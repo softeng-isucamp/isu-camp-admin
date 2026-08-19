@@ -46,7 +46,10 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{
+    name: string;
+    kind: "added" | "edited";
+  } | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
     queryFn: () => services.locations.list(query),
@@ -82,7 +85,10 @@ export function Locations() {
       await refresh();
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
-      if (adding) setSuccess(draft.name || "Location");
+      setSuccess({
+        name: draft.name || "Location",
+        kind: adding ? "added" : "edited",
+      });
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
@@ -198,10 +204,16 @@ export function Locations() {
         </div>
       )}
       {success && (
-        <Modal title="Location Added" onClose={() => setSuccess(null)}>
+        <Modal
+          title={
+            success.kind === "added" ? "Location Added" : "Location Updated"
+          }
+          onClose={() => setSuccess(null)}
+        >
           <p className="muted">
-            <strong>{success}</strong> was added to the campus directory
-            successfully.
+            <strong>{success.name}</strong> was{" "}
+            {success.kind === "added" ? "added to" : "updated in"} the campus
+            directory successfully.
           </p>
           <div className="modal-actions">
             <Button onClick={() => setSuccess(null)}>Done</Button>
