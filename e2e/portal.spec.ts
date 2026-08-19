@@ -362,6 +362,14 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
 
   await page.goto("/map-editor");
+  await page
+    .locator(".leaflet-overlay-pane path")
+    .first()
+    .dispatchEvent("click");
+  await expect(page.getByText("SELECTED AREA")).toBeVisible();
+  await expect(page).toHaveScreenshot("map-selected-area.png", {
+    animations: "disabled",
+  });
   await page.getByPlaceholder("Search campus places...").fill("Computer Lab");
   await expect(
     page.getByRole("button", { name: /Computer Lab 1/ }),
