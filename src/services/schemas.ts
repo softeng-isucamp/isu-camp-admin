@@ -22,6 +22,14 @@ export const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code."),
   password: z.string().min(8, "Password must be at least 8 characters."),
 });
+export const resetPasswordSchema = resetSchema
+  .extend({
+    confirmPassword: z.string().min(8, "Confirm your new password."),
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  });
 export const locationImportSchema = z.object({
   id: z.string(),
   name: z.string().min(1),

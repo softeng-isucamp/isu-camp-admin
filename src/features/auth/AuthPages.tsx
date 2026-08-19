@@ -6,6 +6,7 @@ import { Button, Card, Field } from "../../components/UI";
 import { services } from "../../services/api";
 import {
   loginSchema,
+  resetPasswordSchema,
   resetRequestSchema,
   resetSchema,
 } from "../../services/schemas";
@@ -142,12 +143,14 @@ export function PasswordReset() {
       email: "admin@isu.edu.ph",
       code: "000000",
       password: "password123",
+      confirmPassword: "password123",
     },
   });
   const submit = async (values: {
     email: string;
     code: string;
     password: string;
+    confirmPassword: string;
   }) => {
     setError("");
     try {
@@ -170,7 +173,7 @@ export function PasswordReset() {
         }
         setStep("new");
       } else if (step === "new") {
-        const parsed = resetSchema.safeParse(values);
+        const parsed = resetPasswordSchema.safeParse(values);
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Check your new password.",
@@ -237,7 +240,7 @@ export function PasswordReset() {
                   </label>
                   <label className="field">
                     <span>CONFIRM NEW PASSWORD</span>
-                    <input type="password" defaultValue="password123" />
+                    <input {...register("confirmPassword")} type="password" />
                   </label>
                 </>
               )}

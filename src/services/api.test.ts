@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { services, setMockFailure } from "./api";
-import { resetSchema } from "./schemas";
+import { resetPasswordSchema, resetSchema } from "./schemas";
 
 describe("mock service contracts", () => {
   it("authenticates the seeded administrator", async () => {
@@ -87,6 +87,13 @@ describe("mock service contracts", () => {
       resetSchema.safeParse({ code: "000000", password: "password123" })
         .success,
     ).toBe(true);
+    expect(
+      resetPasswordSchema.safeParse({
+        code: "000000",
+        password: "password123",
+        confirmPassword: "different123",
+      }).success,
+    ).toBe(false);
   });
 
   it("persists map geometry edits through the service boundary", async () => {
