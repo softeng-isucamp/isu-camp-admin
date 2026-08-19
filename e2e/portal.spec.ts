@@ -112,6 +112,18 @@ test("locations, users, logs, and map expose their key state transitions", async
 }) => {
   await signIn(page);
   await page.goto("/locations");
+  await page
+    .getByRole("button", { name: /Actions for/i })
+    .first()
+    .click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(page).toHaveScreenshot("location-actions-open.png", {
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: /Actions for/i })
+    .first()
+    .click();
   await page.getByRole("button", { name: /add location/i }).click();
   await expect(
     page.getByRole("heading", { name: "Add Location" }),
@@ -221,6 +233,18 @@ test("locations, users, logs, and map expose their key state transitions", async
 
   await page.goto("/routes");
   await expect(page.getByLabel("Route geometry preview")).toBeVisible();
+  await page
+    .getByRole("button", { name: /Actions for/i })
+    .first()
+    .click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(page).toHaveScreenshot("route-actions-open.png", {
+    animations: "disabled",
+  });
+  await page
+    .getByRole("button", { name: /Actions for/i })
+    .first()
+    .click();
   await page.getByRole("button", { name: /add route/i }).click();
   await expect(
     page.getByRole("heading", { name: "Add Route / Path" }),

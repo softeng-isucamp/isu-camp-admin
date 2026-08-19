@@ -49,6 +49,7 @@ export function Locations() {
   const [dialog, setDialog] = useState<
     "add" | "import" | "edit" | "history" | "remove" | null
   >(null);
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Location>(blankLocation());
   const [selected, setSelected] = useState<Location | null>(null);
   const [importText, setImportText] = useState("");
@@ -304,42 +305,99 @@ export function Locations() {
                     <Badge>{item.status}</Badge>
                   </td>
                   <td>
-                    <button
-                      className="table-action"
-                      title="Locate on map"
-                      onClick={() =>
-                        navigate(`/map-editor?location=${item.id}`)
-                      }
-                    >
-                      ⌖
-                    </button>
-                    <button
-                      className="table-action"
-                      title="Edit location"
-                      onClick={() => openEdit(item)}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      className="table-action"
-                      title="View location history"
-                      onClick={() => {
-                        setSelected(item);
-                        setDialog("history");
-                      }}
-                    >
-                      ↺
-                    </button>
-                    <button
-                      className="table-action danger-text"
-                      title="Delete location"
-                      onClick={() => {
-                        setSelected(item);
-                        setDialog("remove");
-                      }}
-                    >
-                      ×
-                    </button>
+                    <div className="row-actions">
+                      <button
+                        className="table-action"
+                        title="Locate on map"
+                        onClick={() =>
+                          navigate(`/map-editor?location=${item.id}`)
+                        }
+                      >
+                        ⌖
+                      </button>
+                      <button
+                        className="table-action"
+                        title="Edit location"
+                        onClick={() => openEdit(item)}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="table-action"
+                        title="View location history"
+                        onClick={() => {
+                          setSelected(item);
+                          setDialog("history");
+                        }}
+                      >
+                        ↺
+                      </button>
+                      <button
+                        className="table-action danger-text"
+                        title="Delete location"
+                        onClick={() => {
+                          setSelected(item);
+                          setDialog("remove");
+                        }}
+                      >
+                        ×
+                      </button>
+                      <button
+                        className="table-action menu-trigger"
+                        aria-label={`Actions for ${item.name}`}
+                        aria-expanded={actionMenuId === item.id}
+                        onClick={() =>
+                          setActionMenuId((current) =>
+                            current === item.id ? null : item.id,
+                          )
+                        }
+                      >
+                        ⋯
+                      </button>
+                      {actionMenuId === item.id && (
+                        <div className="row-action-menu" role="menu">
+                          <button
+                            role="menuitem"
+                            onClick={() => {
+                              navigate(`/map-editor?location=${item.id}`);
+                              setActionMenuId(null);
+                            }}
+                          >
+                            Locate on map
+                          </button>
+                          <button
+                            role="menuitem"
+                            onClick={() => {
+                              openEdit(item);
+                              setActionMenuId(null);
+                            }}
+                          >
+                            Edit location
+                          </button>
+                          <button
+                            role="menuitem"
+                            onClick={() => {
+                              setSelected(item);
+                              setDialog("history");
+                              setActionMenuId(null);
+                            }}
+                          >
+                            View history
+                          </button>
+                          <button
+                            className="danger-text"
+                            role="menuitem"
+                            onClick={() => {
+                              setSelected(item);
+                              setDialog("remove");
+                              setActionMenuId(null);
+                            }}
+                          >
+                            Delete location
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

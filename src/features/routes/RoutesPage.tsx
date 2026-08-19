@@ -31,6 +31,7 @@ export function RoutesPage() {
   const [dialog, setDialog] = useState<
     "add" | "import" | "edit" | "remove" | null
   >(null);
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Pathway | null>(null);
   const [draft, setDraft] = useState<Pathway | null>(null);
   const [importText, setImportText] = useState("");
@@ -281,27 +282,67 @@ export function RoutesPage() {
                       <Badge>{item.status}</Badge>
                     </td>
                     <td>
-                      <button
-                        className="table-action"
-                        title="Edit route"
-                        onClick={() => {
-                          setSelected(item);
-                          setDraft({ ...item });
-                          setDialog("edit");
-                        }}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="table-action danger-text"
-                        title="Delete route"
-                        onClick={() => {
-                          setSelected(item);
-                          setDialog("remove");
-                        }}
-                      >
-                        ×
-                      </button>
+                      <div className="row-actions">
+                        <button
+                          className="table-action"
+                          title="Edit route"
+                          onClick={() => {
+                            setSelected(item);
+                            setDraft({ ...item });
+                            setDialog("edit");
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="table-action danger-text"
+                          title="Delete route"
+                          onClick={() => {
+                            setSelected(item);
+                            setDialog("remove");
+                          }}
+                        >
+                          ×
+                        </button>
+                        <button
+                          className="table-action menu-trigger"
+                          aria-label={`Actions for ${item.name}`}
+                          aria-expanded={actionMenuId === item.id}
+                          onClick={() =>
+                            setActionMenuId((current) =>
+                              current === item.id ? null : item.id,
+                            )
+                          }
+                        >
+                          ⋯
+                        </button>
+                        {actionMenuId === item.id && (
+                          <div className="row-action-menu" role="menu">
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                setSelected(item);
+                                setDraft({ ...item });
+                                setDialog("edit");
+                                setActionMenuId(null);
+                              }}
+                            >
+                              Edit route
+                            </button>
+                            <button
+                              className="danger-text"
+                              role="menuitem"
+                              onClick={() => {
+                                setSelected(item);
+                                setDialog("remove");
+                                setActionMenuId(null);
+                              }}
+                            >
+                              Delete route
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
