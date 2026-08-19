@@ -45,6 +45,7 @@ export function Users() {
     (page - 1) * pageSize,
     page * pageSize,
   );
+  useEffect(() => setPage(1), [query]);
   const openEdit = (user: UserAccount) => {
     setSelected(user);
     setUsername(user.username);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { services } from "../../services/api";
 import {
@@ -28,6 +28,7 @@ export function Logs() {
     (page - 1) * pageSize,
     page * pageSize,
   );
+  useEffect(() => setPage(1), [q, category, actor, date]);
   return (
     <div className="page">
       <div className="page-hero">

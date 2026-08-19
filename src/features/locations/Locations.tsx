@@ -87,6 +87,7 @@ export function Locations() {
       (building === "All Buildings" || item.building === building) &&
       (floor === "All Floors" || item.floor === floor),
   );
+  useEffect(() => setPage(1), [query, type, status, building, floor]);
   const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["locations"] });

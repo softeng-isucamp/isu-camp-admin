@@ -50,6 +50,7 @@ export function RoutesPage() {
   const items = (data?.items ?? []).filter(
     (item) => status === "All Statuses" || item.status === status,
   );
+  useEffect(() => setPage(1), [query, status]);
   const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const summary = selected ?? items[0];
   const refresh = async () => {
