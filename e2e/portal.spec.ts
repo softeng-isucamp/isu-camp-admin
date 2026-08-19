@@ -444,4 +444,21 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-discard-confirmation.png", {
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.goto("/map-editor?mockFailure=mapSave");
+  await page.getByPlaceholder("Search campus places...").fill("Computer Lab");
+  await page.getByRole("button", { name: /Computer Lab 1/ }).click();
+  await page.getByRole("button", { name: "Move Marker" }).click();
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 400, y: 245 } });
+  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Save Changes", exact: true })
+    .last()
+    .click();
+  await expect(page.getByRole("alert")).toContainText("Mock mapSave failed");
+  await expect(page).toHaveScreenshot("map-save-failure.png", {
+    animations: "disabled",
+  });
 });

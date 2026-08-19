@@ -10,7 +10,8 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { services } from "../../services/api";
+import { useEffect } from "react";
+import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Card, Field, Modal } from "../../components/UI";
 import "leaflet/dist/leaflet.css";
@@ -35,6 +36,16 @@ function ClickCapture({
 
 export function MapEditor() {
   const queryClient = useQueryClient();
+  useEffect(() => {
+    const failure = new URLSearchParams(window.location.search).get(
+      "mockFailure",
+    );
+    if (failure === "mapSave") {
+      setMockFailure("mapSave", true);
+      return () => setMockFailure("mapSave", false);
+    }
+    return undefined;
+  }, []);
   const { data } = useQuery({
     queryKey: ["map"],
     queryFn: async () => ({
