@@ -112,6 +112,17 @@ test("locations, users, logs, and map expose their key state transitions", async
 }) => {
   await signIn(page);
   await page.goto("/locations");
+  await page.getByLabel("TYPE").selectOption("Laboratory");
+  await expect(page.getByText("Computer Lab 1")).toBeVisible();
+  await expect(page).toHaveScreenshot("locations-type-filter.png", {
+    animations: "disabled",
+  });
+  await page.getByLabel("TYPE").selectOption("All Types");
+  await page.getByLabel("STATUS").selectOption("Active");
+  await expect(page).toHaveScreenshot("locations-status-filter.png", {
+    animations: "disabled",
+  });
+  await page.getByLabel("STATUS").selectOption("All Statuses");
   await page
     .getByRole("button", { name: /Actions for/i })
     .first()
@@ -356,6 +367,15 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
 
   await page.goto("/users");
+  await expect(
+    page.getByRole("columnheader", { name: "CREATED AT" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "LAST SIGN IN" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "DEVICE ID" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: /add user/i }).click();
   await expect(page.getByRole("heading", { name: "Add User" })).toBeVisible();
   await expect(page).toHaveScreenshot("user-add-dialog.png", {
