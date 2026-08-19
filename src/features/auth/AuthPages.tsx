@@ -4,7 +4,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Button, Card, Field } from "../../components/UI";
 import { services } from "../../services/api";
-import { loginSchema, resetSchema } from "../../services/schemas";
+import {
+  loginSchema,
+  resetRequestSchema,
+  resetSchema,
+} from "../../services/schemas";
 import mapIcon from "../../assets/figma/login/login-icon-3.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
 export function Login() {
@@ -70,7 +74,7 @@ export function Login() {
             <Link to="/reset-password">Forgot password?</Link>
           </div>
           {(error || errors.username || errors.password) && (
-            <div className="error">
+            <div className="error" role="alert">
               {error || errors.username?.message || errors.password?.message}
             </div>
           )}
@@ -103,8 +107,16 @@ export function PasswordReset() {
   }) => {
     setError("");
     try {
-      if (step === "request") setStep("code");
-      else if (step === "code") {
+      if (step === "request") {
+        const parsed = resetRequestSchema.safeParse({ email: values.email });
+        if (!parsed.success) {
+          setError(
+            parsed.error.issues[0]?.message ?? "Enter a valid email address.",
+          );
+          return;
+        }
+        setStep("code");
+      } else if (step === "code") {
         const parsed = resetSchema.shape.code.safeParse(values.code);
         if (!parsed.success) {
           setError(

@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AuthProvider } from "./AuthContext";
 import { Login, PasswordReset } from "./AuthPages";
+
+afterEach(() => cleanup());
 
 describe("login screen", () => {
   it("renders the Figma-authored admin login affordances", () => {
@@ -25,6 +27,19 @@ describe("login screen", () => {
 });
 
 describe("password recovery screen", () => {
+  it("rejects an invalid recovery email", () => {
+    render(
+      <MemoryRouter>
+        <PasswordReset />
+      </MemoryRouter>,
+    );
+    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
+      target: { value: "not-an-email" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/valid admin email/i);
+  });
+
   it("validates the code and reaches the success state", async () => {
     render(
       <MemoryRouter>
