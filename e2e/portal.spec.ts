@@ -30,6 +30,9 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   ).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("heading", { name: "Sign out?" })).toBeVisible();
+  await expect(page).toHaveScreenshot("sign-out-confirmation.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("button", { name: "Sign Out", exact: true }).click();
@@ -96,6 +99,9 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(
     page.getByRole("heading", { name: "Add Location" }),
   ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-add-dialog.png", {
+    animations: "disabled",
+  });
   await page
     .getByPlaceholder(/student innovation center/i)
     .fill("Test Facility");
@@ -113,6 +119,9 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(
     page.getByRole("heading", { name: "Add Route / Path" }),
   ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-add-dialog.png", {
+    animations: "disabled",
+  });
   await page.locator(".modal input").first().fill("Test Walkway");
   await page.getByRole("button", { name: /save route/i }).click();
   await expect(page.getByRole("status")).toContainText("saved successfully");
@@ -120,6 +129,9 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.goto("/users");
   await page.getByRole("button", { name: "Edit" }).first().click();
   await expect(page.getByRole("heading", { name: "Edit User" })).toBeVisible();
+  await expect(page).toHaveScreenshot("user-edit-dialog.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: /save changes/i }).click();
   await expect(page.getByRole("status")).toContainText("User updated");
   await page.getByRole("button", { name: "Remove" }).first().click();
@@ -136,6 +148,9 @@ test("locations, users, logs, and map expose their key state transitions", async
     page.getByRole("heading", { name: "Log Details" }),
   ).toBeVisible();
   await expect(page.getByText("Administrator detail")).toBeVisible();
+  await expect(page).toHaveScreenshot("log-details-dialog.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByLabel("ACTOR").selectOption("admin01");
 
@@ -147,4 +162,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByRole("button", { name: "Area" }).click();
   await expect(page.getByText("Draw Campus Zone")).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear Area" })).toBeVisible();
+  await expect(page).toHaveScreenshot("map-area-mode.png", {
+    animations: "disabled",
+  });
 });
