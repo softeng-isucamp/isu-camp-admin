@@ -30,6 +30,11 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   await expect(page).toHaveScreenshot("dashboard.png", {
     animations: "disabled",
   });
+  await page.reload();
+  await expect(page).toHaveURL(/dashboard/);
+  await expect(
+    page.getByRole("heading", { name: "Campus Overview" }),
+  ).toBeVisible();
   await page.locator(".sidebar a", { hasText: "Locations" }).click();
   await expect(page).toHaveURL(/locations/);
   await expect(
