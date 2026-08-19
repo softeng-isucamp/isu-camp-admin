@@ -319,6 +319,11 @@ main {
   place-items: center;
   font-size: 25px;
 }
+.metric-icon img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
 .metric-grid .card > span {
   display: block;
   margin-top: 56px;
@@ -580,8 +585,21 @@ main {
   text-decoration: none;
 }
 .quick-links a > span {
-  font-size: 22px;
-  color: var(--green);
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #a0f5ba;
+  flex: 0 0 48px;
+}
+.quick-links a:nth-child(2) > span {
+  background: #d9e6da;
+}
+.quick-links a > span img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 .quick-links a div {
   flex: 1;

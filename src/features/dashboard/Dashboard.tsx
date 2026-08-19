@@ -3,6 +3,10 @@ import { Link } from "react-router-dom";
 import { Card, Badge } from "../../components/UI";
 import { services } from "../../services/api";
 import campusMap from "../../assets/figma/dashboard/campus-map.png";
+import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
+import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
+import actionMap from "../../assets/figma/dashboard/action-map.svg";
+import actionRouting from "../../assets/figma/dashboard/action-routing.svg";
 export function Dashboard() {
   const { data } = useQuery({
     queryKey: ["dashboard"],
@@ -27,7 +31,9 @@ export function Dashboard() {
       <div className="metric-grid">
         <Card>
           <div className="metric-top">
-            <span className="metric-icon">▥</span>
+            <span className="metric-icon">
+              <img src={metricBuildings} alt="" />
+            </span>
             <Badge>+2 this week</Badge>
           </div>
           <span>Total Buildings</span>
@@ -35,7 +41,9 @@ export function Dashboard() {
         </Card>
         <Card>
           <div className="metric-top">
-            <span className="metric-icon">⌂</span>
+            <span className="metric-icon">
+              <img src={metricOffices} alt="" />
+            </span>
           </div>
           <span>Registered Offices</span>
           <strong>{data?.offices?.toLocaleString() ?? "—"}</strong>
@@ -124,7 +132,9 @@ export function Dashboard() {
             </div>
             <div className="quick-links">
               <Link to="/map-editor">
-                <span>⌖</span>
+                <span>
+                  <img src={actionMap} alt="" />
+                </span>
                 <div>
                   <strong>Edit Campus Map</strong>
                   <small>Modify structural layouts and markers.</small>
@@ -132,18 +142,12 @@ export function Dashboard() {
                 →
               </Link>
               <Link to="/routes">
-                <span>⌁</span>
+                <span>
+                  <img src={actionRouting} alt="" />
+                </span>
                 <div>
                   <strong>Configure Routing</strong>
                   <small>Manage pedestrian pathways and shade.</small>
-                </div>
-                →
-              </Link>
-              <Link to="/locations">
-                <span>▤</span>
-                <div>
-                  <strong>Manage Locations</strong>
-                  <small>Review campus places and facilities.</small>
                 </div>
                 →
               </Link>
