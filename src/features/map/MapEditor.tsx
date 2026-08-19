@@ -391,8 +391,16 @@ export function MapEditor() {
           )}
           {mode === "place" && (
             <>
-              <Field label="OBJECT TYPE" value="Location Marker" readOnly />
-              <p className="muted">Click the map to preview a new position.</p>
+              <Field
+                label="OBJECT TYPE"
+                value={selectedNode ? "Route Node" : "Location Marker"}
+                readOnly
+              />
+              <p className="muted">
+                {place
+                  ? `Preview position: ${place[0].toFixed(5)}, ${place[1].toFixed(5)}`
+                  : "Click the map to preview a new position."}
+              </p>
             </>
           )}
           {(dirty || mode === "area") && (

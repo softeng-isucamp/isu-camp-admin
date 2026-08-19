@@ -317,6 +317,15 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-selected-location.png", {
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Move Marker" }).click();
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 390, y: 235 } });
+  await expect(page.getByText(/Preview position:/)).toBeVisible();
+  await expect(page).toHaveScreenshot("map-move-marker-preview.png", {
+    animations: "disabled",
+  });
+  await page.goto("/map-editor");
   await page
     .getByPlaceholder("Search campus places...")
     .fill("CCSICT Entrance");
@@ -327,6 +336,15 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-selected-route-node.png", {
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Move Node" }).click();
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 470, y: 250 } });
+  await expect(page.getByText(/Preview position:/)).toBeVisible();
+  await expect(page).toHaveScreenshot("map-move-node-preview.png", {
+    animations: "disabled",
+  });
+  await page.goto("/map-editor");
   await page
     .getByPlaceholder("Search campus places...")
     .fill("CCSICT Entrance");
