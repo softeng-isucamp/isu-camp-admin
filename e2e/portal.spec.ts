@@ -114,6 +114,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(
     page.getByRole("heading", { name: "Log Details" }),
   ).toBeVisible();
+  await expect(page.getByText("Administrator detail")).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByLabel("ACTOR").selectOption("admin01");
 

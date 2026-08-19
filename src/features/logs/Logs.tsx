@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { services } from "../../services/api";
 import {
+  Badge,
   Card,
   Empty,
   Field,
@@ -126,6 +127,13 @@ export function Logs() {
       </Card>
       {detail && (
         <Modal title="Log Details" onClose={() => setDetail(null)}>
+          <Badge>
+            {detail.category === "Admin"
+              ? "Administrator detail"
+              : detail.category === "User"
+                ? "User activity detail"
+                : "System detail"}
+          </Badge>
           <div className="detail-grid">
             <span>ACTIVITY</span>
             <strong>{detail.action}</strong>
@@ -136,6 +144,13 @@ export function Logs() {
             <span>DATE &amp; TIME</span>
             <strong>{detail.createdAt}</strong>
           </div>
+          <p className="muted">
+            {detail.category === "Admin"
+              ? "This administrator action changed protected campus data."
+              : detail.category === "User"
+                ? "This user event records activity originating from a campus account."
+                : "This system event was recorded by the ISU-CAMP service."}
+          </p>
           <p className="muted">
             {detail.detail ??
               "No additional detail was recorded for this activity."}
