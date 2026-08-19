@@ -156,6 +156,14 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Done" }).click();
+  await page.getByTitle("Delete route").first().click();
+  await expect(
+    page.getByRole("heading", { name: "Delete Route?" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-delete-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
   await page
     .getByRole("button", { name: /import/i })
     .first()
