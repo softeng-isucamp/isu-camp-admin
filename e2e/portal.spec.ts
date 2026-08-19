@@ -134,10 +134,21 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: /save changes/i }).click();
   await expect(page.getByRole("status")).toContainText("User updated");
+  await page.getByRole("button", { name: "View History" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Audit History" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("user-audit-history-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Remove" }).first().click();
   await expect(
     page.getByRole("heading", { name: "Remove User?" }),
   ).toBeVisible();
+  await expect(page).toHaveScreenshot("user-remove-dialog.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.goto("/system-logs");
