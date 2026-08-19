@@ -23,11 +23,17 @@ export function Users() {
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<UserAccount["role"]>("User");
   const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const { data } = useQuery({
     queryKey: ["users", query],
     queryFn: () => services.users.list(query),
   });
   const close = () => setDialog(null);
+  const visibleUsers = (data?.items ?? []).slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
   const openEdit = (user: UserAccount) => {
     setSelected(user);
     setUsername(user.username);
@@ -124,7 +130,7 @@ export function Users() {
               </tr>
             </thead>
             <tbody>
-              {(data?.items ?? []).map((user) => (
+              {visibleUsers.map((user) => (
                 <tr key={user.id}>
                   <td>
                     <strong>{user.username}</strong>
@@ -175,7 +181,12 @@ export function Users() {
           </table>
           {!data?.items.length && <Empty>No users found.</Empty>}
         </div>
-        <Pagination total={data?.total ?? 0} />
+        <Pagination
+          total={data?.items.length ?? 0}
+          page={page}
+          pageSize={pageSize}
+          onChange={setPage}
+        />
       </Card>
       {dialog === "edit" && selected && (
         <Modal title="Edit User" onClose={close}>

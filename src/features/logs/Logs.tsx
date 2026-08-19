@@ -18,10 +18,16 @@ export function Logs() {
   const [actor, setActor] = useState("All Actors");
   const [date, setDate] = useState("All Dates");
   const [detail, setDetail] = useState<AuditEntry | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const { data } = useQuery({
     queryKey: ["logs", category, q, actor, date],
     queryFn: () => services.logs.list(category, q, actor, date),
   });
+  const visibleItems = (data?.items ?? []).slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
   return (
     <div className="page">
       <div className="page-hero">
@@ -100,7 +106,7 @@ export function Logs() {
               </tr>
             </thead>
             <tbody>
-              {(data?.items ?? []).map((l) => (
+              {visibleItems.map((l) => (
                 <tr key={l.id}>
                   <td>
                     <strong>{l.action}</strong>
@@ -123,7 +129,12 @@ export function Logs() {
           </table>
           {!data?.items.length && <Empty>No logs found.</Empty>}
         </div>
-        <Pagination total={data?.total ?? 0} />
+        <Pagination
+          total={data?.items.length ?? 0}
+          page={page}
+          pageSize={pageSize}
+          onChange={setPage}
+        />
       </Card>
       {detail && (
         <Modal title="Log Details" onClose={() => setDetail(null)}>

@@ -30,6 +30,8 @@ export function RoutesPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const { data } = useQuery({
     queryKey: ["routes", query],
     queryFn: () => services.routes.list(query),
@@ -37,6 +39,7 @@ export function RoutesPage() {
   const items = (data?.items ?? []).filter(
     (item) => status === "All Statuses" || item.status === status,
   );
+  const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const summary = selected ?? items[0];
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["routes"] });
@@ -216,7 +219,7 @@ export function RoutesPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {visibleItems.map((item) => (
                   <tr
                     key={item.id}
                     onClick={() => setSelected(item)}
@@ -268,7 +271,12 @@ export function RoutesPage() {
             </table>
             {!items.length && <Empty>No routes found.</Empty>}
           </div>
-          <Pagination total={items.length} />
+          <Pagination
+            total={items.length}
+            page={page}
+            pageSize={pageSize}
+            onChange={setPage}
+          />
         </Card>
       </div>
       {(dialog === "add" || dialog === "edit") && draft && (

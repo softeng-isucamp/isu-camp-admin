@@ -46,6 +46,8 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
   const [success, setSuccess] = useState<{
     name: string;
     kind: "added" | "edited";
@@ -72,6 +74,7 @@ export function Locations() {
       (building === "All Buildings" || item.building === building) &&
       (floor === "All Floors" || item.floor === floor),
   );
+  const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["locations"] });
     await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
@@ -252,7 +255,7 @@ export function Locations() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {visibleItems.map((item) => (
                 <tr key={item.id}>
                   <td>
                     <strong>{item.name}</strong>
@@ -311,7 +314,12 @@ export function Locations() {
             <Empty>No campus location records matching filter criteria.</Empty>
           )}
         </div>
-        <Pagination total={items.length} />
+        <Pagination
+          total={items.length}
+          page={page}
+          pageSize={pageSize}
+          onChange={setPage}
+        />
       </Card>
       {(dialog === "add" || dialog === "edit") && (
         <Modal
