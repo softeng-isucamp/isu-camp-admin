@@ -145,6 +145,12 @@ button {
   color: #b6e6c5;
   font-size: 20px;
 }
+
+.profile button img {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
 .avatar {
   display: grid;
   place-items: center;
@@ -161,6 +167,13 @@ button {
   height: 32px;
   background: var(--green);
   color: white;
+}
+
+.avatar img {
+  display: block;
+  width: 12px;
+  height: 12px;
+  object-fit: contain;
 }
 .content {
   margin-left: 280px;

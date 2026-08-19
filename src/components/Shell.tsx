@@ -9,6 +9,8 @@ import locationsIcon from "../assets/figma/navigation/locations.svg";
 import routesIcon from "../assets/figma/navigation/routes.svg";
 import usersIcon from "../assets/figma/navigation/users.svg";
 import logsIcon from "../assets/figma/navigation/logs.svg";
+import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
+import signOutIcon from "../assets/figma/navigation/sign-out.svg";
 const links = [
   ["/dashboard", dashboardIcon, "Dashboard Overview"],
   ["/map-editor", mapEditorIcon, "Map Editor"],
@@ -55,13 +57,15 @@ export function Shell({ children }: PropsWithChildren) {
           </nav>
         </div>
         <div className="profile">
-          <div className="avatar">AJ</div>
+          <div className="avatar">
+            <img src={profileUserIcon} alt="" />
+          </div>
           <div>
             <strong>{session?.username ?? "Admin Justine"}</strong>
             <small>ADMINISTRATOR</small>
           </div>
           <button aria-label="Sign out" onClick={() => setConfirm(true)}>
-            ↪
+            <img src={signOutIcon} alt="" />
           </button>
         </div>
       </aside>
@@ -84,7 +88,9 @@ export function Shell({ children }: PropsWithChildren) {
           <button className="icon-btn">
             ♧<em />
           </button>
-          <div className="avatar small">AJ</div>
+          <div className="avatar small">
+            <img src={profileUserIcon} alt="" />
+          </div>
         </header>
         <main>{children}</main>
       </div>
