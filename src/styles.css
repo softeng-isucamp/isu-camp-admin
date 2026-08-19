@@ -115,6 +115,13 @@ button {
   text-align: center;
   font-size: 20px;
 }
+.sidebar nav a i img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  margin: 0 auto;
+}
 .sidebar nav a.active {
   background: #d6ede0;
   color: #08613b;

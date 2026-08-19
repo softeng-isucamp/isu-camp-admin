@@ -3,13 +3,19 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { Button, Card } from "./UI";
 import logo from "../assets/figma/brand/isu-camp-logo.png";
+import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
+import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
+import locationsIcon from "../assets/figma/navigation/locations.svg";
+import routesIcon from "../assets/figma/navigation/routes.svg";
+import usersIcon from "../assets/figma/navigation/users.svg";
+import logsIcon from "../assets/figma/navigation/logs.svg";
 const links = [
-  ["/dashboard", "▦", "Dashboard Overview"],
-  ["/map-editor", "⌖", "Map Editor"],
-  ["/locations", "▤", "Locations"],
-  ["/routes", "⌁", "Routes & Paths"],
-  ["/users", "♙", "User Management"],
-  ["/system-logs", "≡", "System Logs"],
+  ["/dashboard", dashboardIcon, "Dashboard Overview"],
+  ["/map-editor", mapEditorIcon, "Map Editor"],
+  ["/locations", locationsIcon, "Locations"],
+  ["/routes", routesIcon, "Routes & Paths"],
+  ["/users", usersIcon, "User Management"],
+  ["/system-logs", logsIcon, "System Logs"],
 ] as const;
 export function Shell({ children }: PropsWithChildren) {
   const { session, logout } = useAuth();
@@ -40,7 +46,9 @@ export function Shell({ children }: PropsWithChildren) {
                 onClick={() => setOpen(false)}
                 className={({ isActive }) => (isActive ? "active" : "")}
               >
-                <i>{icon}</i>
+                <i>
+                  <img src={icon} alt="" />
+                </i>
                 {label}
               </NavLink>
             ))}
