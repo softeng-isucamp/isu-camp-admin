@@ -8,6 +8,8 @@ import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import actionMap from "../../assets/figma/dashboard/action-map.svg";
 import actionRouting from "../../assets/figma/dashboard/action-routing.svg";
+import mapLayersIcon from "../../assets/figma/dashboard/map-layers-icon.svg";
+import mapZoomIcon from "../../assets/figma/dashboard/map-zoom-icon.svg";
 export function Dashboard() {
   const [searchWindow, setSearchWindow] = useState("This Week");
   const { data } = useQuery({
@@ -67,6 +69,14 @@ export function Dashboard() {
                 src={campusMap}
                 alt="Campus map preview"
               />
+              <div className="dashboard-map-controls" aria-label="Map controls">
+                <button type="button" aria-label="Show map layers">
+                  <img src={mapLayersIcon} alt="" />
+                </button>
+                <button type="button" aria-label="Zoom map">
+                  <img src={mapZoomIcon} alt="" />
+                </button>
+              </div>
               <div className="legend">
                 <b>LIVE LAYERS</b>
                 <span>
