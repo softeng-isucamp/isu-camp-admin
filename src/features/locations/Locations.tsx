@@ -45,6 +45,7 @@ export function Locations() {
     errors: string[];
   } | null>(null);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
     queryFn: () => services.locations.list(query),
@@ -73,10 +74,17 @@ export function Locations() {
     await queryClient.invalidateQueries({ queryKey: ["logs"] });
   };
   const save = async () => {
-    await services.locations.save(draft);
-    await refresh();
-    setDialog(null);
-    setNotice(`${draft.name || "Location"} saved successfully.`);
+    setError("");
+    try {
+      await services.locations.save(draft);
+      await refresh();
+      setDialog(null);
+      setNotice(`${draft.name || "Location"} saved successfully.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to save location.",
+      );
+    }
   };
   const remove = async () => {
     if (!selected) return;
@@ -180,6 +188,11 @@ export function Locations() {
           {notice}
         </div>
       )}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
       <Card className="table-card">
         <div className="table-heading">
           <div>
@@ -263,6 +276,11 @@ export function Locations() {
           title={dialog === "add" ? "Add Location" : "Edit Location"}
           onClose={() => setDialog(null)}
         >
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
           <Field
             label="LOCATION NAME"
             value={draft.name}

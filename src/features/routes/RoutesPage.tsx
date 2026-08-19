@@ -28,6 +28,7 @@ export function RoutesPage() {
     errors: string[];
   } | null>(null);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const { data } = useQuery({
     queryKey: ["routes", query],
     queryFn: () => services.routes.list(query),
@@ -42,10 +43,17 @@ export function RoutesPage() {
   };
   const save = async () => {
     if (!draft) return;
-    await services.routes.save(draft);
-    await refresh();
-    setDialog(null);
-    setNotice(`${draft.name} saved successfully.`);
+    setError("");
+    try {
+      await services.routes.save(draft);
+      await refresh();
+      setDialog(null);
+      setNotice(`${draft.name} saved successfully.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to save route.",
+      );
+    }
   };
   const remove = async () => {
     if (!selected) return;
@@ -77,6 +85,11 @@ export function RoutesPage() {
       {notice && (
         <div className="notice" role="status">
           {notice}
+        </div>
+      )}
+      {error && (
+        <div className="error" role="alert">
+          {error}
         </div>
       )}
       <div className="routes-layout">
@@ -213,6 +226,11 @@ export function RoutesPage() {
           title={dialog === "add" ? "Add Route / Path" : "Edit Route / Path"}
           onClose={() => setDialog(null)}
         >
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
           <Field
             label="ROUTE NAME"
             value={draft.name}

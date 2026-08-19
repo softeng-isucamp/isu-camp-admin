@@ -62,7 +62,14 @@ export interface Services {
     reset(id: string): Promise<void>;
     remove(id: string): Promise<void>;
   };
-  logs: { list(category?: string, query?: string): Promise<Page<AuditEntry>> };
+  logs: {
+    list(
+      category?: string,
+      query?: string,
+      actor?: string,
+      date?: string,
+    ): Promise<Page<AuditEntry>>;
+  };
   map: {
     buildings(): Promise<typeof buildings>;
     locations(): Promise<Location[]>;
@@ -206,7 +213,7 @@ export const services: Services = {
     },
   },
   logs: {
-    list: async (category, q) =>
+    list: async (category, q, actor, date) =>
       wait({
         items: clone(
           auditEntries.filter((e) => {
@@ -214,7 +221,11 @@ export const services: Services = {
               !category || category === "All" || e.category === category;
             const queryMatch =
               !q || [e.action, e.actor, e.target].some((v) => matches(v, q));
-            return categoryMatch && queryMatch;
+            const actorMatch =
+              !actor || actor === "All Actors" || e.actor === actor;
+            const dateMatch =
+              !date || date === "All Dates" || e.createdAt.includes(date);
+            return categoryMatch && queryMatch && actorMatch && dateMatch;
           }),
         ),
         total: auditEntries.length,
