@@ -549,6 +549,23 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-path-point-removed.png", {
     animations: "disabled",
   });
+  const pathPointMarker = page.locator(".leaflet-marker-icon").last();
+  const markerBox = await pathPointMarker.boundingBox();
+  if (!markerBox) throw new Error("Path point marker was not rendered.");
+  await page.mouse.move(
+    markerBox.x + markerBox.width / 2,
+    markerBox.y + markerBox.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    markerBox.x + markerBox.width / 2 + 36,
+    markerBox.y + markerBox.height / 2 + 24,
+  );
+  await page.mouse.up();
+  await expect(page.getByText(/1 points plotted/)).toBeVisible();
+  await expect(page).toHaveScreenshot("map-moved-point-result.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Place" }).click();
   await expect(
     page.getByText("Click the map to preview a new position."),
