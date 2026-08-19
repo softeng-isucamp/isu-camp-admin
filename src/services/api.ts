@@ -15,6 +15,7 @@ import {
   pathways,
   routeNodes,
   users,
+  topSearchedLocations,
 } from "./mockData";
 import { locationImportSchema, routeImportSchema } from "./schemas";
 
@@ -37,6 +38,7 @@ export const setMockFailure = (key: FailureKey, enabled: boolean) => {
 const failIfConfigured = (key: FailureKey) => {
   if (mockFailures[key]) throw new Error(`Mock ${key} failed.`);
 };
+let adminPassword = "password123";
 
 export interface Services {
   auth: {
@@ -109,7 +111,7 @@ const addAudit = (
 export const services: Services = {
   auth: {
     login: async (username, password) => {
-      if (username !== "admin_justine" || !password)
+      if (username !== "admin_justine" || password !== adminPassword)
         throw new Error("Invalid username or password.");
       return wait({ username, role: "Administrator" });
     },
@@ -117,6 +119,7 @@ export const services: Services = {
     reset: async (code, password) => {
       if (code !== "000000" || password.length < 8)
         throw new Error("Invalid verification code or password.");
+      adminPassword = password;
       return wait(undefined);
     },
   },
@@ -128,6 +131,7 @@ export const services: Services = {
         locations: locations.length,
         pathways: pathways.filter((path) => path.status === "Open").length,
         searches: 438,
+        topSearched: clone(topSearchedLocations),
         recent: clone(auditEntries.slice(0, 3)),
       }),
   },

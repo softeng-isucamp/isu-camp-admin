@@ -13,6 +13,14 @@ describe("mock service contracts", () => {
     await expect(services.auth.login("wrong", "password123")).rejects.toThrow(
       "Invalid username or password",
     );
+    await expect(
+      services.auth.login("admin_justine", "wrong-password"),
+    ).rejects.toThrow("Invalid username or password");
+    await services.auth.reset("000000", "new-password");
+    await expect(
+      services.auth.login("admin_justine", "new-password"),
+    ).resolves.toMatchObject({ username: "admin_justine" });
+    await services.auth.reset("000000", "password123");
   });
 
   it("filters locations through the service boundary", async () => {
@@ -25,6 +33,7 @@ describe("mock service contracts", () => {
     const summary = await services.dashboard.summary();
     expect(summary.locations).toBeGreaterThan(0);
     expect(summary.pathways).toBeGreaterThan(0);
+    expect(summary.topSearched).toHaveLength(5);
   });
 
   it("creates an audit entry after a user mutation", async () => {

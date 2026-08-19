@@ -77,7 +77,14 @@ export interface DashboardSummary {
   locations: number;
   pathways: number;
   searches: number;
+  topSearched: TopSearchedLocation[];
   recent: AuditEntry[];
+}
+export interface TopSearchedLocation {
+  rank: string;
+  name: string;
+  context: string;
+  searches: number;
 }
 export interface Page<T> {
   items: T[];

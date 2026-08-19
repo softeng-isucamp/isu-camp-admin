@@ -166,6 +166,38 @@ export const locations: Location[] = [
     positioned: true,
   },
 ];
+export const topSearchedLocations = [
+  {
+    rank: "01",
+    name: "Registrar’s Office",
+    context: "Office · Administration",
+    searches: 128,
+  },
+  {
+    rank: "02",
+    name: "Computer Lab 1",
+    context: "Laboratory · CCSICT",
+    searches: 104,
+  },
+  {
+    rank: "03",
+    name: "CAS ROOM 101",
+    context: "Classroom · CAS",
+    searches: 87,
+  },
+  {
+    rank: "04",
+    name: "University Library",
+    context: "Library · Facility",
+    searches: 76,
+  },
+  {
+    rank: "05",
+    name: "Student Development Center",
+    context: "Office · Facility",
+    searches: 61,
+  },
+];
 export const routeNodes: RouteNode[] = [
   {
     id: "ccsict-entry",

@@ -100,21 +100,15 @@ export function Dashboard() {
               <Link to="/locations">VIEW ALL</Link>
             </div>
             <div className="rank-list">
-              {[
-                ["01", "Registrar’s Office", "Office · Administration", "128"],
-                ["02", "Computer Lab 1", "Laboratory · CCSICT", "104"],
-                ["03", "CAS ROOM 101", "Classroom · CAS", "87"],
-                ["04", "University Library", "Library · Facility", "76"],
-                ["05", "Student Development Center", "Office · Facility", "61"],
-              ].map((r) => (
-                <div className="rank-row" key={r[0]}>
-                  <b>{r[0]}</b>
+              {(data?.topSearched ?? []).map((r) => (
+                <div className="rank-row" key={r.rank}>
+                  <b>{r.rank}</b>
                   <div>
-                    <strong>{r[1]}</strong>
-                    <small>{r[2]}</small>
+                    <strong>{r.name}</strong>
+                    <small>{r.context}</small>
                   </div>
                   <span>
-                    <strong>{r[3]}</strong>
+                    <strong>{r.searches}</strong>
                     <small>searches</small>
                   </span>
                 </div>
