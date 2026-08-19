@@ -22,7 +22,7 @@ describe("mock service contracts", () => {
   });
 
   it("creates an audit entry after a user mutation", async () => {
-    const before = (await services.logs.list("All")).total;
+    const before = (await services.logs.list("Admin")).total;
     const page = await services.users.list("admin01");
     await services.users.update({ ...page.items[0], username: "admin01" });
     expect((await services.logs.list("Admin")).total).toBeGreaterThanOrEqual(
@@ -91,6 +91,7 @@ describe("mock service contracts", () => {
           entry.actor === "admin01" && entry.createdAt.includes("Aug 17, 2026"),
       ),
     ).toBe(true);
+    expect(result.total).toBe(result.items.length);
   });
 
   it("keeps import validation transactional until commit", async () => {

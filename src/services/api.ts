@@ -130,25 +130,21 @@ export const services: Services = {
       }),
   },
   locations: {
-    list: async (q) =>
-      wait({
-        items: clone(
-          q
-            ? locations.filter((l) =>
-                [
-                  l.name,
-                  l.code,
-                  l.type,
-                  l.function ?? "",
-                  l.keywords ?? "",
-                ].some((v) => matches(v, q)),
-              )
-            : locations,
-        ),
-        total: locations.length,
+    list: async (q) => {
+      const filtered = q
+        ? locations.filter((l) =>
+            [l.name, l.code, l.type, l.function ?? "", l.keywords ?? ""].some(
+              (v) => matches(v, q),
+            ),
+          )
+        : locations;
+      return wait({
+        items: clone(filtered),
+        total: filtered.length,
         page: 1,
         pageSize: 20,
-      }),
+      });
+    },
     save: async (location) => {
       failIfConfigured("locationSave");
       const i = locations.findIndex((l) => l.id === location.id);
@@ -164,13 +160,17 @@ export const services: Services = {
     },
   },
   routes: {
-    list: async (q) =>
-      wait({
-        items: clone(q ? pathways.filter((p) => matches(p.name, q)) : pathways),
-        total: pathways.length,
+    list: async (q) => {
+      const filtered = q
+        ? pathways.filter((p) => matches(p.name, q))
+        : pathways;
+      return wait({
+        items: clone(filtered),
+        total: filtered.length,
         page: 1,
         pageSize: 20,
-      }),
+      });
+    },
     save: async (path) => {
       failIfConfigured("routeSave");
       const i = pathways.findIndex((p) => p.id === path.id);
@@ -186,13 +186,15 @@ export const services: Services = {
     },
   },
   users: {
-    list: async (q) =>
-      wait({
-        items: clone(q ? users.filter((u) => matches(u.username, q)) : users),
-        total: users.length,
+    list: async (q) => {
+      const filtered = q ? users.filter((u) => matches(u.username, q)) : users;
+      return wait({
+        items: clone(filtered),
+        total: filtered.length,
         page: 1,
         pageSize: 20,
-      }),
+      });
+    },
     create: async (user) => {
       failIfConfigured("userUpdate");
       users.push(clone(user));
@@ -219,25 +221,25 @@ export const services: Services = {
     },
   },
   logs: {
-    list: async (category, q, actor, date) =>
-      wait({
-        items: clone(
-          auditEntries.filter((e) => {
-            const categoryMatch =
-              !category || category === "All" || e.category === category;
-            const queryMatch =
-              !q || [e.action, e.actor, e.target].some((v) => matches(v, q));
-            const actorMatch =
-              !actor || actor === "All Actors" || e.actor === actor;
-            const dateMatch =
-              !date || date === "All Dates" || e.createdAt.includes(date);
-            return categoryMatch && queryMatch && actorMatch && dateMatch;
-          }),
-        ),
-        total: auditEntries.length,
+    list: async (category, q, actor, date) => {
+      const filtered = auditEntries.filter((e) => {
+        const categoryMatch =
+          !category || category === "All" || e.category === category;
+        const queryMatch =
+          !q || [e.action, e.actor, e.target].some((v) => matches(v, q));
+        const actorMatch =
+          !actor || actor === "All Actors" || e.actor === actor;
+        const dateMatch =
+          !date || date === "All Dates" || e.createdAt.includes(date);
+        return categoryMatch && queryMatch && actorMatch && dateMatch;
+      });
+      return wait({
+        items: clone(filtered),
+        total: filtered.length,
         page: 1,
         pageSize: 20,
-      }),
+      });
+    },
   },
   map: {
     buildings: async () => wait(clone(buildings)),
