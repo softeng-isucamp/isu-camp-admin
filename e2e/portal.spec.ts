@@ -336,7 +336,8 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("user-remove-dialog.png", {
     animations: "disabled",
   });
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Remove User" }).click();
+  await expect(page.getByRole("status")).toContainText("removed successfully");
 
   await page.goto("/system-logs");
   await page.getByRole("button", { name: "Admin Activity" }).click();
