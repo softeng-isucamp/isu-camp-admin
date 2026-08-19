@@ -109,6 +109,25 @@ describe("mock service contracts", () => {
     ).toMatchObject({ lat: next[0], lng: next[1] });
   });
 
+  it("persists a drawn map area only when it has a valid polygon", async () => {
+    const before = (await services.map.buildings()).length;
+    await services.map.save({
+      areaPoints: [
+        [1, 1],
+        [1, 2],
+      ],
+    });
+    expect((await services.map.buildings()).length).toBe(before);
+    await services.map.save({
+      areaPoints: [
+        [1, 1],
+        [1, 2],
+        [2, 2],
+      ],
+    });
+    expect((await services.map.buildings()).length).toBe(before + 1);
+  });
+
   it("filters logs by actor and date through the service boundary", async () => {
     const result = await services.logs.list(
       "Admin",

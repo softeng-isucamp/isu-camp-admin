@@ -127,6 +127,7 @@ export function MapEditor() {
         selected: selected ?? undefined,
         place,
         pathPoints,
+        areaPoints: points.length >= 3 ? points : undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ["map"] });
       await queryClient.invalidateQueries({ queryKey: ["dashboard"] });

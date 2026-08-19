@@ -87,6 +87,7 @@ export interface Services {
       selected?: { type: string; id: string };
       place?: [number, number] | null;
       pathPoints?: [number, number][];
+      areaPoints?: [number, number][];
     }): Promise<void>;
   };
   imports: {
@@ -280,6 +281,14 @@ export const services: Services = {
       if (edit?.selected && edit.pathPoints) {
         const path = pathways.find((item) => item.id === edit.selected?.id);
         if (path) path.pathPoints = clone(edit.pathPoints);
+      }
+      if (edit?.areaPoints && edit.areaPoints.length >= 3) {
+        buildings.push({
+          id: `area-${Date.now()}`,
+          name: "Drawn Campus Area",
+          code: "AREA-DRAFT",
+          points: clone(edit.areaPoints),
+        });
       }
       addAudit("Updated Map", "Campus geometry");
       return wait(undefined);
