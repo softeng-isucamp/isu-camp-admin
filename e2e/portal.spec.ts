@@ -123,6 +123,14 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByLabel("STATUS").selectOption("All Statuses");
+  await page.locator(".filters select").nth(1).selectOption("CCSICT Building");
+  await page.locator(".filters select").nth(2).selectOption("2nd Floor");
+  await expect(page.getByText("Computer Lab 1")).toBeVisible();
+  await expect(page).toHaveScreenshot("locations-building-floor-filter.png", {
+    animations: "disabled",
+  });
+  await page.locator(".filters select").nth(1).selectOption("All Buildings");
+  await page.locator(".filters select").nth(2).selectOption("All Floors");
   await page
     .getByRole("button", { name: /Actions for/i })
     .first()
