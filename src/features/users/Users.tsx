@@ -47,6 +47,7 @@ export function Users() {
       await services.users.update({ ...selected, username });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       close();
       setNotice("User updated successfully.");
     } catch (cause) {
@@ -62,6 +63,7 @@ export function Users() {
       await services.users.remove(selected.id);
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       close();
       setNotice(`${selected.username} removed successfully.`);
     } catch (cause) {
@@ -84,6 +86,7 @@ export function Users() {
       });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
       await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       close();
       setNotice("User created successfully.");
     } catch (cause) {
@@ -98,6 +101,7 @@ export function Users() {
     try {
       await services.users.reset(selected.id);
       await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
       close();
       setNotice(`Password reset for ${selected.username}.`);
     } catch (cause) {

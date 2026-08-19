@@ -9,7 +9,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { services } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Card, Field, Modal } from "../../components/UI";
@@ -34,6 +34,7 @@ function ClickCapture({
 }
 
 export function MapEditor() {
+  const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["map"],
     queryFn: async () => ({
@@ -103,6 +104,9 @@ export function MapEditor() {
         place,
         pathPoints,
       });
+      await queryClient.invalidateQueries({ queryKey: ["map"] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ["logs"] });
       resetDraft();
     } catch (cause) {
       setError(
