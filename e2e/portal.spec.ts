@@ -216,6 +216,10 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Close" }).click();
   await page.getByLabel("ACTOR").selectOption("admin01");
+  await page.getByLabel("DATE").selectOption("Aug 17, 2026");
+  await expect(page).toHaveScreenshot("system-logs-date-filter.png", {
+    animations: "disabled",
+  });
 
   await page.goto("/map-editor");
   await page.getByPlaceholder("Search campus places...").fill("Computer Lab");
