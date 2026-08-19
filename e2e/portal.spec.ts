@@ -40,10 +40,31 @@ test("password recovery reaches verification step", async ({ page }) => {
   await page.goto("/login");
   await page.getByRole("link", { name: /forgot password/i }).click();
   await expect(page).toHaveURL(/reset-password/);
+  await expect(page).toHaveScreenshot("password-recovery-request.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: /send code/i }).click();
   await expect(
     page.getByRole("heading", { name: /enter verification code/i }),
   ).toBeVisible();
+  await page.getByLabel("VERIFICATION CODE").fill("123");
+  await page.getByRole("button", { name: /continue/i }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "6-digit verification code",
+  );
+  await expect(page).toHaveScreenshot("password-recovery-code-error.png", {
+    animations: "disabled",
+  });
+  await page.getByLabel("VERIFICATION CODE").fill("000000");
+  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByLabel("NEW PASSWORD").fill("password123");
+  await page.getByRole("button", { name: /save password/i }).click();
+  await expect(
+    page.getByRole("heading", { name: /password reset successful/i }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("password-recovery-success.png", {
+    animations: "disabled",
+  });
 });
 
 test("protected modules have stable desktop visual states", async ({

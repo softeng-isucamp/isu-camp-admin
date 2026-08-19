@@ -179,7 +179,11 @@ export function PasswordReset() {
                 type="password"
               />
             )}
-            {error && <div className="error">{error}</div>}
+            {error && (
+              <div className="error" role="alert">
+                {error}
+              </div>
+            )}
             <Button onClick={submit}>
               {step === "request"
                 ? "Send Code"
