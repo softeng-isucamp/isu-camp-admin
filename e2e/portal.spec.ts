@@ -440,6 +440,12 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("system-logs-date-filter.png", {
     animations: "disabled",
   });
+  await page.getByPlaceholder("Search logs...").fill("Computer Lab 1");
+  await expect(page.getByText("Updated Location")).toBeVisible();
+  await expect(page).toHaveScreenshot("system-logs-search-computer-lab.png", {
+    animations: "disabled",
+  });
+  await page.getByPlaceholder("Search logs...").fill("");
   await page.getByLabel("ACTOR").selectOption("All Actors");
   await page.getByLabel("DATE").selectOption("All Dates");
   await page.getByRole("button", { name: "All Logs" }).click();
