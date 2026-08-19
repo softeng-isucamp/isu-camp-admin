@@ -63,6 +63,7 @@ export function Logs() {
           <option>staff02</option>
           <option>student01</option>
           <option>student02</option>
+          <option>system</option>
         </SelectField>
         <SelectField
           label="DATE"
@@ -71,6 +72,9 @@ export function Logs() {
         >
           <option>All Dates</option>
           <option>Aug 17, 2026</option>
+          <option>Aug 16, 2026</option>
+          <option>Aug 15, 2026</option>
+          <option>Aug 14, 2026</option>
         </SelectField>
       </Card>
       <Card className="table-card">
