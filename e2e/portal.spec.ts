@@ -188,10 +188,25 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByLabel("ACTOR").selectOption("admin01");
 
   await page.goto("/map-editor");
+  await page.getByPlaceholder("Search campus places...").fill("Computer Lab");
+  await expect(
+    page.getByRole("button", { name: /Computer Lab 1/ }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-search-results.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: /Computer Lab 1/ }).click();
+  await expect(page.getByText("SELECTED LOCATION")).toBeVisible();
+  await expect(page).toHaveScreenshot("map-selected-location.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Place" }).click();
   await expect(
     page.getByText("Click the map to preview a new position."),
   ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-place-mode.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Area" }).click();
   await expect(page.getByText("Draw Campus Zone")).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear Area" })).toBeVisible();
