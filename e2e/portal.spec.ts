@@ -94,7 +94,7 @@ test("protected modules have stable desktop visual states", async ({
   const modules = [
     ["map-editor", "map-editor.png", "MAP EDITOR"],
     ["locations", "locations.png", "Campus Locations"],
-    ["routes", "routes.png", "Routes & Paths"],
+    ["routes", "routes.png", "Manage Routes & Paths"],
     ["users", "users.png", "User Management"],
     ["system-logs", "system-logs.png", "System Logs"],
   ] as const;
@@ -346,7 +346,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByPlaceholder("Search routes...").fill("Library");
   await page.getByLabel("SHADE").selectOption("Partial Shade");
   await expect(
-    page.getByText(/Walkway Junction A → Library Entrance/),
+    page.getByText(/College of Medicine → University Library/),
   ).toBeVisible();
   await expect(page).toHaveScreenshot("route-search-shade-filter.png", {
     animations: "disabled",
@@ -525,12 +525,8 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.goto("/map-editor");
-  await page
-    .getByPlaceholder("Search campus places...")
-    .fill("CCSICT Entrance");
-  await page
-    .getByRole("button", { name: /CCSICT Entrance.*Walkway Junction A/ })
-    .click();
+  await page.getByPlaceholder("Search campus places...").fill("Gate–Arts");
+  await page.getByRole("button", { name: /Gate–Arts/ }).click();
   await expect(page.getByText("SELECTED CONNECTION")).toBeVisible();
   await expect(page).toHaveScreenshot("map-selected-pathway.png", {
     animations: "disabled",

@@ -243,12 +243,12 @@ export const routeNodes: RouteNode[] = [
 export const pathways: Pathway[] = [
   {
     id: "ccsict-junction",
-    name: "CCSICT Entrance → Walkway Junction A",
+    name: "Gate–Arts",
     sourceNodeId: "ccsict-entry",
     destinationNodeId: "junction-a",
     distance: "48 m",
     time: "1 min",
-    shade: "Mostly Shaded",
+    shade: "Fully Shaded",
     type: "Campus walkway",
     direction: "Two-way",
     status: "Open",
@@ -256,7 +256,7 @@ export const pathways: Pathway[] = [
   },
   {
     id: "junction-library",
-    name: "Walkway Junction A → Library Entrance",
+    name: "Med–Library",
     sourceNodeId: "junction-a",
     destinationNodeId: "library-entry",
     distance: "56 m",
@@ -269,12 +269,12 @@ export const pathways: Pathway[] = [
   },
   {
     id: "junction-student",
-    name: "Walkway Junction A → Student Center Entrance",
+    name: "Dorm–Field",
     sourceNodeId: "junction-a",
     destinationNodeId: "student-entry",
     distance: "42 m",
     time: "1 min",
-    shade: "Fully Shaded",
+    shade: "Unshaded",
     type: "Campus walkway",
     direction: "Two-way",
     status: "Open",

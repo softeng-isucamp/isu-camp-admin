@@ -14,6 +14,12 @@ import {
 import type { Pathway, Shade } from "../../types";
 import routesModuleIcon from "../../assets/figma/modules/routes.svg";
 
+const endpointLabels: Record<string, [string, string]> = {
+  "ccsict-junction": ["Main Gate", "Arts & Sciences"],
+  "junction-student": ["ISU Dormitory", "ISU Grandstand"],
+  "junction-library": ["College of Medicine", "University Library"],
+};
+
 export function RoutesPage() {
   const queryClient = useQueryClient();
   useEffect(() => {
@@ -102,11 +108,8 @@ export function RoutesPage() {
           <img src={routesModuleIcon} alt="" />
         </span>
         <div>
-          <h1>Routes &amp; Paths</h1>
-          <p>
-            Manage pedestrian connections, pathway geometry, shade
-            classification, and availability.
-          </p>
+          <h1>Manage Routes &amp; Paths</h1>
+          <p>Create and manage connections between campus locations.</p>
         </div>
       </div>
       {notice && (
@@ -276,7 +279,8 @@ export function RoutesPage() {
                       </small>
                     </td>
                     <td>
-                      {item.sourceNodeId} → {item.destinationNodeId}
+                      {endpointLabels[item.id]?.[0] ?? item.sourceNodeId} →{" "}
+                      {endpointLabels[item.id]?.[1] ?? item.destinationNodeId}
                     </td>
                     <td>
                       <Badge>{item.shade}</Badge>
