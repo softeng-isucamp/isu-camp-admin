@@ -52,6 +52,10 @@ export function Users() {
   };
   const update = async () => {
     if (!selected) return;
+    if (!username.trim()) {
+      setError("Username is required.");
+      return;
+    }
     setError("");
     try {
       await services.users.update({ ...selected, username });
@@ -84,7 +88,10 @@ export function Users() {
   };
   const create = async () => {
     const name = username.trim();
-    if (!name) return;
+    if (!name) {
+      setError("Username is required.");
+      return;
+    }
     setError("");
     try {
       await services.users.create({
