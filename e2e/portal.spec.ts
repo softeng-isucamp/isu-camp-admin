@@ -245,9 +245,21 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page
     .getByPlaceholder("Search campus places...")
     .fill("CCSICT Entrance");
-  await page.getByRole("button", { name: /CCSICT Entrance/ }).click();
+  await page
+    .getByRole("button", { name: /CCSICT Entrance Route Node/ })
+    .click();
   await expect(page.getByText("SELECTED ROUTE NODE")).toBeVisible();
   await expect(page).toHaveScreenshot("map-selected-route-node.png", {
+    animations: "disabled",
+  });
+  await page
+    .getByPlaceholder("Search campus places...")
+    .fill("CCSICT Entrance");
+  await page
+    .getByRole("button", { name: /CCSICT Entrance.*Walkway Junction A/ })
+    .click();
+  await expect(page.getByText("SELECTED CONNECTION")).toBeVisible();
+  await expect(page).toHaveScreenshot("map-selected-pathway.png", {
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Place" }).click();

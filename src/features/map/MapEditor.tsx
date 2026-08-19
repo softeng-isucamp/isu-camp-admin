@@ -69,6 +69,7 @@ export function MapEditor() {
     return [
       ...data.locations.map((item) => ({ ...item, kind: "Location" })),
       ...data.nodes.map((item) => ({ ...item, kind: "Route Node" })),
+      ...data.pathways.map((item) => ({ ...item, kind: "Pathway" })),
     ]
       .filter((item) => item.name.toLowerCase().includes(search.toLowerCase()))
       .slice(0, 6);
