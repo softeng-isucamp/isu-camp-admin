@@ -12,6 +12,7 @@ import {
   SelectField,
 } from "../../components/UI";
 import type { Pathway, Shade } from "../../types";
+import routesModuleIcon from "../../assets/figma/modules/routes.svg";
 
 export function RoutesPage() {
   const queryClient = useQueryClient();
@@ -97,7 +98,9 @@ export function RoutesPage() {
   return (
     <div className="page">
       <div className="page-hero">
-        <span className="page-icon">⌁</span>
+        <span className="page-icon">
+          <img src={routesModuleIcon} alt="" />
+        </span>
         <div>
           <h1>Routes &amp; Paths</h1>
           <p>

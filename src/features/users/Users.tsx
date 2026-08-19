@@ -11,6 +11,7 @@ import {
   SelectField,
 } from "../../components/UI";
 import type { UserAccount } from "../../types";
+import usersModuleIcon from "../../assets/figma/modules/users.svg";
 
 export function Users() {
   const queryClient = useQueryClient();
@@ -130,7 +131,9 @@ export function Users() {
   return (
     <div className="page">
       <div className="page-hero">
-        <span className="page-icon">♙</span>
+        <span className="page-icon">
+          <img src={usersModuleIcon} alt="" />
+        </span>
         <div>
           <h1>User Management</h1>
           <p>

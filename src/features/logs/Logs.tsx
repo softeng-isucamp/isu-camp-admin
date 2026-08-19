@@ -12,6 +12,7 @@ import {
   Pagination,
 } from "../../components/UI";
 import type { AuditEntry } from "../../types";
+import logsModuleIcon from "../../assets/figma/modules/logs.svg";
 export function Logs() {
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("All");
@@ -32,7 +33,9 @@ export function Logs() {
   return (
     <div className="page">
       <div className="page-hero">
-        <span className="page-icon">≡</span>
+        <span className="page-icon">
+          <img src={logsModuleIcon} alt="" />
+        </span>
         <div>
           <h1>System Logs</h1>
           <p>Review administrator changes and user activity across ISU-CAMP.</p>

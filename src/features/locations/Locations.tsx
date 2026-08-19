@@ -13,6 +13,7 @@ import {
   SelectField,
 } from "../../components/UI";
 import type { Location, LocationType } from "../../types";
+import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 
 const blankLocation = (): Location => ({
   id: `loc-${Date.now()}`,
@@ -139,7 +140,9 @@ export function Locations() {
   return (
     <div className="page">
       <div className="page-hero">
-        <span className="page-icon">▤</span>
+        <span className="page-icon">
+          <img src={locationsModuleIcon} alt="" />
+        </span>
         <div>
           <h1>Campus Locations</h1>
           <p>

@@ -652,9 +652,19 @@ main {
   margin: 0 -24px 20px;
 }
 .page-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   font-size: 28px;
   color: var(--green);
   margin-top: 5px;
+}
+.page-icon img {
+  display: block;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
 }
 .page-hero p {
   font-size: 16px;
