@@ -114,6 +114,19 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Done" }).click();
+  await page.getByTitle("Edit location").first().click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Location" }),
+  ).toBeVisible();
+  await page.locator(".modal input").first().fill("Test Facility Updated");
+  await page.getByRole("button", { name: /save location/i }).click();
+  await expect(
+    page.getByRole("heading", { name: "Location Updated" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-edit-success.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Done" }).click();
   await page.getByTitle("View location history").first().click();
   await expect(
     page.getByRole("heading", { name: "Location History" }),
