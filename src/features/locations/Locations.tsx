@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { services } from "../../services/api";
+import { services, setMockFailure } from "../../services/api";
 import {
   Badge,
   Button,
@@ -29,6 +29,16 @@ const blankLocation = (): Location => ({
 
 export function Locations() {
   const queryClient = useQueryClient();
+  useEffect(() => {
+    const failure = new URLSearchParams(window.location.search).get(
+      "mockFailure",
+    );
+    if (failure === "locationSave") {
+      setMockFailure("locationSave", true);
+      return () => setMockFailure("locationSave", false);
+    }
+    return undefined;
+  }, []);
   const [query, setQuery] = useState("");
   const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");

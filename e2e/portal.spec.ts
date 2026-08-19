@@ -182,6 +182,19 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Done" }).click();
 
+  await page.goto("/locations?mockFailure=locationSave");
+  await page.getByRole("button", { name: /add location/i }).click();
+  await page
+    .getByPlaceholder(/student innovation center/i)
+    .fill("Failed Facility");
+  await page.getByRole("button", { name: /save location/i }).click();
+  await expect(page.getByRole("alert").first()).toContainText(
+    "Mock locationSave failed",
+  );
+  await expect(page).toHaveScreenshot("location-save-failure.png", {
+    animations: "disabled",
+  });
+
   await page.goto("/routes");
   await expect(page.getByLabel("Route geometry preview")).toBeVisible();
   await page.getByRole("button", { name: /add route/i }).click();
