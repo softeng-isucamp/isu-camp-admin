@@ -46,6 +46,7 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
     queryFn: () => services.locations.list(query),
@@ -75,11 +76,13 @@ export function Locations() {
   };
   const save = async () => {
     setError("");
+    const adding = dialog === "add";
     try {
       await services.locations.save(draft);
       await refresh();
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
+      if (adding) setSuccess(draft.name || "Location");
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
@@ -193,6 +196,17 @@ export function Locations() {
         <div className="error" role="alert">
           {error}
         </div>
+      )}
+      {success && (
+        <Modal title="Location Added" onClose={() => setSuccess(null)}>
+          <p className="muted">
+            <strong>{success}</strong> was added to the campus directory
+            successfully.
+          </p>
+          <div className="modal-actions">
+            <Button onClick={() => setSuccess(null)}>Done</Button>
+          </div>
+        </Modal>
       )}
       <Card className="table-card">
         <div className="table-heading">

@@ -107,6 +107,13 @@ test("locations, users, logs, and map expose their key state transitions", async
     .fill("Test Facility");
   await page.getByRole("button", { name: /save location/i }).click();
   await expect(page.getByRole("status")).toContainText("saved successfully");
+  await expect(
+    page.getByRole("heading", { name: "Location Added" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-added-success.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Done" }).click();
   await page.getByTitle("View location history").first().click();
   await expect(
     page.getByRole("heading", { name: "Location History" }),
