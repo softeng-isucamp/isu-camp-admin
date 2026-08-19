@@ -36,6 +36,7 @@ export function RoutesPage() {
   const items = (data?.items ?? []).filter(
     (item) => status === "All Statuses" || item.status === status,
   );
+  const summary = selected ?? items[0];
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["routes"] });
     await queryClient.invalidateQueries({ queryKey: ["logs"] });
@@ -96,14 +97,26 @@ export function RoutesPage() {
       <div className="routes-layout">
         <Card className="route-summary">
           <p className="eyebrow">SELECTED CONNECTION</p>
-          <h2>Main Gate → College of Arts &amp; Sciences</h2>
-          <p>Fully Shaded</p>
+          <h2>{summary?.name ?? "Select a route connection"}</h2>
+          <p>
+            {summary
+              ? `${summary.shade} · ${summary.distance} · ${summary.time}`
+              : "Choose a row to inspect its path details."}
+          </p>
           <hr />
-          <Badge>Open · Two-way covered walkway</Badge>
+          <Badge>
+            {summary
+              ? `${summary.status} · ${summary.direction} ${summary.type.toLowerCase()}`
+              : "No connection selected"}
+          </Badge>
           <div className="mini-route">
-            <span>S</span>
+            <span>
+              {summary?.sourceNodeId?.slice(0, 1).toUpperCase() ?? "S"}
+            </span>
             <i />
-            <span>D</span>
+            <span>
+              {summary?.destinationNodeId?.slice(0, 1).toUpperCase() ?? "D"}
+            </span>
           </div>
         </Card>
         <Card className="table-card">
@@ -174,7 +187,13 @@ export function RoutesPage() {
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id}>
+                  <tr
+                    key={item.id}
+                    onClick={() => setSelected(item)}
+                    className={
+                      selected?.id === item.id ? "selected-row" : undefined
+                    }
+                  >
                     <td>
                       <strong>{item.name}</strong>
                       <small>
