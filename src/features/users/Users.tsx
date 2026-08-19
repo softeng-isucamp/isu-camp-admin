@@ -23,6 +23,7 @@ export function Users() {
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<UserAccount["role"]>("User");
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const { data } = useQuery({
@@ -41,41 +42,69 @@ export function Users() {
   };
   const update = async () => {
     if (!selected) return;
-    await services.users.update({ ...selected, username });
-    await queryClient.invalidateQueries({ queryKey: ["users"] });
-    await queryClient.invalidateQueries({ queryKey: ["logs"] });
-    close();
-    setNotice("User updated successfully.");
+    setError("");
+    try {
+      await services.users.update({ ...selected, username });
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      close();
+      setNotice("User updated successfully.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to update user.",
+      );
+    }
   };
   const remove = async () => {
     if (!selected) return;
-    await services.users.remove(selected.id);
-    await queryClient.invalidateQueries({ queryKey: ["users"] });
-    await queryClient.invalidateQueries({ queryKey: ["logs"] });
-    close();
-    setNotice(`${selected.username} removed successfully.`);
+    setError("");
+    try {
+      await services.users.remove(selected.id);
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      close();
+      setNotice(`${selected.username} removed successfully.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to remove user.",
+      );
+    }
   };
   const create = async () => {
     const name = username.trim();
     if (!name) return;
-    await services.users.create({
-      id: `usr-${Date.now()}`,
-      username: name,
-      createdAt: "Just now",
-      lastSignIn: null,
-      role,
-    });
-    await queryClient.invalidateQueries({ queryKey: ["users"] });
-    await queryClient.invalidateQueries({ queryKey: ["logs"] });
-    close();
-    setNotice("User created successfully.");
+    setError("");
+    try {
+      await services.users.create({
+        id: `usr-${Date.now()}`,
+        username: name,
+        createdAt: "Just now",
+        lastSignIn: null,
+        role,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      close();
+      setNotice("User created successfully.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to create user.",
+      );
+    }
   };
   const reset = async () => {
     if (!selected) return;
-    await services.users.reset(selected.id);
-    await queryClient.invalidateQueries({ queryKey: ["logs"] });
-    close();
-    setNotice(`Password reset for ${selected.username}.`);
+    setError("");
+    try {
+      await services.users.reset(selected.id);
+      await queryClient.invalidateQueries({ queryKey: ["logs"] });
+      close();
+      setNotice(`Password reset for ${selected.username}.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Unable to reset password.",
+      );
+    }
   };
   return (
     <div className="page">
@@ -92,6 +121,11 @@ export function Users() {
       {notice && (
         <div className="notice" role="status">
           {notice}
+        </div>
+      )}
+      {error && (
+        <div className="error" role="alert">
+          {error}
         </div>
       )}
       <Card className="search-card">

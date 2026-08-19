@@ -55,6 +55,15 @@ describe("mock service contracts", () => {
     await expect(services.map.save()).resolves.toBeUndefined();
   });
 
+  it("injects user mutation failures through the service boundary", async () => {
+    const user = (await services.users.list("admin01")).items[0];
+    setMockFailure("userUpdate", true);
+    await expect(services.users.update(user)).rejects.toThrow(
+      "Mock userUpdate failed",
+    );
+    setMockFailure("userUpdate", false);
+  });
+
   it("validates recovery code and password requirements", () => {
     expect(
       resetSchema.safeParse({ code: "123", password: "short" }).success,
