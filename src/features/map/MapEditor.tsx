@@ -15,6 +15,7 @@ import { useLocation } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Card, Field, Modal } from "../../components/UI";
+import profileUserIcon from "../../assets/figma/navigation/profile-user.svg";
 import "leaflet/dist/leaflet.css";
 
 const icon = (color: string) =>
@@ -163,7 +164,9 @@ export function MapEditor() {
           )}
         </div>
         <button className="icon-btn">♧</button>
-        <div className="avatar small">AJ</div>
+        <div className="avatar small">
+          <img src={profileUserIcon} alt="" />
+        </div>
       </div>
       <div className="map-workspace">
         <MapContainer

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Card, Badge } from "../../components/UI";
 import { services } from "../../services/api";
@@ -8,6 +9,7 @@ import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import actionMap from "../../assets/figma/dashboard/action-map.svg";
 import actionRouting from "../../assets/figma/dashboard/action-routing.svg";
 export function Dashboard() {
+  const [searchWindow, setSearchWindow] = useState("This Week");
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: services.dashboard.summary,
@@ -88,7 +90,19 @@ export function Dashboard() {
                 <h2>Top Searched Locations</h2>
                 <p>Most searched campus destinations by users.</p>
               </div>
-              <Link to="/locations">VIEW ALL</Link>
+              <div className="dashboard-card-controls">
+                <Link to="/locations">VIEW ALL</Link>
+                <select
+                  className="dashboard-time-filter"
+                  aria-label="Top searched time range"
+                  value={searchWindow}
+                  onChange={(event) => setSearchWindow(event.target.value)}
+                >
+                  <option>This Week</option>
+                  <option>This Month</option>
+                  <option>All Time</option>
+                </select>
+              </div>
             </div>
             <div className="rank-list">
               {(data?.topSearched ?? []).map((r) => (

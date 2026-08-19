@@ -393,6 +393,22 @@ main {
   font-weight: 800;
   text-decoration: none;
 }
+.dashboard-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dashboard-time-filter {
+  height: 32px;
+  padding: 0 28px 0 12px;
+  border: 1px solid #dbe7df;
+  border-radius: 8px;
+  background: #fff;
+  color: #3f5148;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
 .map-card {
   padding-bottom: 24px;
 }

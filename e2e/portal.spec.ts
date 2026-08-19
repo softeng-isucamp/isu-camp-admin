@@ -337,6 +337,12 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Done" }).click();
 
+  await page.getByLabel("STATUS").selectOption("Open");
+  await expect(page.getByText(/Open/).first()).toBeVisible();
+  await expect(page).toHaveScreenshot("route-status-filter.png", {
+    animations: "disabled",
+  });
+  await page.getByLabel("STATUS").selectOption("All Statuses");
   await page.getByPlaceholder("Search routes...").fill("Library");
   await page.getByLabel("SHADE").selectOption("Partial Shade");
   await expect(
