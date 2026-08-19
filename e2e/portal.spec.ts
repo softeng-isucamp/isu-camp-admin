@@ -172,6 +172,9 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(
     page.getByRole("heading", { name: "Location History" }),
   ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-history-modal.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Close" }).click();
   await page
     .getByRole("button", { name: /import json/i })
