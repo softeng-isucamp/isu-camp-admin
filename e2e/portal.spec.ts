@@ -257,6 +257,17 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("route-import-dialog.png", {
     animations: "disabled",
   });
+  await page.locator(".json-input").fill("{bad");
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.getByText("Invalid JSON file.")).toBeVisible();
+  await expect(page).toHaveScreenshot("route-import-invalid-file.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page
+    .getByRole("button", { name: /import/i })
+    .first()
+    .click();
   await page
     .locator(".json-input")
     .fill(
@@ -287,6 +298,15 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Done" }).click();
+
+  await page.getByPlaceholder("Search routes...").fill("Library");
+  await page.getByLabel("SHADE").selectOption("Partial Shade");
+  await expect(
+    page.getByText(/Walkway Junction A → Library Entrance/),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-search-shade-filter.png", {
+    animations: "disabled",
+  });
 
   await page.goto("/routes?mockFailure=routeSave");
   await page.getByRole("button", { name: /add route/i }).click();

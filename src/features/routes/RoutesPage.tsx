@@ -27,6 +27,7 @@ export function RoutesPage() {
   }, []);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All Statuses");
+  const [shade, setShade] = useState("All Shades");
   const [dialog, setDialog] = useState<
     "add" | "import" | "edit" | "remove" | null
   >(null);
@@ -48,9 +49,11 @@ export function RoutesPage() {
     queryFn: () => services.routes.list(query),
   });
   const items = (data?.items ?? []).filter(
-    (item) => status === "All Statuses" || item.status === status,
+    (item) =>
+      (status === "All Statuses" || item.status === status) &&
+      (shade === "All Shades" || item.shade === shade),
   );
-  useEffect(() => setPage(1), [query, status]);
+  useEffect(() => setPage(1), [query, status, shade]);
   const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const summary = selected ?? items[0];
   const refresh = async () => {
@@ -197,6 +200,17 @@ export function RoutesPage() {
                 <option>All Statuses</option>
                 <option>Open</option>
                 <option>Closed</option>
+              </SelectField>
+              <SelectField
+                label="SHADE"
+                value={shade}
+                onChange={(event) => setShade(event.target.value)}
+              >
+                <option>All Shades</option>
+                <option>Fully Shaded</option>
+                <option>Mostly Shaded</option>
+                <option>Partial Shade</option>
+                <option>Unshaded</option>
               </SelectField>
               <Button
                 variant="subtle"
