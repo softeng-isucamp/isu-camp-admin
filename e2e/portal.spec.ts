@@ -179,6 +179,12 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.goto("/users");
+  await page.getByRole("button", { name: /add user/i }).click();
+  await expect(page.getByRole("heading", { name: "Add User" })).toBeVisible();
+  await expect(page).toHaveScreenshot("user-add-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Edit" }).first().click();
   await expect(page.getByRole("heading", { name: "Edit User" })).toBeVisible();
   await expect(page).toHaveScreenshot("user-edit-dialog.png", {
