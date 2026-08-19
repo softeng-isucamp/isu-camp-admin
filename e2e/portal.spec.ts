@@ -55,12 +55,25 @@ test('locations, users, logs, and map expose their key state transitions', async
   await page.getByRole('button', { name: /save location/i }).click()
   await expect(page.getByRole('status')).toContainText('saved successfully')
 
+  await page.goto('/routes')
+  await page.getByRole('button', { name: /add route/i }).click()
+  await expect(page.getByRole('heading', { name: 'Add Route / Path' })).toBeVisible()
+  await page.locator('.modal input').first().fill('Test Walkway')
+  await page.getByRole('button', { name: /save route/i }).click()
+  await expect(page.getByRole('status')).toContainText('saved successfully')
+
   await page.goto('/users')
+  await page.getByRole('button', { name: 'Edit' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Edit User' })).toBeVisible()
+  await page.getByRole('button', { name: /save changes/i }).click()
+  await expect(page.getByRole('status')).toContainText('User updated')
   await page.getByRole('button', { name: 'Remove' }).first().click()
   await expect(page.getByRole('heading', { name: 'Remove User?' })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel' }).click()
 
   await page.goto('/system-logs')
+  await page.getByRole('button', { name: 'Admin Activity' }).click()
+  await expect(page.getByText('Admin activity').first()).toBeVisible()
   await page.getByRole('button', { name: 'View Details' }).first().click()
   await expect(page.getByRole('heading', { name: 'Log Details' })).toBeVisible()
 
