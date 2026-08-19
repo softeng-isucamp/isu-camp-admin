@@ -7,6 +7,17 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/dashboard/);
 }
 
+test("redirects unauthenticated visitors from protected routes", async ({
+  page,
+}) => {
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "ISU-CAMP" })).toBeVisible();
+  await expect(page).toHaveScreenshot("guard-login-redirect.png", {
+    animations: "disabled",
+  });
+});
+
 test("administrator can sign in and navigate modules", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "ISU-CAMP" })).toBeVisible();
