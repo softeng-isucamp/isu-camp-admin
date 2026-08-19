@@ -798,6 +798,16 @@ td small {
   overflow: hidden;
   padding: 24px;
 }
+.auth-page::before {
+  content: "";
+  position: absolute;
+  inset: 210px 24px;
+  border-radius: 24px;
+  background-color: #1a734433;
+  background-image: url("./assets/figma/login/decorative-background.jpg");
+  background-size: 512px 279px;
+  opacity: 0.15;
+}
 .ambient {
   position: absolute;
   width: 800px;
@@ -805,6 +815,7 @@ td small {
   border-radius: 50%;
   background: #1a734433;
   filter: blur(60px);
+  z-index: 1;
 }
 .login-card {
   position: relative;
@@ -815,6 +826,7 @@ td small {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  z-index: 2;
 }
 .auth-brand {
   text-align: center;
