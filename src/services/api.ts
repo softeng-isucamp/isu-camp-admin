@@ -82,8 +82,14 @@ export interface Services {
     }): Promise<void>;
   };
   imports: {
-    locations(json: string): Promise<{ imported: number; errors: string[] }>;
-    routes(json: string): Promise<{ imported: number; errors: string[] }>;
+    locations(
+      json: string,
+      commit?: boolean,
+    ): Promise<{ imported: number; errors: string[] }>;
+    routes(
+      json: string,
+      commit?: boolean,
+    ): Promise<{ imported: number; errors: string[] }>;
   };
 }
 
@@ -262,7 +268,7 @@ export const services: Services = {
     },
   },
   imports: {
-    locations: async (json) => {
+    locations: async (json, commit = false) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(json);
@@ -271,7 +277,7 @@ export const services: Services = {
       }
       const rows = Array.isArray(parsed) ? parsed : [parsed];
       const errors: string[] = [];
-      let imported = 0;
+      const pending: Location[] = [];
       rows.forEach((row, i) => {
         const result = locationImportSchema.safeParse(row);
         if (!result.success)
@@ -282,7 +288,7 @@ export const services: Services = {
         )
           errors.push(`Row ${i + 1}: parent location reference not found.`);
         else {
-          locations.push({
+          pending.push({
             ...result.data,
             function: "",
             keywords: "",
@@ -290,12 +296,19 @@ export const services: Services = {
             floor: undefined,
             positioned: true,
           });
-          imported++;
         }
       });
-      return wait({ imported, errors });
+      if (commit && errors.length === 0) {
+        locations.push(...pending);
+        if (pending.length)
+          addAudit("Imported Locations", `${pending.length} locations`);
+      }
+      return wait({
+        imported: errors.length === 0 ? pending.length : 0,
+        errors,
+      });
     },
-    routes: async (json) => {
+    routes: async (json, commit = false) => {
       let parsed: unknown;
       try {
         parsed = JSON.parse(json);
@@ -304,7 +317,7 @@ export const services: Services = {
       }
       const rows = Array.isArray(parsed) ? parsed : [parsed];
       const errors: string[] = [];
-      let imported = 0;
+      const pending: Pathway[] = [];
       rows.forEach((row, i) => {
         const result = routeImportSchema.safeParse(row);
         if (!result.success) errors.push(`Row ${i + 1}: invalid route fields.`);
@@ -314,7 +327,7 @@ export const services: Services = {
         )
           errors.push(`Row ${i + 1}: node reference not found.`);
         else {
-          pathways.push({
+          pending.push({
             ...result.data,
             distance: "—",
             time: "—",
@@ -323,10 +336,17 @@ export const services: Services = {
             direction: "Two-way",
             status: "Open",
           });
-          imported++;
         }
       });
-      return wait({ imported, errors });
+      if (commit && errors.length === 0) {
+        pathways.push(...pending);
+        if (pending.length)
+          addAudit("Imported Routes", `${pending.length} routes`);
+      }
+      return wait({
+        imported: errors.length === 0 ? pending.length : 0,
+        errors,
+      });
     },
   },
 };

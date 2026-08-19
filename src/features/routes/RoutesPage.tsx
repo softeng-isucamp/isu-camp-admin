@@ -66,9 +66,10 @@ export function RoutesPage() {
     setImportResult(await services.imports.routes(importText));
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
+    const committed = await services.imports.routes(importText, true);
     await refresh();
     setDialog(null);
-    setNotice(`${importResult.imported} routes imported successfully.`);
+    setNotice(`${committed.imported} routes imported successfully.`);
   };
   return (
     <div className="page">

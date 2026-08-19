@@ -56,6 +56,9 @@ export function MapEditor() {
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [error, setError] = useState("");
+  const [basemap, setBasemap] = useState<"street" | "light">("street");
+  const [showBuildings, setShowBuildings] = useState(true);
+  const [showPathways, setShowPathways] = useState(true);
   const selectedLocation = data?.locations.find(
     (item) => item.id === selected?.id,
   );
@@ -143,51 +146,57 @@ export function MapEditor() {
         >
           <TileLayer
             attribution="© OpenStreetMap"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            url={
+              basemap === "street"
+                ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            }
           />
           <ClickCapture onPoint={onPoint} />
-          {data?.buildings.map((building) => (
-            <Polygon
-              key={building.id}
-              positions={building.points}
-              pathOptions={{
-                color: "#278b70",
-                fillColor: "#8fd1bd",
-                fillOpacity: 0.25,
-              }}
-            />
-          ))}
-          {data?.pathways.map((path) => {
-            const source = data.nodes.find(
-              (node) => node.id === path.sourceNodeId,
-            );
-            const destination = data.nodes.find(
-              (node) => node.id === path.destinationNodeId,
-            );
-            return source && destination ? (
-              <Polyline
-                key={path.id}
-                positions={[
-                  [source.lat, source.lng],
-                  ...(path.id === selected?.id && pathPoints.length
-                    ? pathPoints
-                    : path.pathPoints),
-                  [destination.lat, destination.lng],
-                ]}
+          {showBuildings &&
+            data?.buildings.map((building) => (
+              <Polygon
+                key={building.id}
+                positions={building.points}
                 pathOptions={{
-                  color: path.id === selected?.id ? "#e67e22" : "#005931",
-                  weight: path.id === selected?.id ? 6 : 4,
-                  dashArray: "7 6",
-                }}
-                eventHandlers={{
-                  click: () => {
-                    setSelected({ type: "pathway", id: path.id });
-                    setPathPoints(path.pathPoints);
-                  },
+                  color: "#278b70",
+                  fillColor: "#8fd1bd",
+                  fillOpacity: 0.25,
                 }}
               />
-            ) : null;
-          })}
+            ))}
+          {showPathways &&
+            data?.pathways.map((path) => {
+              const source = data.nodes.find(
+                (node) => node.id === path.sourceNodeId,
+              );
+              const destination = data.nodes.find(
+                (node) => node.id === path.destinationNodeId,
+              );
+              return source && destination ? (
+                <Polyline
+                  key={path.id}
+                  positions={[
+                    [source.lat, source.lng],
+                    ...(path.id === selected?.id && pathPoints.length
+                      ? pathPoints
+                      : path.pathPoints),
+                    [destination.lat, destination.lng],
+                  ]}
+                  pathOptions={{
+                    color: path.id === selected?.id ? "#e67e22" : "#005931",
+                    weight: path.id === selected?.id ? 6 : 4,
+                    dashArray: "7 6",
+                  }}
+                  eventHandlers={{
+                    click: () => {
+                      setSelected({ type: "pathway", id: path.id });
+                      setPathPoints(path.pathPoints);
+                    },
+                  }}
+                />
+              ) : null;
+            })}
           {data?.locations
             .filter((item) => item.positioned)
             .map((location) => (
@@ -234,6 +243,39 @@ export function MapEditor() {
                 {item[0].toUpperCase() + item.slice(1)}
               </button>
             ))}
+          </div>
+          <div className="map-layer-controls">
+            <p className="eyebrow">MAP LAYERS</p>
+            <div className="inline-fields">
+              <Button
+                variant={basemap === "street" ? "primary" : "subtle"}
+                onClick={() => setBasemap("street")}
+              >
+                Street
+              </Button>
+              <Button
+                variant={basemap === "light" ? "primary" : "subtle"}
+                onClick={() => setBasemap("light")}
+              >
+                Light
+              </Button>
+            </div>
+            <label>
+              <input
+                type="checkbox"
+                checked={showBuildings}
+                onChange={(event) => setShowBuildings(event.target.checked)}
+              />{" "}
+              Buildings
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showPathways}
+                onChange={(event) => setShowPathways(event.target.checked)}
+              />{" "}
+              Pathways
+            </label>
           </div>
           {error && (
             <div className="error" role="alert">

@@ -92,4 +92,32 @@ describe("mock service contracts", () => {
       ),
     ).toBe(true);
   });
+
+  it("keeps import validation transactional until commit", async () => {
+    const before = (await services.locations.list()).total;
+    const payload = JSON.stringify({
+      id: "loc-preview",
+      name: "Preview Facility",
+      code: "PRE-01",
+      type: "Facility",
+      parentId: null,
+      status: "Active",
+      lat: 16.72,
+      lng: 121.69,
+    });
+    await expect(services.imports.locations(payload)).resolves.toMatchObject({
+      imported: 1,
+      errors: [],
+    });
+    expect((await services.locations.list()).total).toBe(before);
+    await expect(
+      services.imports.locations(payload, true),
+    ).resolves.toMatchObject({
+      imported: 1,
+      errors: [],
+    });
+    expect(
+      (await services.locations.list("Preview Facility")).items,
+    ).toHaveLength(1);
+  });
 });

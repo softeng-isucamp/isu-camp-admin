@@ -98,9 +98,10 @@ export function Locations() {
   };
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
+    const committed = await services.imports.locations(importText, true);
     await refresh();
     setDialog(null);
-    setNotice(`${importResult.imported} locations imported successfully.`);
+    setNotice(`${committed.imported} locations imported successfully.`);
   };
   const openEdit = (item: Location) => {
     setSelected(item);
