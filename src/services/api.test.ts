@@ -160,4 +160,22 @@ describe("mock service contracts", () => {
     );
     setMockFailure("routeSave", false);
   });
+
+  it("rejects malformed CRUD payloads before mutating mock data", async () => {
+    const locationsBefore = (await services.locations.list()).total;
+    await expect(
+      services.locations.save({ id: "bad" } as never),
+    ).rejects.toThrow();
+    expect((await services.locations.list()).total).toBe(locationsBefore);
+
+    const routesBefore = (await services.routes.list()).total;
+    await expect(
+      services.routes.save({ id: "bad" } as never),
+    ).rejects.toThrow();
+    expect((await services.routes.list()).total).toBe(routesBefore);
+
+    await expect(
+      services.users.create({ id: "bad", username: "" } as never),
+    ).rejects.toThrow("Username is required");
+  });
 });

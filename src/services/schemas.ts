@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+const locationTypeSchema = z.enum([
+  "Building",
+  "Floor",
+  "Room",
+  "Office",
+  "Laboratory",
+  "Restroom",
+  "Facility",
+]);
+const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed"]);
+
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required."),
   password: z.string().min(1, "Password is required."),
@@ -15,19 +26,18 @@ export const locationImportSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   code: z.string().min(1),
-  type: z.enum([
-    "Building",
-    "Floor",
-    "Room",
-    "Office",
-    "Laboratory",
-    "Restroom",
-    "Facility",
-  ]),
+  type: locationTypeSchema,
   parentId: z.string().nullable(),
-  status: z.enum(["Active", "Inactive", "Open", "Closed"]),
+  status: recordStatusSchema,
   lat: z.number(),
   lng: z.number(),
+});
+export const locationSchema = locationImportSchema.extend({
+  building: z.string().optional(),
+  floor: z.string().optional(),
+  function: z.string().optional(),
+  keywords: z.string().optional(),
+  positioned: z.boolean(),
 });
 export const routeImportSchema = z.object({
   id: z.string(),
@@ -35,4 +45,19 @@ export const routeImportSchema = z.object({
   sourceNodeId: z.string(),
   destinationNodeId: z.string(),
   pathPoints: z.array(z.tuple([z.number(), z.number()])),
+});
+export const pathwaySchema = routeImportSchema.extend({
+  distance: z.string(),
+  time: z.string(),
+  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"]),
+  type: z.string().min(1),
+  direction: z.enum(["Two-way", "One-way"]),
+  status: z.enum(["Open", "Closed"]),
+});
+export const userAccountSchema = z.object({
+  id: z.string().min(1),
+  username: z.string().min(1, "Username is required."),
+  createdAt: z.string().min(1),
+  lastSignIn: z.string().nullable(),
+  role: z.enum(["Administrator", "Staff", "User"]),
 });

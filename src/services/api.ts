@@ -17,7 +17,13 @@ import {
   users,
   topSearchedLocations,
 } from "./mockData";
-import { locationImportSchema, routeImportSchema } from "./schemas";
+import {
+  locationImportSchema,
+  locationSchema,
+  pathwaySchema,
+  routeImportSchema,
+  userAccountSchema,
+} from "./schemas";
 
 const wait = <T>(value: T, delay = 120) =>
   new Promise<T>((resolve) => setTimeout(() => resolve(value), delay));
@@ -153,6 +159,7 @@ export const services: Services = {
     },
     save: async (location) => {
       failIfConfigured("locationSave");
+      locationSchema.parse(location);
       const i = locations.findIndex((l) => l.id === location.id);
       if (i >= 0) locations[i] = clone(location);
       else locations.push(clone(location));
@@ -179,6 +186,7 @@ export const services: Services = {
     },
     save: async (path) => {
       failIfConfigured("routeSave");
+      pathwaySchema.parse(path);
       const i = pathways.findIndex((p) => p.id === path.id);
       if (i >= 0) pathways[i] = clone(path);
       else pathways.push(clone(path));
@@ -203,12 +211,14 @@ export const services: Services = {
     },
     create: async (user) => {
       failIfConfigured("userUpdate");
+      userAccountSchema.parse(user);
       users.push(clone(user));
       addAudit("Created User", user.username);
       return wait(clone(user));
     },
     update: async (user) => {
       failIfConfigured("userUpdate");
+      userAccountSchema.parse(user);
       const i = users.findIndex((u) => u.id === user.id);
       if (i >= 0) users[i] = clone(user);
       addAudit("Updated User", user.username);
