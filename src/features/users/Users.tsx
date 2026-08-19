@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { services } from "../../services/api";
+import { services, setMockFailure } from "../../services/api";
 import {
   Badge,
   Button,
@@ -15,6 +15,16 @@ import type { UserAccount } from "../../types";
 
 export function Users() {
   const queryClient = useQueryClient();
+  useEffect(() => {
+    const failure = new URLSearchParams(window.location.search).get(
+      "mockFailure",
+    );
+    if (failure === "userUpdate") {
+      setMockFailure("userUpdate", true);
+      return () => setMockFailure("userUpdate", false);
+    }
+    return undefined;
+  }, []);
   const [query, setQuery] = useState("");
   const [dialog, setDialog] = useState<
     "add" | "edit" | "history" | "reset" | "remove" | null

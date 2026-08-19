@@ -274,6 +274,16 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
 
+  await page.goto("/users?mockFailure=userUpdate");
+  await page.getByRole("button", { name: "Edit" }).first().click();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await expect(page.getByRole("alert").first()).toContainText(
+    "Mock userUpdate failed",
+  );
+  await expect(page).toHaveScreenshot("user-save-failure.png", {
+    animations: "disabled",
+  });
+
   await page.goto("/users");
   await page.getByRole("button", { name: /add user/i }).click();
   await expect(page.getByRole("heading", { name: "Add User" })).toBeVisible();
