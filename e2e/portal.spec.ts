@@ -143,6 +143,13 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.locator(".modal input").first().fill("Test Walkway");
   await page.getByRole("button", { name: /save route/i }).click();
   await expect(page.getByRole("status")).toContainText("saved successfully");
+  await expect(
+    page.getByRole("heading", { name: "Route Saved" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-save-success.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Done" }).click();
   await page
     .getByRole("button", { name: /import/i })
     .first()

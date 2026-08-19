@@ -29,6 +29,7 @@ export function RoutesPage() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState<string | null>(null);
   const { data } = useQuery({
     queryKey: ["routes", query],
     queryFn: () => services.routes.list(query),
@@ -50,6 +51,7 @@ export function RoutesPage() {
       await refresh();
       setDialog(null);
       setNotice(`${draft.name} saved successfully.`);
+      setSuccess(draft.name);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to save route.",
@@ -93,6 +95,16 @@ export function RoutesPage() {
         <div className="error" role="alert">
           {error}
         </div>
+      )}
+      {success && (
+        <Modal title="Route Saved" onClose={() => setSuccess(null)}>
+          <p className="muted">
+            <strong>{success}</strong> was saved to the campus path network.
+          </p>
+          <div className="modal-actions">
+            <Button onClick={() => setSuccess(null)}>Done</Button>
+          </div>
+        </Modal>
       )}
       <div className="routes-layout">
         <Card className="route-summary">
