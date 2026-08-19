@@ -215,6 +215,13 @@ button {
   width: 313px;
   color: #9ca3af;
 }
+.global-search > img,
+.map-search > img {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
 .global-search input,
 .map-search input {
   border: 0;
@@ -239,6 +246,11 @@ button {
   background: #e35d5d;
   top: -2px;
   right: -2px;
+}
+.icon-btn > img {
+  display: block;
+  width: 16px;
+  height: 20px;
 }
 .menu-btn {
   display: none;

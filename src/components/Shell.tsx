@@ -11,6 +11,8 @@ import usersIcon from "../assets/figma/navigation/users.svg";
 import logsIcon from "../assets/figma/navigation/logs.svg";
 import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
 import signOutIcon from "../assets/figma/navigation/sign-out.svg";
+import searchIcon from "../assets/figma/navigation/search.svg";
+import notificationsIcon from "../assets/figma/navigation/notifications.svg";
 const links = [
   ["/dashboard", dashboardIcon, "Dashboard Overview"],
   ["/map-editor", mapEditorIcon, "Map Editor"],
@@ -79,14 +81,15 @@ export function Shell({ children }: PropsWithChildren) {
             ISU Echague <span>/</span> <b>{title}</b>
           </div>
           <div className="global-search">
-            <span>⌕</span>
+            <img src={searchIcon} alt="" />
             <input
               placeholder="Search entities..."
               onKeyDown={(e) => e.key === "Enter" && navigate("/locations")}
             />
           </div>
           <button className="icon-btn">
-            ♧<em />
+            <img src={notificationsIcon} alt="" />
+            <em />
           </button>
           <div className="avatar small">
             <img src={profileUserIcon} alt="" />

@@ -16,6 +16,8 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Card, Field, Modal } from "../../components/UI";
 import profileUserIcon from "../../assets/figma/navigation/profile-user.svg";
+import searchIcon from "../../assets/figma/navigation/search.svg";
+import notificationsIcon from "../../assets/figma/navigation/notifications.svg";
 import "leaflet/dist/leaflet.css";
 
 const icon = (color: string) =>
@@ -140,7 +142,7 @@ export function MapEditor() {
     <div className="map-editor-page">
       <div className="map-toolbar">
         <div className="map-search">
-          <span>⌕</span>
+          <img src={searchIcon} alt="" />
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -163,7 +165,9 @@ export function MapEditor() {
             </div>
           )}
         </div>
-        <button className="icon-btn">♧</button>
+        <button className="icon-btn">
+          <img src={notificationsIcon} alt="" />
+        </button>
         <div className="avatar small">
           <img src={profileUserIcon} alt="" />
         </div>
