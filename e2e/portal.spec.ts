@@ -284,6 +284,13 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-selected-pathway.png", {
     animations: "disabled",
   });
+  await page.getByRole("button", { name: "Edit Path Points" }).click();
+  await expect(
+    page.getByText(/Click the map to add path points/),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-edit-path-points.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Place" }).click();
   await expect(
     page.getByText("Click the map to preview a new position."),
