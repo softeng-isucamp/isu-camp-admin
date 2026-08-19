@@ -215,6 +215,14 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "User Activity" }).click();
+  await page.getByRole("button", { name: "View Details" }).first().click();
+  await expect(page.getByText("User activity detail")).toBeVisible();
+  await expect(page).toHaveScreenshot("log-user-details-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Admin Activity" }).click();
   await page.getByLabel("ACTOR").selectOption("admin01");
   await page.getByLabel("DATE").selectOption("Aug 17, 2026");
   await expect(page).toHaveScreenshot("system-logs-date-filter.png", {
