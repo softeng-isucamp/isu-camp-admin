@@ -93,6 +93,44 @@ export function Login() {
     </div>
   );
 }
+
+function LoginPreview() {
+  return (
+    <Card className="login-card" aria-hidden="true">
+      <div className="auth-brand">
+        <div className="auth-mark">
+          <img src={mapIcon} alt="" />
+        </div>
+        <h1>ISU-CAMP</h1>
+        <p>Admin Login</p>
+      </div>
+      <form>
+        <label className="field">
+          <span>USERNAME</span>
+          <div className="input-with-icon">
+            <img src={userIcon} alt="" />
+            <input value="admin_justine" readOnly />
+          </div>
+        </label>
+        <label className="field">
+          <span>PASSWORD</span>
+          <div className="password">
+            <img className="password-icon" src={lockIcon} alt="" />
+            <input value="password123" type="password" readOnly />
+            <button type="button" tabIndex={-1}>
+              <img src={eyeIcon} alt="" />
+            </button>
+          </div>
+        </label>
+        <div className="forgot">Forgot password?</div>
+        <Button type="button">
+          Login <img src={arrowIcon} alt="" />
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
 export function PasswordReset() {
   const navigate = useNavigate();
   const [step, setStep] = useState<"request" | "code" | "new" | "success">(
@@ -149,75 +187,80 @@ export function PasswordReset() {
   return (
     <div className="auth-page">
       <div className="ambient" />
-      <Card className="login-card">
-        <div className="auth-brand">
-          <div className="auth-mark">
-            <img src={mapIcon} alt="" />
-          </div>
-          <h1>ISU-CAMP</h1>
-          <p>Admin Login</p>
-        </div>
-        {step === "success" ? (
-          <>
-            <h2>Password reset successful</h2>
-            <p className="muted">
-              Your password has been updated. You can now sign in.
-            </p>
-            <Button onClick={() => navigate("/login")}>Return to Login</Button>
-          </>
-        ) : (
-          <>
-            <h2>
-              {step === "request"
-                ? "Reset your password"
-                : step === "code"
-                  ? "Enter verification code"
-                  : "Create new password"}
-            </h2>
-            <p className="muted">
-              {step === "request"
-                ? "We will send a six-digit code to your admin email."
-                : step === "code"
-                  ? "Enter the code from the email. Use 000000 in the demo."
-                  : "Choose a new password with at least 8 characters."}
-            </p>
-            {step === "request" && (
-              <label className="field">
-                <span>ADMIN EMAIL</span>
-                <input {...register("email")} type="email" />
-              </label>
-            )}
-            {step === "code" && (
-              <label className="field">
-                <span>VERIFICATION CODE</span>
-                <input {...register("code")} inputMode="numeric" />
-              </label>
-            )}
-            {step === "new" && (
-              <label className="field">
-                <span>NEW PASSWORD</span>
-                <input {...register("password")} type="password" />
-              </label>
-            )}
-            {error && (
-              <div className="error" role="alert">
-                {error}
-              </div>
-            )}
-            <Button type="button" onClick={() => void submit(getValues())}>
-              {step === "request"
-                ? "Send Code"
-                : step === "code"
-                  ? "Continue"
-                  : "Save Password"}{" "}
-              <span>→</span>
-            </Button>
-            <Link className="back-link" to="/login">
-              Back to login
-            </Link>
-          </>
-        )}
-      </Card>
+      <LoginPreview />
+      <div className="recovery-overlay">
+        <Card className="recovery-modal">
+          {step === "success" ? (
+            <>
+              <div className="recovery-success-icon">✓</div>
+              <h2>Password reset successful</h2>
+              <p className="muted">
+                Your password has been updated. You can now sign in.
+              </p>
+              <Button onClick={() => navigate("/login")}>
+                Return to Login
+              </Button>
+            </>
+          ) : (
+            <>
+              <h2>
+                {step === "request"
+                  ? "Reset your password"
+                  : step === "code"
+                    ? "Enter verification code"
+                    : "Create new password"}
+              </h2>
+              <p className="muted">
+                {step === "request"
+                  ? "We will send a six-digit code to your admin email."
+                  : step === "code"
+                    ? "We sent a verification code to the admin’s email."
+                    : "Choose a new password with at least 8 characters."}
+              </p>
+              {step === "request" && (
+                <label className="field">
+                  <span>ADMIN EMAIL</span>
+                  <input {...register("email")} type="email" />
+                </label>
+              )}
+              {step === "code" && (
+                <label className="field">
+                  <span>VERIFICATION CODE</span>
+                  <input {...register("code")} inputMode="numeric" />
+                </label>
+              )}
+              {step === "new" && (
+                <>
+                  <label className="field">
+                    <span>NEW PASSWORD</span>
+                    <input {...register("password")} type="password" />
+                  </label>
+                  <label className="field">
+                    <span>CONFIRM NEW PASSWORD</span>
+                    <input type="password" defaultValue="password123" />
+                  </label>
+                </>
+              )}
+              {error && (
+                <div className="error" role="alert">
+                  {error}
+                </div>
+              )}
+              <Button type="button" onClick={() => void submit(getValues())}>
+                {step === "request"
+                  ? "Send Code"
+                  : step === "code"
+                    ? "Continue"
+                    : "Save Password"}{" "}
+                <span>→</span>
+              </Button>
+              <Link className="back-link" to="/login">
+                Back to login
+              </Link>
+            </>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

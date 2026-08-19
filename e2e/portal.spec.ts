@@ -77,7 +77,7 @@ test("password recovery reaches verification step", async ({ page }) => {
   });
   await page.getByLabel("VERIFICATION CODE").fill("000000");
   await page.getByRole("button", { name: /continue/i }).click();
-  await page.getByLabel("NEW PASSWORD").fill("password123");
+  await page.getByLabel("NEW PASSWORD", { exact: true }).fill("password123");
   await page.getByRole("button", { name: /save password/i }).click();
   await expect(
     page.getByRole("heading", { name: /password reset successful/i }),
