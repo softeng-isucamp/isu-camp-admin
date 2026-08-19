@@ -28,6 +28,12 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "System Logs" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign out?" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign Out", exact: true }).click();
+  await expect(page).toHaveURL(/login/);
 });
 
 test("password recovery reaches verification step", async ({ page }) => {
@@ -81,6 +87,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByRole("button", { name: "Close" }).click();
 
   await page.goto("/routes");
+  await expect(page.getByLabel("Route geometry preview")).toBeVisible();
   await page.getByRole("button", { name: /add route/i }).click();
   await expect(
     page.getByRole("heading", { name: "Add Route / Path" }),

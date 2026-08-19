@@ -118,6 +118,24 @@ export function RoutesPage() {
               {summary?.destinationNodeId?.slice(0, 1).toUpperCase() ?? "D"}
             </span>
           </div>
+          <div className="route-preview" aria-label="Route geometry preview">
+            <svg viewBox="0 0 220 90" role="img">
+              <polyline
+                points={
+                  summary
+                    ? `10,76 ${summary.pathPoints.map((_, index) => `${35 + ((index * 42) % 150)},${25 + (index % 2) * 35}`).join(" ")} 210,18`
+                    : "10,76 110,45 210,18"
+                }
+              />
+              <circle cx="10" cy="76" r="6" />
+              <circle cx="210" cy="18" r="6" />
+            </svg>
+            <small>
+              {summary
+                ? `${summary.pathPoints.length} geometry point${summary.pathPoints.length === 1 ? "" : "s"}`
+                : "No route selected"}
+            </small>
+          </div>
         </Card>
         <Card className="table-card">
           <div className="table-heading">
