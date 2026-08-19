@@ -19,4 +19,11 @@ describe('mock service contracts', () => {
     await services.users.update({ ...page.items[0], username: 'admin01' })
     expect((await services.logs.list('Admin')).total).toBeGreaterThanOrEqual(before)
   })
+
+  it('reports invalid import JSON and missing references', async () => {
+    await expect(services.imports.locations('{bad')).resolves.toMatchObject({ imported: 0, errors: ['Invalid JSON file.'] })
+    const result = await services.imports.routes(JSON.stringify({ id: 'r-import', name: 'Broken', sourceNodeId: 'missing', destinationNodeId: 'missing', pathPoints: [] }))
+    expect(result.imported).toBe(0)
+    expect(result.errors[0]).toContain('node reference')
+  })
 })

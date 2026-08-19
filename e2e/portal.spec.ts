@@ -3,9 +3,11 @@ import { test, expect } from '@playwright/test'
 test('administrator can sign in and navigate modules', async ({ page }) => {
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'ISU-CAMP' })).toBeVisible()
+  await expect(page).toHaveScreenshot('login.png', { animations: 'disabled' })
   await page.getByRole('button', { name: /login/i }).click()
   await expect(page).toHaveURL(/dashboard/)
   await expect(page.getByRole('heading', { name: 'Campus Overview' })).toBeVisible()
+  await expect(page).toHaveScreenshot('dashboard.png', { animations: 'disabled' })
   await page.locator('.sidebar a', { hasText: 'Locations' }).click()
   await expect(page).toHaveURL(/locations/)
   await expect(page.getByRole('heading', { name: 'Campus Locations' })).toBeVisible()
