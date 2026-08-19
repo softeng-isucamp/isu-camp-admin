@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { services } from './api'
+import { services, setMockFailure } from './api'
 
 describe('mock service contracts', () => {
   it('authenticates the seeded administrator', async () => {
@@ -25,5 +25,12 @@ describe('mock service contracts', () => {
     const result = await services.imports.routes(JSON.stringify({ id: 'r-import', name: 'Broken', sourceNodeId: 'missing', destinationNodeId: 'missing', pathPoints: [] }))
     expect(result.imported).toBe(0)
     expect(result.errors[0]).toContain('node reference')
+  })
+
+  it('supports deterministic injectable save failures', async () => {
+    setMockFailure('mapSave', true)
+    await expect(services.map.save()).rejects.toThrow('Mock mapSave failed')
+    setMockFailure('mapSave', false)
+    await expect(services.map.save()).resolves.toBeUndefined()
   })
 })
