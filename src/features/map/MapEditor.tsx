@@ -246,6 +246,28 @@ export function MapEditor() {
             />
           )}
           {place && <Marker position={place} icon={icon("#e67e22")} />}
+          {mode === "path" &&
+            selectedPath &&
+            pathPoints.map((point, index) => (
+              <Marker
+                key={`path-point-${index}`}
+                position={point}
+                icon={icon("#e67e22")}
+                draggable
+                eventHandlers={{
+                  dragend: (event) => {
+                    const marker = event.target as L.Marker;
+                    const next = marker.getLatLng();
+                    setPathPoints((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index ? [next.lat, next.lng] : item,
+                      ),
+                    );
+                    setDirty(true);
+                  },
+                }}
+              />
+            ))}
         </MapContainer>
         <Card className="map-panel">
           <div className="mode-tabs">
@@ -369,8 +391,8 @@ export function MapEditor() {
               {mode === "path" && (
                 <>
                   <p className="muted">
-                    Click the map to add path points. {pathPoints.length} points
-                    plotted.
+                    Click the map to add path points or drag an existing point
+                    to move it. {pathPoints.length} points plotted.
                   </p>
                   <Button
                     variant="subtle"

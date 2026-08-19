@@ -385,6 +385,12 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-edit-path-points.png", {
     animations: "disabled",
   });
+  await expect(
+    page.getByText(/drag an existing point to move it/i),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-move-point-instruction.png", {
+    animations: "disabled",
+  });
   await page
     .locator(".leaflet-container")
     .click({ position: { x: 420, y: 260 } });
