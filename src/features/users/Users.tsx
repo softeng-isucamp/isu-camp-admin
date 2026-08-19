@@ -249,9 +249,13 @@ export function Users() {
             value={username}
             onChange={(event) => setUsername(event.target.value)}
           />
-          <p className="muted">
-            Created {selected.createdAt}. Password values are never shown.
-          </p>
+          <Field label="PASSWORD" value="•••••••••••••" readOnly />
+          <p className="muted">Protected · Read-only</p>
+          <div className="record-information">
+            <strong>ACCOUNT TIMESTAMPS</strong>
+            <span>Created {selected.createdAt}</span>
+            <span>Last sign in {selected.lastSignIn ?? "Never"}</span>
+          </div>
           <div className="modal-actions">
             <Button variant="subtle" onClick={close}>
               Cancel
