@@ -29,6 +29,7 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   ).toBeVisible();
   await expect(page).toHaveScreenshot("dashboard.png", {
     animations: "disabled",
+    fullPage: true,
   });
   await page.reload();
   await expect(page).toHaveURL(/dashboard/);

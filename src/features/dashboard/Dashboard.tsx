@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Card, Badge } from "../../components/UI";
 import { services } from "../../services/api";
+import campusMap from "../../assets/figma/dashboard/campus-map.png";
 export function Dashboard() {
   const { data } = useQuery({
     queryKey: ["dashboard"],
@@ -39,21 +40,6 @@ export function Dashboard() {
           <span>Registered Offices</span>
           <strong>{data?.offices?.toLocaleString() ?? "—"}</strong>
         </Card>
-        <Card>
-          <div className="metric-top">
-            <span className="metric-icon">▤</span>
-          </div>
-          <span>Campus Locations</span>
-          <strong>{data?.locations?.toLocaleString() ?? "—"}</strong>
-        </Card>
-        <Card>
-          <div className="metric-top">
-            <span className="metric-icon">⌁</span>
-            <Badge tone="blue">LIVE</Badge>
-          </div>
-          <span>Active Pathways</span>
-          <strong>{data?.pathways?.toLocaleString() ?? "—"}</strong>
-        </Card>
       </div>
       <div className="dashboard-grid">
         <div className="stack">
@@ -66,14 +52,11 @@ export function Dashboard() {
               <Link to="/map-editor">Expand View ↗</Link>
             </div>
             <div className="map-preview">
-              <div className="map-grid" />
-              <div className="map-building b1" />
-              <div className="map-building b2" />
-              <div className="map-building b3" />
-              <div className="map-path p1" />
-              <div className="map-path p2" />
-              <span className="map-pin pin1">●</span>
-              <span className="map-pin pin2">●</span>
+              <img
+                className="map-image"
+                src={campusMap}
+                alt="Campus map preview"
+              />
               <div className="legend">
                 <b>LIVE LAYERS</b>
                 <span>
