@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import {
   Badge,
@@ -29,6 +30,7 @@ const blankLocation = (): Location => ({
 
 export function Locations() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -301,7 +303,13 @@ export function Locations() {
                     <Badge>{item.status}</Badge>
                   </td>
                   <td>
-                    <button className="table-action" title="Locate on map">
+                    <button
+                      className="table-action"
+                      title="Locate on map"
+                      onClick={() =>
+                        navigate(`/map-editor?location=${item.id}`)
+                      }
+                    >
                       ⌖
                     </button>
                     <button

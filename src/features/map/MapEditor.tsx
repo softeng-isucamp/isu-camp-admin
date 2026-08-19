@@ -11,6 +11,7 @@ import {
 import L from "leaflet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Card, Field, Modal } from "../../components/UI";
@@ -36,6 +37,7 @@ function ClickCapture({
 
 export function MapEditor() {
   const queryClient = useQueryClient();
+  const routeLocation = useLocation();
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -78,6 +80,14 @@ export function MapEditor() {
   );
   const selectedNode = data?.nodes.find((item) => item.id === selected?.id);
   const selectedPath = data?.pathways.find((item) => item.id === selected?.id);
+  useEffect(() => {
+    const locationId = new URLSearchParams(routeLocation.search).get(
+      "location",
+    );
+    if (locationId && data?.locations.some((item) => item.id === locationId)) {
+      setSelected({ type: "location", id: locationId });
+    }
+  }, [data?.locations, routeLocation.search]);
   const results = useMemo(() => {
     if (!data || !search.trim()) return [];
     return [

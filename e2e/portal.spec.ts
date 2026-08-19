@@ -182,6 +182,12 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Done" }).click();
+  await page.getByTitle("Locate on map").first().click();
+  await expect(page).toHaveURL(/\/map-editor\?location=/);
+  await expect(page.getByText("SELECTED LOCATION")).toBeVisible();
+  await expect(page).toHaveScreenshot("location-locate-on-map.png", {
+    animations: "disabled",
+  });
 
   await page.goto("/locations?mockFailure=locationSave");
   await page.getByRole("button", { name: /add location/i }).click();
