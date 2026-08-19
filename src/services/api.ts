@@ -13,7 +13,7 @@ export interface Services {
   routes: { list(query?: string): Promise<Page<Pathway>>; save(path: Pathway): Promise<Pathway>; remove(id: string): Promise<void> }
   users: { list(query?: string): Promise<Page<UserAccount>>; update(user: UserAccount): Promise<UserAccount>; remove(id: string): Promise<void> }
   logs: { list(category?: string, query?: string): Promise<Page<AuditEntry>> }
-  map: { buildings(): Promise<typeof buildings>; locations(): Promise<Location[]>; nodes(): Promise<RouteNode[]>; pathways(): Promise<Pathway[]> }
+  map: { buildings(): Promise<typeof buildings>; locations(): Promise<Location[]>; nodes(): Promise<RouteNode[]>; pathways(): Promise<Pathway[]>; save(): Promise<void> }
   imports: { locations(json: string): Promise<{ imported: number; errors: string[] }>; routes(json: string): Promise<{ imported: number; errors: string[] }> }
 }
 
@@ -31,7 +31,7 @@ export const services: Services = {
       return categoryMatch && queryMatch
     })), total: auditEntries.length, page: 1, pageSize: 20
   }) },
-  map: { buildings: async () => wait(clone(buildings)), locations: async () => wait(clone(locations)), nodes: async () => wait(clone(routeNodes)), pathways: async () => wait(clone(pathways)) },
+  map: { buildings: async () => wait(clone(buildings)), locations: async () => wait(clone(locations)), nodes: async () => wait(clone(routeNodes)), pathways: async () => wait(clone(pathways)), save: async () => { addAudit('Updated Map', 'Campus geometry'); return wait(undefined) } },
   imports: {
     locations: async json => { let parsed: unknown; try { parsed = JSON.parse(json) } catch { return { imported: 0, errors: ['Invalid JSON file.'] } } const rows = Array.isArray(parsed) ? parsed : [parsed]; const errors: string[] = []; let imported = 0; rows.forEach((row, i) => { const result = locationImportSchema.safeParse(row); if (!result.success) errors.push(`Row ${i + 1}: invalid location fields.`); else if (result.data.parentId && !locations.some(l => l.id === result.data.parentId)) errors.push(`Row ${i + 1}: parent location reference not found.`); else { locations.push({ ...result.data, function: '', keywords: '', building: undefined, floor: undefined, positioned: true }); imported++ } }); return wait({ imported, errors }) },
     routes: async json => { let parsed: unknown; try { parsed = JSON.parse(json) } catch { return { imported: 0, errors: ['Invalid JSON file.'] } } const rows = Array.isArray(parsed) ? parsed : [parsed]; const errors: string[] = []; let imported = 0; rows.forEach((row, i) => { const result = routeImportSchema.safeParse(row); if (!result.success) errors.push(`Row ${i + 1}: invalid route fields.`); else if (!routeNodes.some(n => n.id === result.data.sourceNodeId) || !routeNodes.some(n => n.id === result.data.destinationNodeId)) errors.push(`Row ${i + 1}: node reference not found.`); else { pathways.push({ ...result.data, distance: '—', time: '—', shade: 'Unshaded', type: 'Campus walkway', direction: 'Two-way', status: 'Open' }); imported++ } }); return wait({ imported, errors }) },
