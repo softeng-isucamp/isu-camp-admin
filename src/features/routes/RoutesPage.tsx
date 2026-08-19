@@ -33,6 +33,8 @@ export function RoutesPage() {
     return undefined;
   }, []);
   const [query, setQuery] = useState("");
+  const [source, setSource] = useState("All Sources");
+  const [destination, setDestination] = useState("All Destinations");
   const [status, setStatus] = useState("All Statuses");
   const [shade, setShade] = useState("All Shades");
   const [dialog, setDialog] = useState<
@@ -58,10 +60,13 @@ export function RoutesPage() {
   });
   const items = (data?.items ?? []).filter(
     (item) =>
+      (source === "All Sources" || item.sourceNodeId === source) &&
+      (destination === "All Destinations" ||
+        item.destinationNodeId === destination) &&
       (status === "All Statuses" || item.status === status) &&
       (shade === "All Shades" || item.shade === shade),
   );
-  useEffect(() => setPage(1), [query, status, shade]);
+  useEffect(() => setPage(1), [query, source, destination, status, shade]);
   const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const summary = selected ?? items[0];
   const refresh = async () => {
@@ -199,6 +204,26 @@ export function RoutesPage() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
+              <SelectField
+                label="SOURCE"
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+              >
+                <option>All Sources</option>
+                <option value="ccsict-entry">Main Gate</option>
+                <option value="junction-a">Arts &amp; Sciences</option>
+                <option value="student-entry">ISU Dormitory</option>
+              </SelectField>
+              <SelectField
+                label="DESTINATION"
+                value={destination}
+                onChange={(event) => setDestination(event.target.value)}
+              >
+                <option>All Destinations</option>
+                <option value="junction-a">Arts &amp; Sciences</option>
+                <option value="student-entry">ISU Grandstand</option>
+                <option value="library-entry">University Library</option>
+              </SelectField>
               <SelectField
                 label="STATUS"
                 value={status}

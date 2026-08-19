@@ -337,6 +337,14 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Done" }).click();
 
+  await page.getByLabel("SOURCE").selectOption("junction-a");
+  await page.getByLabel("DESTINATION").selectOption("library-entry");
+  await expect(page.getByText("Med–Library")).toBeVisible();
+  await expect(page).toHaveScreenshot("route-source-destination-filter.png", {
+    animations: "disabled",
+  });
+  await page.getByLabel("SOURCE").selectOption("All Sources");
+  await page.getByLabel("DESTINATION").selectOption("All Destinations");
   await page.getByLabel("STATUS").selectOption("Open");
   await expect(page.getByText(/Open/).first()).toBeVisible();
   await expect(page).toHaveScreenshot("route-status-filter.png", {
