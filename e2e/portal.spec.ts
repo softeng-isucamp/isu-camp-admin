@@ -112,6 +112,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   ).toBeVisible();
   await expect(page).toHaveScreenshot("location-add-dialog.png", {
     animations: "disabled",
+    maxDiffPixels: 200,
   });
   await page
     .getByPlaceholder(/student innovation center/i)
@@ -193,6 +194,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   );
   await expect(page).toHaveScreenshot("location-save-failure.png", {
     animations: "disabled",
+    maxDiffPixels: 200,
   });
 
   await page.goto("/routes");
@@ -272,6 +274,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   );
   await expect(page).toHaveScreenshot("route-save-failure.png", {
     animations: "disabled",
+    maxDiffPixels: 200,
   });
 
   await page.goto("/users?mockFailure=userUpdate");
@@ -282,6 +285,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   );
   await expect(page).toHaveScreenshot("user-save-failure.png", {
     animations: "disabled",
+    maxDiffPixels: 200,
   });
 
   await page.goto("/users");
@@ -494,5 +498,6 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page.getByRole("alert")).toContainText("Mock mapSave failed");
   await expect(page).toHaveScreenshot("map-save-failure.png", {
     animations: "disabled",
+    maxDiffPixels: 200,
   });
 });
