@@ -21,6 +21,12 @@ describe("mock service contracts", () => {
     expect(result.items[0].name).toBe("Computer Lab 1");
   });
 
+  it("returns the dashboard metric counts through the service boundary", async () => {
+    const summary = await services.dashboard.summary();
+    expect(summary.locations).toBeGreaterThan(0);
+    expect(summary.pathways).toBeGreaterThan(0);
+  });
+
   it("creates an audit entry after a user mutation", async () => {
     const before = (await services.logs.list("Admin")).total;
     const page = await services.users.list("admin01");

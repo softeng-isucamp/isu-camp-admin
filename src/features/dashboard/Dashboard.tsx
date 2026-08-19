@@ -39,6 +39,21 @@ export function Dashboard() {
           <span>Registered Offices</span>
           <strong>{data?.offices?.toLocaleString() ?? "—"}</strong>
         </Card>
+        <Card>
+          <div className="metric-top">
+            <span className="metric-icon">▤</span>
+          </div>
+          <span>Campus Locations</span>
+          <strong>{data?.locations?.toLocaleString() ?? "—"}</strong>
+        </Card>
+        <Card>
+          <div className="metric-top">
+            <span className="metric-icon">⌁</span>
+            <Badge tone="blue">LIVE</Badge>
+          </div>
+          <span>Active Pathways</span>
+          <strong>{data?.pathways?.toLocaleString() ?? "—"}</strong>
+        </Card>
       </div>
       <div className="dashboard-grid">
         <div className="stack">

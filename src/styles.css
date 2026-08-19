@@ -275,7 +275,7 @@ main {
 }
 .metric-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 24px;
   margin-top: -196px;
   margin-left: 32px;

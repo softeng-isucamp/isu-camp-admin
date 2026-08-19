@@ -125,6 +125,8 @@ export const services: Services = {
       wait({
         buildings: 142,
         offices: 1854,
+        locations: locations.length,
+        pathways: pathways.filter((path) => path.status === "Open").length,
         searches: 438,
         recent: clone(auditEntries.slice(0, 3)),
       }),
