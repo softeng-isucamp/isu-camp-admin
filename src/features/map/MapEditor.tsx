@@ -56,7 +56,9 @@ export function MapEditor() {
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [error, setError] = useState("");
-  const [basemap, setBasemap] = useState<"street" | "light">("street");
+  const [basemap, setBasemap] = useState<"street" | "light" | "satellite">(
+    "street",
+  );
   const [showBuildings, setShowBuildings] = useState(true);
   const [showPathways, setShowPathways] = useState(true);
   const selectedLocation = data?.locations.find(
@@ -146,11 +148,19 @@ export function MapEditor() {
           className="leaflet-map"
         >
           <TileLayer
-            attribution="© OpenStreetMap"
+            attribution={
+              basemap === "satellite"
+                ? "© Esri"
+                : basemap === "street"
+                  ? "© OpenStreetMap"
+                  : "© CARTO"
+            }
             url={
               basemap === "street"
                 ? "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                : basemap === "light"
+                  ? "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                  : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             }
           />
           <ClickCapture onPoint={onPoint} />
@@ -259,6 +269,12 @@ export function MapEditor() {
                 onClick={() => setBasemap("light")}
               >
                 Light
+              </Button>
+              <Button
+                variant={basemap === "satellite" ? "primary" : "subtle"}
+                onClick={() => setBasemap("satellite")}
+              >
+                Satellite
               </Button>
             </div>
             <label>
