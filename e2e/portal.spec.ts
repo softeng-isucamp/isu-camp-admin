@@ -391,6 +391,19 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-area-mode.png", {
     animations: "disabled",
   });
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 320, y: 210 } });
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 520, y: 210 } });
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 420, y: 340 } });
+  await expect(page.getByText("Points plotted: 3")).toBeVisible();
+  await expect(page).toHaveScreenshot("map-area-drawn.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Save Changes" }).click();
   await expect(
     page.getByRole("heading", { name: "Save map changes?" }),
