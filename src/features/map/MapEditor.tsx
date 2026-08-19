@@ -189,6 +189,9 @@ export function MapEditor() {
                   fillColor: "#8fd1bd",
                   fillOpacity: 0.25,
                 }}
+                eventHandlers={{
+                  click: () => setSelected({ type: "area", id: building.id }),
+                }}
               />
             ))}
           {showPathways &&
@@ -360,6 +363,22 @@ export function MapEditor() {
                   Clear Area
                 </Button>
               </div>
+            </>
+          ) : data?.buildings.find((item) => item.id === selected?.id) ? (
+            <>
+              <p className="eyebrow">SELECTED AREA</p>
+              <h2>
+                {data.buildings.find((item) => item.id === selected?.id)?.name}
+              </h2>
+              <p className="muted">
+                Building footprint ·{" "}
+                {data.buildings.find((item) => item.id === selected?.id)?.code}
+              </p>
+              <hr />
+              <p className="muted">
+                This campus area is selectable as a map layer and can be used as
+                the reference boundary for zone drawing.
+              </p>
             </>
           ) : selectedLocation ? (
             <>
