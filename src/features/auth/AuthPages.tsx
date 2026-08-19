@@ -82,7 +82,6 @@ export function Login() {
             Login <img src={arrowIcon} alt="" />
           </Button>
         </form>
-        <footer>Authorized Personnel Only · Echague Main Campus</footer>
       </Card>
     </div>
   );
