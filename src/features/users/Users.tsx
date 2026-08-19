@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { services, setMockFailure } from "../../services/api";
 import {
-  Badge,
   Button,
   Card,
   Empty,
@@ -181,7 +180,6 @@ export function Users() {
                 <th>USERNAME</th>
                 <th>CREATED AT</th>
                 <th>LAST SIGN IN</th>
-                <th>ROLE</th>
                 <th>ACTIONS</th>
               </tr>
             </thead>
@@ -193,9 +191,6 @@ export function Users() {
                   </td>
                   <td>{user.createdAt}</td>
                   <td>{user.lastSignIn ?? "Never"}</td>
-                  <td>
-                    <Badge>{user.role}</Badge>
-                  </td>
                   <td>
                     <button
                       className="text-action"
