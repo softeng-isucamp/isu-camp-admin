@@ -129,6 +129,12 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("location-import-dialog.png", {
     animations: "disabled",
   });
+  await page.locator(".json-input").fill("{bad");
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.getByText("Invalid JSON file.")).toBeVisible();
+  await expect(page).toHaveScreenshot("location-import-invalid.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.goto("/routes");
@@ -158,6 +164,16 @@ test("locations, users, logs, and map expose their key state transitions", async
     page.getByRole("heading", { name: "Import Routes JSON" }),
   ).toBeVisible();
   await expect(page).toHaveScreenshot("route-import-dialog.png", {
+    animations: "disabled",
+  });
+  await page
+    .locator(".json-input")
+    .fill(
+      '{"id":"bad-route","name":"Broken","sourceNodeId":"missing","destinationNodeId":"missing","pathPoints":[]}',
+    );
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.getByText(/node reference not found/i)).toBeVisible();
+  await expect(page).toHaveScreenshot("route-import-invalid-reference.png", {
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Cancel" }).click();
