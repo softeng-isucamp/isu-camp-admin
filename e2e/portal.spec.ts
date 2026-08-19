@@ -291,6 +291,18 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-edit-path-points.png", {
     animations: "disabled",
   });
+  await page
+    .locator(".leaflet-container")
+    .click({ position: { x: 420, y: 260 } });
+  await expect(page.getByText(/2 points plotted/)).toBeVisible();
+  await expect(page).toHaveScreenshot("map-path-point-added.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Remove Last Point" }).click();
+  await expect(page.getByText(/1 points plotted/)).toBeVisible();
+  await expect(page).toHaveScreenshot("map-path-point-removed.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Place" }).click();
   await expect(
     page.getByText("Click the map to preview a new position."),
