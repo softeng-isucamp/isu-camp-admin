@@ -57,7 +57,9 @@ export interface Services {
   };
   users: {
     list(query?: string): Promise<Page<UserAccount>>;
+    create(user: UserAccount): Promise<UserAccount>;
     update(user: UserAccount): Promise<UserAccount>;
+    reset(id: string): Promise<void>;
     remove(id: string): Promise<void>;
   };
   logs: { list(category?: string, query?: string): Promise<Page<AuditEntry>> };
@@ -178,12 +180,24 @@ export const services: Services = {
         page: 1,
         pageSize: 20,
       }),
+    create: async (user) => {
+      failIfConfigured("userUpdate");
+      users.push(clone(user));
+      addAudit("Created User", user.username);
+      return wait(clone(user));
+    },
     update: async (user) => {
       failIfConfigured("userUpdate");
       const i = users.findIndex((u) => u.id === user.id);
       if (i >= 0) users[i] = clone(user);
       addAudit("Updated User", user.username);
       return wait(clone(user));
+    },
+    reset: async (id) => {
+      failIfConfigured("userUpdate");
+      const user = users.find((item) => item.id === id);
+      if (user) addAudit("Reset User Password", user.username);
+      return wait(undefined);
     },
     remove: async (id) => {
       const i = users.findIndex((u) => u.id === id);
