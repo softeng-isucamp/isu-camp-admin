@@ -88,16 +88,24 @@ export function PasswordReset() {
   const [step, setStep] = useState<"request" | "code" | "new" | "success">(
     "request",
   );
-  const [email, setEmail] = useState("admin@isu.edu.ph");
-  const [code, setCode] = useState("000000");
-  const [password, setPassword] = useState("password123");
   const [error, setError] = useState("");
-  const submit = async () => {
+  const { register, getValues } = useForm({
+    defaultValues: {
+      email: "admin@isu.edu.ph",
+      code: "000000",
+      password: "password123",
+    },
+  });
+  const submit = async (values: {
+    email: string;
+    code: string;
+    password: string;
+  }) => {
     setError("");
     try {
       if (step === "request") setStep("code");
       else if (step === "code") {
-        const parsed = resetSchema.shape.code.safeParse(code);
+        const parsed = resetSchema.shape.code.safeParse(values.code);
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Enter the verification code.",
@@ -106,7 +114,7 @@ export function PasswordReset() {
         }
         setStep("new");
       } else if (step === "new") {
-        const parsed = resetSchema.safeParse({ code, password });
+        const parsed = resetSchema.safeParse(values);
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Check your new password.",
@@ -156,35 +164,29 @@ export function PasswordReset() {
                   : "Choose a new password with at least 8 characters."}
             </p>
             {step === "request" && (
-              <Field
-                label="ADMIN EMAIL"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                type="email"
-              />
+              <label className="field">
+                <span>ADMIN EMAIL</span>
+                <input {...register("email")} type="email" />
+              </label>
             )}
             {step === "code" && (
-              <Field
-                label="VERIFICATION CODE"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                inputMode="numeric"
-              />
+              <label className="field">
+                <span>VERIFICATION CODE</span>
+                <input {...register("code")} inputMode="numeric" />
+              </label>
             )}
             {step === "new" && (
-              <Field
-                label="NEW PASSWORD"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                type="password"
-              />
+              <label className="field">
+                <span>NEW PASSWORD</span>
+                <input {...register("password")} type="password" />
+              </label>
             )}
             {error && (
               <div className="error" role="alert">
                 {error}
               </div>
             )}
-            <Button onClick={submit}>
+            <Button type="button" onClick={() => void submit(getValues())}>
               {step === "request"
                 ? "Send Code"
                 : step === "code"
