@@ -163,6 +163,39 @@ export function Logs() {
             <span>DATE &amp; TIME</span>
             <strong>{detail.createdAt}</strong>
           </div>
+          {detail.category === "Admin" && (
+            <div className="detail-changes">
+              <strong>CHANGED FIELDS</strong>
+              <div>
+                <span>Location Type</span>
+                <b>Building</b>
+              </div>
+              <div>
+                <span>Status</span>
+                <b>Active</b>
+              </div>
+            </div>
+          )}
+          {detail.category === "User" && (
+            <div className="detail-changes">
+              <div>
+                <span>USERNAME</span>
+                <b>{detail.actor}</b>
+              </div>
+              <div>
+                <span>DEVICE ID</span>
+                <b>Web client</b>
+              </div>
+              <div>
+                <span>FROM</span>
+                <b>Campus search</b>
+              </div>
+              <div>
+                <span>TO</span>
+                <b>{detail.target}</b>
+              </div>
+            </div>
+          )}
           <p className="muted">
             {detail.category === "Admin"
               ? "This administrator action changed protected campus data."

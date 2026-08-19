@@ -1123,6 +1123,28 @@ td small {
   font-size: 10px;
   letter-spacing: 0.08em;
 }
+.detail-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f3f6f4;
+  font-size: 11px;
+}
+.detail-changes > strong {
+  color: var(--green);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.detail-changes > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.detail-changes span {
+  color: #64716a;
+}
 .map-editor-page {
   position: relative;
   height: calc(100vh - 64px);
