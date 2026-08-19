@@ -200,6 +200,14 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-selected-location.png", {
     animations: "disabled",
   });
+  await page
+    .getByPlaceholder("Search campus places...")
+    .fill("CCSICT Entrance");
+  await page.getByRole("button", { name: /CCSICT Entrance/ }).click();
+  await expect(page.getByText("SELECTED ROUTE NODE")).toBeVisible();
+  await expect(page).toHaveScreenshot("map-selected-route-node.png", {
+    animations: "disabled",
+  });
   await page.getByRole("button", { name: "Place" }).click();
   await expect(
     page.getByText("Click the map to preview a new position."),
