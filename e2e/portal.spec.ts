@@ -194,6 +194,14 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Reset Password" }).first().click();
+  await expect(
+    page.getByRole("heading", { name: "Reset Password?" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("user-reset-password-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: "Remove" }).first().click();
   await expect(
     page.getByRole("heading", { name: "Remove User?" }),
