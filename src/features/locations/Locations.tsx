@@ -35,7 +35,7 @@ export function Locations() {
   const [building, setBuilding] = useState("All Buildings");
   const [floor, setFloor] = useState("All Floors");
   const [dialog, setDialog] = useState<
-    "add" | "import" | "edit" | "remove" | null
+    "add" | "import" | "edit" | "history" | "remove" | null
   >(null);
   const [draft, setDraft] = useState<Location>(blankLocation());
   const [selected, setSelected] = useState<Location | null>(null);
@@ -231,6 +231,11 @@ export function Locations() {
                   <td>
                     <strong>{item.name}</strong>
                     <small>{item.code}</small>
+                    <small>
+                      {item.parentId
+                        ? `Child of ${item.parentId}`
+                        : "Top-level campus record"}
+                    </small>
                   </td>
                   <td>
                     <Badge>{item.type}</Badge>
@@ -250,6 +255,16 @@ export function Locations() {
                       onClick={() => openEdit(item)}
                     >
                       ✎
+                    </button>
+                    <button
+                      className="table-action"
+                      title="View location history"
+                      onClick={() => {
+                        setSelected(item);
+                        setDialog("history");
+                      }}
+                    >
+                      ↺
                     </button>
                     <button
                       className="table-action danger-text"
@@ -344,6 +359,47 @@ export function Locations() {
             <Button variant="danger" onClick={remove}>
               Delete Location
             </Button>
+          </div>
+        </Modal>
+      )}
+      {dialog === "history" && selected && (
+        <Modal title="Location History" onClose={() => setDialog(null)}>
+          <p className="muted">
+            Hierarchy and administrative changes for{" "}
+            <strong>{selected.name}</strong>.
+          </p>
+          <div className="history-list">
+            <div>
+              <small>Aug 10, 2026 · 9:15 AM</small>
+              <strong>Created Location</strong>
+              <span>
+                {selected.parentId
+                  ? `Parent: ${selected.parentId}`
+                  : "Top-level campus record"}
+              </span>
+            </div>
+            <div>
+              <small>Aug 17, 2026 · 2:05 PM</small>
+              <strong>Updated Directory Metadata</strong>
+              <span>
+                {selected.function || "No function description recorded."}
+              </span>
+            </div>
+            <div>
+              <small>Current hierarchy</small>
+              <strong>
+                {selected.parentId
+                  ? `Nested under ${selected.parentId}`
+                  : "Campus root"}
+              </strong>
+              <span>
+                {selected.building || "Building not assigned"} ·{" "}
+                {selected.floor || "Floor not assigned"}
+              </span>
+            </div>
+          </div>
+          <div className="modal-actions">
+            <Button onClick={() => setDialog(null)}>Close</Button>
           </div>
         </Modal>
       )}

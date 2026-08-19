@@ -290,6 +290,22 @@ export function MapEditor() {
                 Click at least 3 points on the map to form an area boundary.
               </p>
               <strong>Points plotted: {points.length}</strong>
+              <div className="inline-fields">
+                <Button
+                  variant="subtle"
+                  onClick={() => setPoints((current) => current.slice(0, -1))}
+                  disabled={!points.length}
+                >
+                  Remove Last Point
+                </Button>
+                <Button
+                  variant="subtle"
+                  onClick={() => setPoints([])}
+                  disabled={!points.length}
+                >
+                  Clear Area
+                </Button>
+              </div>
             </>
           ) : selectedLocation ? (
             <>
