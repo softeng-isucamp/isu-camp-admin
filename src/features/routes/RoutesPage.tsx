@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { services } from "../../services/api";
+import { services, setMockFailure } from "../../services/api";
 import {
   Badge,
   Button,
@@ -15,6 +15,16 @@ import type { Pathway, Shade } from "../../types";
 
 export function RoutesPage() {
   const queryClient = useQueryClient();
+  useEffect(() => {
+    const failure = new URLSearchParams(window.location.search).get(
+      "mockFailure",
+    );
+    if (failure === "routeSave") {
+      setMockFailure("routeSave", true);
+      return () => setMockFailure("routeSave", false);
+    }
+    return undefined;
+  }, []);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All Statuses");
   const [dialog, setDialog] = useState<

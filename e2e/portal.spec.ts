@@ -250,6 +250,17 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Done" }).click();
 
+  await page.goto("/routes?mockFailure=routeSave");
+  await page.getByRole("button", { name: /add route/i }).click();
+  await page.locator(".modal input").first().fill("Failed Walkway");
+  await page.getByRole("button", { name: /save route/i }).click();
+  await expect(page.getByRole("alert").first()).toContainText(
+    "Mock routeSave failed",
+  );
+  await expect(page).toHaveScreenshot("route-save-failure.png", {
+    animations: "disabled",
+  });
+
   await page.goto("/users");
   await page.getByRole("button", { name: /add user/i }).click();
   await expect(page.getByRole("heading", { name: "Add User" })).toBeVisible();
