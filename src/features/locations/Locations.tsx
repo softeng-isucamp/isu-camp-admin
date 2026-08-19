@@ -52,6 +52,7 @@ export function Locations() {
     name: string;
     kind: "added" | "edited";
   } | null>(null);
+  const [importSuccess, setImportSuccess] = useState<number | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
     queryFn: () => services.locations.list(query),
@@ -114,6 +115,7 @@ export function Locations() {
     await refresh();
     setDialog(null);
     setNotice(`${committed.imported} locations imported successfully.`);
+    setImportSuccess(committed.imported);
   };
   const openEdit = (item: Location) => {
     setSelected(item);
@@ -220,6 +222,20 @@ export function Locations() {
           </p>
           <div className="modal-actions">
             <Button onClick={() => setSuccess(null)}>Done</Button>
+          </div>
+        </Modal>
+      )}
+      {importSuccess !== null && (
+        <Modal
+          title="Locations Imported"
+          onClose={() => setImportSuccess(null)}
+        >
+          <p className="muted">
+            <strong>{importSuccess} locations</strong> were imported into the
+            campus directory successfully.
+          </p>
+          <div className="modal-actions">
+            <Button onClick={() => setImportSuccess(null)}>Done</Button>
           </div>
         </Modal>
       )}

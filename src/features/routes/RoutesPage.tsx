@@ -30,6 +30,7 @@ export function RoutesPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const { data } = useQuery({
@@ -76,6 +77,7 @@ export function RoutesPage() {
     await refresh();
     setDialog(null);
     setNotice(`${committed.imported} routes imported successfully.`);
+    setImportSuccess(committed.imported);
   };
   return (
     <div className="page">
@@ -106,6 +108,17 @@ export function RoutesPage() {
           </p>
           <div className="modal-actions">
             <Button onClick={() => setSuccess(null)}>Done</Button>
+          </div>
+        </Modal>
+      )}
+      {importSuccess !== null && (
+        <Modal title="Routes Imported" onClose={() => setImportSuccess(null)}>
+          <p className="muted">
+            <strong>{importSuccess} routes</strong> were imported into the path
+            network successfully.
+          </p>
+          <div className="modal-actions">
+            <Button onClick={() => setImportSuccess(null)}>Done</Button>
           </div>
         </Modal>
       )}

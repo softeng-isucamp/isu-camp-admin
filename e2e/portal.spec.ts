@@ -149,6 +149,27 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Cancel" }).click();
+  await page
+    .getByRole("button", { name: /import json/i })
+    .first()
+    .click();
+  await page
+    .locator(".json-input")
+    .fill(
+      '{"id":"loc-imported","name":"Imported Facility","code":"IMP-01","type":"Facility","parentId":null,"status":"Active","lat":16.72,"lng":121.69}',
+    );
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(
+    page.getByText(/Validation passed for 1 locations/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Locations Imported" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-import-success.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Done" }).click();
 
   await page.goto("/routes");
   await expect(page.getByLabel("Route geometry preview")).toBeVisible();
@@ -198,6 +219,25 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Cancel" }).click();
+  await page
+    .getByRole("button", { name: /import/i })
+    .first()
+    .click();
+  await page
+    .locator(".json-input")
+    .fill(
+      '{"id":"route-imported","name":"Imported Walkway","sourceNodeId":"ccsict-entry","destinationNodeId":"junction-a","pathPoints":[]}',
+    );
+  await page.getByRole("button", { name: "Validate" }).click();
+  await expect(page.getByText(/Validation passed for 1 routes/)).toBeVisible();
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Routes Imported" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-import-success.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Done" }).click();
 
   await page.goto("/users");
   await page.getByRole("button", { name: /add user/i }).click();
