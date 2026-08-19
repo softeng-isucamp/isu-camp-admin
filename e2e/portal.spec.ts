@@ -53,7 +53,7 @@ test('locations, users, logs, and map expose their key state transitions', async
   await expect(page.getByRole('heading', { name: 'Add Location' })).toBeVisible()
   await page.getByPlaceholder(/student innovation center/i).fill('Test Facility')
   await page.getByRole('button', { name: /save location/i }).click()
-  await expect(page.getByRole('status')).toContainText('Location added')
+  await expect(page.getByRole('status')).toContainText('saved successfully')
 
   await page.goto('/users')
   await page.getByRole('button', { name: 'Remove' }).first().click()
