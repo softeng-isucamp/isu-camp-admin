@@ -120,4 +120,19 @@ describe("mock service contracts", () => {
       (await services.locations.list("Preview Facility")).items,
     ).toHaveLength(1);
   });
+
+  it("exposes injectable location and route save failures", async () => {
+    const location = (await services.locations.list()).items[0];
+    const route = (await services.routes.list()).items[0];
+    setMockFailure("locationSave", true);
+    await expect(services.locations.save(location)).rejects.toThrow(
+      "Mock locationSave failed",
+    );
+    setMockFailure("locationSave", false);
+    setMockFailure("routeSave", true);
+    await expect(services.routes.save(route)).rejects.toThrow(
+      "Mock routeSave failed",
+    );
+    setMockFailure("routeSave", false);
+  });
 });
