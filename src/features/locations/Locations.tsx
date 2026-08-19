@@ -461,6 +461,48 @@ export function Locations() {
               <option key={value}>{value}</option>
             ))}
           </SelectField>
+          <div className="form-grid-two">
+            <SelectField
+              label="PARENT BUILDING"
+              value={draft.building ?? ""}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  building: event.target.value || undefined,
+                })
+              }
+            >
+              <option value="">Unassigned</option>
+              {buildingOptions.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="PARENT FLOOR"
+              value={draft.floor ?? ""}
+              onChange={(event) =>
+                setDraft({ ...draft, floor: event.target.value || undefined })
+              }
+            >
+              <option value="">Unassigned</option>
+              {floorOptions.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </SelectField>
+          </div>
+          <SelectField
+            label="STATUS"
+            value={draft.status}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                status: event.target.value as Location["status"],
+              })
+            }
+          >
+            <option>Active</option>
+            <option>Inactive</option>
+          </SelectField>
           <Field
             label="FUNCTION"
             value={draft.function}
@@ -468,6 +510,24 @@ export function Locations() {
               setDraft({ ...draft, function: event.target.value })
             }
           />
+          <Field
+            label="KEYWORDS"
+            value={draft.keywords ?? ""}
+            onChange={(event) =>
+              setDraft({ ...draft, keywords: event.target.value })
+            }
+          />
+          <label className="field">
+            <span>PHOTO UPLOAD</span>
+            <input type="file" accept="image/*" />
+          </label>
+          {dialog === "edit" && (
+            <div className="record-information">
+              <strong>RECORD INFORMATION</strong>
+              <span>Created Aug 10, 2026 · 9:15 AM</span>
+              <span>Last updated Aug 17, 2026 · 2:05 PM</span>
+            </div>
+          )}
           <div className="modal-actions">
             <Button variant="subtle" onClick={() => setDialog(null)}>
               Cancel

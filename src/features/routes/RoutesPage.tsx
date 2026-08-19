@@ -383,6 +383,30 @@ export function RoutesPage() {
             }
             placeholder="e.g. Gate–Arts"
           />
+          <div className="form-grid-two">
+            <SelectField
+              label="SOURCE"
+              value={draft.sourceNodeId}
+              onChange={(event) =>
+                setDraft({ ...draft, sourceNodeId: event.target.value })
+              }
+            >
+              <option value="ccsict-entry">Main Gate</option>
+              <option value="junction-a">Arts &amp; Sciences</option>
+              <option value="student-entry">ISU Dormitory</option>
+            </SelectField>
+            <SelectField
+              label="DESTINATION"
+              value={draft.destinationNodeId}
+              onChange={(event) =>
+                setDraft({ ...draft, destinationNodeId: event.target.value })
+              }
+            >
+              <option value="junction-a">Arts &amp; Sciences</option>
+              <option value="student-entry">ISU Grandstand</option>
+              <option value="library-entry">University Library</option>
+            </SelectField>
+          </div>
           <SelectField
             label="SHADE"
             value={draft.shade}
@@ -396,6 +420,34 @@ export function RoutesPage() {
               ),
             )}
           </SelectField>
+          <div className="form-grid-two">
+            <SelectField
+              label="STATUS"
+              value={draft.status}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  status: event.target.value as Pathway["status"],
+                })
+              }
+            >
+              <option>Open</option>
+              <option>Closed</option>
+            </SelectField>
+            <SelectField
+              label="DIRECTION"
+              value={draft.direction}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  direction: event.target.value as Pathway["direction"],
+                })
+              }
+            >
+              <option>Two-way</option>
+              <option>One-way</option>
+            </SelectField>
+          </div>
           <div className="modal-actions">
             <Button variant="subtle" onClick={() => setDialog(null)}>
               Cancel

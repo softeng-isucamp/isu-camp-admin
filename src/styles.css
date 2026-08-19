@@ -1103,6 +1103,26 @@ td small {
   gap: 8px;
   margin-top: 24px;
 }
+.form-grid-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.record-information {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f3f6f4;
+  color: #64716a;
+  font-size: 11px;
+}
+.record-information strong {
+  color: var(--green);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
 .map-editor-page {
   position: relative;
   height: calc(100vh - 64px);
