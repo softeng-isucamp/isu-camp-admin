@@ -937,11 +937,37 @@ td small {
   flex-direction: column;
   gap: 16px;
 }
+.input-with-icon {
+  position: relative;
+}
+.input-with-icon > img {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.input-with-icon input {
+  width: 100%;
+  padding-left: 42px;
+}
 .password {
   position: relative;
 }
 .password input {
   width: 100%;
+  padding-left: 42px;
+}
+.password-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 16px;
+  height: 21px;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .password button {
   position: absolute;
@@ -949,6 +975,12 @@ td small {
   top: 9px;
   background: transparent;
   color: #64716a;
+  padding: 0;
+}
+.password button img {
+  display: block;
+  width: 18px;
+  height: 13px;
 }
 .forgot {
   text-align: right;

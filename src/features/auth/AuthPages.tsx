@@ -10,6 +10,9 @@ import {
   resetSchema,
 } from "../../services/schemas";
 import mapIcon from "../../assets/figma/login/login-icon-3.svg";
+import userIcon from "../../assets/figma/login/login-icon-4.svg";
+import lockIcon from "../../assets/figma/login/login-icon-1.svg";
+import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
 export function Login() {
   const { login } = useAuth();
@@ -51,11 +54,15 @@ export function Login() {
         <form onSubmit={handleSubmit(submit)}>
           <label className="field">
             <span>USERNAME</span>
-            <input {...register("username")} autoComplete="username" />
+            <div className="input-with-icon">
+              <img src={userIcon} alt="" />
+              <input {...register("username")} autoComplete="username" />
+            </div>
           </label>
           <label className="field">
             <span>PASSWORD</span>
             <div className="password">
+              <img className="password-icon" src={lockIcon} alt="" />
               <input
                 {...register("password")}
                 type={show ? "text" : "password"}
@@ -66,7 +73,7 @@ export function Login() {
                 onClick={() => setShow(!show)}
                 aria-label="Toggle password visibility"
               >
-                {show ? "◉" : "◌"}
+                <img src={eyeIcon} alt="" />
               </button>
             </div>
           </label>
