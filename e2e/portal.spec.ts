@@ -471,6 +471,12 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Move Marker" }).click();
+  await expect(
+    page.getByText("Click the map to preview a new position."),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-place-location-initial.png", {
+    animations: "disabled",
+  });
   await page
     .locator(".leaflet-container")
     .click({ position: { x: 390, y: 235 } });
@@ -490,6 +496,12 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Move Node" }).click();
+  await expect(
+    page.getByText("Click the map to preview a new position."),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-place-route-node-initial.png", {
+    animations: "disabled",
+  });
   await page
     .locator(".leaflet-container")
     .click({ position: { x: 470, y: 250 } });
