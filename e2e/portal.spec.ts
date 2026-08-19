@@ -112,6 +112,17 @@ test("locations, users, logs, and map expose their key state transitions", async
     page.getByRole("heading", { name: "Location History" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
+  await page
+    .getByRole("button", { name: /import json/i })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Import Locations JSON" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("location-import-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.goto("/routes");
   await expect(page.getByLabel("Route geometry preview")).toBeVisible();
@@ -125,6 +136,17 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.locator(".modal input").first().fill("Test Walkway");
   await page.getByRole("button", { name: /save route/i }).click();
   await expect(page.getByRole("status")).toContainText("saved successfully");
+  await page
+    .getByRole("button", { name: /import/i })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Import Routes JSON" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("route-import-dialog.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.goto("/users");
   await page.getByRole("button", { name: "Edit" }).first().click();
@@ -174,6 +196,21 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page.getByText("Draw Campus Zone")).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear Area" })).toBeVisible();
   await expect(page).toHaveScreenshot("map-area-mode.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Save Changes" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Save map changes?" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-save-confirmation.png", {
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Discard" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Discard changes?" }),
+  ).toBeVisible();
+  await expect(page).toHaveScreenshot("map-discard-confirmation.png", {
     animations: "disabled",
   });
 });
