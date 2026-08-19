@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { services, setMockFailure } from './api'
+import { resetSchema } from './schemas'
 
 describe('mock service contracts', () => {
   it('authenticates the seeded administrator', async () => {
@@ -32,5 +33,18 @@ describe('mock service contracts', () => {
     await expect(services.map.save()).rejects.toThrow('Mock mapSave failed')
     setMockFailure('mapSave', false)
     await expect(services.map.save()).resolves.toBeUndefined()
+  })
+
+  it('validates recovery code and password requirements', () => {
+    expect(resetSchema.safeParse({ code: '123', password: 'short' }).success).toBe(false)
+    expect(resetSchema.safeParse({ code: '000000', password: 'password123' }).success).toBe(true)
+  })
+
+  it('persists map geometry edits through the service boundary', async () => {
+    const nodes = await services.map.nodes()
+    const node = nodes[0]
+    const next: [number, number] = [node.lat + 0.0001, node.lng + 0.0001]
+    await services.map.save({ selected: { type: 'node', id: node.id }, place: next })
+    expect((await services.map.nodes()).find(item => item.id === node.id)).toMatchObject({ lat: next[0], lng: next[1] })
   })
 })
