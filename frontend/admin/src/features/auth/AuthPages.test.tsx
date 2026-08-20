@@ -54,7 +54,7 @@ describe("password recovery screen", () => {
       target: { value: "123" },
     });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByText(/6-digit verification code/i)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/6-digit verification code/i);
     fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), {
       target: { value: "000000" },
     });
@@ -62,7 +62,10 @@ describe("password recovery screen", () => {
     fireEvent.change(screen.getByLabelText("NEW PASSWORD"), {
       target: { value: "password123" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save password/i }));
+    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), {
+      target: { value: "password123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reset password|save password/i }));
     expect(
       await screen.findByRole("heading", {
         name: /password reset successful/i,
