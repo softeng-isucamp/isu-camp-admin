@@ -1,0 +1,26 @@
+<svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="15" height="15" fill="#1E1E1E"/>
+<g id="Dashboard Screen">
+<rect width="1280" height="1512" transform="translate(-864 -24)" fill="white"/>
+<rect width="1280" height="1512" transform="translate(-864 -24)" fill="#F8F9FA"/>
+<foreignObject x="-608" y="-48" width="1048" height="112"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(12px);clip-path:url(#bgblur_0_0_1_clip_path);height:100%;width:100%"></div></foreignObject><g id="Header" data-figma-bg-blur-radius="24">
+<mask id="path-1-inside-1_0_1" fill="white">
+<path d="M-584 -24H416V40H-584V-24Z"/>
+</mask>
+<path d="M-584 -24H416V40H-584V-24Z" fill="#F8F9FA" fill-opacity="0.8"/>
+<path d="M416 40V39H-584V40V41H416V40Z" fill="#E1E3E4" mask="url(#path-1-inside-1_0_1)"/>
+<g id="Container">
+<g id="Background+Border">
+<rect x="-17" y="-11.5" width="313" height="38" rx="19" fill="#F3F4F5"/>
+<rect x="-16.5" y="-11" width="312" height="37" rx="18.5" stroke="#BEC9BE" stroke-opacity="0.3"/>
+<g id="Margin">
+<path id="Icon" d="M13.8333 15L8.58333 9.75C8.16667 10.0833 7.6875 10.3472 7.14583 10.5417C6.60417 10.7361 6.02778 10.8333 5.41667 10.8333C3.90278 10.8333 2.62153 10.309 1.57292 9.26042C0.524305 8.21181 0 6.93056 0 5.41667C0 3.90278 0.524305 2.62153 1.57292 1.57292C2.62153 0.524305 3.90278 0 5.41667 0C6.93056 0 8.21181 0.524305 9.26042 1.57292C10.309 2.62153 10.8333 3.90278 10.8333 5.41667C10.8333 6.02778 10.7361 6.60417 10.5417 7.14583C10.3472 7.6875 10.0833 8.16667 9.75 8.58333L15 13.8333L13.8333 15ZM5.41667 9.16667C6.45833 9.16667 7.34375 8.80208 8.07292 8.07292C8.80208 7.34375 9.16667 6.45833 9.16667 5.41667C9.16667 4.375 8.80208 3.48958 8.07292 2.76042C7.34375 2.03125 6.45833 1.66667 5.41667 1.66667C4.375 1.66667 3.48958 2.03125 2.76042 2.76042C2.03125 3.48958 1.66667 4.375 1.66667 5.41667C1.66667 6.45833 2.03125 7.34375 2.76042 8.07292C3.48958 8.80208 4.375 9.16667 5.41667 9.16667Z" fill="#3F4941"/>
+</g>
+</g>
+</g>
+</g>
+</g>
+<defs>
+<clipPath id="bgblur_0_0_1_clip_path" transform="translate(608 48)"><path d="M-584 -24H416V40H-584V-24Z"/>
+</clipPath></defs>
+</svg>
