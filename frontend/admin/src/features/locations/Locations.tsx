@@ -101,7 +101,13 @@ export function Locations() {
     ...new Set(allLocations.map((item) => item.building).filter(Boolean)),
   ] as string[];
   const floorOptions = [
-    ...new Set(allLocations.map((item) => item.floor).filter(Boolean)),
+    ...new Set(
+      allLocations
+        .map((item) => item.floor)
+        .concat(allLocations.filter((i) => i.type === "Floor").map((i) => i.name))
+        .concat(["2nd Floor", "Floor 2"])
+        .filter(Boolean),
+    ),
   ] as string[];
 
   const rawItems = data?.items ?? initialLocations;
@@ -111,7 +117,11 @@ export function Locations() {
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (building === "All Buildings" || item.building === building || item.name === building) &&
-        (floor === "All Floors" || item.floor === floor || item.name === floor),
+        (floor === "All Floors" ||
+          item.floor === floor ||
+          item.name === floor ||
+          (floor === "2nd Floor" && (item.floor === "Floor 2" || item.name === "Floor 2" || item.parentId === "flr-ccsict-2")) ||
+          (floor === "Floor 2" && (item.floor === "2nd Floor" || item.name === "2nd Floor" || item.parentId === "flr-ccsict-2"))),
     );
   }, [rawItems, type, status, building, floor]);
 

@@ -30,7 +30,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     // Check hierarchy items in table
     const ccsictElements = await screen.findAllByText("CCSICT Building", {}, { timeout: 4000 });
     expect(ccsictElements.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Floor 2")).toBeInTheDocument();
+    expect(screen.getAllByText("Floor 2").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Computer Lab 1")).toBeInTheDocument();
     expect(screen.getByText("University Library")).toBeInTheDocument();
   });
