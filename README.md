@@ -1,22 +1,21 @@
+# ISU-CAMP Admin
 
-# ISU-CAMP Admin Portal
+This repository contains the ISU-CAMP administration backend scaffold and the admin frontend.
 
-The portal is now a Vite + React + TypeScript application organized by feature modules. It follows the ISU-CAMP Figma administration mockup and uses a seeded asynchronous mock API until a backend is connected.
+## Repository layout
 
-## Development
+- `app/` contains the Python backend modules.
+- `frontend/admin/` contains the Vite, React, and TypeScript admin portal.
+- `static/` and `templates/admin/` are reserved for Flask-managed assets and templates.
+
+## Admin frontend
+
+Run frontend commands from `frontend/admin`:
 
 ```bash
+cd frontend/admin
 npm install
 npm run dev
 ```
 
-Demo login: `admin_justine` with any non-empty password. Password recovery uses verification code `000000` in the mock adapter.
-
-## Verification
-
-```bash
-npm test
-npm run build
-```
-
-Feature code lives under `src/features`; shared models and replaceable service contracts are in `src/types.ts` and `src/services`.
+See `frontend/admin/README.md` for demo credentials and verification commands. Flask integration and production asset generation are intentionally outside this frontend migration.
