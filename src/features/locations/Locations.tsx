@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import {
   Badge,
@@ -32,6 +32,7 @@ const blankLocation = (): Location => ({
 export function Locations() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const routeLocation = useLocation();
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -43,6 +44,10 @@ export function Locations() {
     return undefined;
   }, []);
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    const q = new URLSearchParams(routeLocation.search).get("q");
+    if (q !== null) setQuery(q);
+  }, [routeLocation.search]);
   const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
   const [building, setBuilding] = useState("All Buildings");
@@ -420,51 +425,78 @@ export function Locations() {
       {(dialog === "add" || dialog === "edit") && (
         <Modal
           title={dialog === "add" ? "Add Location" : "Edit Location"}
+          subtitle="Add a building, floor, room, office, laboratory, restroom, or facility."
+          icon={<img src={locationsModuleIcon} alt="" className="w-5 h-5 brightness-0 invert" />}
+          size="lg"
+          variant="green"
           onClose={() => setDialog(null)}
         >
           {error && (
-            <div className="error" role="alert">
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
               {error}
             </div>
           )}
-          <Field
-            label="LOCATION NAME"
-            value={draft.name}
-            onChange={(event) =>
-              setDraft({ ...draft, name: event.target.value })
-            }
-            placeholder="e.g. Student Innovation Center"
-          />
-          <Field
-            label="CODE"
-            value={draft.code}
-            onChange={(event) =>
-              setDraft({ ...draft, code: event.target.value })
-            }
-          />
-          <SelectField
-            label="TYPE"
-            value={draft.type}
-            onChange={(event) =>
-              setDraft({ ...draft, type: event.target.value as LocationType })
-            }
-          >
-            {[
-              "Facility",
-              "Building",
-              "Floor",
-              "Room",
-              "Office",
-              "Laboratory",
-              "Restroom",
-            ].map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </SelectField>
+          <div className="form-grid-two">
+            <SelectField
+              label="LOCATION TYPE"
+              required
+              value={draft.type}
+              onChange={(event) =>
+                setDraft({ ...draft, type: event.target.value as LocationType })
+              }
+            >
+              {[
+                "Laboratory",
+                "Room",
+                "Office",
+                "Facility",
+                "Building",
+                "Floor",
+                "Restroom",
+              ].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="STATUS"
+              required
+              value={draft.status}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  status: event.target.value as Location["status"],
+                })
+              }
+            >
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </SelectField>
+          </div>
+          <div className="form-grid-two">
+            <Field
+              label="LOCATION NAME"
+              required
+              value={draft.name}
+              placeholder="Computer Lab 1"
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
+            <Field
+              label="LOCATION CODE / ID"
+              required
+              value={draft.code}
+              placeholder="LAB-CCSICT-201"
+              onChange={(event) =>
+                setDraft({ ...draft, code: event.target.value })
+              }
+            />
+          </div>
           <div className="form-grid-two">
             <SelectField
               label="PARENT BUILDING"
               value={draft.building ?? ""}
+              subhelper="Required for rooms, offices, laboratories, restrooms, and facilities."
               onChange={(event) =>
                 setDraft({
                   ...draft,
@@ -472,7 +504,7 @@ export function Locations() {
                 })
               }
             >
-              <option value="">Unassigned</option>
+              <option value="">Select building</option>
               {buildingOptions.map((value) => (
                 <option key={value}>{value}</option>
               ))}
@@ -484,43 +516,52 @@ export function Locations() {
                 setDraft({ ...draft, floor: event.target.value || undefined })
               }
             >
-              <option value="">Unassigned</option>
-              {floorOptions.map((value) => (
-                <option key={value}>{value}</option>
+              <option value="">Select floor</option>
+              {["Ground Floor", "Floor 1", "Floor 2", "Floor 3", "Floor 4"].map((f) => (
+                <option key={f} value={f}>{f}</option>
               ))}
             </SelectField>
           </div>
-          <SelectField
-            label="STATUS"
-            value={draft.status}
-            onChange={(event) =>
-              setDraft({
-                ...draft,
-                status: event.target.value as Location["status"],
-              })
-            }
-          >
-            <option>Active</option>
-            <option>Inactive</option>
-          </SelectField>
           <Field
-            label="FUNCTION"
+            label="FUNCTION / PURPOSE"
+            required
             value={draft.function}
+            placeholder="Programming and computer-based activities"
             onChange={(event) =>
               setDraft({ ...draft, function: event.target.value })
             }
           />
           <Field
-            label="KEYWORDS"
+            label="DESCRIPTION"
+            value={draft.keywords ? `A ${draft.type.toLowerCase()} used for ${draft.function?.toLowerCase() || 'campus activities'}.` : ""}
+            placeholder="A computer laboratory used for programming, software development, and hands-on IT exercises."
+            onChange={(event) =>
+              setDraft({ ...draft, function: event.target.value })
+            }
+          />
+          <Field
+            label="KEYWORDS / TAGS"
             value={draft.keywords ?? ""}
+            placeholder="programming, coding, computer lab"
             onChange={(event) =>
               setDraft({ ...draft, keywords: event.target.value })
             }
           />
-          <label className="field">
-            <span>PHOTO UPLOAD</span>
-            <input type="file" accept="image/*" />
-          </label>
+          <div className="field-group">
+            <div className="field-label-row">
+              <span className="field-label">PHOTO / IMAGE UPLOAD</span>
+            </div>
+            <label className="border border-dashed border-[#c2d4cb] bg-[#f4f7f5] hover:bg-[#ebf2ee] rounded-2xl p-3.5 flex items-center justify-between cursor-pointer transition">
+              <div className="flex items-center gap-2.5 text-xs font-semibold text-[#3f4941]">
+                <svg className="w-4 h-4 text-[#005931]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span>Upload a campus location photo or image</span>
+              </div>
+              <span className="text-[10px] text-[#64716a] font-mono font-medium">PNG, JPG, or WEBP</span>
+              <input type="file" accept="image/*" className="hidden" />
+            </label>
+          </div>
           {dialog === "edit" && (
             <div className="record-information">
               <strong>RECORD INFORMATION</strong>
@@ -532,15 +573,22 @@ export function Locations() {
             <Button variant="subtle" onClick={() => setDialog(null)}>
               Cancel
             </Button>
-            <Button onClick={save}>Save Location</Button>
+            <Button onClick={save}>
+              Save Location
+            </Button>
           </div>
         </Modal>
       )}
       {dialog === "remove" && (
-        <Modal title="Delete Location?" onClose={() => setDialog(null)}>
-          <p>
-            This action will remove <strong>{selected?.name}</strong> and its
-            directory record.
+        <Modal
+          title="Delete Location?"
+          subtitle="This action will permanently remove the record from campus directories."
+          size="sm"
+          variant="danger"
+          onClose={() => setDialog(null)}
+        >
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            Are you sure you want to remove <strong>{selected?.name}</strong>?
           </p>
           <div className="modal-actions">
             <Button variant="subtle" onClick={() => setDialog(null)}>
@@ -553,11 +601,13 @@ export function Locations() {
         </Modal>
       )}
       {dialog === "history" && selected && (
-        <Modal title="Location History" onClose={() => setDialog(null)}>
-          <p className="muted">
-            Hierarchy and administrative changes for{" "}
-            <strong>{selected.name}</strong>.
-          </p>
+        <Modal
+          title="Location History"
+          subtitle={`Structural lineage and changes for ${selected.name}`}
+          size="md"
+          variant="green"
+          onClose={() => setDialog(null)}
+        >
           <div className="history-list">
             <div>
               <small>Aug 10, 2026 · 9:15 AM</small>
@@ -589,32 +639,41 @@ export function Locations() {
             </div>
           </div>
           <div className="modal-actions">
-            <Button onClick={() => setDialog(null)}>Close</Button>
+            <Button variant="subtle" onClick={() => setDialog(null)}>Close</Button>
           </div>
         </Modal>
       )}
       {dialog === "import" && (
-        <Modal title="Import Locations JSON" onClose={() => setDialog(null)}>
-          <p className="muted">
-            Paste or upload a JSON array. Parent references are checked before
-            import.
+        <Modal
+          title="Import Locations JSON"
+          subtitle="Transactional import of campus location definitions."
+          size="lg"
+          variant="green"
+          onClose={() => setDialog(null)}
+        >
+          <p className="text-xs text-[#3f4941]">
+            Paste or upload a JSON array of location records. Parent references and coordinates will be validated.
           </p>
           <textarea
             className="json-input"
             value={importText}
             onChange={(event) => setImportText(event.target.value)}
-            placeholder='[{"id":"loc-1", ...}]'
+            placeholder='[{"id":"loc-1", "name":"Multimedia Lab", "type":"Laboratory", ...}]'
+            rows={8}
           />
-          <input
-            type="file"
-            accept="application/json"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) file.text().then(setImportText);
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              accept="application/json"
+              className="text-xs text-[#3f4941]"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) file.text().then(setImportText);
+              }}
+            />
+          </div>
           {importResult && (
-            <div className={importResult.errors.length ? "error" : "notice"}>
+            <div className={importResult.errors.length ? "p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" : "notice"}>
               {importResult.errors.length
                 ? importResult.errors.map((error) => (
                     <div key={error}>{error}</div>
@@ -633,7 +692,7 @@ export function Locations() {
               onClick={applyImport}
               disabled={!importResult || importResult.errors.length > 0}
             >
-              Import
+              Commit Import
             </Button>
           </div>
         </Modal>

@@ -92,3 +92,27 @@ export interface Page<T> {
   page: number;
   pageSize: number;
 }
+export interface NotificationItem {
+  id: string;
+  title: string;
+  message: string;
+  time: string;
+  read: boolean;
+  type: "info" | "success" | "warning";
+}
+export interface MapSavePayload {
+  selected?: { type: string; id: string };
+  place?: [number, number] | null;
+  pathPoints?: [number, number][];
+  areaPoints?: [number, number][];
+  newNode?: {
+    name: string;
+    nodeType: "Entrance" | "Junction" | "Access Point";
+    associatedPlaceId?: string | null;
+    lat: number;
+    lng: number;
+  };
+  movedLocation?: { id: string; lat: number; lng: number };
+  movedNode?: { id: string; lat: number; lng: number };
+  updatedPath?: { id: string; pathPoints: [number, number][] };
+}

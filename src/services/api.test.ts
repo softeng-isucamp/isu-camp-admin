@@ -204,4 +204,59 @@ describe("mock service contracts", () => {
       services.users.create({ id: "bad", username: "" } as never),
     ).rejects.toThrow("Username is required");
   });
+
+  it("handles notifications listing and mark as read", async () => {
+    const list = await services.notifications.list();
+    expect(list.length).toBeGreaterThan(0);
+    const unread = list.find((n) => !n.read);
+    if (unread) {
+      await services.notifications.markRead(unread.id);
+      const updated = await services.notifications.list();
+      expect(updated.find((n) => n.id === unread.id)?.read).toBe(true);
+    }
+    await services.notifications.markAllRead();
+    const all = await services.notifications.list();
+    expect(all.every((n) => n.read)).toBe(true);
+  });
+
+  it("persists new route nodes, moved locations, and updated path shapes", async () => {
+    const nodeName = `Test Gate ${Date.now()}`;
+    await services.map.save({
+      newNode: {
+        name: nodeName,
+        nodeType: "Access Point",
+        lat: 16.1234,
+        lng: 121.5678,
+      },
+    });
+    const nodes = await services.map.nodes();
+    expect(nodes.some((n) => n.name === nodeName)).toBe(true);
+
+    const locations = await services.map.locations();
+    const targetLoc = locations[0];
+    await services.map.save({
+      movedLocation: {
+        id: targetLoc.id,
+        lat: 16.9999,
+        lng: 121.9999,
+      },
+    });
+    const updatedLocations = await services.map.locations();
+    const locResult = updatedLocations.find((l) => l.id === targetLoc.id);
+    expect(locResult?.lat).toBe(16.9999);
+    expect(locResult?.positioned).toBe(true);
+
+    const pathways = await services.map.pathways();
+    const targetPath = pathways[0];
+    const newPoints: [number, number][] = [[16.1, 121.1], [16.2, 121.2]];
+    await services.map.save({
+      updatedPath: {
+        id: targetPath.id,
+        pathPoints: newPoints,
+      },
+    });
+    const updatedPathways = await services.map.pathways();
+    const pathResult = updatedPathways.find((p) => p.id === targetPath.id);
+    expect(pathResult?.pathPoints).toEqual(newPoints);
+  });
 });

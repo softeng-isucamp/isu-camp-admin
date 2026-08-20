@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, Badge } from "../../components/UI";
 import { services } from "../../services/api";
 import campusMap from "../../assets/figma/dashboard/campus-map.png";
@@ -10,12 +10,15 @@ import actionMap from "../../assets/figma/dashboard/action-map.svg";
 import actionRouting from "../../assets/figma/dashboard/action-routing.svg";
 import mapLayersIcon from "../../assets/figma/dashboard/map-layers-icon.svg";
 import mapZoomIcon from "../../assets/figma/dashboard/map-zoom-icon.svg";
+
 export function Dashboard() {
+  const navigate = useNavigate();
   const [searchWindow, setSearchWindow] = useState("This Week");
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: services.dashboard.summary,
   });
+
   return (
     <div className="page dashboard">
       <section className="hero">
@@ -33,7 +36,7 @@ export function Dashboard() {
         </Link>
       </section>
       <div className="metric-grid">
-        <Card>
+        <Card style={{ cursor: "pointer" }} onClick={() => navigate("/locations")}>
           <div className="metric-top">
             <span className="metric-icon">
               <img src={metricBuildings} alt="" />
@@ -43,7 +46,7 @@ export function Dashboard() {
           <span>Total Buildings</span>
           <strong>{data?.buildings ?? "—"}</strong>
         </Card>
-        <Card>
+        <Card style={{ cursor: "pointer" }} onClick={() => navigate("/locations")}>
           <div className="metric-top">
             <span className="metric-icon">
               <img src={metricOffices} alt="" />
@@ -68,12 +71,24 @@ export function Dashboard() {
                 className="map-image"
                 src={campusMap}
                 alt="Campus map preview"
+                onClick={() => navigate("/map-editor")}
+                style={{ cursor: "pointer" }}
               />
               <div className="dashboard-map-controls" aria-label="Map controls">
-                <button type="button" aria-label="Show map layers">
+                <button
+                  type="button"
+                  aria-label="Show map layers"
+                  onClick={() => navigate("/map-editor")}
+                  title="Open map layers"
+                >
                   <img src={mapLayersIcon} alt="" />
                 </button>
-                <button type="button" aria-label="Zoom map">
+                <button
+                  type="button"
+                  aria-label="Zoom map"
+                  onClick={() => navigate("/map-editor")}
+                  title="Zoom into interactive map"
+                >
                   <img src={mapZoomIcon} alt="" />
                 </button>
               </div>
@@ -116,7 +131,13 @@ export function Dashboard() {
             </div>
             <div className="rank-list">
               {(data?.topSearched ?? []).map((r) => (
-                <div className="rank-row" key={r.rank}>
+                <div
+                  className="rank-row"
+                  key={r.rank}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate(`/locations?q=${encodeURIComponent(r.name)}`)}
+                  title={`View ${r.name} in directory`}
+                >
                   <b>{r.rank}</b>
                   <div>
                     <strong>{r.name}</strong>
@@ -139,7 +160,13 @@ export function Dashboard() {
             </div>
             <div className="activity">
               {(data?.recent ?? []).map((a) => (
-                <div className="activity-row" key={a.id}>
+                <div
+                  className="activity-row"
+                  key={a.id}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate("/system-logs")}
+                  title="View activity in system logs"
+                >
                   <i />
                   <div>
                     <small>{a.createdAt}</small>

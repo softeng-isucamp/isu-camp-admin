@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import {
   Button,
@@ -15,6 +16,7 @@ import usersModuleIcon from "../../assets/figma/modules/users.svg";
 
 export function Users() {
   const queryClient = useQueryClient();
+  const routeLocation = useLocation();
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -26,6 +28,10 @@ export function Users() {
     return undefined;
   }, []);
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    const q = new URLSearchParams(routeLocation.search).get("q");
+    if (q !== null) setQuery(q);
+  }, [routeLocation.search]);
   const [dialog, setDialog] = useState<
     "add" | "edit" | "history" | "reset" | "remove" | null
   >(null);
@@ -243,14 +249,48 @@ export function Users() {
         />
       </Card>
       {dialog === "edit" && selected && (
-        <Modal title="Edit User" onClose={close}>
-          <Field
-            label="USERNAME"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-          <Field label="PASSWORD" value="•••••••••••••" readOnly />
-          <p className="muted">Protected · Read-only</p>
+        <Modal
+          title="Edit User"
+          subtitle="Update user privileges and account credentials."
+          size="md"
+          variant="green"
+          onClose={close}
+        >
+          {error && (
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="form-grid-two">
+            <Field
+              label="USERNAME"
+              required
+              value={username}
+              subhelper="Campus network account username"
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Enter username"
+            />
+            <Field
+              label="DEVICE ID"
+              value={selected.id ? `DEV-${selected.id.toUpperCase()}` : "DEV-UNASSIGNED"}
+              readOnly
+              badge="Hardware bound"
+              subhelper="Hardware bound (Read-only)"
+            />
+          </div>
+          <SelectField
+            label="ACCOUNT ROLE"
+            required
+            value={role}
+            subhelper="Administrator · Staff · User"
+            onChange={(event) =>
+              setRole(event.target.value as UserAccount["role"])
+            }
+          >
+            <option>User</option>
+            <option>Staff</option>
+            <option>Administrator</option>
+          </SelectField>
           <div className="record-information">
             <strong>ACCOUNT TIMESTAMPS</strong>
             <span>Created {selected.createdAt}</span>
@@ -265,24 +305,41 @@ export function Users() {
         </Modal>
       )}
       {dialog === "add" && (
-        <Modal title="Add User" onClose={close}>
-          <Field
-            label="USERNAME"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="e.g. staff03"
-          />
-          <SelectField
-            label="ROLE"
-            value={role}
-            onChange={(event) =>
-              setRole(event.target.value as UserAccount["role"])
-            }
-          >
-            <option>User</option>
-            <option>Staff</option>
-            <option>Administrator</option>
-          </SelectField>
+        <Modal
+          title="Add User"
+          subtitle="Create a new campus administrator or staff account."
+          size="md"
+          variant="green"
+          onClose={close}
+        >
+          {error && (
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="form-grid-two">
+            <Field
+              label="USERNAME"
+              required
+              value={username}
+              subhelper="Unique username identifier"
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="e.g. staff03"
+            />
+            <SelectField
+              label="ROLE"
+              required
+              value={role}
+              subhelper="Administrator · Staff · User"
+              onChange={(event) =>
+                setRole(event.target.value as UserAccount["role"])
+              }
+            >
+              <option>User</option>
+              <option>Staff</option>
+              <option>Administrator</option>
+            </SelectField>
+          </div>
           <div className="modal-actions">
             <Button variant="subtle" onClick={close}>
               Cancel
@@ -292,10 +349,13 @@ export function Users() {
         </Modal>
       )}
       {dialog === "history" && selected && (
-        <Modal title="Audit History" onClose={close}>
-          <p className="muted">
-            Account changes only. Password values are never shown.
-          </p>
+        <Modal
+          title="Audit History"
+          subtitle={`Account mutation timeline for ${selected.username}`}
+          size="md"
+          variant="green"
+          onClose={close}
+        >
           <div className="history-list">
             <div>
               <small>Aug 16, 2026 · 4:35 PM</small>
@@ -305,21 +365,29 @@ export function Users() {
             <div>
               <small>Aug 14, 2026 · 11:20 AM</small>
               <strong>Password Reset</strong>
+              <span>Administrative temporary code generated</span>
             </div>
             <div>
               <small>{selected.createdAt}</small>
-              <strong>Created User</strong>
+              <strong>Created User Account</strong>
+              <span>Assigned initial role: {selected.role}</span>
             </div>
           </div>
           <div className="modal-actions">
-            <Button onClick={close}>Close</Button>
+            <Button variant="subtle" onClick={close}>Close</Button>
           </div>
         </Modal>
       )}
       {dialog === "remove" && selected && (
-        <Modal title="Remove User?" onClose={close}>
-          <p>
-            This action will remove <strong>{selected.username}</strong>.
+        <Modal
+          title="Remove User?"
+          subtitle="This user will immediately lose access to the system."
+          size="sm"
+          variant="danger"
+          onClose={close}
+        >
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            Are you sure you want to remove <strong>{selected.username}</strong>?
           </p>
           <div className="modal-actions">
             <Button variant="subtle" onClick={close}>
@@ -332,9 +400,15 @@ export function Users() {
         </Modal>
       )}
       {dialog === "reset" && selected && (
-        <Modal title="Reset Password?" onClose={close}>
-          <p>
-            Generate a reset action for <strong>{selected.username}</strong>?
+        <Modal
+          title="Reset Password?"
+          subtitle="Generate a temporary authentication code."
+          size="sm"
+          variant="green"
+          onClose={close}
+        >
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            Generate a secure temporary password reset action for <strong className="text-[#191c1d]">{selected.username}</strong>?
           </p>
           <div className="modal-actions">
             <Button variant="subtle" onClick={close}>

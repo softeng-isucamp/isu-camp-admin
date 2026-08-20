@@ -145,14 +145,22 @@ export function Logs() {
         />
       </Card>
       {detail && (
-        <Modal title="Log Details" onClose={() => setDetail(null)}>
-          <Badge>
-            {detail.category === "Admin"
-              ? "Administrator detail"
-              : detail.category === "User"
-                ? "User activity detail"
-                : "System detail"}
-          </Badge>
+        <Modal
+          title="Log Details"
+          subtitle="Detailed diagnostic event metadata and field change history."
+          size="md"
+          variant="green"
+          onClose={() => setDetail(null)}
+        >
+          <div className="flex items-center gap-2">
+            <Badge tone={detail.category === "Admin" ? "green" : detail.category === "User" ? "blue" : "amber"}>
+              {detail.category === "Admin"
+                ? "Administrator Audit Record"
+                : detail.category === "User"
+                  ? "User Activity Record"
+                  : "System Diagnostic Record"}
+            </Badge>
+          </div>
           <div className="detail-grid">
             <span>ACTIVITY</span>
             <strong>{detail.action}</strong>
@@ -196,19 +204,20 @@ export function Logs() {
               </div>
             </div>
           )}
-          <p className="muted">
+          <p className="text-xs text-[#3f4941] leading-relaxed">
             {detail.category === "Admin"
               ? "This administrator action changed protected campus data."
               : detail.category === "User"
                 ? "This user event records activity originating from a campus account."
                 : "This system event was recorded by the ISU-CAMP service."}
           </p>
-          <p className="muted">
-            {detail.detail ??
-              "No additional detail was recorded for this activity."}
-          </p>
+          {detail.detail && (
+            <p className="text-xs text-[#64716a] italic">
+              {detail.detail}
+            </p>
+          )}
           <div className="modal-actions">
-            <Button onClick={() => setDetail(null)}>Close</Button>
+            <Button variant="subtle" onClick={() => setDetail(null)}>Close</Button>
           </div>
         </Modal>
       )}

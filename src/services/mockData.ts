@@ -356,3 +356,30 @@ export const auditEntries: AuditEntry[] = [
     detail: "Scheduled system activity recorded by the campus service.",
   })),
 ];
+
+export const notifications: import("../types").NotificationItem[] = [
+  {
+    id: "n-1",
+    title: "Geospatial Update",
+    message: "CCSICT walkway geometry successfully calibrated.",
+    time: "10m ago",
+    read: false,
+    type: "success",
+  },
+  {
+    id: "n-2",
+    title: "New Location Added",
+    message: "University Library entrance node linked to directory.",
+    time: "1h ago",
+    read: false,
+    type: "info",
+  },
+  {
+    id: "n-3",
+    title: "System Synchronization",
+    message: "Campus database synchronized with live mobile clients.",
+    time: "3h ago",
+    read: true,
+    type: "info",
+  },
+];

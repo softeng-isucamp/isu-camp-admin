@@ -11,7 +11,7 @@ import {
   Pagination,
   SelectField,
 } from "../../components/UI";
-import type { Pathway, Shade } from "../../types";
+import type { Pathway, RouteNode, Shade } from "../../types";
 import routesModuleIcon from "../../assets/figma/modules/routes.svg";
 
 const endpointLabels: Record<string, [string, string]> = {
@@ -58,6 +58,11 @@ export function RoutesPage() {
     queryKey: ["routes", query],
     queryFn: () => services.routes.list(query),
   });
+  const { data: nodesData } = useQuery<RouteNode[]>({
+    queryKey: ["nodes"],
+    queryFn: () => services.map.nodes(),
+  });
+  const nodes = nodesData ?? [];
   const items = (data?.items ?? []).filter(
     (item) =>
       (source === "All Sources" || item.sourceNodeId === source) &&
@@ -123,28 +128,27 @@ export function RoutesPage() {
         </div>
       )}
       {error && (
-        <div className="error" role="alert">
+        <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
           {error}
         </div>
       )}
       {success && (
-        <Modal title="Route Saved" onClose={() => setSuccess(null)}>
-          <p className="muted">
-            <strong>{success}</strong> was saved to the campus path network.
+        <Modal title="Pathway Saved" size="sm" onClose={() => setSuccess(null)}>
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            <strong className="text-[#191c1d]">{success}</strong> was successfully saved to the campus pathway network.
           </p>
           <div className="modal-actions">
-            <Button onClick={() => setSuccess(null)}>Done</Button>
+            <Button variant="primary" onClick={() => setSuccess(null)}>Done</Button>
           </div>
         </Modal>
       )}
       {importSuccess !== null && (
-        <Modal title="Routes Imported" onClose={() => setImportSuccess(null)}>
-          <p className="muted">
-            <strong>{importSuccess} routes</strong> were imported into the path
-            network successfully.
+        <Modal title="Pathways Imported" size="sm" onClose={() => setImportSuccess(null)}>
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            <strong className="text-[#191c1d]">{importSuccess} pathways</strong> were successfully imported into the campus network.
           </p>
           <div className="modal-actions">
-            <Button onClick={() => setImportSuccess(null)}>Done</Button>
+            <Button variant="primary" onClick={() => setImportSuccess(null)}>Done</Button>
           </div>
         </Modal>
       )}
@@ -393,62 +397,98 @@ export function RoutesPage() {
       {(dialog === "add" || dialog === "edit") && draft && (
         <Modal
           title={dialog === "add" ? "Add Route / Path" : "Edit Route / Path"}
+          subtitle="Connect two campus nodes for navigation."
+          size="md"
+          variant="green"
           onClose={() => setDialog(null)}
         >
           {error && (
-            <div className="error" role="alert">
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
               {error}
             </div>
           )}
-          <Field
-            label="ROUTE NAME"
-            value={draft.name}
-            onChange={(event) =>
-              setDraft({ ...draft, name: event.target.value })
-            }
-            placeholder="e.g. Gate–Arts"
-          />
           <div className="form-grid-two">
             <SelectField
               label="SOURCE"
+              required
               value={draft.sourceNodeId}
+              subhelper="Required · must differ from destination"
               onChange={(event) =>
                 setDraft({ ...draft, sourceNodeId: event.target.value })
               }
             >
-              <option value="ccsict-entry">Main Gate</option>
-              <option value="junction-a">Arts &amp; Sciences</option>
-              <option value="student-entry">ISU Dormitory</option>
+              <option value="">Select source</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name} ({n.nodeType})
+                </option>
+              ))}
             </SelectField>
             <SelectField
               label="DESTINATION"
+              required
               value={draft.destinationNodeId}
+              subhelper="Required · must differ from source"
               onChange={(event) =>
                 setDraft({ ...draft, destinationNodeId: event.target.value })
               }
             >
-              <option value="junction-a">Arts &amp; Sciences</option>
-              <option value="student-entry">ISU Grandstand</option>
-              <option value="library-entry">University Library</option>
+              <option value="">Select destination</option>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name} ({n.nodeType})
+                </option>
+              ))}
             </SelectField>
           </div>
-          <SelectField
-            label="SHADE"
-            value={draft.shade}
-            onChange={(event) =>
-              setDraft({ ...draft, shade: event.target.value as Shade })
-            }
-          >
-            {["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"].map(
-              (value) => (
-                <option key={value}>{value}</option>
-              ),
-            )}
-          </SelectField>
           <div className="form-grid-two">
             <SelectField
+              label="SHADE"
+              required
+              value={draft.shade}
+              subhelper="No Shade · Partial Shade · Mostly Shaded · Fully Shaded · Indoor"
+              onChange={(event) =>
+                setDraft({ ...draft, shade: event.target.value as Shade })
+              }
+            >
+              <option value="">Select shade</option>
+              {["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"].map(
+                (value) => (
+                  <option key={value}>{value}</option>
+                ),
+              )}
+            </SelectField>
+            <SelectField
+              label="PATH TYPE"
+              required
+              value={draft.type || "Walkway"}
+              subhelper="Walkway · Covered walkway · Stairs · Road crossing"
+              onChange={(event) =>
+                setDraft({ ...draft, type: event.target.value })
+              }
+            >
+              <option value="">Select path type</option>
+              {["Walkway", "Covered walkway", "Stairs", "Road crossing"].map(
+                (value) => (
+                  <option key={value}>{value}</option>
+                ),
+              )}
+            </SelectField>
+          </div>
+          <div className="form-grid-two">
+            <Field
+              label="NOTES"
+              value={draft.name}
+              placeholder="Optional notes about this connection"
+              onChange={(event) =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
+            <SelectField
               label="STATUS"
+              required
               value={draft.status}
+              subhelper="Open · Temporarily Closed · Under Maintenance · Restricted"
               onChange={(event) =>
                 setDraft({
                   ...draft,
@@ -456,21 +496,8 @@ export function RoutesPage() {
                 })
               }
             >
-              <option>Open</option>
-              <option>Closed</option>
-            </SelectField>
-            <SelectField
-              label="DIRECTION"
-              value={draft.direction}
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  direction: event.target.value as Pathway["direction"],
-                })
-              }
-            >
-              <option>Two-way</option>
-              <option>One-way</option>
+              <option value="Open">Open</option>
+              <option value="Closed">Closed</option>
             </SelectField>
           </div>
           <div className="modal-actions">
@@ -482,9 +509,15 @@ export function RoutesPage() {
         </Modal>
       )}
       {dialog === "remove" && (
-        <Modal title="Delete Route?" onClose={() => setDialog(null)}>
-          <p>
-            This action will remove <strong>{selected?.name}</strong>.
+        <Modal
+          title="Delete Route?"
+          subtitle="Permanently remove this connection from campus navigation."
+          size="sm"
+          variant="danger"
+          onClose={() => setDialog(null)}
+        >
+          <p className="text-xs text-[#3f4941] leading-relaxed">
+            Are you sure you want to remove <strong>{selected?.name}</strong> from the campus network?
           </p>
           <div className="modal-actions">
             <Button variant="subtle" onClick={() => setDialog(null)}>
@@ -497,31 +530,41 @@ export function RoutesPage() {
         </Modal>
       )}
       {dialog === "import" && (
-        <Modal title="Import Routes JSON" onClose={() => setDialog(null)}>
-          <p className="muted">
-            Validate source and destination node references before commit.
+        <Modal
+          title="Import Pathways JSON"
+          subtitle="Validate source and destination node references before committing."
+          size="lg"
+          variant="green"
+          onClose={() => setDialog(null)}
+        >
+          <p className="text-xs text-[#3f4941]">
+            Paste or upload a JSON array of pathway definitions.
           </p>
           <textarea
             className="json-input"
             value={importText}
             onChange={(event) => setImportText(event.target.value)}
-            placeholder='[{"id":"route-1", ...}]'
+            placeholder='[{"id":"path-1", "name":"Walkway 1", "sourceNodeId":"node-1", ...}]'
+            rows={8}
           />
-          <input
-            type="file"
-            accept="application/json"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) file.text().then(setImportText);
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              accept="application/json"
+              className="text-xs text-[#3f4941]"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) file.text().then(setImportText);
+              }}
+            />
+          </div>
           {importResult && (
-            <div className={importResult.errors.length ? "error" : "notice"}>
+            <div className={importResult.errors.length ? "p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" : "notice"}>
               {importResult.errors.length
                 ? importResult.errors.map((error) => (
                     <div key={error}>{error}</div>
                   ))
-                : `Validation passed for ${importResult.imported} routes.`}
+                : `Validation passed for ${importResult.imported} pathways.`}
             </div>
           )}
           <div className="modal-actions">
@@ -535,7 +578,7 @@ export function RoutesPage() {
               onClick={applyImport}
               disabled={!importResult || importResult.errors.length > 0}
             >
-              Import
+              Commit Import
             </Button>
           </div>
         </Modal>

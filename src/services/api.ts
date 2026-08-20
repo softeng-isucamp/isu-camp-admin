@@ -2,6 +2,8 @@ import type {
   AuditEntry,
   DashboardSummary,
   Location,
+  MapSavePayload,
+  NotificationItem,
   Page,
   Pathway,
   RouteNode,
@@ -12,6 +14,7 @@ import {
   auditEntries,
   buildings,
   locations,
+  notifications,
   pathways,
   routeNodes,
   users,
@@ -78,17 +81,17 @@ export interface Services {
       date?: string,
     ): Promise<Page<AuditEntry>>;
   };
+  notifications: {
+    list(): Promise<import("../types").NotificationItem[]>;
+    markRead(id: string): Promise<void>;
+    markAllRead(): Promise<void>;
+  };
   map: {
     buildings(): Promise<typeof buildings>;
     locations(): Promise<Location[]>;
     nodes(): Promise<RouteNode[]>;
     pathways(): Promise<Pathway[]>;
-    save(edit?: {
-      selected?: { type: string; id: string };
-      place?: [number, number] | null;
-      pathPoints?: [number, number][];
-      areaPoints?: [number, number][];
-    }): Promise<void>;
+    save(edit?: import("../types").MapSavePayload): Promise<void>;
   };
   imports: {
     locations(
@@ -258,6 +261,20 @@ export const services: Services = {
       });
     },
   },
+  notifications: {
+    list: async () => wait(clone(notifications)),
+    markRead: async (id) => {
+      const item = notifications.find((n) => n.id === id);
+      if (item) item.read = true;
+      return wait(undefined);
+    },
+    markAllRead: async () => {
+      notifications.forEach((n) => {
+        n.read = true;
+      });
+      return wait(undefined);
+    },
+  },
   map: {
     buildings: async () => wait(clone(buildings)),
     locations: async () => wait(clone(locations)),
@@ -273,14 +290,46 @@ export const services: Services = {
         if (location) {
           location.lat = edit.place[0];
           location.lng = edit.place[1];
+          location.positioned = true;
         } else if (node) {
           node.lat = edit.place[0];
           node.lng = edit.place[1];
         }
       }
+      if (edit?.movedLocation) {
+        const location = locations.find(
+          (item) => item.id === edit.movedLocation?.id,
+        );
+        if (location) {
+          location.lat = edit.movedLocation.lat;
+          location.lng = edit.movedLocation.lng;
+          location.positioned = true;
+        }
+      }
+      if (edit?.movedNode) {
+        const node = routeNodes.find((item) => item.id === edit.movedNode?.id);
+        if (node) {
+          node.lat = edit.movedNode.lat;
+          node.lng = edit.movedNode.lng;
+        }
+      }
+      if (edit?.newNode) {
+        routeNodes.push({
+          id: `node-${Date.now()}`,
+          name: edit.newNode.name,
+          nodeType: edit.newNode.nodeType,
+          associatedPlaceId: edit.newNode.associatedPlaceId || null,
+          lat: edit.newNode.lat,
+          lng: edit.newNode.lng,
+        });
+      }
       if (edit?.selected && edit.pathPoints) {
         const path = pathways.find((item) => item.id === edit.selected?.id);
         if (path) path.pathPoints = clone(edit.pathPoints);
+      }
+      if (edit?.updatedPath) {
+        const path = pathways.find((item) => item.id === edit.updatedPath?.id);
+        if (path) path.pathPoints = clone(edit.updatedPath.pathPoints);
       }
       if (edit?.areaPoints && edit.areaPoints.length >= 3) {
         buildings.push({
