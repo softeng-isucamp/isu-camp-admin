@@ -241,8 +241,10 @@ export function PasswordReset() {
         <Card className="recovery-modal">
           {step === "success" ? (
             <>
-              <div className="recovery-success-icon" style={{ background: "#0c7441", color: "#fff", width: "54px", height: "54px", borderRadius: "999px", display: "grid", placeItems: "center", fontSize: "28px" }}>
-                ✓
+              <div className="recovery-success-icon" style={{ background: "#0c7441", color: "#fff", width: "54px", height: "54px", borderRadius: "999px", display: "grid", placeItems: "center" }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
               </div>
               <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>Password reset successful</h2>
               <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
@@ -278,7 +280,7 @@ export function PasswordReset() {
               {step === "code" && (
                 <div className="field">
                   <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>VERIFICATION CODE</span>
-                  <div className="segmented-code-container" style={{ display: "flex", gap: "8px", justifyContent: "space-between" }}>
+                  <div className="segmented-code-container" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", width: "100%", boxSizing: "border-box" }}>
                     {digits.map((digit, i) => (
                       <input
                         key={i}
@@ -291,8 +293,9 @@ export function PasswordReset() {
                         onKeyDown={(e) => handleKeyDown(i, e)}
                         className="segmented-code-input"
                         style={{
-                          width: "56px",
-                          height: "54px",
+                          width: "100%",
+                          height: "52px",
+                          minWidth: 0,
                           textAlign: "center",
                           fontSize: "20px",
                           fontWeight: "bold",
@@ -300,6 +303,7 @@ export function PasswordReset() {
                           background: "#e1e3e4",
                           border: "1px solid #d1d5db",
                           color: "#191c1d",
+                          boxSizing: "border-box",
                         }}
                         aria-label={`Digit ${i + 1}`}
                       />
