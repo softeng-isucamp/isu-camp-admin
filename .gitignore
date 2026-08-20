@@ -1,6 +1,8 @@
 node_modules/
+venv/
 dist/
 *.tsbuildinfo
 test-results/
+frontend/admin/e2e/portal.spec.ts-snapshots/
 .DS_Store
 .env
