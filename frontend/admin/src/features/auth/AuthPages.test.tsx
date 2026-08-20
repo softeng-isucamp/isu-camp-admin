@@ -54,7 +54,7 @@ describe("password recovery screen", () => {
       target: { value: "123" },
     });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByText(/6-digit verification code/i)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/6-digit verification code/i);
     fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), {
       target: { value: "000000" },
     });
@@ -62,11 +62,43 @@ describe("password recovery screen", () => {
     fireEvent.change(screen.getByLabelText("NEW PASSWORD"), {
       target: { value: "password123" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /save password/i }));
+    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), {
+      target: { value: "password123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reset password|save password/i }));
     expect(
       await screen.findByRole("heading", {
         name: /password reset successful/i,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("supports pasting a 6-digit code into the segmented inputs", () => {
+    render(
+      <MemoryRouter>
+        <PasswordReset />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    expect(
+      screen.getByRole("heading", { name: /verification code/i }),
+    ).toBeInTheDocument();
+
+    const firstDigitInput = screen.getByLabelText("Digit 1");
+    fireEvent.paste(firstDigitInput, {
+      clipboardData: {
+        getData: () => "123456",
+      },
+    });
+
+    expect(screen.getByLabelText("Digit 1")).toHaveValue("1");
+    expect(screen.getByLabelText("Digit 2")).toHaveValue("2");
+    expect(screen.getByLabelText("Digit 3")).toHaveValue("3");
+    expect(screen.getByLabelText("Digit 4")).toHaveValue("4");
+    expect(screen.getByLabelText("Digit 5")).toHaveValue("5");
+    expect(screen.getByLabelText("Digit 6")).toHaveValue("6");
+
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(screen.getByLabelText("NEW PASSWORD")).toBeInTheDocument();
   });
 });

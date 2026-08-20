@@ -1081,6 +1081,32 @@ td small {
   height: 54px;
   border-radius: 999px;
 }
+.recovery-modal .segmented-code-container {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.recovery-modal .segmented-code-input {
+  width: 100% !important;
+  height: 52px !important;
+  min-width: 0 !important;
+  border-radius: 14px !important;
+  text-align: center !important;
+  font-size: 20px !important;
+  font-weight: bold !important;
+  background: #e1e3e4 !important;
+  border: 1px solid #d1d5db !important;
+  color: #191c1d !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+.recovery-modal .segmented-code-input:focus {
+  border-color: var(--green) !important;
+  box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2) !important;
+  outline: none !important;
+}
 .recovery-modal .btn {
   width: 100%;
   min-height: 50px;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { services, setMockFailure } from "../../services/api";
 import {
@@ -12,6 +12,7 @@ import {
   SelectField,
 } from "../../components/UI";
 import type { Pathway, RouteNode, Shade } from "../../types";
+import { pathways as initialPathways } from "../../services/mockData";
 import routesModuleIcon from "../../assets/figma/modules/routes.svg";
 
 const endpointLabels: Record<string, [string, string]> = {
@@ -32,6 +33,7 @@ export function RoutesPage() {
     }
     return undefined;
   }, []);
+
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("All Sources");
   const [destination, setDestination] = useState("All Destinations");
@@ -41,6 +43,18 @@ export function RoutesPage() {
     "add" | "import" | "edit" | "remove" | null
   >(null);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
+        setActionMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const [selected, setSelected] = useState<Pathway | null>(null);
   const [draft, setDraft] = useState<Pathway | null>(null);
   const [importText, setImportText] = useState("");
@@ -54,16 +68,20 @@ export function RoutesPage() {
   const [importSuccess, setImportSuccess] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const pageSize = 20;
+
   const { data } = useQuery({
     queryKey: ["routes", query],
     queryFn: () => services.routes.list(query),
   });
+
   const { data: nodesData } = useQuery<RouteNode[]>({
     queryKey: ["nodes"],
     queryFn: () => services.map.nodes(),
   });
   const nodes = nodesData ?? [];
-  const items = (data?.items ?? []).filter(
+
+  const rawPathways = data?.items ?? initialPathways;
+  const items = rawPathways.filter(
     (item) =>
       (source === "All Sources" || item.sourceNodeId === source) &&
       (destination === "All Destinations" ||
@@ -71,14 +89,17 @@ export function RoutesPage() {
       (status === "All Statuses" || item.status === status) &&
       (shade === "All Shades" || item.shade === shade),
   );
+
   useEffect(() => setPage(1), [query, source, destination, status, shade]);
   const visibleItems = items.slice((page - 1) * pageSize, page * pageSize);
   const summary = selected ?? items[0];
+
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["routes"] });
     await queryClient.invalidateQueries({ queryKey: ["logs"] });
     await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
+
   const save = async () => {
     if (!draft) return;
     setError("");
@@ -94,6 +115,7 @@ export function RoutesPage() {
       );
     }
   };
+
   const remove = async () => {
     if (!selected) return;
     await services.routes.remove(selected.id);
@@ -101,8 +123,10 @@ export function RoutesPage() {
     setDialog(null);
     setNotice(`${selected.name} removed successfully.`);
   };
+
   const validateImport = async () =>
     setImportResult(await services.imports.routes(importText));
+
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
     const committed = await services.imports.routes(importText, true);
@@ -111,19 +135,21 @@ export function RoutesPage() {
     setNotice(`${committed.imported} routes imported successfully.`);
     setImportSuccess(committed.imported);
   };
+
   return (
-    <div className="page">
+    <div className="page routes-page">
       <div className="page-hero">
-        <span className="page-icon">
-          <img src={routesModuleIcon} alt="" />
+        <span className="page-icon" style={{ background: "#d6ede0", borderRadius: "12px", width: "48px", height: "48px", display: "grid", placeItems: "center" }}>
+          <img src={routesModuleIcon} alt="" style={{ width: "24px", height: "24px" }} />
         </span>
         <div>
-          <h1>Manage Routes &amp; Paths</h1>
-          <p>Create and manage connections between campus locations.</p>
+          <h1 style={{ fontSize: "28px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Manage Routes &amp; Paths</h1>
+          <p style={{ color: "#525c57", marginTop: "4px", fontSize: "15px" }}>Create and manage connections between campus locations.</p>
         </div>
       </div>
+
       {notice && (
-        <div className="notice" role="status">
+        <div className="notice" role="status" style={{ background: "#e6f7ec", color: "#0c7441", padding: "10px 16px", borderRadius: "12px" }}>
           {notice}
         </div>
       )}
@@ -153,21 +179,21 @@ export function RoutesPage() {
         </Modal>
       )}
       <div className="routes-layout">
-        <Card className="route-summary">
+        <Card className="route-summary" style={{ borderRadius: "20px" }}>
           <p className="eyebrow">SELECTED CONNECTION</p>
-          <h2>{summary?.name ?? "Select a route connection"}</h2>
-          <p>
+          <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: "6px 0 2px" }}>{summary?.name ?? "Select a route connection"}</h2>
+          <p style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 12px" }}>
             {summary
               ? `${summary.shade} · ${summary.distance} · ${summary.time}`
               : "Choose a row to inspect its path details."}
           </p>
-          <hr />
+          <hr style={{ borderColor: "#f3f4f6", margin: "12px 0" }} />
           <Badge>
             {summary
               ? `${summary.status} · ${summary.direction} ${summary.type.toLowerCase()}`
               : "No connection selected"}
           </Badge>
-          <div className="mini-route">
+          <div className="mini-route" style={{ margin: "16px 0" }}>
             <span>
               {summary?.sourceNodeId?.slice(0, 1).toUpperCase() ?? "S"}
             </span>
@@ -195,13 +221,14 @@ export function RoutesPage() {
             </small>
           </div>
         </Card>
-        <Card className="table-card">
-          <div className="table-heading">
+
+        <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
+          <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap", gap: "12px" }}>
             <div>
-              <h2>Routes &amp; Paths</h2>
-              <p>{items.length} connections</p>
+              <h2 style={{ fontSize: "18px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Routes &amp; Paths</h2>
+              <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: "14px" }}>{items.length} connections</p>
             </div>
-            <div className="inline-fields">
+            <div className="inline-fields" style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
               <Field
                 label=""
                 placeholder="Search routes..."
@@ -250,15 +277,20 @@ export function RoutesPage() {
               </SelectField>
               <Button
                 variant="subtle"
+                style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1px solid #0c7441", color: "#0c7441", display: "inline-flex", alignItems: "center", gap: "8px" }}
                 onClick={() => {
                   setImportText("");
                   setImportResult(null);
                   setDialog("import");
                 }}
               >
-                ⇧ Import
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                </svg>
+                Import JSON
               </Button>
               <Button
+                style={{ height: "46px", borderRadius: "999px", padding: "0 22px", background: "#005931", color: "#fff" }}
                 onClick={() => {
                   const base = items[0] ?? {
                     id: "",
@@ -281,15 +313,16 @@ export function RoutesPage() {
               </Button>
             </div>
           </div>
-          <div className="table-wrap">
-            <table>
+
+          <div className="table-wrap" style={{ overflowX: "visible" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
               <thead>
-                <tr>
-                  <th>ROUTE / PATH</th>
-                  <th>SOURCE → DESTINATION</th>
-                  <th>SHADE</th>
-                  <th>STATUS</th>
-                  <th>ACTIONS</th>
+                <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#4b5563", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <th style={{ padding: "14px 20px" }}>ROUTE / PATH</th>
+                  <th style={{ padding: "14px 20px" }}>SOURCE → DESTINATION</th>
+                  <th style={{ padding: "14px 20px" }}>SHADE</th>
+                  <th style={{ padding: "14px 20px" }}>STATUS</th>
+                  <th style={{ padding: "14px 20px", textAlign: "right" }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
@@ -300,63 +333,65 @@ export function RoutesPage() {
                     className={
                       selected?.id === item.id ? "selected-row" : undefined
                     }
+                    style={{ borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
                   >
-                    <td>
-                      <strong>{item.name}</strong>
-                      <small>
+                    <td style={{ padding: "16px 20px" }}>
+                      <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
+                      <small style={{ color: "#6b7280", fontSize: "12px" }}>
                         {item.direction} corridor · {item.distance}
                       </small>
                     </td>
-                    <td>
+                    <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
                       {endpointLabels[item.id]?.[0] ?? item.sourceNodeId} →{" "}
                       {endpointLabels[item.id]?.[1] ?? item.destinationNodeId}
                     </td>
-                    <td>
-                      <Badge>{item.shade}</Badge>
+                    <td style={{ padding: "16px 20px" }}>
+                      <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
+                        {item.shade}
+                      </span>
                     </td>
-                    <td>
-                      <Badge>{item.status}</Badge>
+                    <td style={{ padding: "16px 20px" }}>
+                      <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: item.status === "Open" ? "#e6f7ec" : "#fee2e2", color: item.status === "Open" ? "#0c7441" : "#dc2626" }}>
+                        {item.status}
+                      </span>
                     </td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          className="table-action"
-                          title="Edit route"
-                          onClick={() => {
-                            setSelected(item);
-                            setDraft({ ...item });
-                            setDialog("edit");
-                          }}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          className="table-action danger-text"
-                          title="Delete route"
-                          onClick={() => {
-                            setSelected(item);
-                            setDialog("remove");
-                          }}
-                        >
-                          ×
-                        </button>
+                    <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
+                      <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
                         <button
                           className="table-action menu-trigger"
                           aria-label={`Actions for ${item.name}`}
                           aria-expanded={actionMenuId === item.id}
-                          onClick={() =>
-                            setActionMenuId((current) =>
-                              current === item.id ? null : item.id,
-                            )
-                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActionMenuId((current) => (current === item.id ? null : item.id));
+                          }}
+                          style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" }}
                         >
-                          ⋯
+                          •••
                         </button>
                         {actionMenuId === item.id && (
-                          <div className="row-action-menu" role="menu">
+                          <div
+                            className="row-action-menu"
+                            role="menu"
+                            style={{
+                              position: "absolute",
+                              right: "20px",
+                              top: "48px",
+                              background: "#fff",
+                              borderRadius: "14px",
+                              boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
+                              zIndex: 40,
+                              padding: "6px",
+                              minWidth: "165px",
+                              border: "1px solid #e5e7eb",
+                              textAlign: "left",
+                            }}
+                          >
                             <button
                               role="menuitem"
-                              onClick={() => {
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelected(item);
                                 setDraft({ ...item });
                                 setDialog("edit");
@@ -366,9 +401,10 @@ export function RoutesPage() {
                               Edit route
                             </button>
                             <button
-                              className="danger-text"
                               role="menuitem"
-                              onClick={() => {
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setSelected(item);
                                 setDialog("remove");
                                 setActionMenuId(null);

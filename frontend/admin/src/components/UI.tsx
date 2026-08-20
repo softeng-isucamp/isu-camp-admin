@@ -55,19 +55,22 @@ export function Field({
   badge,
   className,
   required,
+  id: customId,
   ...props
 }: FieldProps) {
   const sub = subhelper || helper;
+  const id = customId || (label ? `field-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}` : undefined);
   return (
     <div className={cx("field-group", className)}>
       <div className="field-label-row">
-        <label className="field-label">
+        <label className="field-label" htmlFor={id}>
           {label}
           {required && <span className="field-required">*</span>}
         </label>
         {badge && <span className="field-badge">{badge}</span>}
       </div>
       <input
+        id={id}
         className={cx("field-input", error ? "field-input-error" : "")}
         required={required}
         {...props}
@@ -94,20 +97,22 @@ export function SelectField({
   children,
   className,
   required,
+  id: customId,
   ...props
 }: PropsWithChildren<SelectFieldProps>) {
   const sub = subhelper || helper;
+  const id = customId || (label ? `select-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}` : undefined);
   return (
     <div className={cx("field-group", className)}>
       <div className="field-label-row">
-        <label className="field-label">
+        <label className="field-label" htmlFor={id}>
           {label}
           {required && <span className="field-required">*</span>}
         </label>
         {badge && <span className="field-badge">{badge}</span>}
       </div>
       <div className="relative flex items-center">
-        <select className="field-select pr-9 appearance-none" required={required} {...props}>
+        <select id={id} className="field-select pr-9 appearance-none" required={required} {...props}>
           {children}
         </select>
         <div className="pointer-events-none absolute right-3 text-[#5b716b]">
