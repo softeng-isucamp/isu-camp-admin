@@ -138,7 +138,8 @@ export function PasswordReset() {
     "request",
   );
   const [error, setError] = useState("");
-  const { register, getValues } = useForm({
+  const [digits, setDigits] = useState<string[]>(["0", "0", "0", "0", "0", "0"]);
+  const { register, getValues, setValue } = useForm({
     defaultValues: {
       email: "admin@isu.edu.ph",
       code: "000000",
@@ -146,6 +147,67 @@ export function PasswordReset() {
       confirmPassword: "password123",
     },
   });
+
+  const handleDigitChange = (index: number, val: string) => {
+    const clean = val.replace(/\D/g, "");
+    if (!clean) {
+      const nextDigits = [...digits];
+      nextDigits[index] = "";
+      setDigits(nextDigits);
+      setValue("code", nextDigits.join(""));
+      return;
+    }
+    const nextDigits = [...digits];
+    if (clean.length > 1) {
+      const chars = clean.slice(0, 6).split("");
+      const startIndex = chars.length === 6 ? 0 : index;
+      for (let i = 0; i < chars.length; i++) {
+        if (startIndex + i < 6) nextDigits[startIndex + i] = chars[i];
+      }
+      setDigits(nextDigits);
+      setValue("code", nextDigits.join(""));
+      const nextInput = document.getElementById(`digit-${Math.min(5, startIndex + chars.length - 1)}`);
+      nextInput?.focus();
+      return;
+    }
+    nextDigits[index] = clean[clean.length - 1];
+    setDigits(nextDigits);
+    setValue("code", nextDigits.join(""));
+    if (index < 5) {
+      const nextInput = document.getElementById(`digit-${index + 1}`);
+      nextInput?.focus();
+    }
+  };
+
+  const handlePaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+    const nextDigits = [...digits];
+    const startIndex = pasted.length === 6 ? 0 : index;
+    for (let i = 0; i < pasted.length; i++) {
+      if (startIndex + i < 6) {
+        nextDigits[startIndex + i] = pasted[i];
+      }
+    }
+    setDigits(nextDigits);
+    setValue("code", nextDigits.join(""));
+    const focusTarget = Math.min(5, startIndex + pasted.length - 1);
+    const nextInput = document.getElementById(`digit-${focusTarget}`);
+    nextInput?.focus();
+  };
+
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && !digits[index] && index > 0) {
+      const nextDigits = [...digits];
+      nextDigits[index - 1] = "";
+      setDigits(nextDigits);
+      setValue("code", nextDigits.join(""));
+      const prevInput = document.getElementById(`digit-${index - 1}`);
+      prevInput?.focus();
+    }
+  };
+
   const submit = async (values: {
     email: string;
     code: string;
@@ -164,13 +226,15 @@ export function PasswordReset() {
         }
         setStep("code");
       } else if (step === "code") {
-        const parsed = resetSchema.shape.code.safeParse(values.code);
+        const rawCode = values.code || digits.join("");
+        const parsed = resetSchema.shape.code.safeParse(rawCode);
         if (!parsed.success) {
           setError(
-            parsed.error.issues[0]?.message ?? "Enter the verification code.",
+            parsed.error.issues[0]?.message ?? "Enter the 6-digit verification code.",
           );
           return;
         }
+        setValue("code", rawCode);
         setStep("new");
       } else if (step === "new") {
         const parsed = resetPasswordSchema.safeParse(values);
@@ -187,6 +251,7 @@ export function PasswordReset() {
       setError(e instanceof Error ? e.message : "Unable to reset password");
     }
   };
+
   return (
     <div className="auth-page">
       <div className="ambient" />
@@ -195,53 +260,107 @@ export function PasswordReset() {
         <Card className="recovery-modal">
           {step === "success" ? (
             <>
-              <div className="recovery-success-icon">✓</div>
-              <h2>Password reset successful</h2>
-              <p className="muted">
-                Your password has been updated. You can now sign in.
+              <div className="recovery-success-icon" style={{ background: "#0c7441", color: "#fff", width: "54px", height: "54px", borderRadius: "999px", display: "grid", placeItems: "center" }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>Password reset successful</h2>
+              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
+                Your admin password has been updated. You can now sign in using your new password.
               </p>
-              <Button onClick={() => navigate("/login")}>
+              <div style={{ flex: 1, minHeight: "12px" }} />
+              <Button style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%" }} onClick={() => navigate("/login")}>
                 Return to Login
               </Button>
             </>
           ) : (
             <>
-              <h2>
+              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>
                 {step === "request"
                   ? "Reset your password"
                   : step === "code"
                     ? "Enter verification code"
-                    : "Create new password"}
+                    : "Create a new password"}
               </h2>
-              <p className="muted">
+              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
                 {step === "request"
                   ? "We will send a six-digit code to your admin email."
                   : step === "code"
-                    ? "We sent a verification code to the admin’s email."
-                    : "Choose a new password with at least 8 characters."}
+                    ? "We sent a 6-digit verification code to the admin’s email."
+                    : "Choose a strong password for the admin account."}
               </p>
               {step === "request" && (
                 <label className="field">
-                  <span>ADMIN EMAIL</span>
-                  <input {...register("email")} type="email" />
+                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN EMAIL</span>
+                  <input {...register("email")} type="email" placeholder="admin@isu.edu.ph" />
                 </label>
               )}
               {step === "code" && (
-                <label className="field">
-                  <span>VERIFICATION CODE</span>
-                  <input {...register("code")} inputMode="numeric" />
-                </label>
+                <div className="field">
+                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>VERIFICATION CODE</span>
+                  <div className="segmented-code-container" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", width: "100%", boxSizing: "border-box" }}>
+                    {digits.map((digit, i) => (
+                      <input
+                        key={i}
+                        id={`digit-${i}`}
+                        type="text"
+                        inputMode="numeric"
+                        value={digit}
+                        onChange={(e) => handleDigitChange(i, e.target.value)}
+                        onKeyDown={(e) => handleKeyDown(i, e)}
+                        onPaste={(e) => handlePaste(i, e)}
+                        onFocus={(e) => e.target.select()}
+                        className="segmented-code-input"
+                        style={{
+                          width: "100%",
+                          height: "52px",
+                          minWidth: 0,
+                          textAlign: "center",
+                          fontSize: "20px",
+                          fontWeight: "bold",
+                          borderRadius: "14px",
+                          background: "#e1e3e4",
+                          border: "1px solid #d1d5db",
+                          color: "#191c1d",
+                          boxSizing: "border-box",
+                        }}
+                        aria-label={`Digit ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                  {/* Accessible/Test input */}
+                  <input
+                    {...register("code")}
+                    type="text"
+                    aria-label="VERIFICATION CODE"
+                    style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
+                    onChange={(e) => {
+                      setValue("code", e.target.value);
+                      const chars = e.target.value.slice(0, 6).split("");
+                      const next = ["", "", "", "", "", ""];
+                      for (let i = 0; i < chars.length; i++) next[i] = chars[i];
+                      setDigits(next);
+                    }}
+                  />
+                  <small style={{ color: "#666e69", fontSize: "13px", marginTop: "4px" }}>
+                    Enter the code from the email. You can request another code if needed.
+                  </small>
+                </div>
               )}
               {step === "new" && (
                 <>
                   <label className="field">
-                    <span>NEW PASSWORD</span>
-                    <input {...register("password")} type="password" />
+                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>NEW PASSWORD</span>
+                    <input {...register("password")} type="password" placeholder="••••••••••••" />
                   </label>
                   <label className="field">
-                    <span>CONFIRM NEW PASSWORD</span>
-                    <input {...register("confirmPassword")} type="password" />
+                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>CONFIRM NEW PASSWORD</span>
+                    <input {...register("confirmPassword")} type="password" placeholder="••••••••••••" />
                   </label>
+                  <div style={{ background: "#f0f8f3", borderRadius: "14px", padding: "12px 16px", color: "#0c5430", fontSize: "13px", lineHeight: "19px" }}>
+                    Use a strong password with at least one uppercase letter, one lowercase letter, one number, and one symbol.
+                  </div>
                 </>
               )}
               {error && (
@@ -249,15 +368,18 @@ export function PasswordReset() {
                   {error}
                 </div>
               )}
-              <Button type="button" onClick={() => void submit(getValues())}>
+              <Button
+                type="button"
+                style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%", marginTop: "8px" }}
+                onClick={() => void submit(getValues())}
+              >
                 {step === "request"
-                  ? "Send Code"
+                  ? "Send Code →"
                   : step === "code"
                     ? "Continue"
-                    : "Save Password"}{" "}
-                <span>→</span>
+                    : "Reset Password"}
               </Button>
-              <Link className="back-link" to="/login">
+              <Link className="back-link" to="/login" style={{ color: "#0c7441", textAlign: "center", fontSize: "14px", marginTop: "4px" }}>
                 Back to login
               </Link>
             </>

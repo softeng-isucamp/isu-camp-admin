@@ -187,7 +187,7 @@ export function Shell({ children }: PropsWithChildren) {
           <div
             className="avatar small"
             style={{ cursor: "pointer" }}
-            title={`Signed in as ${session?.username ?? "Admin Justine"}`}
+            title={`Signed in as ${session?.username ?? "Admin User"}`}
             onClick={() => setConfirm(true)}
           >
             <img src={profileUserIcon} alt="" />
@@ -197,15 +197,25 @@ export function Shell({ children }: PropsWithChildren) {
       </div>
       {confirm && (
         <div className="modal-backdrop">
-          <Card className="modal">
-            <h2>Sign out?</h2>
-            <p>Your session will be ended on this device.</p>
-            <div className="modal-actions">
-              <Button variant="subtle" onClick={() => setConfirm(false)}>
+          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+            <div style={{ display: "flex", gap: "16px", alignItems: "flex-start", marginBottom: "16px" }}>
+              <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "grid", placeItems: "center", fontSize: "20px", flexShrink: 0 }}>
+                <img src={signOutIcon} alt="" style={{ width: "22px", height: "22px", filter: "invert(24%) sepia(85%) saturate(3000%) hue-rotate(345deg) brightness(95%) contrast(95%)" }} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Sign out?</h2>
+                <p style={{ margin: "6px 0 0", color: "#525c57", fontSize: "14px", lineHeight: "20px" }}>
+                  You’ll need to sign in again to access the ISU-CAMP admin dashboard.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={() => setConfirm(false)}>
                 Cancel
               </Button>
               <Button
                 variant="danger"
+                style={{ borderRadius: "999px", padding: "0 24px", background: "#dc2626", color: "#fff" }}
                 onClick={() => {
                   setConfirm(false);
                   logout();
@@ -214,7 +224,7 @@ export function Shell({ children }: PropsWithChildren) {
                 Sign Out
               </Button>
             </div>
-          </Card>
+          </div>
         </div>
       )}
     </div>
