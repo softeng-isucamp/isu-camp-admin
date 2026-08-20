@@ -160,22 +160,41 @@ export function PasswordReset() {
     const nextDigits = [...digits];
     if (clean.length > 1) {
       const chars = clean.slice(0, 6).split("");
+      const startIndex = chars.length === 6 ? 0 : index;
       for (let i = 0; i < chars.length; i++) {
-        if (index + i < 6) nextDigits[index + i] = chars[i];
+        if (startIndex + i < 6) nextDigits[startIndex + i] = chars[i];
       }
       setDigits(nextDigits);
       setValue("code", nextDigits.join(""));
-      const nextInput = document.getElementById(`digit-${Math.min(5, index + chars.length)}`);
+      const nextInput = document.getElementById(`digit-${Math.min(5, startIndex + chars.length - 1)}`);
       nextInput?.focus();
       return;
     }
-    nextDigits[index] = clean[0];
+    nextDigits[index] = clean[clean.length - 1];
     setDigits(nextDigits);
     setValue("code", nextDigits.join(""));
     if (index < 5) {
       const nextInput = document.getElementById(`digit-${index + 1}`);
       nextInput?.focus();
     }
+  };
+
+  const handlePaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+    const nextDigits = [...digits];
+    const startIndex = pasted.length === 6 ? 0 : index;
+    for (let i = 0; i < pasted.length; i++) {
+      if (startIndex + i < 6) {
+        nextDigits[startIndex + i] = pasted[i];
+      }
+    }
+    setDigits(nextDigits);
+    setValue("code", nextDigits.join(""));
+    const focusTarget = Math.min(5, startIndex + pasted.length - 1);
+    const nextInput = document.getElementById(`digit-${focusTarget}`);
+    nextInput?.focus();
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -287,10 +306,11 @@ export function PasswordReset() {
                         id={`digit-${i}`}
                         type="text"
                         inputMode="numeric"
-                        maxLength={1}
                         value={digit}
                         onChange={(e) => handleDigitChange(i, e.target.value)}
                         onKeyDown={(e) => handleKeyDown(i, e)}
+                        onPaste={(e) => handlePaste(i, e)}
+                        onFocus={(e) => e.target.select()}
                         className="segmented-code-input"
                         style={{
                           width: "100%",
