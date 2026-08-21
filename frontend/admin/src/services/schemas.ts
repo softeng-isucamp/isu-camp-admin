@@ -16,7 +16,7 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required."),
 });
 export const resetRequestSchema = z.object({
-  username: z.string().min(1, "Enter an admin username."),
+  username: z.string().min(1, "Enter a valid email address."),
 });
 export const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code."),
