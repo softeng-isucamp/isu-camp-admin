@@ -68,8 +68,8 @@ export interface AuditEntry {
   category: "Admin" | "User" | "System";
 }
 export interface Session {
+  id: string;
   username: string;
-  role: UserAccount["role"];
 }
 export interface DashboardSummary {
   buildings: number;

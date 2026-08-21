@@ -141,7 +141,7 @@ export function PasswordReset() {
   const [digits, setDigits] = useState<string[]>(["0", "0", "0", "0", "0", "0"]);
   const { register, getValues, setValue } = useForm({
     defaultValues: {
-      email: "admin@isu.edu.ph",
+      username: "admin_justine",
       code: "000000",
       password: "password123",
       confirmPassword: "password123",
@@ -209,7 +209,7 @@ export function PasswordReset() {
   };
 
   const submit = async (values: {
-    email: string;
+    username: string;
     code: string;
     password: string;
     confirmPassword: string;
@@ -217,7 +217,7 @@ export function PasswordReset() {
     setError("");
     try {
       if (step === "request") {
-        const parsed = resetRequestSchema.safeParse({ email: values.email });
+        const parsed = resetRequestSchema.safeParse({ username: values.username });
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Enter a valid email address.",
@@ -244,7 +244,11 @@ export function PasswordReset() {
           );
           return;
         }
-        await services.auth.reset(parsed.data.code, parsed.data.password);
+        await services.auth.reset(
+          values.username,
+          parsed.data.code,
+          parsed.data.password,
+        );
         setStep("success");
       }
     } catch (e) {
@@ -285,15 +289,15 @@ export function PasswordReset() {
               </h2>
               <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
                 {step === "request"
-                  ? "We will send a six-digit code to your admin email."
+                  ? "Enter your admin username to receive a six-digit code."
                   : step === "code"
                     ? "We sent a 6-digit verification code to the admin’s email."
                     : "Choose a strong password for the admin account."}
               </p>
               {step === "request" && (
                 <label className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN EMAIL</span>
-                  <input {...register("email")} type="email" placeholder="admin@isu.edu.ph" />
+                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN USERNAME</span>
+                  <input {...register("username")} type="text" placeholder="admin_justine" />
                 </label>
               )}
               {step === "code" && (
