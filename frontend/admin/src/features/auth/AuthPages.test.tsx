@@ -33,11 +33,11 @@ describe("password recovery screen", () => {
         <PasswordReset />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
-      target: { value: "not-an-email" },
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
+      target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent(/valid admin email/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/admin username/i);
   });
 
   it("validates the code and reaches the success state", async () => {

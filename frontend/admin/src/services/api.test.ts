@@ -1,26 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { services, setMockFailure } from "./api";
 import { resetPasswordSchema, resetSchema } from "./schemas";
 
 describe("mock service contracts", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("authenticates the seeded administrator", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ admin: { id: "1", username: "admin01" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "Invalid username or password" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+
     await expect(
       services.auth.login("admin_justine", "password123"),
-    ).resolves.toMatchObject({
-      username: "admin_justine",
-      role: "Administrator",
-    });
+    ).resolves.toEqual({ id: "1", username: "admin01" });
     await expect(services.auth.login("wrong", "password123")).rejects.toThrow(
       "Invalid username or password",
     );
-    await expect(
-      services.auth.login("admin_justine", "wrong-password"),
-    ).rejects.toThrow("Invalid username or password");
-    await services.auth.reset("000000", "new-password");
-    await expect(
-      services.auth.login("admin_justine", "new-password"),
-    ).resolves.toMatchObject({ username: "admin_justine" });
-    await services.auth.reset("000000", "password123");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:5000/api/login",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ username: "admin_justine", password: "password123" }),
+      }),
+    );
   });
 
   it("filters locations through the service boundary", async () => {
