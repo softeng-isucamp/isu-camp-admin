@@ -248,10 +248,11 @@ export function PasswordReset() {
           );
           return;
         }
-        setValue("code", rawCode);
+        setValue("code", parsed.data);
         setStep("new");
       } else if (step === "new") {
-        const parsed = resetPasswordSchema.safeParse(values);
+        const rawCode = values.code || digits.join("");
+        const parsed = resetPasswordSchema.safeParse({ ...values, code: rawCode });
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Check your new password.",

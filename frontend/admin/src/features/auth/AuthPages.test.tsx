@@ -12,13 +12,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const mockResetRequest = () =>
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
+const mockResetRequest = () => {
+  vi.spyOn(services.auth, "requestReset").mockResolvedValue(undefined);
+  vi.spyOn(services.auth, "reset").mockResolvedValue(undefined);
+};
 
 describe("login screen", () => {
   it("renders the admin login with placeholders and no pre-filled values", () => {
@@ -69,7 +66,7 @@ describe("password recovery screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
-      screen.getByRole("heading", { name: /verification code/i }),
+      await screen.findByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
 
     // Verify initial empty boxes state
@@ -89,13 +86,12 @@ describe("password recovery screen", () => {
     expect(screen.getByPlaceholderText("Enter new password")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Confirm new password")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), {
-      target: { value: "password123" },
-    });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), {
-      target: { value: "password123" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /reset password|save password/i }));
+    const newPassInput = screen.getByLabelText("NEW PASSWORD");
+    const confirmPassInput = screen.getByLabelText("CONFIRM NEW PASSWORD");
+    fireEvent.change(newPassInput, { target: { value: "password123" } });
+    fireEvent.change(confirmPassInput, { target: { value: "password123" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+
     expect(
       await screen.findByRole("heading", {
         name: /password reset successful/i,
@@ -103,7 +99,7 @@ describe("password recovery screen", () => {
     ).toBeInTheDocument();
   });
 
-  it("supports pasting a 6-digit code into the segmented inputs", () => {
+  it("supports pasting a 6-digit code into the segmented inputs", async () => {
     mockResetRequest();
     render(
       <MemoryRouter>
@@ -115,7 +111,7 @@ describe("password recovery screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
-      screen.getByRole("heading", { name: /verification code/i }),
+      await screen.findByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
 
     const firstDigitInput = screen.getByLabelText("Digit 1");
@@ -136,7 +132,8 @@ describe("password recovery screen", () => {
     expect(screen.getByLabelText("NEW PASSWORD")).toBeInTheDocument();
   });
 
-  it("supports resending verification code when requested", () => {
+  it("supports resending verification code when requested", async () => {
+    mockResetRequest();
     render(
       <MemoryRouter>
         <PasswordReset />
@@ -147,7 +144,7 @@ describe("password recovery screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
-      screen.getByRole("heading", { name: /verification code/i }),
+      await screen.findByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
 
     const resendButton = screen.getByRole("button", { name: /resend code/i });
