@@ -224,6 +224,7 @@ export function PasswordReset() {
           );
           return;
         }
+        await services.auth.requestReset(values.username);
         setStep("code");
       } else if (step === "code") {
         const rawCode = values.code || digits.join("");

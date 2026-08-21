@@ -1,5 +1,18 @@
 from flask import Blueprint, request, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
+from flask_mail import Mail, Message
+from dotenv import load_dotenv
+
+import os
+import secrets
+from datetime import datetime, timedelta
+
+
+# ==========================================
+# Load Environment Variables
+# ==========================================
+
+load_dotenv()
 
 
 # ==========================================
@@ -7,6 +20,13 @@ from flask_sqlalchemy import SQLAlchemy
 # ==========================================
 
 db = SQLAlchemy()
+
+
+# ==========================================
+# Mail
+# ==========================================
+
+mail = Mail()
 
 
 # ==========================================
@@ -18,6 +38,13 @@ auth_bp = Blueprint(
     __name__,
     url_prefix="/api"
 )
+
+
+# ==========================================
+# Temporary Password Reset OTP Storage
+# ==========================================
+
+reset_otps = {}
 
 
 # ==========================================
@@ -44,6 +71,11 @@ class Admin(db.Model):
     )
 
     password = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    gmail = db.Column(
         db.String(255),
         nullable=False
     )
@@ -242,3 +274,194 @@ def admin_required():
         )
 
     return admin, None
+
+
+# ==========================================
+# REQUEST PASSWORD RESET OTP
+# ==========================================
+
+@auth_bp.route("/reset/request", methods=["POST"])
+def request_reset():
+
+    try:
+
+        data = request.get_json(silent=True)
+
+        if not data:
+
+            return jsonify({
+                "success": False,
+                "message": "Request body is required"
+            }), 400
+
+        username = data.get("username")
+
+        if not username:
+
+            return jsonify({
+                "success": False,
+                "message": "Username is required"
+            }), 400
+
+        print("PASSWORD RESET REQUEST:", username)
+
+        # --------------------------------------
+        # Find Admin
+        # --------------------------------------
+
+        admin = Admin.query.filter_by(
+            username=username
+        ).first()
+
+        if not admin:
+
+            return jsonify({
+                "success": False,
+                "message": "Admin account not found"
+            }), 404
+
+        print("ADMIN FOUND:", admin.username)
+
+        # --------------------------------------
+        # Check Registered Gmail
+        # --------------------------------------
+
+        if not admin.gmail:
+
+            return jsonify({
+                "success": False,
+                "message": "No Gmail address is registered for this account"
+            }), 400
+
+        # --------------------------------------
+        # Generate 6-Digit OTP
+        # --------------------------------------
+
+        otp = f"{secrets.randbelow(1000000):06d}"
+
+        print("GENERATED OTP:", otp)
+
+        # --------------------------------------
+        # Store OTP
+        # --------------------------------------
+
+        reset_otps[username] = {
+            "otp": otp,
+            "expires_at": datetime.utcnow() + timedelta(minutes=10)
+        }
+
+        # --------------------------------------
+        # Create Email
+        # --------------------------------------
+
+        message = Message(
+            subject="ISU-CAMP Password Reset OTP",
+            recipients=[admin.gmail]
+        )
+
+        message.body = f"""
+Hello {admin.username},
+
+You requested to reset your ISU-CAMP admin password.
+
+Your verification code is:
+
+{otp}
+
+This code will expire in 10 minutes.
+
+If you did not request this password reset, please ignore this email.
+
+ISU-CAMP Admin System
+"""
+
+        # --------------------------------------
+        # Send Email
+        # --------------------------------------
+
+        mail.send(message)
+
+        print("OTP SENT TO:", admin.gmail)
+
+        return jsonify({
+            "success": True,
+            "message": "Verification code sent to the registered Gmail."
+        }), 200
+
+    except Exception as e:
+
+        print("PASSWORD RESET EMAIL ERROR:")
+        print(e)
+
+        return jsonify({
+            "success": False,
+            "message": "Failed to send verification code",
+            "error": str(e)
+        }), 500
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+def reset_password():
+
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({
+                "success": False,
+                "message": "Request body is required"
+            }), 400
+
+        username = data.get("username")
+        otp = data.get("code")
+        password = data.get("password")
+
+        if not username or not otp or not password:
+            return jsonify({
+                "success": False,
+                "message": "Username, verification code, and new password are required"
+            }), 400
+
+        if len(password) < 8:
+            return jsonify({
+                "success": False,
+                "message": "Password must be at least 8 characters"
+            }), 400
+
+        reset = reset_otps.get(username)
+        if not reset or datetime.utcnow() > reset["expires_at"]:
+            reset_otps.pop(username, None)
+            return jsonify({
+                "success": False,
+                "message": "Verification code has expired"
+            }), 400
+
+        if not secrets.compare_digest(str(reset["otp"]), str(otp)):
+            return jsonify({
+                "success": False,
+                "message": "Invalid verification code"
+            }), 400
+
+        admin = Admin.query.filter_by(username=username).first()
+        if not admin:
+            reset_otps.pop(username, None)
+            return jsonify({
+                "success": False,
+                "message": "Admin account not found"
+            }), 404
+
+        admin.password = password
+        db.session.commit()
+        reset_otps.pop(username, None)
+
+        return jsonify({
+            "success": True,
+            "message": "Password reset successful"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Password reset failed",
+            "error": str(e)
+        }), 500
