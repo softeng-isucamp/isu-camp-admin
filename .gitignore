@@ -1,6 +1,7 @@
 node_modules/
 venv/
 dist/
+__pycache__/
 *.tsbuildinfo
 test-results/
 frontend/admin/e2e/portal.spec.ts-snapshots/
