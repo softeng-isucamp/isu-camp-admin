@@ -8,10 +8,22 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Starting ISU-CAMP Backend & Frontend " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
+# Create venv + install deps if missing
 $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPython)) {
-    Write-Host "[ERROR] Virtual environment 'venv' not found in $ProjectRoot" -ForegroundColor Red
-    exit 1
+    Write-Host "[SETUP] Creating virtual environment..." -ForegroundColor Yellow
+    python -m venv venv
+    Write-Host "[SETUP] Installing Python dependencies..." -ForegroundColor Yellow
+    & (Join-Path $ProjectRoot "venv\Scripts\pip.exe") install -r requirements.txt
+}
+
+# Install frontend deps if node_modules missing
+$NodeModules = Join-Path $ProjectRoot "frontend\admin\node_modules"
+if (-not (Test-Path $NodeModules)) {
+    Write-Host "[SETUP] Installing frontend dependencies..." -ForegroundColor Yellow
+    Set-Location (Join-Path $ProjectRoot "frontend\admin")
+    npm install
+    Set-Location $ProjectRoot
 }
 
 Write-Host "[1/2] Starting Flask Backend on http://127.0.0.1:5000..." -ForegroundColor Green
