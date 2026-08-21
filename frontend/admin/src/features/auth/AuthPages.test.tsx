@@ -1,10 +1,21 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "./AuthContext";
 import { Login, PasswordReset } from "./AuthPages";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+const mockResetRequest = () =>
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
 
 describe("login screen", () => {
   it("renders the Figma-authored admin login affordances", () => {
@@ -41,6 +52,7 @@ describe("password recovery screen", () => {
   });
 
   it("validates the code and reaches the success state", async () => {
+    mockResetRequest();
     render(
       <MemoryRouter>
         <PasswordReset />
@@ -74,6 +86,7 @@ describe("password recovery screen", () => {
   });
 
   it("supports pasting a 6-digit code into the segmented inputs", () => {
+    mockResetRequest();
     render(
       <MemoryRouter>
         <PasswordReset />

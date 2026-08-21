@@ -7,7 +7,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from auth import auth_bp, db
+from auth import auth_bp, db, mail
 
 
 # ==========================================
@@ -16,11 +16,14 @@ from auth import auth_bp, db
 
 load_dotenv()
 
+print("MAIL USERNAME:", os.getenv("MAIL_USERNAME"))
+print("MAIL PASSWORD LOADED:", bool(os.getenv("MAIL_PASSWORD")))
+print("MAIL PASSWORD LENGTH:", len(os.getenv("MAIL_PASSWORD", "")))
+
 
 # ==========================================
 # Create Flask App
 # ==========================================
-
 app = Flask(__name__)
 
 
@@ -32,6 +35,20 @@ app.config["SECRET_KEY"] = os.getenv(
     "SECRET_KEY",
     "dev-secret-key"
 )
+
+
+# ==========================================
+# Gmail SMTP Configuration
+# ==========================================
+
+app.config["MAIL_SERVER"] = "smtp.gmail.com"
+app.config["MAIL_PORT"] = 587
+app.config["MAIL_USE_TLS"] = True
+app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME")
+app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
+app.config["MAIL_DEFAULT_SENDER"] = os.getenv("MAIL_USERNAME")
+
+mail.init_app(app)
 
 
 # ==========================================

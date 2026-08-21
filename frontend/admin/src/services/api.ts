@@ -107,6 +107,8 @@ export interface Services {
 
     me(): Promise<Session | null>;
 
+    requestReset(username: string): Promise<void>;
+
     reset(
       username: string,
       code: string,
@@ -368,18 +370,27 @@ export const services: Services = {
       };
     },
 
+    requestReset: async (username) => {
+      const response = await fetch(`${API_URL}/api/reset/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      let data: { message?: string };
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Unable to connect to the backend.");
+      }
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to send verification code");
+      }
+    },
+
 
     // --------------------------------------
     // Password Reset
     // --------------------------------------
-    //
-    // TEMPORARY
-    //
-    // This currently does NOT update
-    // the Supabase database.
-    //
-    // We will connect this to Flask later.
-    //
 
     reset: async (
       username,
