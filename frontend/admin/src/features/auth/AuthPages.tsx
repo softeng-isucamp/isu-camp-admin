@@ -25,7 +25,7 @@ export function Login() {
     handleSubmit,
     formState: { errors },
   } = useForm({
-    defaultValues: { username: "admin_justine", password: "password123" },
+    defaultValues: { username: "", password: "" },
   });
   const submit = async (values: { username: string; password: string }) => {
     setError("");
@@ -57,7 +57,11 @@ export function Login() {
             <span>USERNAME</span>
             <div className="input-with-icon">
               <img src={userIcon} alt="" />
-              <input {...register("username")} autoComplete="username" />
+              <input
+                {...register("username")}
+                autoComplete="username"
+                placeholder="Enter your username"
+              />
             </div>
           </label>
           <label className="field">
@@ -68,6 +72,7 @@ export function Login() {
                 {...register("password")}
                 type={show ? "text" : "password"}
                 autoComplete="current-password"
+                placeholder="Enter your password"
               />
               <button
                 type="button"
@@ -110,14 +115,14 @@ function LoginPreview() {
           <span>USERNAME</span>
           <div className="input-with-icon">
             <img src={userIcon} alt="" />
-            <input value="admin_justine" readOnly />
+            <input placeholder="Enter your username" readOnly />
           </div>
         </label>
         <label className="field">
           <span>PASSWORD</span>
           <div className="password">
             <img className="password-icon" src={lockIcon} alt="" />
-            <input value="password123" type="password" readOnly />
+            <input placeholder="Enter your password" type="password" readOnly />
             <button type="button" tabIndex={-1}>
               <img src={eyeIcon} alt="" />
             </button>
@@ -138,13 +143,21 @@ export function PasswordReset() {
     "request",
   );
   const [error, setError] = useState("");
-  const [digits, setDigits] = useState<string[]>(["0", "0", "0", "0", "0", "0"]);
+  const [resendMessage, setResendMessage] = useState("");
+  const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
+
+  const handleResendCode = () => {
+    setError("");
+    setDigits(["", "", "", "", "", ""]);
+    setValue("code", "");
+    setResendMessage("A new 6-digit verification code has been sent.");
+  };
   const { register, getValues, setValue } = useForm({
     defaultValues: {
-      username: "admin_justine",
-      code: "000000",
-      password: "password123",
-      confirmPassword: "password123",
+      username: "",
+      code: "",
+      password: "",
+      confirmPassword: "",
     },
   });
 
@@ -290,15 +303,15 @@ export function PasswordReset() {
               </h2>
               <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
                 {step === "request"
-                  ? "Enter your admin username to receive a six-digit code."
+                  ? "Enter your admin email to receive a six-digit code."
                   : step === "code"
                     ? "We sent a 6-digit verification code to the admin’s email."
                     : "Choose a strong password for the admin account."}
               </p>
               {step === "request" && (
                 <label className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN USERNAME</span>
-                  <input {...register("username")} type="text" placeholder="admin_justine" />
+                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN EMAIL</span>
+                  <input {...register("username")} type="email" placeholder="admin@isu.edu.ph" />
                 </label>
               )}
               {step === "code" && (
@@ -348,20 +361,32 @@ export function PasswordReset() {
                       setDigits(next);
                     }}
                   />
-                  <small style={{ color: "#666e69", fontSize: "13px", marginTop: "4px" }}>
-                    Enter the code from the email. You can request another code if needed.
+                  <small style={{ color: "#666e69", fontSize: "13px", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Didn't receive code?</span>
+                    <button
+                      type="button"
+                      onClick={handleResendCode}
+                      style={{ background: "none", border: "none", color: "#0c7441", fontWeight: 600, fontSize: "13px", cursor: "pointer", padding: 0 }}
+                    >
+                      Resend code
+                    </button>
                   </small>
+                  {resendMessage && (
+                    <div style={{ color: "#0c7441", fontSize: "13px", marginTop: "6px", fontWeight: 500 }}>
+                      {resendMessage}
+                    </div>
+                  )}
                 </div>
               )}
               {step === "new" && (
                 <>
                   <label className="field">
                     <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>NEW PASSWORD</span>
-                    <input {...register("password")} type="password" placeholder="••••••••••••" />
+                    <input {...register("password")} type="password" placeholder="Enter new password" />
                   </label>
                   <label className="field">
                     <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>CONFIRM NEW PASSWORD</span>
-                    <input {...register("confirmPassword")} type="password" placeholder="••••••••••••" />
+                    <input {...register("confirmPassword")} type="password" placeholder="Confirm new password" />
                   </label>
                   <div style={{ background: "#f0f8f3", borderRadius: "14px", padding: "12px 16px", color: "#0c5430", fontSize: "13px", lineHeight: "19px" }}>
                     Use a strong password with at least one uppercase letter, one lowercase letter, one number, and one symbol.
