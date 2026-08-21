@@ -8,10 +8,18 @@ echo ==========================================
 :: Change directory to project root
 cd /d "%~dp0"
 
-:: Check virtual environment
+:: Create venv + install deps if missing
 if not exist "venv\Scripts\python.exe" (
-    echo [ERROR] Virtual environment 'venv' not found in %CD%
-    exit /b 1
+    echo [SETUP] Creating virtual environment...
+    python -m venv venv
+    echo [SETUP] Installing Python dependencies...
+    venv\Scripts\pip install -r requirements.txt
+)
+
+:: Install frontend deps if node_modules missing
+if not exist "frontend\admin\node_modules" (
+    echo [SETUP] Installing frontend dependencies...
+    cd frontend\admin && npm install && cd "%~dp0"
 )
 
 :: Start Backend in a new command window

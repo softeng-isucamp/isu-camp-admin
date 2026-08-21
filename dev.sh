@@ -26,10 +26,18 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# Check Python venv
+# Create venv + install deps if missing
 if [ ! -d "venv" ]; then
-    echo "[ERROR] Virtual environment 'venv' not found in $PROJECT_DIR"
-    exit 1
+    echo "[SETUP] Creating virtual environment..."
+    python3 -m venv venv
+    echo "[SETUP] Installing Python dependencies..."
+    venv/bin/pip install -r requirements.txt
+fi
+
+# Install frontend deps if node_modules missing
+if [ ! -d "frontend/admin/node_modules" ]; then
+    echo "[SETUP] Installing frontend dependencies..."
+    cd frontend/admin && npm install && cd "$PROJECT_DIR"
 fi
 
 # Start Backend
