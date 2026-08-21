@@ -1,7 +1,11 @@
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(__file__))
+
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-import os
 
 from auth import auth_bp, db
 
