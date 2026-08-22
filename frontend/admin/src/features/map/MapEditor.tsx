@@ -403,9 +403,12 @@ export function MapEditor() {
   const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
   const updatePathway = (updated: Pathway) => { setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
   const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
-  const focusObject = (object: MapObjectReference) => {
+  const focusObject = (object: MapObjectReference, fieldLabel?: string) => {
     setPreviewOpen(false);
     setSelected({ type: object.type, id: object.id });
+    if (fieldLabel) {
+      window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${fieldLabel}"]`)?.focus());
+    }
     if (object.type === "pathway") {
       const pathway = currentPathways.find((item) => item.id === object.id);
       if (pathway) {
@@ -1140,6 +1143,15 @@ export function MapEditor() {
                     <option>Entrance</option><option>Junction</option><option>Access Point</option>
                   </select>
                 </label>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Associated Location
+                  <select aria-label="Associated Location" value={selectedNode.associatedPlaceId ?? ""} onChange={(event) => updateNode({ ...selectedNode, associatedPlaceId: event.target.value || null })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
+                    <option value="">None</option>
+                    {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
+                      <option value={selectedNode.associatedPlaceId}>Missing Location ({selectedNode.associatedPlaceId})</option>
+                    )}
+                    {currentLocations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                  </select>
+                </label>
                 <div className="text-xs text-[#3f4941]">{selectedNode.nodeType}</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
@@ -1326,7 +1338,7 @@ export function MapEditor() {
                 <button
                   key={`${validationError.object.type}-${validationError.object.id}-${index}`}
                   type="button"
-                  onClick={() => focusObject(validationError.object)}
+                  onClick={() => focusObject(validationError.object, validationError.message === "Associated Location does not exist." ? "Associated Location" : undefined)}
                   className="w-full text-left p-3 border border-red-100 rounded-xl hover:bg-red-50"
                 >
                   <span className="block text-xs font-bold text-[#191c1d]">{validationError.object.label}</span>
