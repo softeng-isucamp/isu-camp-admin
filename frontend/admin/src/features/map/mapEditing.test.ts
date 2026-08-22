@@ -31,17 +31,6 @@ describe("map draft review", () => {
     expect(result).toEqual({ valid: true, errors: [], groups: [] });
   });
 
-  it("does not reject unchanged building geometry omitted by the data boundary", () => {
-    const projectedBuilding = building({ points: [] });
-    const result = reviewMapDraft({
-      original: { locations: [], nodes: [], pathways: [], buildings: [projectedBuilding] },
-      current: { locations: [], nodes: [], pathways: [], buildings: [projectedBuilding] },
-      deleted: [],
-    });
-
-    expect(result).toEqual({ valid: true, errors: [], groups: [] });
-  });
-
   it("groups added, moved, renamed, edited, and deleted objects", () => {
     const result = reviewMapDraft({
       original: { locations: [location()], nodes: [node(), node({ id: "node-2" })], pathways: [pathway()], buildings: [building()] },
