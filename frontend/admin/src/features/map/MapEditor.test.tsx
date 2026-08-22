@@ -40,6 +40,7 @@ describe("Map Editor preview", () => {
   beforeEach(() => {
     mapClickHandler = undefined;
     pathPointDragPosition = undefined;
+    vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
       { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.975, lng: 121.731, positioned: true },
     ]);
@@ -129,6 +130,55 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("moved (1)");
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Entrance · node");
+  });
+
+  it("saves an Area polygon as the named Building shown in Preview", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Area" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
+    clickMap(16.975, 121.731);
+    clickMap(16.976, 121.731);
+    clickMap(16.976, 121.732);
+    fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    const preview = screen.getByRole("dialog", { name: "Preview Map" });
+    expect(preview).toHaveTextContent("added (1)");
+    expect(preview).toHaveTextContent("Science Annex · building");
+  });
+
+  it("focuses Building code correction guidance for an invalid saved footprint", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-1", name: "Science Annex", code: "", points: [[16.975, 121.731], [16.976, 121.731], [16.976, 121.732]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
+    fireEvent.click(screen.getByRole("button", { name: /Building code is required/ }));
+
+    await waitFor(() => expect(screen.getByLabelText("Building code")).toHaveFocus());
+  });
+
+  it("focuses Building name correction guidance for an invalid saved footprint", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-1", name: "", code: "SCI-ANN", points: [[16.975, 121.731], [16.976, 121.731], [16.976, 121.732]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
+    fireEvent.click(screen.getByRole("button", { name: /Building name is required/ }));
+
+    await waitFor(() => expect(screen.getByLabelText("Building name")).toHaveFocus());
+  });
+
+  it("blocks malformed Building geometry in the review", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-1", name: "Science Annex", code: "SCI-ANN", points: [[16.975, 121.731], [16.976, 121.731], [16.975, 121.731]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
+
+    expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
   });
 
   it("adjusts a selected Path Point with coordinates and preserves it in Preview", async () => {
