@@ -115,12 +115,10 @@ export function reviewMapDraft(input: {
   });
   current.buildings.forEach((object) => {
     const reference = { type: "building" as const, id: object.id, label: label(object) };
-    const originalBuilding = original.buildings.find((building) => building.id === object.id);
-    const geometryChanged = !originalBuilding || !same(object.points, originalBuilding.points);
     if (!object.name.trim()) addError(reference, "Building name is required.");
     if (!object.code.trim()) addError(reference, "Building code is required.");
-    if (geometryChanged && (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3)) addError(reference, "Building geometry requires at least 3 distinct points.");
-    if (geometryChanged && object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
+    if (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3) addError(reference, "Building geometry requires at least 3 distinct points.");
+    if (object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
   });
 
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];

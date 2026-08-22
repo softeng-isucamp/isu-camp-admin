@@ -147,7 +147,7 @@ export function MapEditor() {
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
   const directoryPathways = data?.pathways || [];
-  const directoryBuildings = data?.buildings || [];
+  const directoryBuildings = (data?.buildings || []).filter((building) => building.points.length >= 3);
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
   const currentPathways = useMemo(() => {
