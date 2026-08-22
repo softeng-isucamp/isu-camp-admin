@@ -5,6 +5,7 @@ import {
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
   useEffect,
+  useId,
 } from "react";
 import { cx } from "../lib/format";
 
@@ -162,6 +163,7 @@ export function Modal({
   variant = "green",
   className,
 }: PropsWithChildren<ModalProps>) {
+  const titleId = useId();
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -175,6 +177,7 @@ export function Modal({
       className="modal-backdrop"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -188,7 +191,7 @@ export function Modal({
               </div>
             )}
             <div className="modal-header-text">
-              <h2>{title}</h2>
+              <h2 id={titleId}>{title}</h2>
               {subtitle && <p className="modal-subtitle">{subtitle}</p>}
             </div>
           </div>
