@@ -122,6 +122,8 @@ export function MapEditor() {
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
   const [temporary, setTemporary] = useState<[number, number] | null>(null);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
+  const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
+  const [manualPathPointDrag, setManualPathPointDrag] = useState(false);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [movingType, setMovingType] = useState<"location" | "node">("location");
   const [movingId, setMovingId] = useState<string | null>(null);
@@ -258,7 +260,7 @@ export function MapEditor() {
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
       setDirty(true);
-    } else if (mode === "path" && editingPathId) {
+    } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
       setPathPoints((current) => [...current, point]);
       setDirty(true);
     }
@@ -349,7 +351,7 @@ export function MapEditor() {
 
   const handleSavePathShape = () => {
     if (!editingPathId) return;
-    const target = directoryPathways.find((p) => p.id === editingPathId) || localPathways.find((p) => p.id === editingPathId);
+    const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
       const updatedPath: Pathway = {
         ...target,
@@ -527,7 +529,7 @@ export function MapEditor() {
           />
           <MapController onMapClick={onMapClick} flyTarget={flyTarget} />
 
-          {localBuildings.map((building) => (
+          {currentBuildings.map((building) => (
             <Polygon
               key={building.id}
               positions={building.points}
@@ -547,10 +549,9 @@ export function MapEditor() {
             </Polygon>
           ))}
 
-          {localPathways.map((path) => {
-            const allNodes = [...localNodes, ...directoryNodes];
-            const source = allNodes.find((node) => node.id === path.sourceNodeId);
-            const destination = allNodes.find((node) => node.id === path.destinationNodeId);
+          {currentPathways.map((path) => {
+            const source = currentNodes.find((node) => node.id === path.sourceNodeId);
+            const destination = currentNodes.find((node) => node.id === path.destinationNodeId);
             const isEditingThisPath = editingPathId === path.id && mode === "path";
             const currentPoints = isEditingThisPath ? pathPoints : path.pathPoints;
             const isSelected = selected?.id === path.id || isEditingThisPath;
@@ -576,7 +577,7 @@ export function MapEditor() {
             ) : null;
           })}
 
-          {localLocations
+          {currentLocations
             .filter((item) => item.positioned)
             .map((loc) => {
               const isSelected = selected?.type === "location" && selected?.id === loc.id;
@@ -601,7 +602,7 @@ export function MapEditor() {
               );
             })}
 
-          {localNodes.map((node) => {
+          {currentNodes.map((node) => {
             const isSelected = selected?.type === "node" && selected?.id === node.id;
             return (
               <Marker
@@ -625,9 +626,10 @@ export function MapEditor() {
                 key={`path-point-${index}`}
                 position={point}
                 icon={createPointIcon(true)}
-                draggable
+                draggable={manualPathPointDrag && selectedPathPointIndex === index}
                 eventHandlers={{
-                  drag: (event) => {
+                  click: () => setSelectedPathPointIndex(index),
+                  dragend: (event) => {
                     const marker = event.target as L.Marker;
                     const next = marker.getLatLng();
                     setPathPoints((current) =>
@@ -635,8 +637,9 @@ export function MapEditor() {
                         i === index ? [next.lat, next.lng] : item,
                       ),
                     );
+                    setSelectedPathPointIndex(index);
+                    setDirty(true);
                   },
-                  dragend: () => setDirty(true),
                 }}
               />
             ))}
@@ -1007,7 +1010,8 @@ export function MapEditor() {
                         onChange={(e) => {
                           setEditingPathId(e.target.value);
                           const found = directoryPathways.find((p) => p.id === e.target.value) || localPathways.find((p) => p.id === e.target.value);
-                          if (found) setPathPoints(found.pathPoints || []);
+                        if (found) setPathPoints(found.pathPoints || []);
+                        setSelectedPathPointIndex(null);
                         }}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
@@ -1019,10 +1023,23 @@ export function MapEditor() {
                       </select>
                     </div>
                     <p className="text-xs text-[#3f4941] my-2">
-                      Click the map to add path points or drag an existing point to move it.{" "}
+                      {manualPathPointDrag ? "Drag the selected Path Point to move it." : "Click the map to add path points or select a Path Point to adjust it."}{" "}
                       <strong>{pathPoints.length} points plotted</strong>.
                     </p>
+                    {selectedPathPointIndex !== null && pathPoints[selectedPathPointIndex] && (
+                      <section aria-label="Selected Path Point" className="my-3 rounded-xl border border-[#dbe0e2] p-3">
+                        <label className="block text-xs font-semibold text-[#3f4941]">Latitude
+                          <input aria-label="Path Point latitude" type="number" step="any" value={pathPoints[selectedPathPointIndex][0]} onChange={(event) => setPathPoints((current) => current.map((point, index) => index === selectedPathPointIndex ? [Number(event.target.value), point[1]] : point))} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
+                          <input aria-label="Path Point longitude" type="number" step="any" value={pathPoints[selectedPathPointIndex][1]} onChange={(event) => setPathPoints((current) => current.map((point, index) => index === selectedPathPointIndex ? [point[0], Number(event.target.value)] : point))} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                        </label>
+                      </section>
+                    )}
                     <div className="flex items-center gap-2 mt-3">
+                      <button type="button" aria-pressed={manualPathPointDrag} onClick={() => setManualPathPointDrag((enabled) => !enabled)} className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4]">
+                        {manualPathPointDrag ? "Stop Dragging" : "Drag Path Point"}
+                      </button>
                       <button
                         type="button"
                         disabled={!pathPoints.length}
