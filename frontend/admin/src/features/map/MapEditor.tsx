@@ -125,6 +125,8 @@ export function MapEditor() {
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
   const [manualPathPointDrag, setManualPathPointDrag] = useState(false);
   const [points, setPoints] = useState<[number, number][]>([]);
+  const [buildingName, setBuildingName] = useState("");
+  const [buildingCode, setBuildingCode] = useState("");
   const [movingType, setMovingType] = useState<"location" | "node">("location");
   const [movingId, setMovingId] = useState<string | null>(null);
   const [placingObjectType, setPlacingObjectType] = useState<"location" | "node">(
@@ -140,6 +142,8 @@ export function MapEditor() {
   >(null);
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
+  const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
+  const canSaveBuilding = points.length >= 3 && distinctBuildingPointCount >= 3 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -158,8 +162,8 @@ export function MapEditor() {
   }, [directoryPathways, editingPathId, localPathways, mode, pathPoints]);
   const currentBuildings = useMemo(() => {
     const merged = overlayChanges(directoryBuildings, localBuildings);
-    return mode === "area" && points.length > 0 ? [...merged, { id: "pending-area", name: "Pending Building", code: "PENDING", points }] : merged;
-  }, [directoryBuildings, localBuildings, mode, points]);
+    return mode === "area" && points.length > 0 ? [...merged, { id: "pending-building", name: buildingName, code: buildingCode, points }] : merged;
+  }, [buildingCode, buildingName, directoryBuildings, localBuildings, mode, points]);
   const draftReview = useMemo(() => reviewMapDraft({
     original: { locations: directoryLocations, nodes: directoryNodes, pathways: directoryPathways, buildings: directoryBuildings },
     current: { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
@@ -370,18 +374,21 @@ export function MapEditor() {
     setMode("select");
   };
 
-  const handleSaveAreaZone = () => {
-    if (points.length < 3) return;
-    const newArea: Building = {
-      id: `area-${Date.now()}`,
-      name: "Drawn Campus Area",
-      code: `AREA-${Date.now().toString().slice(-4)}`,
+  const handleSaveBuilding = () => {
+    if (!canSaveBuilding) return;
+    const building: Building = {
+      id: `building-${Date.now()}`,
+      name: buildingName.trim(),
+      code: buildingCode.trim(),
       points: [...points],
     };
-    setLocalBuildings((current) => [...current, newArea]);
+    setLocalBuildings((current) => [...current, building]);
     setDirty(true);
     setPoints([]);
+    setBuildingName("");
+    setBuildingCode("");
     setMode("select");
+    setSelected({ type: "building", id: building.id });
   };
 
   const resetDraft = () => {
@@ -832,9 +839,15 @@ export function MapEditor() {
               </div>
             ) : mode === "area" ? (
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Zone Polygon</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Campus Zone</h2>
-                <p className="text-xs text-[#3f4941] mt-1">Click at least 3 points on the map to form an area boundary.</p>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
+                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building Footprint</h2>
+                <p className="text-xs text-[#3f4941] mt-1">Enter the Building identity and click at least 3 distinct points on the map to form its footprint.</p>
+                <label className="mt-3 block text-xs font-semibold text-[#3f4941]">Building name
+                  <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                </label>
+                <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
+                  <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                </label>
                 <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
                 <div className="flex flex-wrap gap-2 mt-3">
                   <button
@@ -864,11 +877,11 @@ export function MapEditor() {
                   </button>
                   <button
                     type="button"
-                    disabled={points.length < 3}
-                    onClick={handleSaveAreaZone}
+                    disabled={!canSaveBuilding}
+                    onClick={handleSaveBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
-                    Save Area
+                    Save Building
                   </button>
                 </div>
               </div>
@@ -1070,11 +1083,14 @@ export function MapEditor() {
               </div>
             ) : selectedBuilding ? (
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Area</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Building</div>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Building name
                   <input aria-label="Building name" value={selectedBuilding.name} onChange={(event) => updateBuilding({ ...selectedBuilding, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
                 </label>
-                <div className="text-xs text-[#3f4941]">Building footprint · {selectedBuilding.code}</div>
+                <label className="mt-2 block text-[10px] font-bold text-[#3f4941]">Building code
+                  <input aria-label="Building code" value={selectedBuilding.code} onChange={(event) => updateBuilding({ ...selectedBuilding, code: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                </label>
+                <div className="text-xs text-[#3f4941] mt-2">Building footprint</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Object Type</dt>
@@ -1355,7 +1371,16 @@ export function MapEditor() {
                 <button
                   key={`${validationError.object.type}-${validationError.object.id}-${index}`}
                   type="button"
-                  onClick={() => focusObject(validationError.object, validationError.message === "Associated Location does not exist." ? "Associated Location" : undefined)}
+                  onClick={() => focusObject(
+                    validationError.object,
+                    validationError.message === "Associated Location does not exist."
+                      ? "Associated Location"
+                      : validationError.message === "Building code is required."
+                        ? "Building code"
+                        : validationError.message === "Building name is required."
+                          ? "Building name"
+                        : undefined,
+                  )}
                   className="w-full text-left p-3 border border-red-100 rounded-xl hover:bg-red-50"
                 >
                   <span className="block text-xs font-bold text-[#191c1d]">{validationError.object.label}</span>
