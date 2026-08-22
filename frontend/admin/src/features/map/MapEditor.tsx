@@ -17,6 +17,7 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
+import { reviewMapDraft, type MapObjectReference } from "./mapEditing";
 import "leaflet/dist/leaflet.css";
 
 const createLocationPinIcon = (selected = false) =>
@@ -55,6 +56,11 @@ interface MapControllerProps {
   onMapClick: (latlng: [number, number]) => void;
   flyTarget: [number, number] | null;
 }
+
+const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
+  const changes = new Map(changed.map((item) => [item.id, item]));
+  return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
+};
 
 function MapController({ onMapClick, flyTarget }: MapControllerProps) {
   const map = useMap();
@@ -134,6 +140,7 @@ export function MapEditor() {
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
 
@@ -141,19 +148,30 @@ export function MapEditor() {
   const directoryNodes = data?.nodes || [];
   const directoryPathways = data?.pathways || [];
   const directoryBuildings = data?.buildings || [];
+  const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
+  const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
+  const currentPathways = useMemo(() => {
+    const merged = overlayChanges(directoryPathways, localPathways);
+    return mode === "path" && editingPathId ? merged.map((item) => item.id === editingPathId ? { ...item, pathPoints } : item) : merged;
+  }, [directoryPathways, editingPathId, localPathways, mode, pathPoints]);
+  const currentBuildings = useMemo(() => {
+    const merged = overlayChanges(directoryBuildings, localBuildings);
+    return mode === "area" && points.length > 0 ? [...merged, { id: "pending-area", name: "Pending Building", code: "PENDING", points }] : merged;
+  }, [directoryBuildings, localBuildings, mode, points]);
+  const draftReview = useMemo(() => reviewMapDraft({
+    original: { locations: directoryLocations, nodes: directoryNodes, pathways: directoryPathways, buildings: directoryBuildings },
+    current: { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
+    deleted: [],
+  }), [currentBuildings, currentLocations, currentNodes, currentPathways, directoryBuildings, directoryLocations, directoryNodes, directoryPathways]);
 
   const selectedLocation =
-    localLocations.find((item) => item.id === selected?.id) ||
-    directoryLocations.find((item) => item.id === selected?.id);
+    currentLocations.find((item) => item.id === selected?.id);
   const selectedNode =
-    localNodes.find((item) => item.id === selected?.id) ||
-    directoryNodes.find((item) => item.id === selected?.id);
+    currentNodes.find((item) => item.id === selected?.id);
   const selectedPath =
-    localPathways.find((item) => item.id === selected?.id) ||
-    directoryPathways.find((item) => item.id === selected?.id);
+    currentPathways.find((item) => item.id === selected?.id);
   const selectedBuilding =
-    localBuildings.find((item) => item.id === selected?.id) ||
-    directoryBuildings.find((item) => item.id === selected?.id);
+    currentBuildings.find((item) => item.id === selected?.id);
 
   useEffect(() => {
     const locationId = new URLSearchParams(routeLocation.search).get(
@@ -375,9 +393,45 @@ export function MapEditor() {
     setPathPoints([]);
     setEditingPathId(null);
     setConfirm(null);
+    setPreviewOpen(false);
     setError("");
     setMode("select");
     setSelected(null);
+  };
+
+  const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updatePathway = (updated: Pathway) => { setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const focusObject = (object: MapObjectReference) => {
+    setPreviewOpen(false);
+    setSelected({ type: object.type, id: object.id });
+    if (object.type === "pathway") {
+      const pathway = currentPathways.find((item) => item.id === object.id);
+      if (pathway) {
+        setEditingPathId(pathway.id);
+        setPathPoints(pathway.pathPoints);
+      }
+    }
+    const positioned = [...currentLocations, ...currentNodes].find((item) => item.id === object.id);
+    if (positioned) setFlyTarget([positioned.lat, positioned.lng]);
+    if (object.type === "pathway") {
+      const pathway = currentPathways.find((item) => item.id === object.id);
+      const source = pathway && currentNodes.find((item) => item.id === pathway.sourceNodeId);
+      if (source) setFlyTarget([source.lat, source.lng]);
+    }
+    if (object.type === "building") {
+      const building = currentBuildings.find((item) => item.id === object.id);
+      if (building?.points[0]) setFlyTarget(building.points[0]);
+    }
+  };
+
+  const openSaveReview = () => {
+    if (!draftReview.valid) {
+      setPreviewOpen(true);
+      return;
+    }
+    setConfirm("save");
   };
 
   const commit = async () => {
@@ -422,6 +476,13 @@ export function MapEditor() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setPreviewOpen(true)}
+            className="px-4 py-2 border border-[#005931] rounded-full text-xs font-bold text-[#005931] hover:bg-emerald-50 transition cursor-pointer"
+          >
+            Preview Map
+          </button>
+          <button
+            type="button"
             disabled={!dirty && mode !== "area" && points.length === 0}
             onClick={() => setConfirm("discard")}
             className="px-4 py-2 border border-[#dbe0e2] rounded-full text-xs font-bold text-[#3f4941] hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
@@ -431,7 +492,7 @@ export function MapEditor() {
           <button
             type="button"
             disabled={!dirty && mode !== "area" && points.length === 0}
-            onClick={() => setConfirm("save")}
+            onClick={openSaveReview}
             className="px-5 py-2 bg-[#005931] hover:bg-[#004727] rounded-full text-xs font-bold text-white shadow disabled:opacity-40 transition flex items-center gap-1.5 cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -990,7 +1051,9 @@ export function MapEditor() {
             ) : selectedBuilding ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Area</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{selectedBuilding.name}</h2>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Building name
+                  <input aria-label="Building name" value={selectedBuilding.name} onChange={(event) => updateBuilding({ ...selectedBuilding, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                </label>
                 <div className="text-xs text-[#3f4941]">Building footprint · {selectedBuilding.code}</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
@@ -1019,7 +1082,9 @@ export function MapEditor() {
             ) : selectedLocation ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Location</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{selectedLocation.name}</h2>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Location name
+                  <input aria-label="Location name" value={selectedLocation.name} onChange={(event) => updateLocation({ ...selectedLocation, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                </label>
                 <div className="text-xs text-[#3f4941]">{selectedLocation.type} · Positioned</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
@@ -1067,7 +1132,14 @@ export function MapEditor() {
             ) : selectedNode ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Route Node</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{selectedNode.name}</h2>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node name
+                  <input aria-label="Route Node name" value={selectedNode.name} onChange={(event) => updateNode({ ...selectedNode, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                </label>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node type
+                  <select aria-label="Route Node type" value={selectedNode.nodeType} onChange={(event) => updateNode({ ...selectedNode, nodeType: event.target.value as RouteNode["nodeType"] })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
+                    <option>Entrance</option><option>Junction</option><option>Access Point</option>
+                  </select>
+                </label>
                 <div className="text-xs text-[#3f4941]">{selectedNode.nodeType}</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
@@ -1115,19 +1187,17 @@ export function MapEditor() {
             ) : selectedPath ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Connection</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{selectedPath.name}</h2>
+                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Pathway name
+                  <input aria-label="Pathway name" value={selectedPath.name} onChange={(event) => updatePathway({ ...selectedPath, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                </label>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Source</dt>
-                    <dd className="text-[#191c1d] font-bold">
-                      {directoryNodes.find((n) => n.id === selectedPath.sourceNodeId)?.name || selectedPath.sourceNodeId}
-                    </dd>
+                    <dd><select aria-label="Pathway source" value={selectedPath.sourceNodeId} onChange={(event) => updatePathway({ ...selectedPath, sourceNodeId: event.target.value })} className="w-full border rounded px-1 py-1 font-bold">{currentNodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></dd>
                   </div>
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Destination</dt>
-                    <dd className="text-[#191c1d] font-bold">
-                      {directoryNodes.find((n) => n.id === selectedPath.destinationNodeId)?.name || selectedPath.destinationNodeId}
-                    </dd>
+                    <dd><select aria-label="Pathway destination" value={selectedPath.destinationNodeId} onChange={(event) => updatePathway({ ...selectedPath, destinationNodeId: event.target.value })} className="w-full border rounded px-1 py-1 font-bold">{currentNodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></dd>
                   </div>
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Distance</dt>
@@ -1236,6 +1306,59 @@ export function MapEditor() {
             >
               {confirm === "save" ? "Save Changes" : "Discard"}
             </Button>
+          </div>
+        </Modal>
+      )}
+      {previewOpen && (
+        <Modal
+          title="Preview Map"
+          subtitle="Validate pending map output and review changes before saving."
+          size="md"
+          variant={draftReview.valid ? "green" : "danger"}
+          onClose={() => setPreviewOpen(false)}
+        >
+          {draftReview.errors.length > 0 ? (
+            <div className="space-y-2 my-3">
+              <div role="alert" className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl">
+                Correct {draftReview.errors.length} validation {draftReview.errors.length === 1 ? "error" : "errors"} before saving.
+              </div>
+              {draftReview.errors.map((validationError, index) => (
+                <button
+                  key={`${validationError.object.type}-${validationError.object.id}-${index}`}
+                  type="button"
+                  onClick={() => focusObject(validationError.object)}
+                  className="w-full text-left p-3 border border-red-100 rounded-xl hover:bg-red-50"
+                >
+                  <span className="block text-xs font-bold text-[#191c1d]">{validationError.object.label}</span>
+                  <span className="block text-xs text-red-700 mt-1">{validationError.message}</span>
+                </button>
+              ))}
+            </div>
+          ) : draftReview.groups.length === 0 ? (
+            <p className="my-4 text-sm text-[#3f4941]">No pending changes.</p>
+          ) : (
+            <div className="space-y-3 my-3">
+              {draftReview.groups.map((group) => (
+                <section key={group.kind}>
+                  <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#005931]">{group.kind} ({group.objects.length})</h3>
+                  <ul className="mt-1 space-y-1">
+                    {group.objects.map((object) => (
+                      <li key={`${group.kind}-${object.type}-${object.id}`}>
+                        <button type="button" onClick={() => focusObject(object)} className="text-xs text-left text-[#191c1d] hover:underline">
+                          {object.label} <span className="text-[#3f4941]">· {object.type}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+          <div className="modal-actions">
+            <Button variant="subtle" onClick={() => setPreviewOpen(false)}>Close</Button>
+            {draftReview.valid && draftReview.groups.length > 0 && (
+              <Button onClick={() => { setPreviewOpen(false); setConfirm("save"); }}>Continue to Save</Button>
+            )}
           </div>
         </Modal>
       )}
