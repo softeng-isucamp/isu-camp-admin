@@ -82,7 +82,11 @@ export function reviewMapDraft(input: {
   current.locations.forEach((object) => {
     const reference = { type: "location" as const, id: object.id, label: label(object) };
     if (!object.name.trim()) addError(reference, "Location name is required.");
+    if (!object.code.trim()) addError(reference, "Location code is required.");
+    if (!object.type) addError(reference, "Location type is required.");
+    if (!object.status) addError(reference, "Location status is required.");
     if (!validCoordinate([object.lat, object.lng])) addError(reference, "Location latitude and longitude must be valid coordinates.");
+    if (object.parentId && !locationIds.has(object.parentId)) addError(reference, "Parent Location does not exist.");
   });
   current.nodes.forEach((object) => {
     const reference = { type: "node" as const, id: object.id, label: label(object) };
@@ -96,6 +100,9 @@ export function reviewMapDraft(input: {
   current.pathways.forEach((object) => {
     const reference = { type: "pathway" as const, id: object.id, label: label(object) };
     if (!object.name.trim()) addError(reference, "Pathway name is required.");
+    if (!object.type.trim()) addError(reference, "Pathway type is required.");
+    if (!object.direction) addError(reference, "Pathway direction is required.");
+    if (!object.status) addError(reference, "Pathway status is required.");
     if (!nodeIds.has(object.sourceNodeId) || !nodeIds.has(object.destinationNodeId)) addError(reference, "Pathway endpoints must reference existing Route Nodes.");
     if (object.sourceNodeId === object.destinationNodeId) addError(reference, "Pathway connects a Route Node to itself.");
     const key = [object.sourceNodeId, object.destinationNodeId].sort().join("::");
@@ -108,9 +115,12 @@ export function reviewMapDraft(input: {
   });
   current.buildings.forEach((object) => {
     const reference = { type: "building" as const, id: object.id, label: label(object) };
+    const originalBuilding = original.buildings.find((building) => building.id === object.id);
+    const geometryChanged = !originalBuilding || !same(object.points, originalBuilding.points);
     if (!object.name.trim()) addError(reference, "Building name is required.");
-    if (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3) addError(reference, "Building geometry requires at least 3 distinct points.");
-    if (object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
+    if (!object.code.trim()) addError(reference, "Building code is required.");
+    if (geometryChanged && (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3)) addError(reference, "Building geometry requires at least 3 distinct points.");
+    if (geometryChanged && object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
   });
 
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];
