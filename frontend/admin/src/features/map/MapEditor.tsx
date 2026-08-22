@@ -283,7 +283,7 @@ export function MapEditor() {
   const handleSavePosition = () => {
     if (!temporary) return;
     if (movingType === "location" && movingId) {
-      const existing = directoryLocations.find((l) => l.id === movingId);
+      const existing = currentLocations.find((location) => location.id === movingId);
       const updated = existing ? { ...existing, lat: temporary[0], lng: temporary[1], positioned: true } : null;
       if (updated) {
         setLocalLocations((current) => {
@@ -295,7 +295,7 @@ export function MapEditor() {
       setMode("select");
       setSelected({ type: "location", id: movingId });
     } else if (movingType === "node" && movingId) {
-      const existing = directoryNodes.find((n) => n.id === movingId);
+      const existing = currentNodes.find((node) => node.id === movingId);
       const updated = existing ? { ...existing, lat: temporary[0], lng: temporary[1] } : null;
       if (updated) {
         setLocalNodes((current) => {
