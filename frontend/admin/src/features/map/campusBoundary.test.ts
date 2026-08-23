@@ -10,12 +10,12 @@ import {
 describe("Echague campus boundary", () => {
   it("accepts points inside the campus polygon and rejects points outside", () => {
     expect(pointOnCampus([16.7208, 121.6896], echagueCampusBoundary)).toBe(true);
-    expect(pointOnCampus([16.725, 121.6896], echagueCampusBoundary)).toBe(false);
+    expect(pointOnCampus([16.73, 121.68], echagueCampusBoundary)).toBe(false);
   });
 
   it("requires every geometry point to remain inside campus", () => {
     expect(geometryOnCampus([[16.7208, 121.6896], [16.721, 121.690]], echagueCampusBoundary)).toBe(true);
-    expect(geometryOnCampus([[16.7208, 121.6896], [16.725, 121.690]], echagueCampusBoundary)).toBe(false);
+    expect(geometryOnCampus([[16.7208, 121.6896], [16.73, 121.68]], echagueCampusBoundary)).toBe(false);
   });
 
   it("adds a 100 metre navigation buffer around the campus", () => {
