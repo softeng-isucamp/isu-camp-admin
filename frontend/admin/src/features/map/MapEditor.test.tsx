@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { generatedMapFixture } from "../../services/generatedMapFixture";
 import type { Location, RouteNode } from "../../types";
 import { MapEditor } from "./MapEditor";
 
@@ -48,6 +49,8 @@ describe("Map Editor preview", () => {
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
       { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
     ]);
+    vi.mocked(services.map.buildings).mockResolvedValue([]);
+    vi.mocked(services.map.pathways).mockResolvedValue([]);
   });
   afterEach(cleanup);
 
@@ -64,6 +67,21 @@ describe("Map Editor preview", () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
     expect(screen.getByText("No pending changes.")).toBeInTheDocument();
+  });
+
+  it("loads the generated OSM fixture and keeps boundary safeguards active", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
+    vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
+    vi.mocked(services.map.nodes).mockResolvedValue(generatedMapFixture.nodes);
+    vi.mocked(services.map.pathways).mockResolvedValue(generatedMapFixture.pathways);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Recorded" } });
+    expect(await screen.findByRole("button", { name: /Recorded Library Location/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Place" }));
+    clickMap(16.8, 121.7);
+
+    expect(screen.getByText("New or modified geometry must stay inside the ISU Echague campus boundary.")).toBeInTheDocument();
   });
 
   it("blocks a missing Route Node association and focuses its correction field", async () => {

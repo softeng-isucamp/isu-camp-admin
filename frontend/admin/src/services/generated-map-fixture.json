@@ -247,6 +247,18 @@
           "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
         },
         "provider": "OpenStreetMap",
+        "source_element": {
+          "id": 101,
+          "lat": 16.72,
+          "lon": 121.69,
+          "tags": {
+            "amenity": "library",
+            "name": "Recorded Library"
+          },
+          "timestamp": "2026-08-24T00:00:00Z",
+          "type": "node",
+          "version": 1
+        },
         "source_id": 101,
         "source_type": "node",
         "tags": {
@@ -286,6 +298,34 @@
           "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
         },
         "provider": "OpenStreetMap",
+        "source_element": {
+          "changeset": 123,
+          "geometry": [
+            {
+              "lat": 16.72,
+              "lon": 121.69
+            },
+            {
+              "lat": 16.7202,
+              "lon": 121.69
+            },
+            {
+              "lat": 16.7202,
+              "lon": 121.6902
+            },
+            {
+              "lat": 16.72,
+              "lon": 121.69
+            }
+          ],
+          "id": 202,
+          "tags": {
+            "building": "yes"
+          },
+          "timestamp": "2026-08-24T00:00:00Z",
+          "type": "way",
+          "version": 4
+        },
         "source_id": 202,
         "source_type": "way",
         "tags": {
@@ -320,6 +360,36 @@
           "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
         },
         "provider": "OpenStreetMap",
+        "source_element": {
+          "geometry": [
+            {
+              "lat": 16.7201,
+              "lon": 121.6898
+            },
+            {
+              "lat": 16.7205,
+              "lon": 121.6898
+            },
+            {
+              "lat": 16.7208,
+              "lon": 121.6901
+            }
+          ],
+          "id": 303,
+          "nodes": [
+            3001,
+            3002,
+            3003
+          ],
+          "tags": {
+            "highway": "footway",
+            "name": "Library Walk",
+            "surface": "paved"
+          },
+          "timestamp": "2026-08-24T00:00:00Z",
+          "type": "way",
+          "version": 2
+        },
         "source_id": 303,
         "source_type": "way",
         "tags": {
@@ -348,7 +418,13 @@
     ]
   },
   "walkingNetwork": {
-    "candidates": [],
+    "candidates": [
+      {
+        "candidateType": "disconnected-path",
+        "pathwayId": "osm-pathway-454abcffbead33d6",
+        "reviewRequired": true
+      }
+    ],
     "complete": false,
     "pathways": [
       {
@@ -371,8 +447,10 @@
             121.6901
           ]
         ],
-        "reviewFlags": [],
-        "reviewRequired": false,
+        "reviewFlags": [
+          "disconnected"
+        ],
+        "reviewRequired": true,
         "shade": "Unshaded",
         "source": {
           "provider": "OpenStreetMap",
@@ -385,6 +463,11 @@
         "sourceNodeIds": [
           "osm-node-6bf3ad9f95bcd9f8",
           "osm-node-34a5e7387e8b1230"
+        ],
+        "sourceOsmNodeIds": [
+          3001,
+          3002,
+          3003
         ],
         "sourceTags": {
           "surface": "paved"
@@ -410,6 +493,7 @@
           "sourceType": "way",
           "url": "https://www.openstreetmap.org/way/303"
         },
+        "sourceOsmNodeId": 3001,
         "sourceWayId": 303
       },
       {
@@ -426,6 +510,7 @@
           "sourceType": "way",
           "url": "https://www.openstreetmap.org/way/303"
         },
+        "sourceOsmNodeId": 3003,
         "sourceWayId": 303
       }
     ],

@@ -28,6 +28,7 @@ const asNode = (value: GeneratedFixture["walkingNetwork"]["routeNodes"][number])
   nodeType: value.nodeType as RouteNode["nodeType"],
   lat: value.lat,
   lng: value.lng,
+  sourceOsmNodeId: value.sourceOsmNodeId,
 });
 
 const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]): Pathway => ({
@@ -36,6 +37,7 @@ const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]
   sourceNodeId: value.sourceNodeId,
   destinationNodeId: value.destinationNodeId,
   pathPoints: value.pathPoints.map(([lat, lng]) => [lat, lng]),
+  sourceOsmNodeIds: value.sourceOsmNodeIds,
   distance: value.distance,
   time: value.time,
   shade: value.shade as Pathway["shade"],
