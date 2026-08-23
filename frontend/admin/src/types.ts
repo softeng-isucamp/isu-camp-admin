@@ -39,6 +39,7 @@ export interface RouteNode {
   associatedPlaceId?: string | null;
   lat: number;
   lng: number;
+  sourceOsmNodeId?: number | null;
 }
 export interface Pathway {
   id: string;
@@ -52,6 +53,7 @@ export interface Pathway {
   direction: "Two-way" | "One-way";
   status: "Open" | "Closed";
   pathPoints: [number, number][];
+  sourceOsmNodeIds?: number[];
 }
 export interface UserAccount {
   id: string;
