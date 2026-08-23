@@ -6,7 +6,7 @@ This repository contains the ISU-CAMP administration backend scaffold and the ad
 
 - `app/` contains the Python backend modules.
 - `frontend/admin/` contains the Vite, React, and TypeScript admin portal.
-- `static/` and `templates/admin/` are reserved for Flask-managed assets and templates.
+- `static/` is reserved for Flask-managed assets.
 
 ## Running Backend & Frontend
 
