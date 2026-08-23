@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
@@ -144,13 +144,29 @@ export function PasswordReset() {
   );
   const [error, setError] = useState("");
   const [resendMessage, setResendMessage] = useState("");
+  const [resendCountdown, setResendCountdown] = useState(0);
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
 
-  const handleResendCode = () => {
+  useEffect(() => {
+    if (resendCountdown <= 0) return;
+    const timer = setTimeout(() => setResendCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCountdown]);
+
+  const handleResendCode = async () => {
     setError("");
+    setResendMessage("");
     setDigits(["", "", "", "", "", ""]);
     setValue("code", "");
-    setResendMessage("A new 6-digit verification code has been sent.");
+    try {
+      await services.auth.requestReset(getValues("username"));
+      setResendMessage("A new 6-digit verification code has been sent.");
+      setResendCountdown(60);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to resend code.";
+      setError(msg);
+      setResendCountdown(0);
+    }
   };
   const { register, getValues, setValue } = useForm({
     defaultValues: {
@@ -233,7 +249,7 @@ export function PasswordReset() {
         const parsed = resetRequestSchema.safeParse({ username: values.username });
         if (!parsed.success) {
           setError(
-            parsed.error.issues[0]?.message ?? "Enter a valid email address.",
+            parsed.error.issues[0]?.message ?? "Username is required.",
           );
           return;
         }
@@ -304,15 +320,15 @@ export function PasswordReset() {
               </h2>
               <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
                 {step === "request"
-                  ? "Enter your admin email to receive a six-digit code."
+                  ? "Enter your admin username to receive a six-digit code."
                   : step === "code"
-                    ? "We sent a 6-digit verification code to the admin’s email."
+                    ? "We sent a 6-digit verification code to the admin’s email on file."
                     : "Choose a strong password for the admin account."}
               </p>
               {step === "request" && (
                 <label className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN EMAIL</span>
-                  <input {...register("username")} type="email" placeholder="admin@isu.edu.ph" />
+                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN USERNAME</span>
+                  <input {...register("username")} type="text" placeholder="admin01" />
                 </label>
               )}
               {step === "code" && (
@@ -367,9 +383,10 @@ export function PasswordReset() {
                     <button
                       type="button"
                       onClick={handleResendCode}
-                      style={{ background: "none", border: "none", color: "#0c7441", fontWeight: 600, fontSize: "13px", cursor: "pointer", padding: 0 }}
+                      disabled={resendCountdown > 0}
+                      style={{ background: "none", border: "none", color: resendCountdown > 0 ? "#999" : "#0c7441", fontWeight: 600, fontSize: "13px", cursor: resendCountdown > 0 ? "default" : "pointer", padding: 0 }}
                     >
-                      Resend code
+                      {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : "Resend code"}
                     </button>
                   </small>
                   {resendMessage && (

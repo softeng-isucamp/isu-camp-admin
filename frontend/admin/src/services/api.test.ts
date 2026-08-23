@@ -32,7 +32,7 @@ describe("mock service contracts", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://localhost:5000/api/login",
+      "/api/login",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
