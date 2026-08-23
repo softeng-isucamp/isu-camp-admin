@@ -600,7 +600,7 @@ export function MapEditor() {
             attribution={
               basemap === "satellite"
                 ? "© Esri"
-                : "© OpenStreetMap"
+                : "© OpenStreetMap contributors"
             }
             url={
               basemap === "satellite"

@@ -1,0 +1,434 @@
+{
+  "attribution": "\u00a9 OpenStreetMap contributors",
+  "campus": {
+    "buildings": [
+      {
+        "boundaryStatus": "retained",
+        "candidateType": "building",
+        "geometry": [
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.6902
+          },
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          }
+        ],
+        "id": "osm-building-1e4f593ce3b42d43",
+        "name": null,
+        "officialName": null,
+        "originalTags": {
+          "building": "yes"
+        },
+        "points": [
+          [
+            16.72,
+            121.69
+          ],
+          [
+            16.7202,
+            121.69
+          ],
+          [
+            16.7202,
+            121.6902
+          ],
+          [
+            16.72,
+            121.69
+          ]
+        ],
+        "ref": null,
+        "reviewRequired": true,
+        "shortName": null,
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-1e4f593ce3b42d43",
+          "sourceId": 202,
+          "sourceType": "way",
+          "url": "https://www.openstreetmap.org/way/202"
+        }
+      }
+    ],
+    "candidates": [
+      {
+        "boundaryStatus": "retained",
+        "candidateType": "building",
+        "geometry": [
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.6902
+          },
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          }
+        ],
+        "id": "osm-building-1e4f593ce3b42d43",
+        "name": null,
+        "officialName": null,
+        "originalTags": {
+          "building": "yes"
+        },
+        "points": [
+          [
+            16.72,
+            121.69
+          ],
+          [
+            16.7202,
+            121.69
+          ],
+          [
+            16.7202,
+            121.6902
+          ],
+          [
+            16.72,
+            121.69
+          ]
+        ],
+        "ref": null,
+        "reviewRequired": true,
+        "shortName": null,
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-1e4f593ce3b42d43",
+          "sourceId": 202,
+          "sourceType": "way",
+          "url": "https://www.openstreetmap.org/way/202"
+        }
+      }
+    ],
+    "complete": false,
+    "locations": [
+      {
+        "code": "",
+        "id": "osm-location-e170e896b63c8bfe",
+        "lat": 16.72,
+        "lng": 121.69,
+        "name": "Recorded Library",
+        "officialName": null,
+        "originalClassification": {
+          "amenity": "library"
+        },
+        "originalTags": {
+          "amenity": "library",
+          "name": "Recorded Library"
+        },
+        "parentId": null,
+        "positioned": true,
+        "shortName": null,
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-e170e896b63c8bfe",
+          "sourceId": 101,
+          "sourceType": "node",
+          "url": "https://www.openstreetmap.org/node/101"
+        },
+        "status": "Open",
+        "type": "Facility"
+      }
+    ],
+    "schemaVersion": 1
+  },
+  "generatedAt": "2026-08-24",
+  "license": "Open Database License (ODbL)",
+  "schemaVersion": 1,
+  "source": {
+    "boundary": [
+      {
+        "lat": 16.717488361227918,
+        "lon": 121.68360872005417
+      },
+      {
+        "lat": 16.716379340457028,
+        "lon": 121.68979066085349
+      },
+      {
+        "lat": 16.71589670903417,
+        "lon": 121.69245232980877
+      },
+      {
+        "lat": 16.715794021339867,
+        "lon": 121.69441638391689
+      },
+      {
+        "lat": 16.719829606126755,
+        "lon": 121.69662728635554
+      },
+      {
+        "lat": 16.72098994930749,
+        "lon": 121.6975610169971
+      },
+      {
+        "lat": 16.722704779843443,
+        "lon": 121.69806544619426
+      },
+      {
+        "lat": 16.723269541015803,
+        "lon": 121.69819423662759
+      },
+      {
+        "lat": 16.72442934084097,
+        "lon": 121.69829188026694
+      },
+      {
+        "lat": 16.726524064022428,
+        "lon": 121.69827041519467
+      },
+      {
+        "lat": 16.72708881388261,
+        "lon": 121.69654247688096
+      },
+      {
+        "lat": 16.72744819928623,
+        "lon": 121.69378421510072
+      },
+      {
+        "lat": 16.72812589563264,
+        "lon": 121.69015661789554
+      },
+      {
+        "lat": 16.727602221394683,
+        "lon": 121.68951266572894
+      },
+      {
+        "lat": 16.7257393991726,
+        "lon": 121.68814769481655
+      },
+      {
+        "lat": 16.723860302589397,
+        "lon": 121.68676319765835
+      },
+      {
+        "lat": 16.72217628773228,
+        "lon": 121.68543236318074
+      }
+    ],
+    "boundary_version": "echague-fallback-v1",
+    "endpoint": "https://overpass-api.de/api/interpreter",
+    "imported_at": "2026-08-24",
+    "provider": "OpenStreetMap",
+    "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;",
+    "records": [
+      {
+        "boundary_status": "retained",
+        "canonical_url": "https://www.openstreetmap.org/node/101",
+        "changeset": null,
+        "generated_id": "osmraw-e170e896b63c8bfe",
+        "geometry": [
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          }
+        ],
+        "import": {
+          "boundary_version": "echague-fallback-v1",
+          "endpoint": "https://overpass-api.de/api/interpreter",
+          "imported_at": "2026-08-24",
+          "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
+        },
+        "provider": "OpenStreetMap",
+        "source_id": 101,
+        "source_type": "node",
+        "tags": {
+          "amenity": "library",
+          "name": "Recorded Library"
+        },
+        "timestamp": "2026-08-24T00:00:00Z",
+        "version": 1
+      },
+      {
+        "boundary_status": "retained",
+        "canonical_url": "https://www.openstreetmap.org/way/202",
+        "changeset": 123,
+        "generated_id": "osmraw-1e4f593ce3b42d43",
+        "geometry": [
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.69
+          },
+          {
+            "lat": 16.7202,
+            "lon": 121.6902
+          },
+          {
+            "lat": 16.72,
+            "lon": 121.69
+          }
+        ],
+        "import": {
+          "boundary_version": "echague-fallback-v1",
+          "endpoint": "https://overpass-api.de/api/interpreter",
+          "imported_at": "2026-08-24",
+          "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
+        },
+        "provider": "OpenStreetMap",
+        "source_id": 202,
+        "source_type": "way",
+        "tags": {
+          "building": "yes"
+        },
+        "timestamp": "2026-08-24T00:00:00Z",
+        "version": 4
+      },
+      {
+        "boundary_status": "retained",
+        "canonical_url": "https://www.openstreetmap.org/way/303",
+        "changeset": null,
+        "generated_id": "osmraw-454abcffbead33d6",
+        "geometry": [
+          {
+            "lat": 16.7201,
+            "lon": 121.6898
+          },
+          {
+            "lat": 16.7205,
+            "lon": 121.6898
+          },
+          {
+            "lat": 16.7208,
+            "lon": 121.6901
+          }
+        ],
+        "import": {
+          "boundary_version": "echague-fallback-v1",
+          "endpoint": "https://overpass-api.de/api/interpreter",
+          "imported_at": "2026-08-24",
+          "query": "[out:json][timeout:60];\n(\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[name];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[building];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[amenity];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[highway];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[entrance];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[barrier];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[parking];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[place];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[leisure];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[sport];\n  nwr(16.7157, 121.6835, 16.7276, 121.6984)[landuse];\n);\nout meta geom;"
+        },
+        "provider": "OpenStreetMap",
+        "source_id": 303,
+        "source_type": "way",
+        "tags": {
+          "highway": "footway",
+          "name": "Library Walk",
+          "surface": "paved"
+        },
+        "timestamp": "2026-08-24T00:00:00Z",
+        "version": 2
+      }
+    ],
+    "rejected": [],
+    "schema_version": 1,
+    "tag_families": [
+      "name",
+      "building",
+      "amenity",
+      "highway",
+      "entrance",
+      "barrier",
+      "parking",
+      "place",
+      "leisure",
+      "sport",
+      "landuse"
+    ]
+  },
+  "walkingNetwork": {
+    "candidates": [],
+    "complete": false,
+    "pathways": [
+      {
+        "destinationNodeId": "osm-node-34a5e7387e8b1230",
+        "direction": "Two-way",
+        "distance": "Unknown",
+        "id": "osm-pathway-454abcffbead33d6",
+        "name": "Library Walk",
+        "pathPoints": [
+          [
+            16.7201,
+            121.6898
+          ],
+          [
+            16.7205,
+            121.6898
+          ],
+          [
+            16.7208,
+            121.6901
+          ]
+        ],
+        "reviewFlags": [],
+        "reviewRequired": false,
+        "shade": "Unshaded",
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-454abcffbead33d6",
+          "sourceId": 303,
+          "sourceType": "way",
+          "url": "https://www.openstreetmap.org/way/303"
+        },
+        "sourceNodeId": "osm-node-6bf3ad9f95bcd9f8",
+        "sourceNodeIds": [
+          "osm-node-6bf3ad9f95bcd9f8",
+          "osm-node-34a5e7387e8b1230"
+        ],
+        "sourceTags": {
+          "surface": "paved"
+        },
+        "sourceWayId": 303,
+        "status": "Open",
+        "time": "Unknown",
+        "type": "footway"
+      }
+    ],
+    "routeNodes": [
+      {
+        "id": "osm-node-6bf3ad9f95bcd9f8",
+        "lat": 16.7201,
+        "lng": 121.6898,
+        "name": "",
+        "nodeType": "Junction",
+        "reviewRequired": false,
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-454abcffbead33d6",
+          "sourceId": 303,
+          "sourceType": "way",
+          "url": "https://www.openstreetmap.org/way/303"
+        },
+        "sourceWayId": 303
+      },
+      {
+        "id": "osm-node-34a5e7387e8b1230",
+        "lat": 16.7208,
+        "lng": 121.6901,
+        "name": "",
+        "nodeType": "Junction",
+        "reviewRequired": false,
+        "source": {
+          "provider": "OpenStreetMap",
+          "rawId": "osmraw-454abcffbead33d6",
+          "sourceId": 303,
+          "sourceType": "way",
+          "url": "https://www.openstreetmap.org/way/303"
+        },
+        "sourceWayId": 303
+      }
+    ],
+    "schemaVersion": 1
+  }
+}
