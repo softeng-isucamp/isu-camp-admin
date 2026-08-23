@@ -25,11 +25,11 @@ vi.mock("../../services/api", () => ({
   services: { map: {
     buildings: vi.fn(async () => []),
     locations: vi.fn(async () => [
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.975, lng: 121.731, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]),
     nodes: vi.fn(async () => [
-      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.975, lng: 121.731 },
-      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.976, lng: 121.732 },
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
     ]),
     pathways: vi.fn(async () => []),
     save: vi.fn(),
@@ -42,11 +42,11 @@ describe("Map Editor preview", () => {
     pathPointDragPosition = undefined;
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.975, lng: 121.731, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]);
     vi.mocked(services.map.nodes).mockResolvedValue([
-      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.975, lng: 121.731 },
-      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.976, lng: 121.732 },
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
     ]);
   });
   afterEach(cleanup);
@@ -68,7 +68,7 @@ describe("Map Editor preview", () => {
 
   it("blocks a missing Route Node association and focuses its correction field", async () => {
     vi.mocked(services.map.nodes).mockResolvedValue([
-      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "missing-location", lat: 16.975, lng: 121.731 },
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "missing-location", lat: 16.7205, lng: 121.6895 },
     ]);
     renderEditor();
 
@@ -86,11 +86,11 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
     fireEvent.change(screen.getByLabelText("Location name"), { target: { value: "Main Library" } });
     fireEvent.click(screen.getByRole("button", { name: "Move Marker" }));
-    clickMap(16.977, 121.733);
+    clickMap(16.7208, 121.6902);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
     expect(screen.getByDisplayValue("Main Library")).toBeInTheDocument();
-    expect(screen.getByText("16.977000")).toBeInTheDocument();
+    expect(screen.getByText("16.720800")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("moved (1)");
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("renamed (1)");
@@ -102,16 +102,16 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Place" }));
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "New Ramp" } });
-    clickMap(16.977, 121.733);
+    clickMap(16.7208, 121.6902);
     fireEvent.click(screen.getByRole("button", { name: "Save Node" }));
     fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
-    clickMap(16.978, 121.734);
+    clickMap(16.7212, 121.6905);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
     expect(screen.getByDisplayValue("New Ramp")).toBeInTheDocument();
-    expect(screen.getByText("16.978000")).toBeInTheDocument();
-    expect(screen.getByText("121.734000")).toBeInTheDocument();
-    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.978,121.734"]')).toBeTruthy();
+    expect(screen.getByText("16.721200")).toBeInTheDocument();
+    expect(screen.getByText("121.690500")).toBeInTheDocument();
+    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7212,121.6905"]')).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("New Ramp · node");
   });
@@ -121,12 +121,12 @@ describe("Map Editor preview", () => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
     fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
     fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
-    clickMap(16.979, 121.735);
+    clickMap(16.7214, 121.6908);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
-    expect(screen.getByText("16.979000")).toBeInTheDocument();
-    expect(screen.getByText("121.735000")).toBeInTheDocument();
-    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.979,121.735"]')).toBeTruthy();
+    expect(screen.getByText("16.721400")).toBeInTheDocument();
+    expect(screen.getByText("121.690800")).toBeInTheDocument();
+    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7214,121.6908"]')).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("moved (1)");
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Entrance · node");
@@ -137,9 +137,9 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Area" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
-    clickMap(16.975, 121.731);
-    clickMap(16.976, 121.731);
-    clickMap(16.976, 121.732);
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
@@ -150,7 +150,7 @@ describe("Map Editor preview", () => {
 
   it("focuses Building code correction guidance for an invalid saved footprint", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "Science Annex", code: "", points: [[16.975, 121.731], [16.976, 121.731], [16.976, 121.732]] },
+      { id: "building-1", name: "Science Annex", code: "", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
@@ -161,7 +161,7 @@ describe("Map Editor preview", () => {
 
   it("focuses Building name correction guidance for an invalid saved footprint", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "", code: "SCI-ANN", points: [[16.975, 121.731], [16.976, 121.731], [16.976, 121.732]] },
+      { id: "building-1", name: "", code: "SCI-ANN", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
@@ -172,7 +172,7 @@ describe("Map Editor preview", () => {
 
   it("blocks malformed Building geometry in the review", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "Science Annex", code: "SCI-ANN", points: [[16.975, 121.731], [16.976, 121.731], [16.975, 121.731]] },
+      { id: "building-1", name: "Science Annex", code: "SCI-ANN", points: [[16.720, 121.689], [16.721, 121.689], [16.720, 121.689]] },
     ]);
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
@@ -183,34 +183,34 @@ describe("Map Editor preview", () => {
 
   it("adjusts a selected Path Point with coordinates and preserves it in Preview", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.9755, 121.7315]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
     fireEvent.click(screen.getByRole("button", { name: "Path" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.9755,121.7315" }));
-    fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.9757" } });
-    fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.7317" } });
-    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.975,121.731],[16.9757,121.7317],[16.976,121.732]]");
+    fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
+    fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
+    fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6899" } });
+    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
     fireEvent.click(screen.getByRole("button", { name: "Save Path" }));
-    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.975,121.731],[16.9757,121.7317],[16.976,121.732]]");
+    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Walk · pathway");
   });
 
   it("moves a selected Path Point only when manual drag mode is enabled", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.9755, 121.7315]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
     fireEvent.click(screen.getByRole("button", { name: "Path" }));
-    const point = await screen.findByRole("button", { name: "Path Point at 16.9755,121.7315" });
+    const point = await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" });
     fireEvent.click(point);
     expect(point).toHaveAttribute("data-draggable", "false");
     fireEvent.click(screen.getByRole("button", { name: "Drag Path Point" }));
-    pathPointDragPosition = { lat: 16.9758, lng: 121.7318 };
-    fireEvent.dragEnd(screen.getByRole("button", { name: "Path Point at 16.9755,121.7315" }));
-    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.975,121.731],[16.9758,121.7318],[16.976,121.732]]");
+    pathPointDragPosition = { lat: 16.7208, lng: 121.6898 };
+    fireEvent.dragEnd(screen.getByRole("button", { name: "Path Point at 16.7207,121.6897" }));
+    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7208,121.6898],[16.721,121.69]]");
   });
 });
