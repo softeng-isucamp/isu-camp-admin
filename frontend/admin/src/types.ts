@@ -26,10 +26,12 @@ export interface Location {
   function?: string;
   keywords?: string;
   status: RecordStatus;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   positioned: boolean;
 }
+export type LocationDraft = Omit<Location, "id"> & { id?: string };
+export interface LocationPosition { id: string; lat: number; lng: number; }
 export interface RouteNode {
   id: string;
   name: string;

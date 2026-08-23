@@ -1,5 +1,6 @@
 import sys
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -62,9 +63,23 @@ if not database_url:
         "SUPABASE_DATABASE_URL is missing from .env"
     )
 
-# Do NOT print the password
-if "@" in database_url:
-    safe_database_url = database_url.split("@")[0] + "@********"
+parsed_database_url = urlsplit(database_url)
+
+if parsed_database_url.hostname:
+    safe_netloc = parsed_database_url.hostname
+
+    if parsed_database_url.port:
+        safe_netloc += f":{parsed_database_url.port}"
+
+    safe_database_url = urlunsplit(
+        (
+            parsed_database_url.scheme,
+            safe_netloc,
+            parsed_database_url.path,
+            parsed_database_url.query,
+            "",
+        )
+    )
 else:
     safe_database_url = "********"
 

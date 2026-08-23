@@ -1,4 +1,5 @@
 import type { Building, Location, Pathway, RouteNode } from "../../types";
+import { geometryOnCampus, pointOnCampus, type MapPoint } from "./campusBoundary";
 
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
@@ -42,8 +43,9 @@ export function reviewMapDraft(input: {
   original: MapSnapshot;
   current: MapSnapshot;
   deleted: MapObjectReference[];
+  campusBoundary?: MapPoint[];
 }): MapDraftReview {
-  const { original, current, deleted } = input;
+  const { original, current, deleted, campusBoundary } = input;
   const errors: MapValidationError[] = [];
   const groups = new Map<MapChangeKind, MapObjectReference[]>();
   const addChange = (kind: MapChangeKind, object: MapObjectReference) =>
@@ -85,7 +87,7 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Location code is required.");
     if (!object.type) addError(reference, "Location type is required.");
     if (!object.status) addError(reference, "Location status is required.");
-    if (!validCoordinate([object.lat, object.lng])) addError(reference, "Location latitude and longitude must be valid coordinates.");
+    if (object.lat === null || object.lng === null || !validCoordinate([object.lat, object.lng])) addError(reference, "Location latitude and longitude must be valid coordinates.");
     if (object.parentId && !locationIds.has(object.parentId)) addError(reference, "Parent Location does not exist.");
   });
   current.nodes.forEach((object) => {
@@ -120,6 +122,38 @@ export function reviewMapDraft(input: {
     if (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3) addError(reference, "Building geometry requires at least 3 distinct points.");
     if (object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
   });
+
+  if (campusBoundary) {
+    const changedIds = new Set(
+      [...groups.values()].flat().map((object) => `${object.type}:${object.id}`),
+    );
+    const addBoundaryError = (reference: MapObjectReference) => {
+      if (changedIds.has(`${reference.type}:${reference.id}`)) {
+        addError(reference, "New or modified geometry must stay inside the ISU Echague campus boundary.");
+      }
+    };
+    current.locations.forEach((object) => {
+      const reference = { type: "location" as const, id: object.id, label: label(object) };
+      if (object.lat !== null && object.lng !== null && !pointOnCampus([object.lat, object.lng], campusBoundary)) addBoundaryError(reference);
+    });
+    current.nodes.forEach((object) => {
+      const reference = { type: "node" as const, id: object.id, label: label(object) };
+      if (!pointOnCampus([object.lat, object.lng], campusBoundary)) addBoundaryError(reference);
+    });
+    current.pathways.forEach((object) => {
+      const source = current.nodes.find((node) => node.id === object.sourceNodeId);
+      const destination = current.nodes.find((node) => node.id === object.destinationNodeId);
+      const points = [source, ...object.pathPoints, destination]
+        .filter((point): point is RouteNode | MapPoint => Boolean(point))
+        .map((point) => "lat" in point ? [point.lat, point.lng] as MapPoint : point);
+      const reference = { type: "pathway" as const, id: object.id, label: label(object) };
+      if (!geometryOnCampus(points, campusBoundary)) addBoundaryError(reference);
+    });
+    current.buildings.forEach((object) => {
+      const reference = { type: "building" as const, id: object.id, label: label(object) };
+      if (!geometryOnCampus(object.points, campusBoundary)) addBoundaryError(reference);
+    });
+  }
 
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];
   return { valid: errors.length === 0, errors, groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []) };
