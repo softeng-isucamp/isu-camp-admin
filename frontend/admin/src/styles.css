@@ -53,6 +53,36 @@ button {
   padding: 24px;
   z-index: 1300;
   box-shadow: 0 10px 15px -3px #0002;
+  transition: width 0.2s ease, padding 0.2s ease;
+}
+.sidebar.minimized {
+  width: 80px;
+  padding: 24px 12px;
+}
+.sidebar.minimized .brand {
+  justify-content: center;
+}
+.sidebar.minimized .sidebar-brand-copy,
+.sidebar.minimized .sidebar-link-label,
+.sidebar.minimized .profile-copy {
+  display: none;
+}
+.sidebar.minimized .sidebar-toggle {
+  display: grid;
+}
+.sidebar.minimized nav a {
+  justify-content: center;
+  padding: 16px 0;
+}
+.sidebar.minimized nav a.active {
+  padding-left: 0;
+  border-left: 0;
+}
+.sidebar.minimized .profile {
+  justify-content: center;
+}
+.content.sidebar-minimized {
+  margin-left: 80px;
 }
 .brand {
   display: flex;
@@ -60,6 +90,19 @@ button {
   gap: 12px;
   border-bottom: 1px solid #fff2;
   padding-bottom: 25px;
+}
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 1px solid #b6e6c566;
+  border-radius: 50%;
+  background: transparent;
+  color: #b6e6c5;
+  font-size: 20px;
+  line-height: 1;
 }
 .brand-mark,
 .auth-mark {
@@ -1658,7 +1701,35 @@ td small {
     min-width: 0;
   }
   .sidebar {
+    width: 280px;
+    padding: 24px;
     transform: translateX(-100%);
+  }
+  .sidebar.minimized {
+    width: 280px;
+    padding: 24px;
+  }
+  .sidebar.minimized .sidebar-brand-copy,
+  .sidebar.minimized .sidebar-link-label,
+  .sidebar.minimized .profile-copy {
+    display: block;
+  }
+  .sidebar.minimized .brand {
+    justify-content: initial;
+  }
+  .sidebar.minimized nav a,
+  .sidebar.minimized .profile {
+    justify-content: initial;
+  }
+  .sidebar.minimized nav a {
+    padding: 16px 0;
+  }
+  .sidebar.minimized nav a.active {
+    padding-left: 16px;
+    border-left: 4px solid #3a684b;
+  }
+  .sidebar-toggle {
+    display: none;
   }
   .sidebar.open {
     transform: translateX(0);
