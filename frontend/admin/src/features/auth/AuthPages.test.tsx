@@ -39,19 +39,19 @@ describe("login screen", () => {
 });
 
 describe("password recovery screen", () => {
-  it("renders email field with placeholder and rejects empty email", () => {
+  it("renders username field with placeholder and rejects empty username", () => {
     render(
       <MemoryRouter>
         <PasswordReset />
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText("ADMIN EMAIL")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("admin@isu.edu.ph")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
+    expect(screen.getByLabelText("ADMIN USERNAME")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("admin01")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent(/Enter a valid email address/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Username is required/i);
   });
 
   it("validates the code with empty boxes and displays new password placeholders", async () => {
@@ -61,8 +61,8 @@ describe("password recovery screen", () => {
         <PasswordReset />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
-      target: { value: "admin@isu.edu.ph" },
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
+      target: { value: "admin01" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
@@ -106,8 +106,8 @@ describe("password recovery screen", () => {
         <PasswordReset />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
-      target: { value: "admin@isu.edu.ph" },
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
+      target: { value: "admin01" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
@@ -139,8 +139,8 @@ describe("password recovery screen", () => {
         <PasswordReset />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), {
-      target: { value: "admin@isu.edu.ph" },
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
+      target: { value: "admin01" },
     });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(
@@ -151,6 +151,31 @@ describe("password recovery screen", () => {
     expect(resendButton).toBeInTheDocument();
 
     fireEvent.click(resendButton);
-    expect(screen.getByText(/a new 6-digit verification code has been sent/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/a new 6-digit verification code has been sent/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("rate limiting", () => {
+  it("shows rate-limit error on 429 response", async () => {
+    vi.spyOn(services.auth, "requestReset").mockRejectedValue(
+      new Error("Too many requests. Please wait 45 seconds.")
+    );
+
+    render(
+      <MemoryRouter>
+        <PasswordReset />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), {
+      target: { value: "admin01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+
+    expect(
+      await screen.findByText(/too many requests/i),
+    ).toBeInTheDocument();
   });
 });

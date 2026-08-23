@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { services, setMockFailure } from "./api";
 import { resetPasswordSchema, resetSchema } from "./schemas";
+import { reviewMapDraft } from "../features/map/mapEditing";
 
 describe("mock service contracts", () => {
   afterEach(() => {
@@ -31,7 +32,7 @@ describe("mock service contracts", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://localhost:5000/api/login",
+      "/api/login",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
@@ -51,6 +52,18 @@ describe("mock service contracts", () => {
     expect(summary.locations).toBeGreaterThan(0);
     expect(summary.pathways).toBeGreaterThan(0);
     expect(summary.topSearched).toHaveLength(5);
+  });
+
+  it("loads a valid seeded Map Editor baseline through the service boundary", async () => {
+    const snapshot = {
+      buildings: await services.map.buildings(),
+      locations: await services.map.locations(),
+      nodes: await services.map.nodes(),
+      pathways: await services.map.pathways(),
+    };
+
+    expect(reviewMapDraft({ original: snapshot, current: snapshot, deleted: [] }))
+      .toEqual({ valid: true, errors: [], groups: [] });
   });
 
   it("creates an audit entry after a user mutation", async () => {
