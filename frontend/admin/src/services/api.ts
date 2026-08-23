@@ -2,6 +2,8 @@ import type {
   AuditEntry,
   DashboardSummary,
   Location,
+  LocationDraft,
+  LocationPosition,
   MapSavePayload,
   NotificationItem,
   Page,
@@ -144,7 +146,9 @@ export interface Services {
   locations: {
     list(query?: string): Promise<Page<Location>>;
 
-    save(location: Location): Promise<Location>;
+    save(location: LocationDraft): Promise<Location>;
+
+    savePosition(position: LocationPosition): Promise<Location>;
 
     remove(id: string): Promise<void>;
   };
@@ -537,36 +541,46 @@ export const services: Services = {
         "locationSave"
       );
 
-      locationSchema.parse(
-        location
-      );
+      const nextLocation: Location = { ...location, id: location.id || `loc-${Date.now()}` };
+      locationSchema.parse(nextLocation);
 
       const index =
         locations.findIndex(
           (item) =>
-            item.id === location.id
+            item.id === nextLocation.id
         );
 
       if (index >= 0) {
 
         locations[index] =
-          clone(location);
+          clone(nextLocation);
 
       } else {
 
         locations.push(
-          clone(location)
+          clone(nextLocation)
         );
       }
 
       addAudit(
         "Updated Location",
-        location.name
+        nextLocation.name
       );
 
       return wait(
-        clone(location)
+        clone(nextLocation)
       );
+    },
+
+    savePosition: async (position) => {
+      if (USE_HTTP_API) return apiJson<Location>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng, positioned: true }) });
+      const location = locations.find((item) => item.id === position.id);
+      if (!location) throw new Error("Location not found.");
+      location.lat = position.lat;
+      location.lng = position.lng;
+      location.positioned = true;
+      addAudit("Positioned Location", location.name);
+      return wait(clone(location));
     },
 
 
@@ -1312,6 +1326,8 @@ export const services: Services = {
 
               ...result.data,
 
+              id: result.data.id || `loc-import-${Date.now()}-${index}`,
+
               function: "",
 
               keywords: "",
@@ -1320,7 +1336,7 @@ export const services: Services = {
 
               floor: undefined,
 
-              positioned: true,
+              positioned: result.data.lat !== null && result.data.lng !== null,
             });
           }
         }

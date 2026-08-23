@@ -18,6 +18,12 @@ import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { reviewMapDraft, type MapObjectReference } from "./mapEditing";
+import {
+  echagueCampusBoundary,
+  formatBoundaryCandidate,
+  geometryOnCampus,
+  pointOnCampus,
+} from "./campusBoundary";
 import "leaflet/dist/leaflet.css";
 
 const createLocationPinIcon = (selected = false) =>
@@ -79,6 +85,9 @@ function MapController({ onMapClick, flyTarget }: MapControllerProps) {
 
   return null;
 }
+
+const isPositionedLocation = (location: Location): location is Location & { lat: number; lng: number } =>
+  location.positioned && location.lat !== null && location.lng !== null;
 
 export function MapEditor() {
   const queryClient = useQueryClient();
@@ -164,11 +173,32 @@ export function MapEditor() {
     const merged = overlayChanges(directoryBuildings, localBuildings);
     return mode === "area" && points.length > 0 ? [...merged, { id: "pending-building", name: buildingName, code: buildingCode, points }] : merged;
   }, [buildingCode, buildingName, directoryBuildings, localBuildings, mode, points]);
+  const campusBoundary = useMemo(
+    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
+    [directoryBuildings],
+  );
   const draftReview = useMemo(() => reviewMapDraft({
     original: { locations: directoryLocations, nodes: directoryNodes, pathways: directoryPathways, buildings: directoryBuildings },
     current: { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
     deleted: [],
-  }), [currentBuildings, currentLocations, currentNodes, currentPathways, directoryBuildings, directoryLocations, directoryNodes, directoryPathways]);
+    campusBoundary,
+  }), [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways, directoryBuildings, directoryLocations, directoryNodes, directoryPathways]);
+
+  const outsideBoundaryCount = useMemo(() => {
+    const locations = currentLocations.filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
+    const nodes = currentNodes.filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
+    const pathways = currentPathways.filter((item) => {
+      const source = currentNodes.find((node) => node.id === item.sourceNodeId);
+      const destination = currentNodes.find((node) => node.id === item.destinationNodeId);
+      return !geometryOnCampus([
+        ...(source ? [[source.lat, source.lng] as [number, number]] : []),
+        ...item.pathPoints,
+        ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
+      ], campusBoundary);
+    }).length;
+    const buildings = currentBuildings.filter((item) => !geometryOnCampus(item.points, campusBoundary)).length;
+    return locations + nodes + pathways + buildings;
+  }, [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways]);
 
   const selectedLocation =
     currentLocations.find((item) => item.id === selected?.id);
@@ -186,7 +216,10 @@ export function MapEditor() {
     if (locationId && directoryLocations.some((item) => item.id === locationId)) {
       const loc = directoryLocations.find((item) => item.id === locationId);
       setSelected({ type: "location", id: locationId });
-      if (loc && loc.positioned) {
+      setPlacingId(locationId);
+      setPlacingObjectType("location");
+      setMode("place");
+      if (loc && isPositionedLocation(loc)) {
         setFlyTarget([loc.lat, loc.lng]);
       }
     }
@@ -235,13 +268,13 @@ export function MapEditor() {
   const handleSearchResultClick = (item: {
     id: string;
     kind: "Location" | "Route Node" | "Pathway";
-    lat?: number;
-    lng?: number;
+    lat?: number | null;
+    lng?: number | null;
   }) => {
     if (item.kind === "Location") {
       selectObject("location", item.id);
       const loc = directoryLocations.find((l) => l.id === item.id) || localLocations.find((l) => l.id === item.id);
-      if (loc && loc.positioned) setFlyTarget([loc.lat, loc.lng]);
+      if (loc && isPositionedLocation(loc)) setFlyTarget([loc.lat, loc.lng]);
     } else if (item.kind === "Route Node") {
       selectObject("node", item.id);
       const n = directoryNodes.find((node) => node.id === item.id) || localNodes.find((node) => node.id === item.id);
@@ -258,8 +291,15 @@ export function MapEditor() {
   };
 
   const onMapClick = (point: [number, number]) => {
+    if (mode !== "area" && !pointOnCampus(point, campusBoundary)) {
+      setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
+      return;
+    }
+    setError("");
     if (mode === "area") {
-      setPoints((current) => [...current, point]);
+      const nextPoints = [...points, point];
+      setPoints(nextPoints);
+      console.info("[Map Editor]", formatBoundaryCandidate(nextPoints));
       setDirty(true);
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
@@ -274,6 +314,7 @@ export function MapEditor() {
     if (!selectedLocation) return;
     setMovingType("location");
     setMovingId(selectedLocation.id);
+    if (!isPositionedLocation(selectedLocation)) return;
     setTemporary([selectedLocation.lat, selectedLocation.lng]);
     setMode("move");
   };
@@ -288,6 +329,10 @@ export function MapEditor() {
 
   const handleSavePosition = () => {
     if (!temporary) return;
+    if (!pointOnCampus(temporary, campusBoundary)) {
+      setError("The new position must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     if (movingType === "location" && movingId) {
       const existing = currentLocations.find((location) => location.id === movingId);
       const updated = existing ? { ...existing, lat: temporary[0], lng: temporary[1], positioned: true } : null;
@@ -315,28 +360,32 @@ export function MapEditor() {
     }
   };
 
-  const handleSavePlacedMarker = () => {
+  const handleSavePlacedMarker = async () => {
     if (!temporary || !placingId) return;
+    if (!pointOnCampus(temporary, campusBoundary)) {
+      setError("The new position must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     const target = directoryLocations.find((l) => l.id === placingId);
     if (target) {
-      const updatedLoc: Location = {
-        ...target,
-        lat: temporary[0],
-        lng: temporary[1],
-        positioned: true,
-      };
-      setLocalLocations((current) => {
-        const filtered = current.filter((l) => l.id !== placingId);
-        return [...filtered, updatedLoc];
-      });
-      setDirty(true);
-      setMode("select");
-      setSelected({ type: "location", id: placingId });
+      try {
+        await services.locations.savePosition({ id: placingId, lat: temporary[0], lng: temporary[1] });
+        await queryClient.invalidateQueries({ queryKey: ["map"] });
+        setMode("select");
+        setSelected({ type: "location", id: placingId });
+        setTemporary(null);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Unable to save location position.");
+      }
     }
   };
 
   const handleSavePlacedNode = () => {
     if (!temporary || !placingNodeName.trim()) return;
+    if (!pointOnCampus(temporary, campusBoundary)) {
+      setError("The new position must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     const newNodeId = `node-${Date.now()}`;
     const newNode: RouteNode = {
       id: newNodeId,
@@ -376,6 +425,11 @@ export function MapEditor() {
 
   const handleSaveBuilding = () => {
     if (!canSaveBuilding) return;
+    if (!geometryOnCampus(points, campusBoundary)) {
+      setError("The building footprint must stay inside the ISU Echague campus boundary.");
+      return;
+    }
+    console.info("[Map Editor]", formatBoundaryCandidate(points));
     const building: Building = {
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
@@ -425,8 +479,10 @@ export function MapEditor() {
         setPathPoints(pathway.pathPoints);
       }
     }
-    const positioned = [...currentLocations, ...currentNodes].find((item) => item.id === object.id);
-    if (positioned) setFlyTarget([positioned.lat, positioned.lng]);
+    const positioned = currentLocations.find((item) => item.id === object.id);
+    if (positioned && isPositionedLocation(positioned)) setFlyTarget([positioned.lat, positioned.lng]);
+    const positionedNode = currentNodes.find((item) => item.id === object.id);
+    if (positionedNode) setFlyTarget([positionedNode.lat, positionedNode.lng]);
     if (object.type === "pathway") {
       const pathway = currentPathways.find((item) => item.id === object.id);
       const source = pathway && currentNodes.find((item) => item.id === pathway.sourceNodeId);
@@ -541,7 +597,7 @@ export function MapEditor() {
               key={building.id}
               positions={building.points}
               pathOptions={{
-                color: selected?.id === building.id ? "#e67e22" : "#278b70",
+                color: !geometryOnCampus(building.points, campusBoundary) ? "#b42318" : selected?.id === building.id ? "#e67e22" : "#278b70",
                 fillColor: "#8fd1bd",
                 fillOpacity: selected?.id === building.id ? 0.35 : 0.22,
                 weight: selected?.id === building.id ? 3 : 2,
@@ -551,7 +607,7 @@ export function MapEditor() {
               }}
             >
               <Tooltip direction="center" permanent className="map-label">
-                {building.name}
+                {building.name}{!geometryOnCampus(building.points, campusBoundary) ? " · Outside campus boundary" : ""}
               </Tooltip>
             </Polygon>
           ))}
@@ -572,7 +628,11 @@ export function MapEditor() {
                   [destination.lat, destination.lng],
                 ]}
                 pathOptions={{
-                  color: isSelected ? "#e67e22" : "#005931",
+                  color: !geometryOnCampus([
+                    ...(source ? [[source.lat, source.lng] as [number, number]] : []),
+                    ...currentPoints,
+                    ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
+                  ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
                   weight: isSelected ? 6 : 4,
                   dashArray: isSelected ? undefined : "7 6",
                   opacity: isSelected ? 0.95 : 0.8,
@@ -585,7 +645,7 @@ export function MapEditor() {
           })}
 
           {currentLocations
-            .filter((item) => item.positioned)
+            .filter(isPositionedLocation)
             .map((loc) => {
               const isSelected = selected?.type === "location" && selected?.id === loc.id;
               return (
@@ -598,7 +658,7 @@ export function MapEditor() {
                   }}
                 >
                   <Tooltip direction="top" offset={[0, -28]}>
-                    {loc.name}
+                    {loc.name}{!pointOnCampus([loc.lat, loc.lng], campusBoundary) ? " · Outside campus boundary" : ""}
                   </Tooltip>
                   <Popup>
                     <strong>{loc.name}</strong>
@@ -621,7 +681,7 @@ export function MapEditor() {
                 }}
               >
                 <Tooltip direction="top" offset={[0, -10]}>
-                  {node.name}
+                  {node.name}{!pointOnCampus([node.lat, node.lng], campusBoundary) ? " · Outside campus boundary" : ""}
                 </Tooltip>
               </Marker>
             );
@@ -639,6 +699,11 @@ export function MapEditor() {
                   dragend: (event) => {
                     const marker = event.target as L.Marker;
                     const next = marker.getLatLng();
+                    if (!pointOnCampus([next.lat, next.lng], campusBoundary)) {
+                      setError("The path point must stay inside the ISU Echague campus boundary.");
+                      return;
+                    }
+                    setError("");
                     setPathPoints((current) =>
                       current.map((item, i) =>
                         i === index ? [next.lat, next.lng] : item,
@@ -676,6 +741,13 @@ export function MapEditor() {
             <Marker position={temporary} icon={createTempIcon()} />
           )}
         </MapContainer>
+
+        {outsideBoundaryCount > 0 && (
+          <div className="absolute bottom-4 right-4 z-[900] max-w-xs rounded-2xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-xs text-amber-900 shadow-lg" role="status">
+            <strong>{outsideBoundaryCount} existing map object{outsideBoundaryCount === 1 ? "" : "s"} outside campus boundary.</strong>
+            <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
+          </div>
+        )}
 
         <div className="absolute top-4 left-4 z-[900] bg-white/95 backdrop-blur-md p-1.5 rounded-full shadow-lg border border-[#e1e3e4] flex items-center gap-1">
           <button
@@ -841,7 +913,7 @@ export function MapEditor() {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
                 <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building Footprint</h2>
-                <p className="text-xs text-[#3f4941] mt-1">Enter the Building identity and click at least 3 distinct points on the map to form its footprint.</p>
+                <p className="text-xs text-[#3f4941] mt-1">Click the campus boundary points in order. Each point is logged; when finished, click <strong>Log Boundary Geometry</strong>, then copy the <code>ISU_ECHAGUE_BOUNDARY_CANDIDATE=...</code> line from the browser console and send it to me.</p>
                 <label className="mt-3 block text-xs font-semibold text-[#3f4941]">Building name
                   <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                 </label>
@@ -874,6 +946,16 @@ export function MapEditor() {
                     onClick={() => setMode("select")}
                   >
                     Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={points.length < 3}
+                    onClick={() => {
+                      if (points.length >= 3) console.info("[Map Editor]", formatBoundaryCandidate(points));
+                    }}
+                    className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-full text-xs font-bold hover:bg-amber-100 disabled:opacity-40 transition cursor-pointer"
+                  >
+                    Log Boundary Geometry
                   </button>
                   <button
                     type="button"
@@ -1141,11 +1223,11 @@ export function MapEditor() {
                   </div>
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Latitude</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.lat.toFixed(6)}</dd>
+                    <dd className="text-[#191c1d] font-bold">{selectedLocation.lat?.toFixed(6) || "—"}</dd>
                   </div>
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Longitude</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.lng.toFixed(6)}</dd>
+                    <dd className="text-[#191c1d] font-bold">{selectedLocation.lng?.toFixed(6) || "—"}</dd>
                   </div>
                 </dl>
                 <div className="flex flex-wrap gap-2 mt-4">

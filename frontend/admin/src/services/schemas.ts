@@ -31,14 +31,14 @@ export const resetPasswordSchema = resetSchema
     path: ["confirmPassword"],
   });
 export const locationImportSchema = z.object({
-  id: z.string(),
+  id: z.string().optional(),
   name: z.string().min(1),
   code: z.string().min(1),
   type: locationTypeSchema,
   parentId: z.string().nullable(),
   status: recordStatusSchema,
-  lat: z.number(),
-  lng: z.number(),
+  lat: z.number().nullable(),
+  lng: z.number().nullable(),
 });
 export const locationSchema = locationImportSchema.extend({
   building: z.string().optional(),
@@ -46,6 +46,13 @@ export const locationSchema = locationImportSchema.extend({
   function: z.string().optional(),
   keywords: z.string().optional(),
   positioned: z.boolean(),
+}).superRefine((value, ctx) => {
+  const hasLat = value.lat !== null;
+  const hasLng = value.lng !== null;
+  if (hasLat !== hasLng) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Latitude and longitude must be provided together." });
+  if (value.positioned !== (hasLat && hasLng)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Positioned must match whether coordinates are present." });
+  if (value.lat !== null && (value.lat < -90 || value.lat > 90)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lat"], message: "Latitude must be between -90 and 90." });
+  if (value.lng !== null && (value.lng < -180 || value.lng > 180)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lng"], message: "Longitude must be between -180 and 180." });
 });
 export const routeImportSchema = z.object({
   id: z.string(),
