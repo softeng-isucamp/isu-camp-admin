@@ -28,6 +28,7 @@ const links = [
 export function Shell({ children }: PropsWithChildren) {
   const { session, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
@@ -61,16 +62,25 @@ export function Shell({ children }: PropsWithChildren) {
 
   return (
     <div className="app-shell">
-      <aside className={open ? "sidebar open" : "sidebar"}>
+      <aside className={`sidebar${open ? " open" : ""}${minimized ? " minimized" : ""}`}>
         <div>
           <div className="brand">
             <div className="brand-mark">
               <img src={logo} alt="ISU-CAMP logo" />
             </div>
-            <div>
+            <div className="sidebar-brand-copy">
               <strong>ISU-CAMP</strong>
               <small>ADMIN PORTAL</small>
             </div>
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setMinimized((current) => !current)}
+              aria-label={minimized ? "Expand sidebar" : "Minimize sidebar"}
+              aria-expanded={!minimized}
+            >
+              {minimized ? "»" : "«"}
+            </button>
           </div>
           <nav>
             {links.map(([to, icon, label]) => (
@@ -83,7 +93,7 @@ export function Shell({ children }: PropsWithChildren) {
                 <i>
                   <img src={icon} alt="" />
                 </i>
-                {label}
+                <span className="sidebar-link-label">{label}</span>
               </NavLink>
             ))}
           </nav>
@@ -92,7 +102,7 @@ export function Shell({ children }: PropsWithChildren) {
           <div className="avatar">
             <img src={profileUserIcon} alt="" />
           </div>
-          <div>
+          <div className="profile-copy">
             <strong>{session?.username ?? "Admin Justine"}</strong>
             <small>ADMINISTRATOR</small>
           </div>
@@ -102,7 +112,7 @@ export function Shell({ children }: PropsWithChildren) {
         </div>
       </aside>
       {open && <div className="backdrop" onClick={() => setOpen(false)} />}
-      <div className="content">
+      <div className={minimized ? "content sidebar-minimized" : "content"}>
         <header>
           <button className="menu-btn" onClick={() => setOpen(true)} aria-label="Toggle navigation">
             ☰
