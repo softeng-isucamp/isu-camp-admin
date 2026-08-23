@@ -31,6 +31,7 @@ import {
   routeImportSchema,
   userAccountSchema,
 } from "./schemas";
+import { generatedMapFixture } from "./generatedMapFixture";
 
 
 // ==========================================
@@ -44,6 +45,7 @@ export type ApiMode = "local" | "mock" | "real";
 // at the remote backend with VITE_API_MODE=real and VITE_API_BASE_URL.
 export const API_MODE: ApiMode =
   (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local";
+export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
@@ -987,22 +989,22 @@ export const services: Services = {
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
-      : wait(clone(buildings)),
+    : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings)),
 
 
     locations: async () => USE_HTTP_API
       ? apiJson<Location[]>("/api/map/locations")
-      : wait(clone(locations)),
+      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations : locations)),
 
 
     nodes: async () => USE_HTTP_API
       ? apiJson<RouteNode[]>("/api/map/nodes")
-      : wait(clone(routeNodes)),
+      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes)),
 
 
     pathways: async () => USE_HTTP_API
       ? apiJson<Pathway[]>("/api/map/pathways")
-      : wait(clone(pathways)),
+      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways)),
 
 
     save: async (edit) => {
