@@ -51,7 +51,7 @@ button {
   flex-direction: column;
   justify-content: space-between;
   padding: 24px;
-  z-index: 20;
+  z-index: 1300;
   box-shadow: 0 10px 15px -3px #0002;
 }
 .brand {
@@ -1667,7 +1667,7 @@ td small {
     position: fixed;
     inset: 0;
     background: #0006;
-    z-index: 15;
+    z-index: 1250;
   }
   .content {
     margin-left: 0;

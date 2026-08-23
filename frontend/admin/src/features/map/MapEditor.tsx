@@ -22,6 +22,7 @@ import {
   echagueCampusBoundary,
   formatBoundaryCandidate,
   geometryOnCampus,
+  paddedCampusBounds,
   pointOnCampus,
 } from "./campusBoundary";
 import "leaflet/dist/leaflet.css";
@@ -61,6 +62,7 @@ const createTempIcon = () =>
 interface MapControllerProps {
   onMapClick: (latlng: [number, number]) => void;
   flyTarget: [number, number] | null;
+  navigationBounds: [[number, number], [number, number]];
 }
 
 const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
@@ -68,7 +70,7 @@ const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) =
   return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
 };
 
-function MapController({ onMapClick, flyTarget }: MapControllerProps) {
+function MapController({ onMapClick, flyTarget, navigationBounds }: MapControllerProps) {
   const map = useMap();
 
   useMapEvents({
@@ -82,6 +84,15 @@ function MapController({ onMapClick, flyTarget }: MapControllerProps) {
       map.flyTo(flyTarget, 19, { duration: 0.8 });
     }
   }, [flyTarget, map]);
+
+  useEffect(() => {
+    if (typeof map.getBoundsZoom !== "function" || typeof map.setMinZoom !== "function") return;
+    const minimumZoom = map.getBoundsZoom(navigationBounds, false);
+    map.setMinZoom(minimumZoom);
+    if (map.getZoom() < minimumZoom && typeof map.fitBounds === "function") {
+      map.fitBounds(navigationBounds, { animate: false });
+    }
+  }, [map, navigationBounds]);
 
   return null;
 }
@@ -177,6 +188,10 @@ export function MapEditor() {
     () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
     [directoryBuildings],
   );
+  const navigationBounds = useMemo(() => {
+    const bounds = paddedCampusBounds(campusBoundary);
+    return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
+  }, [campusBoundary]);
   const draftReview = useMemo(() => reviewMapDraft({
     original: { locations: directoryLocations, nodes: directoryNodes, pathways: directoryPathways, buildings: directoryBuildings },
     current: { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
@@ -575,6 +590,9 @@ export function MapEditor() {
         <MapContainer
           center={campusCenter}
           zoom={18}
+          minZoom={15}
+          maxBounds={navigationBounds}
+          maxBoundsViscosity={1}
           zoomControl={false}
           className="w-full h-full"
         >
@@ -590,7 +608,7 @@ export function MapEditor() {
                 : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             }
           />
-          <MapController onMapClick={onMapClick} flyTarget={flyTarget} />
+          <MapController onMapClick={onMapClick} flyTarget={flyTarget} navigationBounds={navigationBounds} />
 
           {currentBuildings.map((building) => (
             <Polygon
