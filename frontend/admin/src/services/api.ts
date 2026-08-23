@@ -35,7 +35,28 @@ import {
 // Backend API
 // ==========================================
 
-const API_URL = "http://localhost:5000";
+export type ApiMode = "local" | "mock" | "real";
+
+// `local` preserves the deterministic in-browser fixtures used by unit tests.
+// Development and Playwright should set VITE_API_MODE=mock; production points
+// at the remote backend with VITE_API_MODE=real and VITE_API_BASE_URL.
+export const API_MODE: ApiMode =
+  (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local";
+const API_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
+const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
+
+const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    ...init,
+  });
+  const data = (await response.json().catch(() => null)) as T & { message?: string } | null;
+  if (!response.ok) throw new Error(data?.message ?? `Request failed (${response.status})`);
+  return data as T;
+};
 
 
 // ==========================================
@@ -223,6 +244,16 @@ const addAudit = (
 // Services
 // ==========================================
 
+function checkRateLimit(response: Response): void {
+  if (response.status === 429) {
+    const retryAfter = response.headers.get("Retry-After");
+    const seconds = retryAfter ? parseInt(retryAfter, 10) : 60;
+    throw new Error(
+      `Too many requests. Please wait ${seconds} second${seconds === 1 ? "" : "s"}.`
+    );
+  }
+}
+
 export const services: Services = {
 
   // ========================================
@@ -268,6 +299,8 @@ export const services: Services = {
         );
       }
 
+      checkRateLimit(response);
+
       if (!response.ok) {
         throw new Error(
           data.message ||
@@ -276,7 +309,7 @@ export const services: Services = {
       }
 
       if (
-        !data.success ||
+        data.success === false ||
         !data.admin
       ) {
         throw new Error(
@@ -382,6 +415,7 @@ export const services: Services = {
       } catch {
         throw new Error("Unable to connect to the backend.");
       }
+      checkRateLimit(response);
       if (!response.ok) {
         throw new Error(data.message || "Failed to send verification code");
       }
@@ -409,6 +443,7 @@ export const services: Services = {
       } catch {
         throw new Error("Unable to connect to the backend.");
       }
+      checkRateLimit(response);
       if (!response.ok) {
         throw new Error(data.message || "Password reset failed");
       }
@@ -458,6 +493,10 @@ export const services: Services = {
 
     list: async (q) => {
 
+      if (USE_HTTP_API) {
+        return apiJson<Page<Location>>(`/api/locations${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+      }
+
       const filtered = q
         ? locations.filter((location) =>
             [
@@ -486,6 +525,13 @@ export const services: Services = {
 
 
     save: async (location) => {
+
+      if (USE_HTTP_API) {
+        return apiJson<Location>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
+          method: location.id ? "PUT" : "POST",
+          body: JSON.stringify(location),
+        });
+      }
 
       failIfConfigured(
         "locationSave"
@@ -526,6 +572,11 @@ export const services: Services = {
 
     remove: async (id) => {
 
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return;
+      }
+
       const index =
         locations.findIndex(
           (location) =>
@@ -559,6 +610,10 @@ export const services: Services = {
 
     list: async (q) => {
 
+      if (USE_HTTP_API) {
+        return apiJson<Page<Pathway>>(`/api/routes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+      }
+
       const filtered = q
         ? pathways.filter((path) =>
             matches(
@@ -583,6 +638,13 @@ export const services: Services = {
 
 
     save: async (path) => {
+
+      if (USE_HTTP_API) {
+        return apiJson<Pathway>(`/api/routes${path.id ? `/${encodeURIComponent(path.id)}` : ""}`, {
+          method: path.id ? "PUT" : "POST",
+          body: JSON.stringify(path),
+        });
+      }
 
       failIfConfigured(
         "routeSave"
@@ -622,6 +684,11 @@ export const services: Services = {
 
 
     remove: async (id) => {
+
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/routes/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return;
+      }
 
       const index =
         pathways.findIndex(
@@ -904,31 +971,35 @@ export const services: Services = {
 
   map: {
 
-    buildings: async () =>
-      wait(
-        clone(buildings)
-      ),
+    buildings: async () => USE_HTTP_API
+      ? apiJson<typeof buildings>("/api/map/buildings")
+      : wait(clone(buildings)),
 
 
-    locations: async () =>
-      wait(
-        clone(locations)
-      ),
+    locations: async () => USE_HTTP_API
+      ? apiJson<Location[]>("/api/map/locations")
+      : wait(clone(locations)),
 
 
-    nodes: async () =>
-      wait(
-        clone(routeNodes)
-      ),
+    nodes: async () => USE_HTTP_API
+      ? apiJson<RouteNode[]>("/api/map/nodes")
+      : wait(clone(routeNodes)),
 
 
-    pathways: async () =>
-      wait(
-        clone(pathways)
-      ),
+    pathways: async () => USE_HTTP_API
+      ? apiJson<Pathway[]>("/api/map/pathways")
+      : wait(clone(pathways)),
 
 
     save: async (edit) => {
+
+      if (USE_HTTP_API) {
+        await apiJson<unknown>("/api/map/save", {
+          method: "POST",
+          body: JSON.stringify(edit ?? {}),
+        });
+        return;
+      }
 
       failIfConfigured(
         "mapSave"
