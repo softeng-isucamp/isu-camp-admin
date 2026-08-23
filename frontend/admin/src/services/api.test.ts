@@ -139,6 +139,16 @@ describe("mock service contracts", () => {
     ).toMatchObject({ lat: next[0], lng: next[1] });
   });
 
+  it("persists a location position through the narrow position seam", async () => {
+    const location = (await services.locations.list()).items[0];
+    const next = { lat: 16.7215, lng: 121.6895 };
+    await services.locations.savePosition({ id: location.id, ...next });
+    expect((await services.locations.list()).items.find((item) => item.id === location.id)).toMatchObject({
+      ...next,
+      positioned: true,
+    });
+  });
+
   it("persists a drawn map area only when it has a valid polygon", async () => {
     const before = (await services.map.buildings()).length;
     await services.map.save({
@@ -233,6 +243,21 @@ describe("mock service contracts", () => {
     await expect(
       services.users.create({ id: "bad", username: "" } as never),
     ).rejects.toThrow("Username is required");
+  });
+
+  it("accepts unpositioned location drafts and rejects partial coordinates", async () => {
+    const created = await services.locations.save({
+      name: "Unpositioned Facility",
+      code: "UNP-01",
+      type: "Facility",
+      parentId: null,
+      status: "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+    });
+    expect(created).toMatchObject({ lat: null, lng: null, positioned: false });
+    await expect(services.locations.save({ ...created, lat: 16.72, lng: null })).rejects.toThrow();
   });
 
   it("handles notifications listing and mark as read", async () => {

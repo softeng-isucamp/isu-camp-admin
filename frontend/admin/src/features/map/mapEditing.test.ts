@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { reviewMapDraft } from "./mapEditing";
+import { echagueCampusBoundary } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
   id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null,
@@ -62,5 +63,16 @@ describe("map draft review", () => {
     expect(result.valid).toBe(false);
     expect(result.errors.map((error) => error.message).join(" ")).toMatch(/name is required|latitude|associated Location|connects a Route Node to itself|duplicate|at least 3/i);
     expect(result.errors[0]).toMatchObject({ object: { type: "location", id: "loc-1" } });
+  });
+
+  it("rejects new or modified objects outside campus while allowing unchanged legacy data", () => {
+    const result = reviewMapDraft({
+      original: { locations: [location({ lat: 16.725 })], nodes: [node(), node({ id: "node-2" })], pathways: [pathway()], buildings: [building()] },
+      current: { locations: [location({ lat: 16.725 })], nodes: [node(), node({ id: "node-2" })], pathways: [pathway({ pathPoints: [[16.725, 121.7311]] })], buildings: [building()] },
+      deleted: [],
+      campusBoundary: echagueCampusBoundary,
+    });
+    expect(result.errors.some((error) => /campus boundary/i.test(error.message))).toBe(true);
+    expect(result.errors.filter((error) => /campus boundary/i.test(error.message))).toHaveLength(1);
   });
 });

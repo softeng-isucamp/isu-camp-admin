@@ -10,24 +10,23 @@ import {
   Pagination,
   SelectField,
 } from "../../components/UI";
-import type { Location, LocationType } from "../../types";
+import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 
-const blankLocation = (): Location => ({
-  id: `loc-${Date.now()}`,
+const blankLocation = (): LocationDraft => ({
   name: "",
   code: `LOC-${Date.now().toString().slice(-4)}`,
   type: "Laboratory",
   parentId: null,
-  building: "CCSICT Building",
-  floor: "Floor 2",
+  building: undefined,
+  floor: undefined,
   function: "Academic and laboratory activities",
   keywords: "",
   status: "Active",
-  lat: 16.72102,
-  lng: 121.68929,
-  positioned: true,
+  lat: null,
+  lng: null,
+  positioned: false,
 });
 
 export function Locations() {
@@ -75,7 +74,7 @@ export function Locations() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const [draft, setDraft] = useState<Location>(blankLocation());
+  const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [selected, setSelected] = useState<Location | null>(null);
   const [importText, setImportText] = useState("");
   const [importMode, setImportMode] = useState<"add" | "update">("add");
@@ -89,6 +88,7 @@ export function Locations() {
   const pageSize = 20;
   const [success, setSuccess] = useState<{
     name: string;
+    id: string;
     building?: string;
     floor?: string;
     kind: "added" | "edited";
@@ -217,12 +217,13 @@ export function Locations() {
     setError("");
     const adding = dialog === "add";
     try {
-      await services.locations.save(draft);
+      const saved = await services.locations.save(draft);
       await refresh();
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
       setSuccess({
-        name: draft.name || "Location",
+        name: saved.name || "Location",
+        id: saved.id,
         building: draft.building,
         floor: draft.floor,
         kind: adding ? "added" : "edited",
@@ -446,9 +447,14 @@ export function Locations() {
               <strong>{success.name}</strong> was {success.kind === "added" ? "added" : "updated"}
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
-            <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
-              Done
-            </Button>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.id}`)}>
+                {success.kind === "added" ? "Place on map" : "Edit position on map"}
+              </Button>
+              <Button variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
+                Done
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -578,6 +584,9 @@ export function Locations() {
                   <td style={{ padding: "16px 20px" }}>
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: item.status === "Active" ? "#e6f7ec" : "#fee2e2", color: item.status === "Active" ? "#0c7441" : "#dc2626" }}>
                       {item.status}
+                    </span>
+                    <span style={{ display: "block", marginTop: "5px", color: item.positioned ? "#0c7441" : "#b45309", fontSize: "11px", fontWeight: 600 }}>
+                      {item.positioned ? "Positioned" : "Not positioned"}
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
@@ -755,7 +764,11 @@ export function Locations() {
                   label="PARENT BUILDING"
                   value={draft.building ?? ""}
                   subhelper="Required for rooms, offices, laboratories, restrooms, and facilities."
-                  onChange={(event) => setDraft({ ...draft, building: event.target.value })}
+                  onChange={(event) => {
+                    const building = event.target.value;
+                    const parent = allLocations.find((item) => item.name === building && item.type === "Building");
+                    setDraft({ ...draft, building, parentId: draft.floor ? draft.parentId : parent?.id ?? null });
+                  }}
                 >
                   <option value="">None / Standalone</option>
                   {buildingOptions.map((b) => (
@@ -765,7 +778,11 @@ export function Locations() {
                 <SelectField
                   label="PARENT FLOOR"
                   value={draft.floor ?? ""}
-                  onChange={(event) => setDraft({ ...draft, floor: event.target.value })}
+                  onChange={(event) => {
+                    const floor = event.target.value;
+                    const parent = allLocations.find((item) => item.name === floor && item.type === "Floor");
+                    setDraft({ ...draft, floor, parentId: parent?.id ?? null });
+                  }}
                 >
                   <option value="">None</option>
                   {floorOptions.map((f) => (
@@ -781,6 +798,12 @@ export function Locations() {
                 placeholder="Programming and computer-based activities"
                 onChange={(event) => setDraft({ ...draft, function: event.target.value })}
               />
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null })} />
+                <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null })} />
+              </div>
+              <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
 
               <Field
                 label="DESCRIPTION"
