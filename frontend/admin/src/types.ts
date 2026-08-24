@@ -6,9 +6,16 @@ export type LocationType =
   | "Laboratory"
   | "Restroom"
   | "Facility";
-export type RecordStatus = "Active" | "Inactive" | "Open" | "Closed";
+export type RecordStatus = "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
 export type Shade =
-  "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded";
+  "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded" | "Unknown";
+export interface SourceProvenance {
+  provider: string;
+  sourceType: string;
+  sourceId: number;
+  url: string | null;
+  rawId: string | null;
+}
 export interface Building {
   id: string;
   name: string;
@@ -40,6 +47,9 @@ export interface RouteNode {
   lat: number;
   lng: number;
   sourceOsmNodeId?: number | null;
+  sourceWayId?: number;
+  sourceWayIds?: number[];
+  source?: SourceProvenance;
 }
 export interface Pathway {
   id: string;
@@ -50,10 +60,12 @@ export interface Pathway {
   time: string;
   shade: Shade;
   type: string;
-  direction: "Two-way" | "One-way";
-  status: "Open" | "Closed";
+  direction: "Two-way" | "One-way" | "Unknown";
+  status: "Open" | "Closed" | "Unknown";
   pathPoints: [number, number][];
   sourceOsmNodeIds?: number[];
+  sourceWayId?: number;
+  source?: SourceProvenance;
 }
 export interface UserAccount {
   id: string;

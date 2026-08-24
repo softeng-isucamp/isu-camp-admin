@@ -32,6 +32,7 @@ import {
   userAccountSchema,
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
+import { createLocalAdapter } from "./localAdapter";
 
 
 // ==========================================
@@ -50,6 +51,13 @@ const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
+const localAdapter = createLocalAdapter(
+  USE_GENERATED_MAP_FIXTURE
+    ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
+        nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
+    : { buildings, locations, nodes: routeNodes, pathways },
+  !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
+);
 
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_URL}${path}`, {
@@ -277,6 +285,10 @@ export const services: Services = {
       password
     ) => {
 
+      if (!USE_HTTP_API) {
+        return localAdapter.auth.login(username, password);
+      }
+
       const response = await fetch(
         `${API_URL}/api/login`,
         {
@@ -337,6 +349,10 @@ export const services: Services = {
 
     logout: async () => {
 
+      if (!USE_HTTP_API) {
+        return localAdapter.auth.logout();
+      }
+
       const response = await fetch(
         `${API_URL}/api/logout`,
         {
@@ -376,6 +392,8 @@ export const services: Services = {
     // --------------------------------------
 
     me: async () => {
+
+      if (!USE_HTTP_API) return localAdapter.auth.me();
 
       const response = await fetch(
         `${API_URL}/api/me`,
@@ -576,11 +594,7 @@ export const services: Services = {
 
     savePosition: async (position) => {
       if (USE_HTTP_API) return apiJson<Location>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng, positioned: true }) });
-      const location = locations.find((item) => item.id === position.id);
-      if (!location) throw new Error("Location not found.");
-      location.lat = position.lat;
-      location.lng = position.lng;
-      location.positioned = true;
+      const location = localAdapter.map.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name);
       return wait(clone(location));
     },
@@ -989,22 +1003,22 @@ export const services: Services = {
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
-    : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings)),
+    : wait(clone(localAdapter.map.buildings())),
 
 
     locations: async () => USE_HTTP_API
       ? apiJson<Location[]>("/api/map/locations")
-      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations : locations)),
+      : wait(clone(localAdapter.map.locations())),
 
 
     nodes: async () => USE_HTTP_API
       ? apiJson<RouteNode[]>("/api/map/nodes")
-      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes)),
+      : wait(clone(localAdapter.map.nodes())),
 
 
     pathways: async () => USE_HTTP_API
       ? apiJson<Pathway[]>("/api/map/pathways")
-      : wait(clone(USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways)),
+      : wait(clone(localAdapter.map.pathways())),
 
 
     save: async (edit) => {

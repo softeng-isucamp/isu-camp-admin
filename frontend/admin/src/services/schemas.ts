@@ -9,7 +9,7 @@ const locationTypeSchema = z.enum([
   "Restroom",
   "Facility",
 ]);
-const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed"]);
+const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed", "Unknown"]);
 
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -64,10 +64,10 @@ export const routeImportSchema = z.object({
 export const pathwaySchema = routeImportSchema.extend({
   distance: z.string(),
   time: z.string(),
-  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"]),
+  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded", "Unknown"]),
   type: z.string().min(1),
-  direction: z.enum(["Two-way", "One-way"]),
-  status: z.enum(["Open", "Closed"]),
+  direction: z.enum(["Two-way", "One-way", "Unknown"]),
+  status: z.enum(["Open", "Closed", "Unknown"]),
 });
 export const userAccountSchema = z.object({
   id: z.string().min(1),
