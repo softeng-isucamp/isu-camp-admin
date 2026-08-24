@@ -21,6 +21,7 @@ export interface Building {
   name: string;
   code: string;
   points: [number, number][];
+  source?: SourceProvenance;
 }
 export interface Location {
   id: string;
@@ -36,6 +37,7 @@ export interface Location {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  source?: SourceProvenance;
 }
 export type LocationDraft = Omit<Location, "id"> & { id?: string };
 export interface LocationPosition { id: string; lat: number; lng: number; }

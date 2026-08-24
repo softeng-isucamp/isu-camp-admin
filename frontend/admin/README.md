@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Demo login: `admin_justine` with any non-empty password. Password recovery uses verification code `000000` in the mock adapter.
+Local development login: `admin_justine` / `password123`. This fixed demo identity is available only when `VITE_API_MODE=local`; mock and production modes authenticate through their configured HTTP backend. Password recovery uses verification code `000000` in the mock adapter.
 
 ## Verification
 
