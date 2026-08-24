@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   Marker,
@@ -63,21 +63,60 @@ interface MapControllerProps {
   onMapClick: (latlng: [number, number]) => void;
   flyTarget: [number, number] | null;
   navigationBounds: [[number, number], [number, number]];
+  onViewportChange?: (bounds: L.LatLngBounds | null, zoom: number) => void;
 }
+
+const isPointInBounds = (
+  lat: number,
+  lng: number,
+  bounds: L.LatLngBounds | null,
+  margin = 0.002
+) => {
+  if (!bounds || typeof bounds.getSouth !== "function") return true;
+  const south = bounds.getSouth() - margin;
+  const north = bounds.getNorth() + margin;
+  const west = bounds.getWest() - margin;
+  const east = bounds.getEast() + margin;
+  return lat >= south && lat <= north && lng >= west && lng <= east;
+};
 
 const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
   const changes = new Map(changed.map((item) => [item.id, item]));
   return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
 };
 
-function MapController({ onMapClick, flyTarget, navigationBounds }: MapControllerProps) {
+function MapController({
+  onMapClick,
+  flyTarget,
+  navigationBounds,
+  onViewportChange,
+}: MapControllerProps) {
   const map = useMap();
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  const initialFitDoneRef = useRef(false);
 
   useMapEvents({
     click: (e) => {
       onMapClick([e.latlng.lat, e.latlng.lng]);
     },
+    moveend: () => {
+      if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+        onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+      }
+    },
+    zoomend: () => {
+      if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+        onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+      }
+    },
   });
+
+  useEffect(() => {
+    if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+      onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+    }
+  }, [map]);
 
   useEffect(() => {
     if (flyTarget) {
@@ -89,7 +128,8 @@ function MapController({ onMapClick, flyTarget, navigationBounds }: MapControlle
     if (typeof map.getBoundsZoom !== "function" || typeof map.setMinZoom !== "function") return;
     const minimumZoom = map.getBoundsZoom(navigationBounds, false);
     map.setMinZoom(minimumZoom);
-    if (map.getZoom() < minimumZoom && typeof map.fitBounds === "function") {
+    if (!initialFitDoneRef.current && map.getZoom() < minimumZoom && typeof map.fitBounds === "function") {
+      initialFitDoneRef.current = true;
       map.fitBounds(navigationBounds, { animate: false });
     }
   }, [map, navigationBounds]);
@@ -169,6 +209,10 @@ export function MapEditor() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
+  const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
+  const handleViewportChange = useCallback((bounds: L.LatLngBounds | null) => {
+    setCurrentMapBounds(bounds);
+  }, []);
 
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
@@ -216,6 +260,31 @@ export function MapEditor() {
     const buildings = currentBuildings.filter((item) => !geometryOnCampus(item.points, campusBoundary)).length;
     return locations + nodes + pathways + buildings;
   }, [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways]);
+
+  // Mode-driven dynamic filtering & viewport culling for fast, lag-free rendering
+  const filteredBuildings = useMemo(() => {
+    return currentBuildings;
+  }, [currentBuildings]);
+
+  const filteredLocations = useMemo(() => {
+    const positioned = currentLocations.filter(isPositionedLocation);
+    if (mode === "area") return [];
+    return positioned.filter(
+      (loc) => isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id
+    );
+  }, [currentLocations, currentMapBounds, mode, selected?.id]);
+
+  const filteredNodes = useMemo(() => {
+    if (mode === "place" || mode === "area") return [];
+    return currentNodes.filter(
+      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds) || selected?.id === node.id
+    );
+  }, [currentMapBounds, currentNodes, mode, selected?.id]);
+
+  const filteredPathways = useMemo(() => {
+    if (mode === "area") return [];
+    return currentPathways;
+  }, [currentPathways, mode]);
 
   const selectedLocation =
     currentLocations.find((item) => item.id === selected?.id);
@@ -594,7 +663,7 @@ export function MapEditor() {
           zoom={18}
           minZoom={15}
           maxBounds={navigationBounds}
-          maxBoundsViscosity={1}
+          maxBoundsViscosity={0.7}
           zoomControl={false}
           className="w-full h-full"
         >
@@ -610,34 +679,62 @@ export function MapEditor() {
                 : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             }
           />
-          <MapController onMapClick={onMapClick} flyTarget={flyTarget} navigationBounds={navigationBounds} />
+          <MapController
+            onMapClick={onMapClick}
+            flyTarget={flyTarget}
+            navigationBounds={navigationBounds}
+            onViewportChange={handleViewportChange}
+          />
 
-          {currentBuildings.map((building) => (
-            <Polygon
-              key={building.id}
-              positions={building.points}
-              pathOptions={{
-                color: !geometryOnCampus(building.points, campusBoundary) ? "#b42318" : selected?.id === building.id ? "#e67e22" : "#278b70",
-                fillColor: "#8fd1bd",
-                fillOpacity: selected?.id === building.id ? 0.35 : 0.22,
-                weight: selected?.id === building.id ? 3 : 2,
-              }}
-              eventHandlers={{
-                click: () => selectObject("building", building.id),
-              }}
-            >
-              <Tooltip direction="center" permanent className="map-label">
-                {building.name}{!geometryOnCampus(building.points, campusBoundary) ? " · Outside campus boundary" : ""}
-              </Tooltip>
-            </Polygon>
-          ))}
+          {filteredBuildings.map((building) => {
+            const isSelected = selected?.id === building.id;
+            const buildingFillOpacity =
+              mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
-          {currentPathways.map((path) => {
+            return (
+              <Polygon
+                key={building.id}
+                positions={building.points}
+                pathOptions={{
+                  color: !geometryOnCampus(building.points, campusBoundary)
+                    ? "#b42318"
+                    : isSelected
+                      ? "#e67e22"
+                      : "#278b70",
+                  fillColor: isSelected ? "#f97316" : "#8fd1bd",
+                  fillOpacity: buildingFillOpacity,
+                  weight: isSelected ? 3 : 2,
+                }}
+                eventHandlers={{
+                  click: () => {
+                    selectObject("building", building.id);
+                  },
+                }}
+              >
+                <Tooltip sticky direction="top" className="map-label">
+                  <div className="font-bold text-xs">{building.name}</div>
+                  {building.code && <div className="text-[10px] text-gray-500 font-normal">{building.code}</div>}
+                  {!geometryOnCampus(building.points, campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+              </Polygon>
+            );
+          })}
+
+          {filteredPathways.map((path) => {
             const source = currentNodes.find((node) => node.id === path.sourceNodeId);
             const destination = currentNodes.find((node) => node.id === path.destinationNodeId);
             const isEditingThisPath = editingPathId === path.id && mode === "path";
             const currentPoints = isEditingThisPath ? pathPoints : path.pathPoints;
             const isSelected = selected?.id === path.id || isEditingThisPath;
+
+            const pathOpacity =
+              mode === "place" || mode === "area"
+                ? 0.25
+                : isSelected
+                  ? 0.95
+                  : 0.8;
 
             return source && destination ? (
               <Polyline
@@ -653,43 +750,61 @@ export function MapEditor() {
                     ...currentPoints,
                     ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
                   ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
-                  weight: isSelected ? 6 : 4,
+                  weight: isSelected ? 6 : mode === "path" ? 5 : 4,
                   dashArray: isSelected ? undefined : "7 6",
-                  opacity: isSelected ? 0.95 : 0.8,
+                  opacity: pathOpacity,
                 }}
                 eventHandlers={{
-                  click: () => selectObject("pathway", path.id),
+                  click: () => {
+                    selectObject("pathway", path.id);
+                  },
                 }}
-              />
+              >
+                <Tooltip sticky direction="top" className="map-label">
+                  <div className="font-bold text-xs">{path.name || "Campus Pathway"}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">Shade: {path.shade} · {path.direction}</div>
+                  {!geometryOnCampus([
+                    ...(source ? [[source.lat, source.lng] as [number, number]] : []),
+                    ...currentPoints,
+                    ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
+                  ], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+              </Polyline>
             ) : null;
           })}
 
-          {currentLocations
-            .filter(isPositionedLocation)
-            .map((loc) => {
-              const isSelected = selected?.type === "location" && selected?.id === loc.id;
-              return (
-                <Marker
-                  key={loc.id}
-                  position={[loc.lat, loc.lng]}
-                  icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{
-                    click: () => selectObject("location", loc.id),
-                  }}
-                >
-                  <Tooltip direction="top" offset={[0, -28]}>
-                    {loc.name}{!pointOnCampus([loc.lat, loc.lng], campusBoundary) ? " · Outside campus boundary" : ""}
-                  </Tooltip>
-                  <Popup>
-                    <strong>{loc.name}</strong>
-                    <br />
-                    <small>{loc.type} · {loc.code}</small>
-                  </Popup>
-                </Marker>
-              );
-            })}
+          {filteredLocations.map((loc) => {
+            const isSelected = selected?.type === "location" && selected?.id === loc.id;
+            return (
+              <Marker
+                key={loc.id}
+                position={[loc.lat, loc.lng]}
+                icon={createLocationPinIcon(isSelected)}
+                eventHandlers={{
+                  click: () => {
+                    selectObject("location", loc.id);
+                  },
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -28]} className="map-label">
+                  <div className="font-bold text-xs">{loc.name}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">{loc.type} · {loc.code}</div>
+                  {!pointOnCampus([loc.lat, loc.lng], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+                <Popup>
+                  <strong>{loc.name}</strong>
+                  <br />
+                  <small>{loc.type} · {loc.code}</small>
+                </Popup>
+              </Marker>
+            );
+          })}
 
-          {currentNodes.map((node) => {
+          {filteredNodes.map((node) => {
             const isSelected = selected?.type === "node" && selected?.id === node.id;
             return (
               <Marker
@@ -697,11 +812,17 @@ export function MapEditor() {
                 position={[node.lat, node.lng]}
                 icon={createNodeIcon(isSelected)}
                 eventHandlers={{
-                  click: () => selectObject("node", node.id),
+                  click: () => {
+                    selectObject("node", node.id);
+                  },
                 }}
               >
-                <Tooltip direction="top" offset={[0, -10]}>
-                  {node.name}{!pointOnCampus([node.lat, node.lng], campusBoundary) ? " · Outside campus boundary" : ""}
+                <Tooltip direction="top" offset={[0, -10]} className="map-label">
+                  <div className="font-bold text-xs">{node.name}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">Route Node ({node.nodeType})</div>
+                  {!pointOnCampus([node.lat, node.lng], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
                 </Tooltip>
               </Marker>
             );
