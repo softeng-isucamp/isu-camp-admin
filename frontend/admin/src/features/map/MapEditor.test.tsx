@@ -76,8 +76,8 @@ describe("Map Editor preview", () => {
     vi.mocked(services.map.pathways).mockResolvedValue(generatedMapFixture.pathways);
     renderEditor();
 
-    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Recorded" } });
-    expect(await screen.findByRole("button", { name: /Recorded Library Location/ })).toBeInTheDocument();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Main Library" } });
+    expect(await screen.findByRole("button", { name: /Main Library Location/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Place" }));
     clickMap(16.8, 121.7);
 

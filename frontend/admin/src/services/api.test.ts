@@ -9,6 +9,9 @@ describe("mock service contracts", () => {
   });
 
   it("authenticates the seeded administrator", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
       .mockResolvedValueOnce(
@@ -25,9 +28,9 @@ describe("mock service contracts", () => {
       );
 
     await expect(
-      services.auth.login("admin_justine", "password123"),
+      httpServices.auth.login("admin_justine", "password123"),
     ).resolves.toEqual({ id: "1", username: "admin01" });
-    await expect(services.auth.login("wrong", "password123")).rejects.toThrow(
+    await expect(httpServices.auth.login("wrong", "password123")).rejects.toThrow(
       "Invalid username or password",
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -39,6 +42,7 @@ describe("mock service contracts", () => {
         body: JSON.stringify({ username: "admin_justine", password: "password123" }),
       }),
     );
+    vi.unstubAllEnvs();
   });
 
   it("filters locations through the service boundary", async () => {

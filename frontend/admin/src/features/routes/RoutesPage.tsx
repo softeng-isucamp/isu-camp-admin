@@ -274,6 +274,7 @@ export function RoutesPage() {
                 <option>Mostly Shaded</option>
                 <option>Partial Shade</option>
                 <option>Unshaded</option>
+                <option>Unknown</option>
               </SelectField>
               <Button
                 variant="subtle"
@@ -534,6 +535,7 @@ export function RoutesPage() {
             >
               <option value="Open">Open</option>
               <option value="Closed">Closed</option>
+              <option value="Unknown">Unknown</option>
             </SelectField>
           </div>
           <div className="modal-actions">

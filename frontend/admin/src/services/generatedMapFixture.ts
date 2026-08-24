@@ -6,14 +6,14 @@ type GeneratedFixture = typeof fixture;
 const asBuilding = (value: GeneratedFixture["campus"]["buildings"][number]): Building => ({
   id: value.id,
   name: value.name ?? "Unnamed OSM building",
-  code: value.ref ?? value.id,
+  code: value.ref ?? `OSM ${value.source.sourceType} ${value.source.sourceId}`,
   points: value.points.map(([lat, lng]) => [lat, lng]),
 });
 
 const asLocation = (value: GeneratedFixture["campus"]["locations"][number]): Location => ({
   id: value.id,
   name: value.name,
-  code: value.code || value.id,
+  code: value.code || `OSM ${value.source.sourceType} ${value.source.sourceId}`,
   type: value.type as Location["type"],
   parentId: value.parentId,
   status: value.status as Location["status"],
@@ -24,11 +24,14 @@ const asLocation = (value: GeneratedFixture["campus"]["locations"][number]): Loc
 
 const asNode = (value: GeneratedFixture["walkingNetwork"]["routeNodes"][number]): RouteNode => ({
   id: value.id,
-  name: value.name,
+  name: value.name || `OSM node ${value.sourceOsmNodeId ?? value.id}`,
   nodeType: value.nodeType as RouteNode["nodeType"],
   lat: value.lat,
   lng: value.lng,
   sourceOsmNodeId: value.sourceOsmNodeId,
+  sourceWayId: value.sourceWayId,
+  sourceWayIds: value.sourceWayIds,
+  source: value.source,
 });
 
 const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]): Pathway => ({
@@ -38,6 +41,8 @@ const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]
   destinationNodeId: value.destinationNodeId,
   pathPoints: value.pathPoints.map(([lat, lng]) => [lat, lng]),
   sourceOsmNodeIds: value.sourceOsmNodeIds,
+  sourceWayId: value.sourceWayId,
+  source: value.source,
   distance: value.distance,
   time: value.time,
   shade: value.shade as Pathway["shade"],

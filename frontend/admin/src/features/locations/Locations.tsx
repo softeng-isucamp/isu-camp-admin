@@ -739,6 +739,7 @@ export function Locations() {
                 >
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
+                  <option value="Unknown">Unknown</option>
                 </SelectField>
               </div>
 
