@@ -8,6 +8,7 @@ const asBuilding = (value: GeneratedFixture["campus"]["buildings"][number]): Bui
   name: value.name ?? "Unnamed OSM building",
   code: value.ref ?? `OSM ${value.source.sourceType} ${value.source.sourceId}`,
   points: value.points.map(([lat, lng]) => [lat, lng]),
+  source: value.source,
 });
 
 const asLocation = (value: GeneratedFixture["campus"]["locations"][number]): Location => ({
@@ -20,6 +21,7 @@ const asLocation = (value: GeneratedFixture["campus"]["locations"][number]): Loc
   lat: value.lat,
   lng: value.lng,
   positioned: value.positioned,
+  source: value.source,
 });
 
 const asNode = (value: GeneratedFixture["walkingNetwork"]["routeNodes"][number]): RouteNode => ({

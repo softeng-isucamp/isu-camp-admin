@@ -184,6 +184,8 @@ export function MapEditor() {
     const merged = overlayChanges(directoryBuildings, localBuildings);
     return mode === "area" && points.length > 0 ? [...merged, { id: "pending-building", name: buildingName, code: buildingCode, points }] : merged;
   }, [buildingCode, buildingName, directoryBuildings, localBuildings, mode, points]);
+  const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
+    .some((item) => item.source?.provider === "OpenStreetMap");
   const campusBoundary = useMemo(
     () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
     [directoryBuildings],
@@ -599,7 +601,7 @@ export function MapEditor() {
           <TileLayer
             attribution={
               basemap === "satellite"
-                ? "© Esri"
+                ? `© Esri${displaysOsmOverlays ? " · © OpenStreetMap contributors" : ""}`
                 : "© OpenStreetMap contributors"
             }
             url={

@@ -41,9 +41,9 @@ import { createLocalAdapter } from "./localAdapter";
 
 export type ApiMode = "local" | "mock" | "real";
 
-// `local` preserves the deterministic in-browser fixtures used by unit tests.
-// Development and Playwright should set VITE_API_MODE=mock; production points
-// at the remote backend with VITE_API_MODE=real and VITE_API_BASE_URL.
+// `local` is the explicit development/test adapter for deterministic in-browser fixtures.
+// HTTP-backed environments use `mock` for the mock API or `real` for production,
+// with VITE_API_BASE_URL selecting the backend when needed.
 export const API_MODE: ApiMode =
   (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local";
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";

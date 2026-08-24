@@ -15,7 +15,7 @@ vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Marker: ({ position, eventHandlers, draggable }: { position: [number, number]; eventHandlers?: { click?: () => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean }) => typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <div data-testid="saved-map-marker" data-position={position.join(",")} /> : null,
   Polygon: () => null, Polyline: ({ positions }: { positions: [number, number][] }) => <output data-testid="path-geometry" data-positions={JSON.stringify(positions)} />, Popup: () => null,
-  TileLayer: () => null, Tooltip: () => null,
+  TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: () => null,
   useMap: () => ({ flyTo: vi.fn() }),
   useMapEvents: ({ click }: { click: (event: { latlng: { lat: number; lng: number } }) => void }) => {
     mapClickHandler = click;
@@ -69,6 +69,16 @@ describe("Map Editor preview", () => {
     expect(screen.getByText("No pending changes.")).toBeInTheDocument();
   });
 
+  it("credits OSM fixture overlays while using satellite tiles", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Satellite" }));
+
+    expect(screen.getByLabelText("Map attribution")).toHaveTextContent("Esri");
+    expect(screen.getByLabelText("Map attribution")).toHaveTextContent("OpenStreetMap contributors");
+  });
+
   it("loads the generated OSM fixture and keeps boundary safeguards active", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
     vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
@@ -82,6 +92,56 @@ describe("Map Editor preview", () => {
     clickMap(16.8, 121.7);
 
     expect(screen.getByText("New or modified geometry must stay inside the ISU Echague campus boundary.")).toBeInTheDocument();
+  });
+
+  it("moves an imported route node from the generated fixture", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
+    vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
+    vi.mocked(services.map.nodes).mockResolvedValue(generatedMapFixture.nodes);
+    vi.mocked(services.map.pathways).mockResolvedValue(generatedMapFixture.pathways);
+    const importedNode = generatedMapFixture.nodes[0];
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: importedNode.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `${importedNode.name} Route Node` }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
+    clickMap(16.7214, 121.6908);
+    fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent(`${importedNode.name} · node`);
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("moved (1)");
+  });
+
+  it("edits an imported pathway from the generated fixture", async () => {
+    vi.mocked(services.map.nodes).mockResolvedValue(generatedMapFixture.nodes);
+    vi.mocked(services.map.pathways).mockResolvedValue(generatedMapFixture.pathways);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: generatedMapFixture.pathways[0].name } });
+    fireEvent.click((await screen.findAllByRole("button", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Path Points" }));
+    const importedPoint = generatedMapFixture.pathways[0].pathPoints[0];
+    fireEvent.click((await screen.findAllByRole("button", { name: `Path Point at ${importedPoint.join(",")}` }))[0]);
+    fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.72095" } });
+    fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6895" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent(`${generatedMapFixture.pathways[0].name} · pathway`);
+  });
+
+  it("retains building geometry validation for an imported building", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { ...generatedMapFixture.buildings[0], points: [generatedMapFixture.buildings[0].points[0], generatedMapFixture.buildings[0].points[1], generatedMapFixture.buildings[0].points[0]] },
+      ...generatedMapFixture.buildings.slice(1),
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
+
+    expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
   });
 
   it("blocks a missing Route Node association and focuses its correction field", async () => {
