@@ -219,7 +219,7 @@ export function Users() {
           </div>
         </div>
 
-        <div className="table-wrap" style={{ overflowX: "visible" }}>
+        <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
             <thead>
               <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#4b5563", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -230,7 +230,9 @@ export function Users() {
               </tr>
             </thead>
             <tbody>
-              {visibleUsers.map((user) => (
+              {visibleUsers.map((user, index) => {
+                const isNearBottom = index >= 3 && index >= visibleUsers.length - 2;
+                return (
                 <tr key={user.id} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -270,7 +272,8 @@ export function Users() {
                           style={{
                             position: "absolute",
                             right: "20px",
-                            top: "48px",
+                            top: isNearBottom ? "auto" : "44px",
+                            bottom: isNearBottom ? "44px" : "auto",
                             background: "#fff",
                             borderRadius: "14px",
                             boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
@@ -329,7 +332,8 @@ export function Users() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {!filteredUsers.length && <Empty>No users found.</Empty>}

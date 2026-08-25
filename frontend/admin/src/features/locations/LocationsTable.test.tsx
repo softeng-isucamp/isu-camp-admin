@@ -148,6 +148,34 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(cancelButton);
   });
 
+  it("creates a building, floor, and unpositioned room through the hierarchy fields", async () => {
+    const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const floor = await services.locations.save({ id: "hierarchy-test-floor", name: "Hierarchy Test Floor", code: "HIER-FLR", type: "Floor", parentId: building.id, building: building.name, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    await waitFor(() => expect(screen.getAllByRole("option", { name: floor.name }).length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+    fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Hierarchy Test Room" } });
+    fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "HIER-ROOM" } });
+    fireEvent.change(screen.getByLabelText("PARENT BUILDING"), { target: { value: building.name } });
+    fireEvent.change(screen.getByLabelText("PARENT FLOOR"), { target: { value: floor.id } });
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+    await screen.findByText(/saved successfully/i);
+    const room = (await services.locations.list("Hierarchy Test Room")).items[0];
+    expect(room).toEqual(expect.objectContaining({
+      type: "Room",
+      parentId: building.id,
+      building: building.name,
+      floor: floor.name,
+      lat: null,
+      lng: null,
+      positioned: false,
+    }));
+
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Hierarchy Test Room" } });
+    expect(await screen.findByText("Hierarchy Test Room")).toBeInTheDocument();
+  });
+
   it("opens the Bulk Import modal with a file input and template", async () => {
     renderLocations();
     const bulkImportButton = await screen.findByRole("button", { name: /bulk import/i }, { timeout: 4000 });

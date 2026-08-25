@@ -104,6 +104,7 @@ const matches = (value: string, query: string) =>
 export type FailureKey =
   | "locationSave"
   | "locationRemove"
+  | "buildingRemove"
   | "routeSave"
   | "userUpdate"
   | "mapSave";
@@ -111,6 +112,7 @@ export type FailureKey =
 export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
   locationRemove: false,
+  buildingRemove: false,
   routeSave: false,
   userUpdate: false,
   mapSave: false,
@@ -209,6 +211,8 @@ export interface Services {
 
   map: {
     buildings(): Promise<typeof buildings>;
+
+    removeBuilding(id: string): Promise<void>;
 
     locations(): Promise<Location[]>;
 
@@ -995,6 +999,18 @@ export const services: Services = {
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
     : wait(clone(localAdapter.map.buildings())),
+
+    removeBuilding: async (id) => {
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/map/buildings/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return;
+      }
+
+      failIfConfigured("buildingRemove");
+      const removed = localAdapter.map.removeBuilding(id);
+      if (removed) addAudit("Removed Building", removed.name, "Admin", removed.id);
+      return wait(undefined);
+    },
 
 
     locations: async () => USE_HTTP_API

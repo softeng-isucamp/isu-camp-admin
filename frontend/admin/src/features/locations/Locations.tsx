@@ -896,10 +896,11 @@ export function Locations() {
                 </SelectField>
                 <SelectField
                   label="PARENT FLOOR"
-                  value={draft.parentId ?? ""}
+                  value={floors.find((item) => item.name === draft.floor && item.parentId === allLocations.find((location) => location.type === "Building" && location.name === draft.building)?.id)?.id ?? ""}
                   onChange={(event) => {
-                    const parent = floors.find((item) => item.id === event.target.value);
-                    setDraft({ ...draft, floor: parent?.name, parentId: parent?.parentId ?? null });
+                    const parent = allLocations.find((item) => item.id === event.target.value && item.type === "Floor");
+                    const building = allLocations.find((item) => item.type === "Building" && item.name === draft.building);
+                    setDraft({ ...draft, floor: parent?.name, parentId: building?.id ?? null });
                   }}
                 >
                   <option value="">None</option>

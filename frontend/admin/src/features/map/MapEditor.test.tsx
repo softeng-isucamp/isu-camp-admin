@@ -14,7 +14,9 @@ vi.mock("leaflet", () => ({ default: { divIcon: () => ({}) } }));
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Marker: ({ position, eventHandlers, draggable }: { position: [number, number]; eventHandlers?: { click?: () => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean }) => typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <div data-testid="saved-map-marker" data-position={position.join(",")} /> : null,
-  Polygon: () => null, Polyline: ({ positions }: { positions: [number, number][] }) => <output data-testid="path-geometry" data-positions={JSON.stringify(positions)} />, Popup: () => null,
+  Polygon: ({ eventHandlers }: { eventHandlers?: { click?: () => void } }) => <button aria-label="building polygon" onClick={eventHandlers?.click} />,
+  Polyline: ({ positions }: { positions: [number, number][] }) => <output data-testid="path-geometry" data-positions={JSON.stringify(positions)} />,
+  Popup: () => null,
   TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: () => null,
   useMap: () => ({ flyTo: vi.fn() }),
   useMapEvents: ({ click }: { click: (event: { latlng: { lat: number; lng: number } }) => void }) => {
@@ -194,6 +196,16 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("New Ramp · node");
   });
 
+  it("opens the new location modal with the coordinates from a Place-mode map click", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Place" }));
+    clickMap(16.7208, 121.6902);
+
+    expect(screen.getByRole("dialog", { name: "Add Location" })).toHaveTextContent(
+      "Latitude: 16.720800 · Longitude: 121.690200",
+    );
+  });
+
   it("persists a seeded Route Node's moved position", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
@@ -220,10 +232,49 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
+    expect(Array.from(document.querySelectorAll('[data-testid="saved-map-marker"]')).some((marker) =>
+      marker.getAttribute("data-position")?.startsWith("16.720666"),
+    )).toBe(true);
+
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     const preview = screen.getByRole("dialog", { name: "Preview Map" });
     expect(preview).toHaveTextContent("added (1)");
     expect(preview).toHaveTextContent("Science Annex · building");
+  });
+
+  it("places an Entrance by map click and allows its coordinates to be edited manually", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Place" }));
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "Science Annex Entrance" } });
+    clickMap(16.7208, 121.6902);
+
+    fireEvent.change(screen.getByLabelText("Placement latitude"), { target: { value: "16.7211" } });
+    fireEvent.change(screen.getByLabelText("Placement longitude"), { target: { value: "121.6907" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Node" }));
+
+    expect(screen.getByText("16.721100")).toBeInTheDocument();
+    expect(screen.getByText("121.690700")).toBeInTheDocument();
+    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7211,121.6907"]')).toBeTruthy();
+  });
+
+  it("shows a building room directory and associated entrances in the inspector", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-room-test", name: "Engineering Hall", code: "ENG-HALL", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "room-204", name: "Room 204", code: "204", type: "Room", parentId: "building-room-test", building: "Engineering Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false },
+    ]);
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "entrance-eng", name: "Main Entrance", nodeType: "Entrance", associatedPlaceId: "building-room-test", lat: 16.7205, lng: 121.6895 },
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
+
+    expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("2nd Floor");
+    expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
+    expect(screen.getByRole("region", { name: "Building entrances" })).toHaveTextContent("Main Entrance");
   });
 
   it("focuses Building code correction guidance for an invalid saved footprint", async () => {

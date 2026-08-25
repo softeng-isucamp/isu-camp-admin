@@ -41,6 +41,11 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
     },
     map: {
       buildings: () => mapData.buildings,
+      removeBuilding: (id: string): Building | undefined => {
+        const building = mapData.buildings.find((item) => item.id === id);
+        if (building) building.status = "Inactive";
+        return building;
+      },
       locations: () => mapData.locations,
       nodes: () => mapData.nodes,
       pathways: () => mapData.pathways,
