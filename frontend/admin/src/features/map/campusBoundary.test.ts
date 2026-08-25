@@ -18,6 +18,14 @@ describe("Echague campus boundary", () => {
     expect(geometryOnCampus([[16.7208, 121.6896], [16.73, 121.68]], echagueCampusBoundary)).toBe(false);
   });
 
+  it("rejects a segment that leaves a concave campus boundary between vertices", () => {
+    const concaveBoundary: [number, number][] = [
+      [0, 0], [0, 4], [4, 4], [4, 3], [1, 3], [1, 1], [4, 1], [4, 0],
+    ];
+
+    expect(geometryOnCampus([[3, 0.5], [3, 3.5]], concaveBoundary)).toBe(false);
+  });
+
   it("adds a 100 metre navigation buffer around the campus", () => {
     const bounds = paddedCampusBounds(echagueCampusBoundary);
     expect(bounds.south).toBeLessThan(Math.min(...echagueCampusBoundary.map(([lat]) => lat)));

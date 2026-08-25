@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { reviewMapDraft } from "./mapEditing";
+import { polygonCentroid, reviewMapDraft } from "./mapEditing";
 import { echagueCampusBoundary } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -23,6 +23,10 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("computes a building center marker from polygon vertices", () => {
+    expect(polygonCentroid([[16, 121], [18, 121], [18, 123], [16, 123]])).toEqual([17, 122]);
+  });
+
   it("reports no pending changes for an unchanged map", () => {
     const result = reviewMapDraft({
       original: { locations: [location()], nodes: [node(), node({ id: "node-2" })], pathways: [pathway()], buildings: [building()] },

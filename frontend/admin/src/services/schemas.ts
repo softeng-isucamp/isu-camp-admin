@@ -9,7 +9,7 @@ const locationTypeSchema = z.enum([
   "Restroom",
   "Facility",
 ]);
-const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed"]);
+const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed", "Unknown"]);
 
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required."),
@@ -30,7 +30,7 @@ export const resetPasswordSchema = resetSchema
     message: "Passwords do not match.",
     path: ["confirmPassword"],
   });
-export const locationImportSchema = z.object({
+const locationImportFields = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   code: z.string().min(1),
@@ -40,19 +40,35 @@ export const locationImportSchema = z.object({
   lat: z.number().nullable(),
   lng: z.number().nullable(),
 });
-export const locationSchema = locationImportSchema.extend({
+const validateCoordinates = (value: { lat: number | null; lng: number | null }, ctx: z.RefinementCtx) => {
+  const hasLat = value.lat !== null;
+  const hasLng = value.lng !== null;
+  if (hasLat !== hasLng) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [hasLat ? "lng" : "lat"], message: "Latitude and longitude must be provided together." });
+  }
+  if (value.lat !== null && (value.lat < -90 || value.lat > 90)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lat"], message: "Latitude must be between -90 and 90." });
+  }
+  if (value.lng !== null && (value.lng < -180 || value.lng > 180)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lng"], message: "Longitude must be between -180 and 180." });
+  }
+};
+export const locationImportSchema = locationImportFields.superRefine(validateCoordinates);
+export const locationSchema = locationImportFields.extend({
   building: z.string().optional(),
   floor: z.string().optional(),
   function: z.string().optional(),
   keywords: z.string().optional(),
   positioned: z.boolean(),
 }).superRefine((value, ctx) => {
+  validateCoordinates(value, ctx);
   const hasLat = value.lat !== null;
   const hasLng = value.lng !== null;
-  if (hasLat !== hasLng) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Latitude and longitude must be provided together." });
   if (value.positioned !== (hasLat && hasLng)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Positioned must match whether coordinates are present." });
-  if (value.lat !== null && (value.lat < -90 || value.lat > 90)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lat"], message: "Latitude must be between -90 and 90." });
-  if (value.lng !== null && (value.lng < -180 || value.lng > 180)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lng"], message: "Longitude must be between -180 and 180." });
+  const isChild = ["Room", "Office", "Laboratory", "Restroom"].includes(value.type);
+  if (isChild && (value.lat !== null || value.lng !== null || value.positioned)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Child locations must not be positioned on the outdoor map." });
+  }
 });
 export const routeImportSchema = z.object({
   id: z.string(),
@@ -64,10 +80,10 @@ export const routeImportSchema = z.object({
 export const pathwaySchema = routeImportSchema.extend({
   distance: z.string(),
   time: z.string(),
-  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"]),
+  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded", "Unknown"]),
   type: z.string().min(1),
-  direction: z.enum(["Two-way", "One-way"]),
-  status: z.enum(["Open", "Closed"]),
+  direction: z.enum(["Two-way", "One-way", "Unknown"]),
+  status: z.enum(["Open", "Closed", "Unknown"]),
 });
 export const userAccountSchema = z.object({
   id: z.string().min(1),

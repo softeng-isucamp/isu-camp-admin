@@ -4,7 +4,7 @@ test("seeded administrator previews the unchanged Map Editor baseline", async ({
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   await page.goto("/login");
-  await page.getByLabel("USERNAME").fill("admin01");
+  await page.getByLabel("USERNAME").fill("admin_justine");
   await page.getByLabel(/PASSWORD/).fill("password123");
   await page.getByRole("button", { name: /login/i }).click();
   await expect(page).toHaveURL(/dashboard/);

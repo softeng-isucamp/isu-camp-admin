@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Card, Badge } from "../../components/UI";
+import { Card, Badge, Empty } from "../../components/UI";
 import { services } from "../../services/api";
 import campusMap from "../../assets/figma/dashboard/campus-map.png";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
@@ -130,25 +130,29 @@ export function Dashboard() {
               </div>
             </div>
             <div className="rank-list">
-              {(data?.topSearched ?? []).map((r) => (
-                <div
-                  className="rank-row"
-                  key={r.rank}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/locations?q=${encodeURIComponent(r.name)}`)}
-                  title={`View ${r.name} in directory`}
-                >
-                  <b>{r.rank}</b>
-                  <div>
-                    <strong>{r.name}</strong>
-                    <small>{r.context}</small>
+              {(data?.topSearched ?? []).length === 0 ? (
+                <Empty>No search analytics recorded yet.</Empty>
+              ) : (
+                (data?.topSearched ?? []).map((r) => (
+                  <div
+                    className="rank-row"
+                    key={r.rank}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/locations?q=${encodeURIComponent(r.name)}`)}
+                    title={`View ${r.name} in directory`}
+                  >
+                    <b>{r.rank}</b>
+                    <div>
+                      <strong>{r.name}</strong>
+                      <small>{r.context}</small>
+                    </div>
+                    <span>
+                      <strong>{r.searches}</strong>
+                      <small>searches</small>
+                    </span>
                   </div>
-                  <span>
-                    <strong>{r.searches}</strong>
-                    <small>searches</small>
-                  </span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </Card>
         </div>
