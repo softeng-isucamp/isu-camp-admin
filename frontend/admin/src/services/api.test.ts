@@ -177,6 +177,28 @@ describe("mock service contracts", () => {
     });
   });
 
+  it("soft-deletes buildings and records an exact-ID audit entry", async () => {
+    const building = {
+      id: "ticket-01-map-building",
+      name: "Map Building",
+      code: "MAP-BLDG",
+      points: [[16.72, 121.69], [16.721, 121.69], [16.72, 121.691]] as [number, number][],
+      status: "Active" as const,
+    };
+
+    await services.map.save({ buildings: [building] });
+    await services.map.removeBuilding(building.id);
+
+    expect((await services.map.buildings()).find((item) => item.id === building.id)).toMatchObject({
+      status: "Inactive",
+    });
+    expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({
+      action: "Removed Building",
+      target: building.name,
+      targetId: building.id,
+    });
+  });
+
   it("rejects positioned child locations", async () => {
     await expect(services.locations.save({
       id: "positioned-child", name: "Positioned", code: "POS", type: "Office", parentId: "building",

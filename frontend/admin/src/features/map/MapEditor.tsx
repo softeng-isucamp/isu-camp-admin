@@ -20,7 +20,6 @@ import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { polygonCentroid, reviewMapDraft, type MapObjectReference } from "./mapEditing";
 import {
   echagueCampusBoundary,
-  formatBoundaryCandidate,
   geometryOnCampus,
   paddedCampusBounds,
   pointOnCampus,
@@ -387,7 +386,6 @@ export function MapEditor() {
     if (mode === "area") {
       const nextPoints = [...points, point];
       setPoints(nextPoints);
-      console.info("[Map Editor]", formatBoundaryCandidate(nextPoints));
       setDirty(true);
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
@@ -522,7 +520,6 @@ export function MapEditor() {
       setError("The building footprint must stay inside the ISU Echague campus boundary.");
       return;
     }
-    console.info("[Map Editor]", formatBoundaryCandidate(points));
     const building: Building = {
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
@@ -731,7 +728,13 @@ export function MapEditor() {
                   )}
                 </Tooltip>
               </Polygon>
-              <Marker position={polygonCentroid(building.points)} icon={L.divIcon({ className: "building-centroid", html: "<span>🏢</span>", iconSize: [24, 24], iconAnchor: [12, 12] })} eventHandlers={{ click: () => selectObject("building", building.id) }} />
+              {localBuildings.some((draft) => draft.id === building.id) && (
+                <Marker
+                  position={polygonCentroid(building.points)}
+                  icon={createLocationPinIcon(isSelected)}
+                  eventHandlers={{ click: () => selectObject("building", building.id) }}
+                />
+              )}
               </Fragment>
             );
           })}
@@ -1073,13 +1076,15 @@ export function MapEditor() {
             ) : mode === "area" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building Footprint</h2>
-                <p className="text-xs text-[#3f4941] mt-1">Click the campus boundary points in order. Each point is logged; when finished, click <strong>Log Boundary Geometry</strong>, then copy the <code>ISU_ECHAGUE_BOUNDARY_CANDIDATE=...</code> line from the browser console and send it to me.</p>
+                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building / Location Footprint</h2>
+                <p className="text-xs text-[#3f4941] mt-1">
+                  Click on the map to plot the perimeter corners of the building or area footprint. A minimum of 3 points is required to form a closed polygon.
+                </p>
                 <label className="mt-3 block text-xs font-semibold text-[#3f4941]">Building name
-                  <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                  <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
-                  <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                  <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                 </label>
                 <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -1104,19 +1109,12 @@ export function MapEditor() {
                   <button
                     type="button"
                     className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                    onClick={() => setMode("select")}
+                    onClick={() => {
+                      setPoints([]);
+                      setMode("select");
+                    }}
                   >
                     Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={points.length < 3}
-                    onClick={() => {
-                      if (points.length >= 3) console.info("[Map Editor]", formatBoundaryCandidate(points));
-                    }}
-                    className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-full text-xs font-bold hover:bg-amber-100 disabled:opacity-40 transition cursor-pointer"
-                  >
-                    Log Boundary Geometry
                   </button>
                   <button
                     type="button"

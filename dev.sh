@@ -67,61 +67,13 @@ if [ ! -d "frontend/admin/node_modules" ]; then
     cd frontend/admin && npm install && cd "$PROJECT_DIR"
 fi
 
+# Point the admin frontend at the generated OSM development fixture.
+# Process-env variables override frontend/admin/.env in Vite.
+export VITE_API_MODE=local
+export VITE_MAP_FIXTURE=osm
+
 echo "[SETUP] Checking database connection..."
-venv/bin/python - <<'PY'
-from dotenv import dotenv_values
-from urllib.parse import urlparse
-import socket
-import sys
-
-database_url = dotenv_values(".env").get("SUPABASE_DATABASE_URL", "")
-
-if not database_url:
-    print("[ERROR] SUPABASE_DATABASE_URL is missing from .env")
-    sys.exit(1)
-
-parsed = urlparse(database_url)
-host = parsed.hostname
-port = parsed.port or 5432
-
-if not host:
-    print("[ERROR] SUPABASE_DATABASE_URL does not contain a database host")
-    sys.exit(1)
-
-print(f"[SETUP] Database host: {host}:{port}")
-
-try:
-    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-except socket.gaierror as error:
-    print(f"[ERROR] Could not resolve database host: {error}")
-    sys.exit(1)
-
-families = {family for family, *_ in infos}
-
-if socket.AF_INET6 in families and socket.AF_INET not in families:
-    try:
-        with open("/proc/net/ipv6_route", encoding="ascii") as routes:
-            has_default_ipv6_route = any(
-                line.startswith("0" * 32) and line.split()[8] != "lo"
-                for line in routes
-            )
-    except OSError:
-        has_default_ipv6_route = False
-
-    if not has_default_ipv6_route:
-        print("[ERROR] Database host resolves only to IPv6, but this machine has no IPv6 default route.")
-        print("[ERROR] Use the Supabase session pooler URL in .env, or enable IPv6 networking.")
-        sys.exit(1)
-
-try:
-    with socket.create_connection((host, port), timeout=5):
-        pass
-except OSError as error:
-    print(f"[ERROR] Could not reach database host over TCP: {error}")
-    sys.exit(1)
-
-print("[SETUP] Database TCP check passed.")
-PY
+venv/bin/python app/services/check_db.py
 
 # Start Backend
 echo "[1/2] Starting Flask Backend on http://127.0.0.1:5000..."

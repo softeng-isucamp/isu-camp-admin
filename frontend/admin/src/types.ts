@@ -21,6 +21,7 @@ export interface Building {
   name: string;
   code: string;
   points: [number, number][];
+  status?: RecordStatus;
   source?: SourceProvenance;
 }
 export interface Location {
