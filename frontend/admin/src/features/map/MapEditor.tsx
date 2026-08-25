@@ -201,7 +201,7 @@ export function MapEditor() {
     string | null
   >(null);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
-  const [newLocation, setNewLocation] = useState({ name: "", code: "", type: "Facility" as Location["type"], status: "Active" as Location["status"] });
+  const [newLocation, setNewLocation] = useState({ name: "", code: "", type: "Facility" as Location["type"], status: "Active" as Location["status"], parentId: null as string | null, building: "", floor: "" });
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
@@ -492,8 +492,8 @@ export function MapEditor() {
   };
 
   const handleSaveNewLocation = () => {
-    if (!temporary || !newLocation.name.trim() || !newLocation.code.trim()) return;
-    const location: Location = { id: `location-${Date.now()}`, ...newLocation, parentId: null, lat: temporary[0], lng: temporary[1], positioned: true };
+    if (!newLocation.name.trim() || !newLocation.code.trim()) return;
+    const location: Location = { id: `location-${Date.now()}`, ...newLocation, lat: temporary?.[0] ?? null, lng: temporary?.[1] ?? null, positioned: Boolean(temporary) };
     setLocalLocations((current) => [...current, location]);
     setDirty(true); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
   };
@@ -1358,6 +1358,26 @@ export function MapEditor() {
                     <dd className="text-[#191c1d] font-bold">{selectedBuilding.code}</dd>
                   </div>
                 </dl>
+                <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
+                    <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => {
+                      setTemporary(null);
+                      setNewLocation({ name: "", code: "", type: "Room", status: "Active", parentId: selectedBuilding.id, building: selectedBuilding.name, floor: "" });
+                      setAddLocationOpen(true);
+                    }}>＋ Add Room</button>
+                  </div>
+                  {(() => {
+                    const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
+                    const grouped = new Map<string, Location[]>();
+                    children.forEach((child) => { const key = child.floor || "Unassigned floor"; grouped.set(key, [...(grouped.get(key) ?? []), child]); });
+                    return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => <div key={floor} className="mt-3"><div className="text-[10px] font-bold uppercase tracking-wide text-[#005931]">{floor}</div>{rooms.map((room) => <div key={room.id} className="flex justify-between gap-2 py-1 text-xs"><span className="font-semibold">{room.name}</span><span className="text-[#6b7280]">{room.code}</span></div>)}</div>) : <p className="mt-2 text-xs text-[#6b7280]">No rooms yet.</p>;
+                  })()}
+                </section>
+                <section aria-label="Building entrances" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
+                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { setPlacingObjectType("node"); setPlacingNodeType("Entrance"); setPlacingAssociatedPlaceId(selectedBuilding.id); setMode("place"); }}>＋ Place Entrance</button></div>
+                  {currentNodes.filter((node) => node.nodeType === "Entrance" && node.associatedPlaceId === selectedBuilding.id).map((node) => <div key={node.id} className="py-1 text-xs">{node.name}</div>)}
+                </section>
                 <div className="mt-4">
                   <button
                     type="button"
@@ -1578,7 +1598,13 @@ export function MapEditor() {
           <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Type
             <select aria-label="New location type" value={newLocation.type} onChange={(e) => setNewLocation({ ...newLocation, type: e.target.value as Location["type"] })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option>Facility</option><option>Building</option><option>Room</option><option>Office</option></select>
           </label>
-          <div className="mt-3 text-xs text-[#3f4941]">Latitude: {temporary?.[0].toFixed(6)} · Longitude: {temporary?.[1].toFixed(6)}</div>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Parent Building
+            <select aria-label="New location parent building" disabled={Boolean(newLocation.parentId)} value={newLocation.parentId ?? ""} onChange={(e) => { const building = currentBuildings.find((item) => item.id === e.target.value); setNewLocation({ ...newLocation, parentId: e.target.value || null, building: building?.name ?? "" }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option value="">None / Standalone</option>{currentBuildings.map((building) => <option key={building.id} value={building.id}>{building.name}</option>)}</select>
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Floor
+            <input aria-label="New location floor" value={newLocation.floor} onChange={(e) => setNewLocation({ ...newLocation, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <div className="mt-3 text-xs text-[#3f4941]">{temporary ? `Latitude: ${temporary[0].toFixed(6)} · Longitude: ${temporary[1].toFixed(6)}` : "This room will be added without a map position."}</div>
           <div className="modal-actions"><Button variant="subtle" onClick={() => setAddLocationOpen(false)}>Cancel</Button><Button disabled={!newLocation.name.trim() || !newLocation.code.trim()} onClick={handleSaveNewLocation}>Add Location</Button></div>
         </Modal>
       )}
