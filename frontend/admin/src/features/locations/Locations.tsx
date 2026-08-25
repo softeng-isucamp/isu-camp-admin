@@ -13,8 +13,8 @@ import {
 import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
+import { locationPolicy } from "../../lib/locationPolicy";
 
-const childLocationTypes = new Set<LocationType>(["Room", "Office", "Laboratory", "Restroom"]);
 const standardFloorLevels = ["Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement"] as const;
 
 const blankLocation = (): LocationDraft => ({
@@ -88,6 +88,7 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [photoName, setPhotoName] = useState("");
@@ -117,6 +118,11 @@ export function Locations() {
   });
 
   const allLocations = directory?.items ?? data?.items ?? initialLocations;
+  const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
+  const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
+    directory: allLocations,
+    previous: draft,
+  });
   const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
   const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
@@ -127,15 +133,16 @@ export function Locations() {
   }, [floors, building, selectedBuildingRecord]);
 
   const rawItems = data?.items ?? initialLocations;
+  const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
   const items = useMemo(() => {
     return rawItems.filter(
       (item) =>
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (building === "All Buildings" || item.building === building || item.name === building) &&
-        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId),
+        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
-  }, [rawItems, type, status, building, floorId]);
+  }, [rawItems, type, status, building, floorId, selectedFloorRecord]);
 
   useEffect(() => setPage(1), [query, type, status, building, floorId]);
 
@@ -238,17 +245,33 @@ export function Locations() {
 
   const save = async () => {
     setError("");
+    setFieldErrors([]);
     const adding = dialog === "add";
+    const normalized = normalizeDraft(draft);
+    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations });
+    const requiredIssues = [
+      ["name", "Location name is required."],
+      ["code", "Location code is required."],
+      ["function", "Description / purpose is required."],
+    ] as const;
+    const validationMessages = [
+      ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([, message]) => message),
+      ...evaluation.issues.map((issue) => issue.message),
+    ];
+    if (validationMessages.length) {
+      setFieldErrors([...new Set(validationMessages)]);
+      return;
+    }
     try {
-      const saved = await services.locations.save(draft);
+      const saved = await services.locations.save(normalized);
       await refresh();
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
       setSuccess({
         name: saved.name || "Location",
         id: saved.id,
-        building: draft.building,
-        floor: draft.floor,
+        building: normalized.building,
+        floor: normalized.floor,
         kind: adding ? "added" : "edited",
       });
     } catch (cause) {
@@ -310,10 +333,10 @@ export function Locations() {
     setDialog("add");
   };
 
-  const isChildLocation = (item: Location) => childLocationTypes.has(item.type);
+  const isChildLocation = (item: Location) => isChildType(item.type);
   const isBuilding = (item: Location) => item.type === "Building";
   const selectedChildren = selected?.type === "Building"
-    ? allLocations.filter((location) => childLocationTypes.has(location.type) && (location.parentId === selected.id || location.building === selected.name))
+    ? allLocations.filter((location) => isChildType(location.type) && (location.parentId === selected.id || location.building === selected.name))
     : [];
 
   const renderLocationTypeIcon = (locType: string) => {
@@ -891,9 +914,9 @@ export function Locations() {
 
             {/* Form Body */}
             <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
-              {error && (
+              {(error || fieldErrors.length > 0) && (
                 <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
-                  {error}
+                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map((message) => <li key={message}>{message}</li>)}</ul>}
                 </div>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
@@ -903,9 +926,7 @@ export function Locations() {
                   value={draft.type}
                   onChange={(event) => {
                     const nextType = event.target.value as LocationType;
-                    setDraft(childLocationTypes.has(nextType) || nextType === "Floor"
-                      ? { ...draft, type: nextType, floor: childLocationTypes.has(nextType) ? draft.floor : undefined }
-                      : { ...draft, type: nextType, parentId: null, building: undefined, floor: undefined });
+                    setDraft(normalizeDraft({ ...draft, type: nextType }));
                   }}
                 >
                   {["Laboratory", "Room", "Office", "Facility", "Building", "Floor", "Restroom"].map((v) => (
@@ -941,7 +962,7 @@ export function Locations() {
                 />
               </div>
 
-              {(childLocationTypes.has(draft.type) || draft.type === "Floor") && (
+              {isChildType(draft.type) && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <SelectField
                     label="PARENT BUILDING"
@@ -949,7 +970,7 @@ export function Locations() {
                     disabled={dialog === "add" && draft.type === "Room" && draft.parentId !== null}
                     onChange={(event) => {
                       const parent = buildingOptions.find((item) => item.id === event.target.value);
-                      setDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name });
+                      setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
                     }}
                   >
                     <option value="">None / Standalone</option>
@@ -957,7 +978,7 @@ export function Locations() {
                       <option key={buildingOption.id} value={buildingOption.id}>{buildingOption.name}</option>
                     ))}
                   </SelectField>
-                  {childLocationTypes.has(draft.type) && (
+                  {draft.type !== "Floor" && (
                     <SelectField
                       label="FLOOR LEVEL"
                       value={draft.floor ?? ""}
@@ -973,25 +994,19 @@ export function Locations() {
               )}
 
               <Field
-                label="FUNCTION / PURPOSE"
+                label="DESCRIPTION"
                 required
+                aria-label="DESCRIPTION"
                 value={draft.function ?? ""}
                 placeholder="Programming and computer-based activities"
                 onChange={(event) => setDraft({ ...draft, function: event.target.value })}
               />
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null })} />
-                <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null })} />
+                <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
+                <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
               </div>
               <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
-
-              <Field
-                label="DESCRIPTION"
-                value={draft.function ?? ""}
-                placeholder="A computer laboratory used for programming, software development, and hands-on IT exercises."
-                onChange={(event) => setDraft({ ...draft, function: event.target.value })}
-              />
 
               <Field
                 label="KEYWORDS / TAGS"

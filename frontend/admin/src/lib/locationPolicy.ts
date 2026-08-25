@@ -34,6 +34,16 @@ export interface LocationPolicyEvaluation {
   issues: LocationPolicyIssue[];
 }
 
+export class LocationPolicyError extends Error {
+  readonly issues: LocationPolicyIssue[];
+
+  constructor(issues: LocationPolicyIssue[]) {
+    super(issues.map((issue) => `${issue.field}: ${issue.message}`).join(" "));
+    this.name = "LocationPolicyError";
+    this.issues = issues;
+  }
+}
+
 export interface LocationPolicyOptions {
   context: LocationPolicyContext;
   directory: readonly Location[];
