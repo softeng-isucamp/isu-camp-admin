@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { services, setMockFailure } from "../../services/api";
+import { createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -38,9 +38,9 @@ export function Locations() {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
     );
-    if (failure === "locationSave") {
-      setMockFailure("locationSave", true);
-      return () => setMockFailure("locationSave", false);
+    if (failure === "locationSave" || failure === "locationRemove") {
+      setMockFailure(failure, true);
+      return () => setMockFailure(failure, false);
     }
     return undefined;
   }, []);
@@ -54,7 +54,7 @@ export function Locations() {
   const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
   const [building, setBuilding] = useState("All Buildings");
-  const [floor, setFloor] = useState("All Floors");
+  const [floorId, setFloorId] = useState("All Floors");
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
 
@@ -77,6 +77,7 @@ export function Locations() {
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [selected, setSelected] = useState<Location | null>(null);
   const [importText, setImportText] = useState("");
+  const [importFileName, setImportFileName] = useState("");
   const [importMode, setImportMode] = useState<"add" | "update">("add");
   const [importResult, setImportResult] = useState<{
     imported: number;
@@ -85,7 +86,8 @@ export function Locations() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = 10;
+  const [photoName, setPhotoName] = useState("");
   const [success, setSuccess] = useState<{
     name: string;
     id: string;
@@ -105,19 +107,16 @@ export function Locations() {
     queryFn: () => services.locations.list(),
   });
 
+  const { data: history } = useQuery({
+    queryKey: ["logs", "location-history", selected?.id],
+    queryFn: () => services.logs.forLocation(selected!.id, selected!.name),
+    enabled: dialog === "history" && selected !== null,
+  });
+
   const allLocations = directory?.items ?? data?.items ?? initialLocations;
-  const buildingOptions = [
-    ...new Set(allLocations.map((item) => item.building).filter(Boolean)),
-  ] as string[];
-  const floorOptions = [
-    ...new Set(
-      allLocations
-        .map((item) => item.floor)
-        .concat(allLocations.filter((i) => i.type === "Floor").map((i) => i.name))
-        .concat(["2nd Floor", "Floor 2"])
-        .filter(Boolean),
-    ),
-  ] as string[];
+  const buildingOptions = allLocations.filter((item) => item.type === "Building").map((item) => item.name);
+  const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
+  const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
 
   const rawItems = data?.items ?? initialLocations;
   const items = useMemo(() => {
@@ -126,15 +125,11 @@ export function Locations() {
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (building === "All Buildings" || item.building === building || item.name === building) &&
-        (floor === "All Floors" ||
-          item.floor === floor ||
-          item.name === floor ||
-          (floor === "2nd Floor" && (item.floor === "Floor 2" || item.name === "Floor 2" || item.parentId === "flr-ccsict-2")) ||
-          (floor === "Floor 2" && (item.floor === "2nd Floor" || item.name === "2nd Floor" || item.parentId === "flr-ccsict-2"))),
+        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId),
     );
-  }, [rawItems, type, status, building, floor]);
+  }, [rawItems, type, status, building, floorId]);
 
-  useEffect(() => setPage(1), [query, type, status, building, floor]);
+  useEffect(() => setPage(1), [query, type, status, building, floorId]);
 
   // Build hierarchy tree
   const hierarchyRows = useMemo(() => {
@@ -237,19 +232,29 @@ export function Locations() {
 
   const remove = async () => {
     if (!selected) return;
-    await services.locations.remove(selected.id);
-    await refresh();
-    setDialog(null);
-    setNotice(`${selected.name} removed successfully.`);
+    setError("");
+    try {
+      await services.locations.remove(selected.id);
+      await refresh();
+      setDialog(null);
+      setNotice(`${selected.name} removed successfully.`);
+    } catch (cause) {
+      setDialog(null);
+      setError(cause instanceof Error ? cause.message : "Unable to delete location.");
+    }
   };
 
   const validateImport = async () => {
-    setImportResult(await services.imports.locations(importText));
+    setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
   };
 
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
-    const committed = await services.imports.locations(importText, true);
+    const committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
+    if (committed.errors.length) {
+      setImportResult(committed);
+      return;
+    }
     await refresh();
     setDialog(null);
     setNotice(`${committed.imported} locations imported successfully.`);
@@ -259,6 +264,7 @@ export function Locations() {
   const openEdit = (item: Location) => {
     setSelected(item);
     setDraft({ ...item });
+    setPhotoName("");
     setDialog("edit");
   };
 
@@ -377,12 +383,12 @@ export function Locations() {
         <SelectField
           label="FLOOR"
           aria-label="FLOOR"
-          value={floor}
-          onChange={(event) => setFloor(event.target.value)}
+          value={floorId}
+          onChange={(event) => setFloorId(event.target.value)}
         >
           <option>All Floors</option>
-          {floorOptions.map((value) => (
-            <option key={value}>{value}</option>
+          {floors.map((value) => (
+            <option key={value.id} value={value.id}>{value.name}</option>
           ))}
         </SelectField>
         <SelectField
@@ -400,6 +406,7 @@ export function Locations() {
           style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1px solid #0c7441", color: "#0c7441", display: "inline-flex", alignItems: "center", gap: "8px" }}
           onClick={() => {
             setImportText("");
+            setImportFileName("");
             setImportResult(null);
             setDialog("import");
           }}
@@ -407,12 +414,13 @@ export function Locations() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
           </svg>
-          Import JSON
+          Bulk Import
         </Button>
         <Button
           style={{ height: "46px", borderRadius: "999px", padding: "0 22px", background: "#005931", color: "#fff" }}
           onClick={() => {
             setDraft(blankLocation());
+            setPhotoName("");
             setDialog("add");
           }}
         >
@@ -561,7 +569,7 @@ export function Locations() {
                           </svg>
                         </button>
                       )}
-                      <div style={{ width: "34px", height: "34px", borderRadius: "10px", background: "#d6ede0", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0 }}>
+                      <div aria-label={item.positioned ? "Positioned location" : "Unpositioned location"} style={{ width: "34px", height: "34px", borderRadius: "10px", background: item.positioned ? "#d6ede0" : "#f3f4f6", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0, filter: item.positioned ? undefined : "grayscale(1)", opacity: item.positioned ? 1 : 0.55 }}>
                         {renderLocationTypeIcon(item.type)}
                       </div>
                       <div>
@@ -584,9 +592,6 @@ export function Locations() {
                   <td style={{ padding: "16px 20px" }}>
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: item.status === "Active" ? "#e6f7ec" : "#fee2e2", color: item.status === "Active" ? "#0c7441" : "#dc2626" }}>
                       {item.status}
-                    </span>
-                    <span style={{ display: "block", marginTop: "5px", color: item.positioned ? "#0c7441" : "#b45309", fontSize: "11px", fontWeight: 600 }}>
-                      {item.positioned ? "Positioned" : "Not positioned"}
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
@@ -778,16 +783,15 @@ export function Locations() {
                 </SelectField>
                 <SelectField
                   label="PARENT FLOOR"
-                  value={draft.floor ?? ""}
+                  value={draft.parentId ?? ""}
                   onChange={(event) => {
-                    const floor = event.target.value;
-                    const parent = allLocations.find((item) => item.name === floor && item.type === "Floor");
-                    setDraft({ ...draft, floor, parentId: parent?.id ?? null });
+                    const parent = floors.find((item) => item.id === event.target.value);
+                    setDraft({ ...draft, floor: parent?.name, parentId: parent?.id ?? null });
                   }}
                 >
                   <option value="">None</option>
-                  {floorOptions.map((f) => (
-                    <option key={f}>{f}</option>
+                  {floors.filter((parentFloor) => !draft.building || parentFloor.parentId === allLocations.find((item) => item.type === "Building" && item.name === draft.building)?.id).map((parentFloor) => (
+                    <option key={parentFloor.id} value={parentFloor.id}>{parentFloor.name}</option>
                   ))}
                 </SelectField>
               </div>
@@ -808,9 +812,9 @@ export function Locations() {
 
               <Field
                 label="DESCRIPTION"
-                value={draft.keywords ?? ""}
+                value={draft.function ?? ""}
                 placeholder="A computer laboratory used for programming, software development, and hands-on IT exercises."
-                onChange={(event) => setDraft({ ...draft, keywords: event.target.value })}
+                onChange={(event) => setDraft({ ...draft, function: event.target.value })}
               />
 
               <Field
@@ -830,9 +834,10 @@ export function Locations() {
                   </div>
                   <div>
                     <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
-                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>PNG, JPG, or WEBP</p>
+                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPG, or WEBP"}</p>
                   </div>
                 </div>
+                <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setPhotoName(event.target.files?.[0]?.name ?? "")} />
               </div>
             </div>
 
@@ -889,32 +894,17 @@ export function Locations() {
             <p style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 20px" }}>Record changes for this location.</p>
 
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "360px", overflowY: "auto" }}>
-              <div style={{ display: "flex", gap: "12px" }}>
-                <span style={{ color: "#0c7441", fontSize: "10px", marginTop: "4px" }}>●</span>
-                <div>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Aug 17, 2026 · 2:05 PM</div>
-                  <div style={{ fontSize: "13px", color: "#0c7441", fontWeight: 600 }}>admin01</div>
-                  <strong style={{ fontSize: "14px", color: "#191c1d", display: "block" }}>Updated Location</strong>
-                  <p style={{ fontSize: "12px", color: "#4b5563", margin: "2px 0 0" }}>Location Type: Classroom → Laboratory</p>
+              {history?.items.length ? history.items.map((entry) => (
+                <div key={entry.id} style={{ display: "flex", gap: "12px" }}>
+                  <span style={{ color: "#0c7441", fontSize: "10px", marginTop: "4px" }}>●</span>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "#6b7280" }}>{entry.createdAt}</div>
+                    <div style={{ fontSize: "13px", color: "#0c7441", fontWeight: 600 }}>{entry.actor}</div>
+                    <strong style={{ fontSize: "14px", color: "#191c1d", display: "block" }}>{entry.action}</strong>
+                    {entry.detail && <p style={{ fontSize: "12px", color: "#4b5563", margin: "2px 0 0" }}>{entry.detail}</p>}
+                  </div>
                 </div>
-              </div>
-              <div style={{ display: "flex", gap: "12px" }}>
-                <span style={{ color: "#0c7441", fontSize: "10px", marginTop: "4px" }}>●</span>
-                <div>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Aug 15, 2026 · 10:31 AM</div>
-                  <div style={{ fontSize: "13px", color: "#0c7441", fontWeight: 600 }}>admin01</div>
-                  <strong style={{ fontSize: "14px", color: "#191c1d", display: "block" }}>Changed Parent Floor</strong>
-                  <p style={{ fontSize: "12px", color: "#4b5563", margin: "2px 0 0" }}>Parent Floor: Floor 1 → Floor 2</p>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "12px" }}>
-                <span style={{ color: "#0c7441", fontSize: "10px", marginTop: "4px" }}>●</span>
-                <div>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Aug 10, 2026 · 9:15 AM</div>
-                  <div style={{ fontSize: "13px", color: "#0c7441", fontWeight: 600 }}>admin01</div>
-                  <strong style={{ fontSize: "14px", color: "#191c1d", display: "block" }}>Created Location</strong>
-                </div>
-              </div>
+              )) : <p style={{ margin: 0, color: "#6b7280", fontSize: "13px" }}>No recorded changes for this location yet.</p>}
             </div>
 
             <div style={{ marginTop: "24px", textAlign: "center" }}>
@@ -926,7 +916,7 @@ export function Locations() {
         </div>
       )}
 
-      {/* Import JSON Modal */}
+      {/* Bulk Import Modal */}
       {dialog === "import" && (
         <div className="modal-backdrop">
           <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
@@ -938,7 +928,7 @@ export function Locations() {
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0 }}>Import Locations JSON</h2>
+                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0 }}>Bulk Import Locations</h2>
                   <p style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Validate campus location records before importing.
                   </p>
@@ -971,14 +961,26 @@ export function Locations() {
                 </div>
                 <strong style={{ fontSize: "15px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
                 <p style={{ color: "#6b7280", fontSize: "13px", margin: "4px 0 14px" }}>Choose a .json file containing campus location records.</p>
-                <textarea
-                  className="json-input"
-                  rows={4}
-                  placeholder='[{"id":"loc-1","name":"Imported Facility","code":"IMP-01","type":"Facility","parentId":null,"status":"Active","lat":16.72,"lng":121.69}]'
-                  value={importText}
-                  onChange={(e) => setImportText(e.target.value)}
-                  style={{ width: "100%", borderRadius: "10px", border: "1px solid #d1d5db", padding: "8px 12px", fontFamily: "monospace", fontSize: "12px", boxSizing: "border-box" }}
+                <input
+                  aria-label="Choose location JSON file"
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    setImportResult(null);
+                    setImportFileName(file?.name ?? "");
+                    if (!file) return setImportText("");
+                    void file.text().then(setImportText);
+                  }}
                 />
+                {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "10px 0 0" }}>{importFileName} selected</p>}
+                <a
+                  href={`data:application/json;charset=utf-8,${encodeURIComponent(createLocationsBulkImportTemplate())}`}
+                  download="locations-bulk-template.json"
+                  style={{ display: "inline-block", marginTop: "12px", color: "#0c7441", fontSize: "13px", fontWeight: 600 }}
+                >
+                  Download template
+                </a>
               </div>
 
               {/* Mode Selection */}
@@ -987,7 +989,7 @@ export function Locations() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "6px", background: "#f3f4f6", padding: "4px", borderRadius: "12px" }}>
                   <button
                     type="button"
-                    onClick={() => setImportMode("add")}
+                    onClick={() => { setImportMode("add"); setImportResult(null); }}
                     style={{
                       padding: "8px",
                       borderRadius: "10px",
@@ -1004,7 +1006,7 @@ export function Locations() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setImportMode("update")}
+                    onClick={() => { setImportMode("update"); setImportResult(null); }}
                     style={{
                       padding: "8px",
                       borderRadius: "10px",
@@ -1024,7 +1026,7 @@ export function Locations() {
 
               {importResult && (
                 <div style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
-                  {importResult.errors.length ? importResult.errors.join(", ") : `Validation passed for ${importResult.imported} locations.`}
+                  {importResult.errors.length ? <ul style={{ margin: 0, paddingLeft: "18px" }}>{importResult.errors.map((message) => <li key={message}>{message}</li>)}</ul> : `Validation passed for ${importResult.imported} locations.`}
                 </div>
               )}
             </div>
