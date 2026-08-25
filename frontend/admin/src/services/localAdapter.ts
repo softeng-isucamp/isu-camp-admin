@@ -1,4 +1,4 @@
-import type { Building, Location, Pathway, RouteNode, Session } from "../types";
+import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
@@ -50,6 +50,20 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         location.lat = lat;
         location.lng = lng;
         location.positioned = true;
+        return location;
+      },
+    },
+    locations: {
+      save: (draft: LocationDraft): Location => {
+        const location: Location = { ...draft, id: draft.id || `loc-${Date.now()}` };
+        const index = mapData.locations.findIndex((item) => item.id === location.id);
+        if (index >= 0) mapData.locations[index] = structuredClone(location);
+        else mapData.locations.push(structuredClone(location));
+        return location;
+      },
+      remove: (id: string): Location | undefined => {
+        const location = mapData.locations.find((item) => item.id === id);
+        if (location) location.status = "Inactive";
         return location;
       },
     },

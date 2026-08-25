@@ -65,6 +65,10 @@ export const locationSchema = locationImportFields.extend({
   const hasLat = value.lat !== null;
   const hasLng = value.lng !== null;
   if (value.positioned !== (hasLat && hasLng)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Positioned must match whether coordinates are present." });
+  const isChild = ["Room", "Office", "Laboratory", "Restroom"].includes(value.type);
+  if (isChild && (value.lat !== null || value.lng !== null || value.positioned)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Child locations must not be positioned on the outdoor map." });
+  }
 });
 export const routeImportSchema = z.object({
   id: z.string(),

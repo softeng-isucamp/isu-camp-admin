@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   Marker,
@@ -457,15 +457,12 @@ export function MapEditor() {
     }
     const target = directoryLocations.find((l) => l.id === placingId);
     if (target) {
-      try {
-        await services.locations.savePosition({ id: placingId, lat: temporary[0], lng: temporary[1] });
-        await queryClient.invalidateQueries({ queryKey: ["map"] });
-        setMode("select");
-        setSelected({ type: "location", id: placingId });
-        setTemporary(null);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to save location position.");
-      }
+      const updated = { ...target, lat: temporary[0], lng: temporary[1], positioned: true };
+      setLocalLocations((current) => [...current.filter((item) => item.id !== target.id), updated]);
+      setMode("select");
+      setSelected({ type: "location", id: placingId });
+      setTemporary(null);
+      setDirty(true);
     }
   };
 
@@ -609,6 +606,9 @@ export function MapEditor() {
         selected: selected ?? undefined,
         pathPoints: pathPoints.length ? pathPoints : undefined,
         areaPoints: points.length >= 3 ? points : undefined,
+        locations: localLocations,
+        nodes: localNodes,
+        buildings: localBuildings,
       });
       await queryClient.invalidateQueries({ queryKey: ["map"] });
       setDirty(false);
@@ -703,7 +703,7 @@ export function MapEditor() {
               mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
             return (
-              <>
+              <Fragment key={building.id}>
               <Polygon
                 key={building.id}
                 positions={building.points}
@@ -732,7 +732,7 @@ export function MapEditor() {
                 </Tooltip>
               </Polygon>
               <Marker position={polygonCentroid(building.points)} icon={L.divIcon({ className: "building-centroid", html: "<span>🏢</span>", iconSize: [24, 24], iconAnchor: [12, 12] })} eventHandlers={{ click: () => selectObject("building", building.id) }} />
-              </>
+              </Fragment>
             );
           })}
 

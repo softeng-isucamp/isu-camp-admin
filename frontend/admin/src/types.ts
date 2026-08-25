@@ -134,4 +134,7 @@ export interface MapSavePayload {
   movedLocation?: { id: string; lat: number; lng: number };
   movedNode?: { id: string; lat: number; lng: number };
   updatedPath?: { id: string; pathPoints: [number, number][] };
+  locations?: Location[];
+  nodes?: RouteNode[];
+  buildings?: Building[];
 }

@@ -12,11 +12,13 @@ const weight = (path: Pathway) => {
 };
 
 /** Resolve indoor destinations to an associated entrance, then run Dijkstra over the pedestrian network. */
-export function planRoute(destination: Location, _locations: Location[], nodes: RouteNode[], pathways: Pathway[]): PlannedRoute | null {
+export function planRoute(destination: Location, locations: Location[], nodes: RouteNode[], pathways: Pathway[], originNodeId?: string): PlannedRoute | null {
   const buildingId = destination.type === "Building" ? destination.id : destination.parentId;
+  if (!buildingId || (destination.type !== "Building" && !locations.some((location) => location.id === buildingId && location.type === "Building"))) return null;
   const entrance = nodes.find((node) => node.nodeType === "Entrance" && node.associatedPlaceId === buildingId);
-  if (!entrance) return null;
-  const distances = new Map<string, number>([[entrance.id, 0]]);
+  const origin = originNodeId ? nodes.find((node) => node.id === originNodeId) : undefined;
+  if (!entrance || !origin) return null;
+  const distances = new Map<string, number>([[origin.id, 0]]);
   const previous = new Map<string, { nodeId: string; path: Pathway }>();
   const pending = new Set(nodes.map((node) => node.id));
   while (pending.size) {
@@ -29,6 +31,7 @@ export function planRoute(destination: Location, _locations: Location[], nodes: 
       if (candidate < (distances.get(next) ?? Infinity)) { distances.set(next, candidate); previous.set(next, { nodeId: current, path }); }
     });
   }
+  if (!Number.isFinite(distances.get(entrance.id))) return null;
   const target = entrance;
   const pathList: Pathway[] = [];
   const nodeList = [target];

@@ -154,6 +154,36 @@ describe("mock service contracts", () => {
     });
   });
 
+  it("preserves hierarchical child locations and soft-deletes by status", async () => {
+    const building = await services.locations.save({
+      id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Building",
+      parentId: null, status: "Active", lat: 16.72, lng: 121.69, positioned: true,
+    });
+    const room = await services.locations.save({
+      id: "ticket-01-room", name: "Ticket 01 Room", code: "T01-R", type: "Room",
+      parentId: building.id, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false,
+    });
+
+    expect((await services.locations.list()).items.find((item) => item.id === room.id)).toMatchObject({
+      parentId: building.id, floor: "2nd Floor", lat: null, lng: null, positioned: false,
+    });
+
+    await services.locations.remove(building.id);
+    const persistedBuilding = (await services.locations.list()).items.find((item) => item.id === building.id);
+    expect(persistedBuilding).toMatchObject({ status: "Inactive" });
+    expect((await services.locations.list()).items.find((item) => item.id === room.id)).toBeDefined();
+    expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({
+      action: "Removed Location", targetId: building.id, target: building.name,
+    });
+  });
+
+  it("rejects positioned child locations", async () => {
+    await expect(services.locations.save({
+      id: "positioned-child", name: "Positioned", code: "POS", type: "Office", parentId: "building",
+      floor: "1st Floor", status: "Active", lat: 16.72, lng: 121.69, positioned: true,
+    })).rejects.toThrow();
+  });
+
   it("persists a drawn map area only when it has a valid polygon", async () => {
     const before = (await services.map.buildings()).length;
     await services.map.save({
