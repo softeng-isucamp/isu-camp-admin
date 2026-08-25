@@ -587,34 +587,9 @@ export const services: Services = {
       const nextLocation: Location = { ...location, id: location.id || `loc-${Date.now()}` };
       locationSchema.parse(nextLocation);
 
-      const index =
-        locations.findIndex(
-          (item) =>
-            item.id === nextLocation.id
-        );
-
-      if (index >= 0) {
-
-        locations[index] =
-          clone(nextLocation);
-
-      } else {
-
-        locations.push(
-          clone(nextLocation)
-        );
-      }
-
-      addAudit(
-        "Updated Location",
-        nextLocation.name,
-        "Admin",
-        nextLocation.id,
-      );
-
-      return wait(
-        clone(nextLocation)
-      );
+      const saved = localAdapter.locations.save(nextLocation);
+      addAudit("Updated Location", saved.name, "Admin", saved.id);
+      return wait(clone(saved));
     },
 
     savePosition: async (position) => {
@@ -634,24 +609,10 @@ export const services: Services = {
 
       failIfConfigured("locationRemove");
 
-      const index =
-        locations.findIndex(
-          (location) =>
-            location.id === id
-        );
-
-      if (index >= 0) {
-
-        const removed =
-          locations.splice(
-            index,
-            1
-          )[0];
-
-        addAudit("Removed Location", removed.name, "Admin", removed.id);
-      }
-
+      const removed = localAdapter.locations.remove(id);
+      if (removed) addAudit("Removed Location", removed.name, "Admin", removed.id);
       return wait(undefined);
+
     },
   },
 
@@ -1196,6 +1157,28 @@ export const services: Services = {
 
           lng:
             edit.newNode.lng,
+        });
+      }
+
+      if (edit?.locations) {
+        edit.locations.forEach((location) => {
+          const index = locations.findIndex((item) => item.id === location.id);
+          if (index >= 0) locations[index] = clone(location);
+          else locations.push(clone(location));
+        });
+      }
+      if (edit?.nodes) {
+        edit.nodes.forEach((node) => {
+          const index = routeNodes.findIndex((item) => item.id === node.id);
+          if (index >= 0) routeNodes[index] = clone(node);
+          else routeNodes.push(clone(node));
+        });
+      }
+      if (edit?.buildings) {
+        edit.buildings.forEach((building) => {
+          const index = buildings.findIndex((item) => item.id === building.id);
+          if (index >= 0) buildings[index] = clone(building);
+          else buildings.push(clone(building));
         });
       }
 

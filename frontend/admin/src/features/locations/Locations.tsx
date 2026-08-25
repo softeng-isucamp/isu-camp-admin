@@ -117,6 +117,11 @@ export function Locations() {
   const buildingOptions = allLocations.filter((item) => item.type === "Building").map((item) => item.name);
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
   const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
+  const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.name === building);
+  const availableFloors = useMemo(() => {
+    if (building === "All Buildings" || !selectedBuildingRecord) return floors;
+    return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
+  }, [floors, building, selectedBuildingRecord]);
 
   const rawItems = data?.items ?? initialLocations;
   const items = useMemo(() => {
@@ -340,92 +345,195 @@ export function Locations() {
         </div>
       </div>
 
-      <Card className="filters" style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", padding: "16px 20px" }}>
-        <div style={{ flex: "1 1 320px", minWidth: "260px" }}>
-          <Field
-            label=""
+      <Card
+        className="filters"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "16px",
+          padding: "20px 24px",
+          background: "#edf3f0",
+          borderRadius: "24px",
+          marginBottom: "20px",
+        }}
+      >
+        {/* Full-width search bar */}
+        <div style={{ position: "relative", width: "100%" }}>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#525c57"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              position: "absolute",
+              left: "18px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+            }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
             aria-label="Search locations"
             placeholder="Search by building, room, office, lab, facility, or keyword..."
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            style={{
+              width: "100%",
+              height: "48px",
+              borderRadius: "999px",
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              padding: "0 20px 0 52px",
+              fontSize: "14px",
+              color: "#191c1d",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
           />
         </div>
-        <SelectField
-          label="TYPE"
-          aria-label="TYPE"
-          value={type}
-          onChange={(event) => setType(event.target.value)}
-        >
-          <option>All Types</option>
-          {[
-            "Building",
-            "Floor",
-            "Laboratory",
-            "Room",
-            "Office",
-            "Restroom",
-            "Facility",
-          ].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </SelectField>
-        <SelectField
-          label="BUILDING"
-          aria-label="BUILDING"
-          value={building}
-          onChange={(event) => setBuilding(event.target.value)}
-        >
-          <option>All Buildings</option>
-          {buildingOptions.map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </SelectField>
-        <SelectField
-          label="FLOOR"
-          aria-label="FLOOR"
-          value={floorId}
-          onChange={(event) => setFloorId(event.target.value)}
-        >
-          <option>All Floors</option>
-          {floors.map((value) => (
-            <option key={value.id} value={value.id}>{value.name}</option>
-          ))}
-        </SelectField>
-        <SelectField
-          label="STATUS"
-          aria-label="STATUS"
-          value={status}
-          onChange={(event) => setStatus(event.target.value)}
-        >
-          <option>All Statuses</option>
-          <option>Active</option>
-          <option>Inactive</option>
-        </SelectField>
-        <Button
-          variant="subtle"
-          style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1px solid #0c7441", color: "#0c7441", display: "inline-flex", alignItems: "center", gap: "8px" }}
-          onClick={() => {
-            setImportText("");
-            setImportFileName("");
-            setImportResult(null);
-            setDialog("import");
+
+        {/* Filters and Actions Row */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            flexWrap: "wrap",
+            gap: "16px",
+            width: "100%",
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-          </svg>
-          Bulk Import
-        </Button>
-        <Button
-          style={{ height: "46px", borderRadius: "999px", padding: "0 22px", background: "#005931", color: "#fff" }}
-          onClick={() => {
-            setDraft(blankLocation());
-            setPhotoName("");
-            setDialog("add");
-          }}
-        >
-          ＋ Add Location
-        </Button>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-end",
+              flexWrap: "wrap",
+              gap: "12px",
+            }}
+          >
+            <SelectField
+              label="TYPE"
+              aria-label="TYPE"
+              value={type}
+              onChange={(event) => setType(event.target.value)}
+              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
+            >
+              <option>All Types</option>
+              {[
+                "Building",
+                "Floor",
+                "Laboratory",
+                "Room",
+                "Office",
+                "Restroom",
+                "Facility",
+              ].map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="BUILDING"
+              aria-label="BUILDING"
+              value={building}
+              onChange={(event) => {
+                setBuilding(event.target.value);
+                setFloorId("All Floors");
+              }}
+              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "140px", height: "46px" }}
+            >
+              <option>All Buildings</option>
+              {buildingOptions.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="FLOOR"
+              aria-label="FLOOR"
+              value={floorId}
+              onChange={(event) => setFloorId(event.target.value)}
+              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
+            >
+              <option>All Floors</option>
+              {availableFloors.map((value) => (
+                <option key={value.id} value={value.id}>{value.name}</option>
+              ))}
+            </SelectField>
+            <SelectField
+              label="STATUS"
+              aria-label="STATUS"
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
+            >
+              <option>All Statuses</option>
+              <option>Active</option>
+              <option>Inactive</option>
+            </SelectField>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              flexWrap: "wrap",
+            }}
+          >
+            <Button
+              variant="subtle"
+              style={{
+                height: "46px",
+                borderRadius: "999px",
+                padding: "0 22px",
+                border: "1.5px solid #0c7441",
+                color: "#0c7441",
+                background: "#ffffff",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                fontWeight: 600,
+              }}
+              onClick={() => {
+                setImportText("");
+                setImportFileName("");
+                setImportResult(null);
+                setDialog("import");
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
+              Bulk Import
+            </Button>
+            <Button
+              style={{
+                height: "46px",
+                borderRadius: "999px",
+                padding: "0 24px",
+                background: "#005931",
+                color: "#fff",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+              onClick={() => {
+                setDraft(blankLocation());
+                setPhotoName("");
+                setDialog("add");
+              }}
+            >
+              ＋ Add Location
+            </Button>
+          </div>
+        </div>
       </Card>
 
       {notice && (
@@ -508,7 +616,7 @@ export function Locations() {
           </div>
         </div>
 
-        <div className="table-wrap" style={{ overflowX: "visible" }}>
+        <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
             <thead>
               <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#4b5563", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -521,7 +629,9 @@ export function Locations() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(({ item, level, hasChildren, isCollapsed }) => (
+              {visibleRows.map(({ item, level, hasChildren, isCollapsed }, index) => {
+                const isNearBottom = index >= 3 && index >= visibleRows.length - 2;
+                return (
                 <tr key={item.id} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
@@ -612,7 +722,8 @@ export function Locations() {
                           style={{
                             position: "absolute",
                             right: "20px",
-                            top: "48px",
+                            top: isNearBottom ? "auto" : "44px",
+                            bottom: isNearBottom ? "44px" : "auto",
                             background: "#fff",
                             borderRadius: "14px",
                             boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
@@ -620,6 +731,7 @@ export function Locations() {
                             padding: "6px",
                             minWidth: "165px",
                             border: "1px solid #e5e7eb",
+                            textAlign: "left",
                           }}
                         >
                           <button
@@ -669,7 +781,8 @@ export function Locations() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {!items.length && (
@@ -786,7 +899,7 @@ export function Locations() {
                   value={draft.parentId ?? ""}
                   onChange={(event) => {
                     const parent = floors.find((item) => item.id === event.target.value);
-                    setDraft({ ...draft, floor: parent?.name, parentId: parent?.id ?? null });
+                    setDraft({ ...draft, floor: parent?.name, parentId: parent?.parentId ?? null });
                   }}
                 >
                   <option value="">None</option>
@@ -921,14 +1034,14 @@ export function Locations() {
         <div className="modal-backdrop">
           <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                <div style={{ width: "38px", height: "38px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
+                <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0 }}>Bulk Import Locations</h2>
+                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
                   <p style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Validate campus location records before importing.
                   </p>
@@ -938,68 +1051,86 @@ export function Locations() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setDialog(null)}
-                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "32px", height: "32px", cursor: "pointer", display: "grid", placeItems: "center" }}
+                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
 
-            <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
               {/* Dropzone container */}
-              <div style={{ border: "1px dashed #d1d5db", borderRadius: "16px", padding: "20px", textAlign: "center", background: "#f9fafb" }}>
-                <div style={{ width: "44px", height: "44px", borderRadius: "12px", background: "#d6ede0", color: "#0c7441", display: "grid", placeItems: "center", margin: "0 auto 8px" }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                  </svg>
+              <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                  <div style={{ width: "46px", height: "46px", borderRadius: "12px", background: "#d6ede0", color: "#0c7441", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="12" y1="18" x2="12" y2="12" />
+                      <line x1="9" y1="15" x2="12" y2="12" />
+                      <line x1="15" y1="15" x2="12" y2="12" />
+                    </svg>
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
+                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing campus location records.</p>
+                    {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{importFileName} selected</p>}
+                  </div>
                 </div>
-                <strong style={{ fontSize: "15px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
-                <p style={{ color: "#6b7280", fontSize: "13px", margin: "4px 0 14px" }}>Choose a .json file containing campus location records.</p>
-                <input
-                  aria-label="Choose location JSON file"
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    setImportResult(null);
-                    setImportFileName(file?.name ?? "");
-                    if (!file) return setImportText("");
-                    void file.text().then(setImportText);
+
+                <label
+                  style={{
+                    border: "1.5px solid #0c7441",
+                    borderRadius: "999px",
+                    padding: "10px 28px",
+                    color: "#0c7441",
+                    fontWeight: 600,
+                    fontSize: "14px",
+                    background: "#fff",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
-                />
-                {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "10px 0 0" }}>{importFileName} selected</p>}
-                <a
-                  href={`data:application/json;charset=utf-8,${encodeURIComponent(createLocationsBulkImportTemplate())}`}
-                  download="locations-bulk-template.json"
-                  style={{ display: "inline-block", marginTop: "12px", color: "#0c7441", fontSize: "13px", fontWeight: 600 }}
                 >
-                  Download template
-                </a>
+                  Browse
+                  <input
+                    aria-label="Choose location JSON file"
+                    type="file"
+                    accept="application/json,.json"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      setImportResult(null);
+                      setImportFileName(file?.name ?? "");
+                      if (!file) return setImportText("");
+                      void file.text().then(setImportText);
+                    }}
+                  />
+                </label>
               </div>
 
               {/* Mode Selection */}
               <div>
-                <span style={{ fontSize: "12px", fontWeight: 600, color: "#4b5563", textTransform: "uppercase" }}>IMPORT MODE</span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "6px", background: "#f3f4f6", padding: "4px", borderRadius: "12px" }}>
+                <span style={{ fontSize: "11px", fontWeight: 700, color: "#525c57", textTransform: "uppercase", letterSpacing: "0.5px" }}>IMPORT MODE</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", marginTop: "8px", background: "#edf2ee", padding: "4px", borderRadius: "14px" }}>
                   <button
                     type="button"
                     onClick={() => { setImportMode("add"); setImportResult(null); }}
                     style={{
-                      padding: "8px",
+                      padding: "10px",
                       borderRadius: "10px",
                       border: "none",
                       background: importMode === "add" ? "#fff" : "transparent",
-                      boxShadow: importMode === "add" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                      fontWeight: 600,
-                      fontSize: "13px",
+                      boxShadow: importMode === "add" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      fontWeight: importMode === "add" ? 700 : 500,
+                      fontSize: "14px",
                       cursor: "pointer",
-                      color: "#191c1d",
+                      color: importMode === "add" ? "#005931" : "#525c57",
+                      transition: "all 0.15s ease",
                     }}
                   >
                     Add new
@@ -1008,20 +1139,35 @@ export function Locations() {
                     type="button"
                     onClick={() => { setImportMode("update"); setImportResult(null); }}
                     style={{
-                      padding: "8px",
+                      padding: "10px",
                       borderRadius: "10px",
                       border: "none",
                       background: importMode === "update" ? "#fff" : "transparent",
-                      boxShadow: importMode === "update" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                      fontWeight: 600,
-                      fontSize: "13px",
+                      boxShadow: importMode === "update" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                      fontWeight: importMode === "update" ? 700 : 500,
+                      fontSize: "14px",
                       cursor: "pointer",
-                      color: "#191c1d",
+                      color: importMode === "update" ? "#005931" : "#525c57",
+                      transition: "all 0.15s ease",
                     }}
                   >
                     Update existing
                   </button>
                 </div>
+              </div>
+
+              {/* Download Template Link */}
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <a
+                  href={`data:application/json;charset=utf-8,${encodeURIComponent(createLocationsBulkImportTemplate())}`}
+                  download="locations-bulk-template.json"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "#0c7441", fontSize: "14px", fontWeight: 600, textDecoration: "none" }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                  Download template
+                </a>
               </div>
 
               {importResult && (
@@ -1031,19 +1177,19 @@ export function Locations() {
               )}
             </div>
 
-            <div style={{ padding: "16px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={() => setDialog(null)}>
+            <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={() => setDialog(null)}>
                 Cancel
               </Button>
               <Button
                 variant="subtle"
-                style={{ borderRadius: "999px", padding: "0 20px", border: "1px solid #0c7441", color: "#0c7441" }}
+                style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }}
                 onClick={validateImport}
               >
                 Validate
               </Button>
               <Button
-                style={{ borderRadius: "999px", padding: "0 22px", background: "#0c7441", color: "#fff" }}
+                style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }}
                 onClick={applyImport}
               >
                 Import Locations
