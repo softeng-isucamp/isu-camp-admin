@@ -147,11 +147,31 @@ export function Locations() {
 
     // Find roots
     const rootBuildings = items.filter((loc) => loc.type === "Building");
-    const standalone = items.filter((loc) => loc.parentId === null && loc.type !== "Building");
+    const standalone = items.filter((loc) => loc.parentId === null && loc.type === "Facility");
 
     for (const bldg of rootBuildings) {
       const bldgCollapsed = collapsedNodes.has(bldg.id);
-      const childFloors = allLocations.filter((loc) => loc.parentId === bldg.id || (loc.building === bldg.name && loc.type === "Floor"));
+      const explicitFloors = allLocations.filter((loc) => loc.parentId === bldg.id && loc.type === "Floor");
+      const childLocations = allLocations.filter((loc) =>
+        loc.type !== "Floor" && loc.type !== "Building" &&
+        (loc.parentId === bldg.id || loc.building === bldg.name),
+      );
+      const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
+      const inferredFloors = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)))
+        .filter((floorName) => !knownFloorNames.has(floorName as string))
+        .map((floorName) => ({
+          id: `${bldg.id}-floor-${floorName}`,
+          name: floorName as string,
+          code: `${bldg.code}-${floorName}`,
+          type: "Floor" as const,
+          parentId: bldg.id,
+          building: bldg.name,
+          status: bldg.status,
+          lat: null,
+          lng: null,
+          positioned: false,
+        }));
+      const childFloors = [...explicitFloors, ...inferredFloors];
       result.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
 
       if (!bldgCollapsed) {
@@ -275,6 +295,23 @@ export function Locations() {
     setPhotoName("");
     setDialog("edit");
   };
+
+  const openAddRoom = (parent: Location) => {
+    setSelected(parent);
+    setDraft({
+      ...blankLocation(),
+      type: "Room",
+      parentId: parent.id,
+      building: parent.name,
+      floor: "1st Floor",
+    });
+    setPhotoName("");
+    setActionMenuId(null);
+    setDialog("add");
+  };
+
+  const isChildLocation = (item: Location) => childLocationTypes.has(item.type);
+  const isBuilding = (item: Location) => item.type === "Building";
 
   const renderLocationTypeIcon = (locType: string) => {
     switch (locType.toLowerCase()) {
@@ -688,6 +725,11 @@ export function Locations() {
                       <div>
                         <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
                         <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
+                        {level > 0 && item.floor && (
+                          <span style={{ display: "inline-block", marginTop: "5px", padding: "2px 8px", borderRadius: "999px", background: "#eef6f1", color: "#0c7441", fontSize: "11px", fontWeight: 600 }}>
+                            {item.floor}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -741,12 +783,22 @@ export function Locations() {
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
-                              navigate(`/map-editor?location=${item.id}`);
+                              const target = isChildLocation(item) && item.parentId ? item.parentId : item.id;
+                              navigate(`/map-editor?location=${target}`);
                               setActionMenuId(null);
                             }}
                           >
-                            Locate on map
+                            {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                           </button>
+                          {isBuilding(item) && (
+                            <button
+                              role="menuitem"
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
+                              onClick={() => openAddRoom(item)}
+                            >
+                              ＋ Add room to this building
+                            </button>
+                          )}
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -891,6 +943,7 @@ export function Locations() {
                   <SelectField
                     label="PARENT BUILDING"
                     value={draft.parentId ?? ""}
+                    disabled={dialog === "add" && draft.type === "Room" && draft.parentId !== null}
                     onChange={(event) => {
                       const parent = buildingOptions.find((item) => item.id === event.target.value);
                       setDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name });
