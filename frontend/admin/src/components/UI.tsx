@@ -66,7 +66,7 @@ export function Field({
       <div className="field-label-row">
         <label className="field-label" htmlFor={id}>
           {label}
-          {required && <span className="field-required">*</span>}
+          {required && <span className="field-required" aria-hidden="true">*</span>}
         </label>
         {badge && <span className="field-badge">{badge}</span>}
       </div>

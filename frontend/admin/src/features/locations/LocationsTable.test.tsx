@@ -82,8 +82,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await seed("floor-building-b", "Floor building B", "Building", null);
     await seed("floor-a", "Level One", "Floor", "floor-building-a");
     await seed("floor-b", "Level One", "Floor", "floor-building-b");
-    await seed("floor-child-a", "Only floor A child", "Room", "floor-a");
-    await seed("floor-child-b", "Only floor B child", "Room", "floor-b");
+    await services.locations.save({ id: "floor-child-a", name: "Only floor A child", code: "FLOOR-CHILD-A", type: "Room", parentId: "floor-building-a", building: "Floor building A", floor: "Level One", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "floor-child-b", name: "Only floor B child", code: "FLOOR-CHILD-B", type: "Room", parentId: "floor-building-b", building: "Floor building B", floor: "Level One", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     const floorSelect = await screen.findByLabelText("FLOOR");
     const identicalNameOptions = Array.from((floorSelect as HTMLSelectElement).options).filter((option) => option.text === "Level One");
@@ -245,6 +245,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("saves description and keywords to their independent directory columns", async () => {
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Saved fields test" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "SAVED-FIELDS" } });
     fireEvent.change(screen.getByLabelText("DESCRIPTION"), { target: { value: "Saved purpose" } });

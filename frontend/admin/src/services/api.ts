@@ -36,6 +36,7 @@ import {
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
+import { LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 
 
 // ==========================================
@@ -591,7 +592,18 @@ export const services: Services = {
       const nextLocation: Location = { ...location, id: location.id || `loc-${Date.now()}` };
       locationSchema.parse(nextLocation);
 
-      const saved = localAdapter.locations.save(nextLocation);
+      const previous = locations.find((item) => item.id === nextLocation.id) ?? nextLocation;
+      const normalized = locationPolicy.normalize(nextLocation, {
+        directory: locations,
+        previous,
+      });
+      const evaluation = locationPolicy.evaluate(normalized, {
+        context: "record",
+        directory: locations,
+      });
+      if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
+
+      const saved = localAdapter.locations.save(normalized);
       addAudit("Updated Location", saved.name, "Admin", saved.id);
       return wait(clone(saved));
     },
@@ -1349,7 +1361,7 @@ export const services: Services = {
       const batchIds = new Set(validRows.flatMap(({ row }) => row.id ? [row.id] : []));
       const seenIds = new Set<string>();
       const seenCodes = new Set<string>();
-      const pending: Array<{ location: Location; existingIndex: number | null }> = [];
+      const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
 
       validRows.forEach(({ row, index }) => {
         const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
@@ -1375,6 +1387,7 @@ export const services: Services = {
         const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
         pending.push({
           existingIndex: existingIndex >= 0 ? existingIndex : null,
+          rowIndex: index,
           location: {
             ...existing,
             ...row,
@@ -1400,6 +1413,27 @@ export const services: Services = {
         if (location.parentId) {
           location.parentId = effectiveIdsByImportedId.get(location.parentId) ?? location.parentId;
         }
+      });
+
+      const batchDirectory = [...locations, ...pending.map(({ location }) => location)];
+      pending.forEach((entry) => {
+        const existing = entry.existingIndex === null ? undefined : locations[entry.existingIndex];
+        const parent = batchDirectory.find((candidate) => candidate.id === entry.location.parentId);
+        const candidate = parent?.type === "Building"
+          ? { ...entry.location, building: parent.name }
+          : entry.location;
+        const evaluation = locationPolicy.evaluate(candidate, {
+          context: "record",
+          directory: batchDirectory,
+        });
+        if (!evaluation.valid) {
+          evaluation.issues.forEach((issue) => errors.push(`Row ${entry.rowIndex + 1}, ${issue.field}: ${issue.message}`));
+          return;
+        }
+        entry.location = locationPolicy.normalize(candidate, {
+          directory: batchDirectory,
+          previous: existing ?? candidate,
+        }) as Location;
       });
 
 
