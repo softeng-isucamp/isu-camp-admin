@@ -4,18 +4,17 @@
 
 **Blocked by:** 01: Expand the shared Location policy seam.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Direct Location saves evaluate and normalize records through the shared policy rather than a separate copy of Location invariants.
-- [ ] Bulk-import preview evaluates every pending record through the shared policy before commit.
-- [ ] Indoor children and Floors must reference a Building, not merely an existing Location of any type.
-- [ ] Parent Buildings may resolve from existing records or valid pending rows in the same batch, independent of row order.
-- [ ] Indoor children and Floors with outdoor coordinates or a positioned state are rejected with row- and field-associated issues.
-- [ ] Outdoor Locations accept either no coordinates or a valid pair within geographic bounds during ordinary record validation.
-- [ ] Placement state and denormalized Building name are normalized from authoritative imported values and resolved parents.
-- [ ] Import remains preview-before-commit and all-or-nothing: any policy issue prevents every row from being committed.
-- [ ] Existing Add-new and Update-existing matching, duplicate detection, audit behavior, and template shape remain unchanged.
-- [ ] Direct-save and import errors retain actionable user-facing meaning without adapters parsing unstable exception text.
-- [ ] Tests cover non-Building parents, batch Building parents, invalid coordinate pairs, child placement, Floor policy, and unchanged totals after failed imports.
-- [ ] The ticket is verifiable through both a successful mixed Building hierarchy import and a rejected batch that leaves persisted data untouched.
-
+- [x] Direct Location saves evaluate and normalize records through the shared policy rather than a separate copy of Location invariants.
+- [x] Bulk-import preview evaluates every pending record through the shared policy before commit.
+- [x] Indoor children and Floors must reference a Building, not merely an existing Location of any type.
+- [x] Parent Buildings may resolve from existing records or valid pending rows in the same batch, independent of row order.
+- [x] Indoor children and Floors with outdoor coordinates or a positioned state are rejected with row- and field-associated issues.
+- [x] Outdoor Locations accept either no coordinates or a valid pair within geographic bounds during ordinary record validation.
+- [x] Placement state and denormalized Building name are normalized from authoritative imported values and resolved parents.
+- [x] Import remains preview-before-commit and all-or-nothing: any policy issue prevents every row from being committed.
+- [x] Existing Add-new and Update-existing matching, duplicate detection, audit behavior, and template shape remain unchanged.
+- [x] Direct-save and import errors retain actionable user-facing meaning without adapters parsing unstable exception text.
+- [x] Tests cover non-Building parents, batch Building parents, invalid coordinate pairs, child placement, Floor policy, and unchanged totals after failed imports.
+- [x] The ticket is verifiable through both a successful mixed Building hierarchy import and a rejected batch that leaves persisted data untouched.
