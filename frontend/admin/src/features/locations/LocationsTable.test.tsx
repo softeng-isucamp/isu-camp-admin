@@ -268,6 +268,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     setMockFailure("locationRemove", false);
   });
 
+  it("warns about connected children and deactivates the building hierarchy", async () => {
+    const building = await services.locations.save({ id: "ui-deactivate-building", name: "UI Deactivate Building", code: "UI-DEACT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const child = await services.locations.save({ id: "ui-deactivate-room", name: "UI Deactivate Room", code: "UI-DEACT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations([`/locations?q=${encodeURIComponent(building.name)}`]);
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    expect(await screen.findByText("This building contains 1 connected rooms/offices. Deactivating this building will mark it and its child rooms as Inactive.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate" }));
+    await waitFor(async () => {
+      expect((await services.locations.list()).items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: building.id, status: "Inactive" }),
+        expect.objectContaining({ id: child.id, status: "Inactive" }),
+      ]));
+    });
+  });
+
   it("renders a selected location's real history entry", async () => {
     const record = await services.locations.save({ id: "history-test", name: "History test", code: "HISTORY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=History%20test"]);

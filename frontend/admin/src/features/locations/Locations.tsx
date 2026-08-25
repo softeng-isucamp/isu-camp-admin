@@ -312,6 +312,9 @@ export function Locations() {
 
   const isChildLocation = (item: Location) => childLocationTypes.has(item.type);
   const isBuilding = (item: Location) => item.type === "Building";
+  const selectedChildren = selected?.type === "Building"
+    ? allLocations.filter((location) => childLocationTypes.has(location.type) && (location.parentId === selected.id || location.building === selected.name))
+    : [];
 
   const renderLocationTypeIcon = (locType: string) => {
     switch (locType.toLowerCase()) {
@@ -1042,7 +1045,9 @@ export function Locations() {
               <div>
                 <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
                 <p style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
-                  This will remove {selected.name} from {selected.building ?? "campus"}{selected.floor ? ` / ${selected.floor}` : ""}.
+                  {selectedChildren.length > 0
+                    ? `This building contains ${selectedChildren.length} connected rooms/offices. Deactivating this building will mark it and its child rooms as Inactive.`
+                    : `This will remove ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}.`}
                 </p>
               </div>
             </div>
@@ -1051,7 +1056,7 @@ export function Locations() {
                 Cancel
               </Button>
               <Button style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
-                Delete
+                {selectedChildren.length > 0 ? "Deactivate" : "Delete"}
               </Button>
             </div>
           </div>

@@ -613,8 +613,15 @@ export const services: Services = {
 
       failIfConfigured("locationRemove");
 
-      const removed = localAdapter.locations.remove(id);
-      if (removed) addAudit("Removed Location", removed.name, "Admin", removed.id);
+      const target = locations.find((location) => location.id === id);
+      const children = target?.type === "Building"
+        ? locations.filter((location) => location.parentId === id || location.building === target.name)
+        : [];
+      const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
+      affected.forEach((location) => {
+        localAdapter.locations.remove(location.id);
+        addAudit("Removed Location", location.name, "Admin", location.id);
+      });
       return wait(undefined);
 
     },
@@ -1374,8 +1381,8 @@ export const services: Services = {
             id: mode === "update" && existing ? existing.id : id,
             function: existing?.function ?? "",
             keywords: existing?.keywords ?? "",
-            building: existing?.building,
-            floor: existing?.floor,
+            building: row.building ?? existing?.building,
+            floor: row.floor ?? existing?.floor,
             positioned: row.lat !== null && row.lng !== null,
           },
         });
