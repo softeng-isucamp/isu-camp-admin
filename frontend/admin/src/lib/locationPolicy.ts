@@ -39,9 +39,14 @@ export interface LocationPolicyOptions {
   directory: readonly Location[];
 }
 
+export interface LocationNormalizationOptions {
+  directory: readonly Location[];
+  previous?: LocationDraft;
+}
+
 export interface LocationPolicy {
   classify(type: LocationType): LocationClassification;
-  normalize(draft: LocationDraft, directory: readonly Location[]): LocationDraft;
+  normalize(draft: LocationDraft, options: LocationNormalizationOptions): LocationDraft;
   evaluate(draft: LocationDraft, options: LocationPolicyOptions): LocationPolicyEvaluation;
 }
 
@@ -59,20 +64,33 @@ const classify = (type: LocationType): LocationClassification => {
   };
 };
 
-const hasValidCoordinates = (draft: LocationDraft) => (
-  draft.lat !== null
-  && draft.lng !== null
-  && draft.lat >= -90
-  && draft.lat <= 90
-  && draft.lng >= -180
-  && draft.lng <= 180
-);
+const analyzeCoordinates = (draft: LocationDraft) => {
+  const hasLat = draft.lat !== null;
+  const hasLng = draft.lng !== null;
+  const latitudeValid = hasLat
+    && Number.isFinite(draft.lat)
+    && draft.lat! >= -90
+    && draft.lat! <= 90;
+  const longitudeValid = hasLng
+    && Number.isFinite(draft.lng)
+    && draft.lng! >= -180
+    && draft.lng! <= 180;
+
+  return {
+    hasLat,
+    hasLng,
+    latitudeValid,
+    longitudeValid,
+    valid: latitudeValid && longitudeValid,
+  };
+};
 
 const normalize = (
   draft: LocationDraft,
-  directory: readonly Location[],
+  options: LocationNormalizationOptions,
 ): LocationDraft => {
   const classification = classify(draft.type);
+  const coordinates = analyzeCoordinates(draft);
 
   if (classification.kind === "outdoor") {
     return {
@@ -80,18 +98,20 @@ const normalize = (
       parentId: null,
       building: undefined,
       floor: undefined,
-      positioned: hasValidCoordinates(draft),
+      positioned: coordinates.valid,
     };
   }
 
-  const parent = directory.find(
+  const parent = options.directory.find(
     (location) => location.id === draft.parentId && location.type === "Building",
   );
+  const parentChanged = options.previous !== undefined
+    && options.previous.parentId !== draft.parentId;
 
   return {
     ...draft,
     building: parent?.name,
-    floor: classification.kind === "floor" ? undefined : draft.floor,
+    floor: classification.kind === "floor" || parentChanged ? undefined : draft.floor,
     lat: null,
     lng: null,
     positioned: false,
@@ -104,8 +124,7 @@ const evaluate = (
 ): LocationPolicyEvaluation => {
   const issues: LocationPolicyIssue[] = [];
   const classification = classify(draft.type);
-  const hasLat = draft.lat !== null;
-  const hasLng = draft.lng !== null;
+  const coordinates = analyzeCoordinates(draft);
 
   if (classification.requiresBuildingParent) {
     const parent = options.directory.find((location) => location.id === draft.parentId);
@@ -144,15 +163,15 @@ const evaluate = (
   }
 
   if (classification.allowsOutdoorPosition) {
-    if (hasLat !== hasLng) {
+    if (coordinates.hasLat !== coordinates.hasLng) {
       issues.push({
         code: "coordinate_pair_required",
-        field: hasLat ? "lng" : "lat",
+        field: coordinates.hasLat ? "lng" : "lat",
         message: "Latitude and longitude must be provided together.",
       });
     }
 
-    if (draft.lat !== null && (draft.lat < -90 || draft.lat > 90)) {
+    if (coordinates.hasLat && !coordinates.latitudeValid) {
       issues.push({
         code: "latitude_out_of_range",
         field: "lat",
@@ -160,7 +179,7 @@ const evaluate = (
       });
     }
 
-    if (draft.lng !== null && (draft.lng < -180 || draft.lng > 180)) {
+    if (coordinates.hasLng && !coordinates.longitudeValid) {
       issues.push({
         code: "longitude_out_of_range",
         field: "lng",
@@ -168,7 +187,7 @@ const evaluate = (
       });
     }
 
-    if (options.context === "map-readiness" && !hasLat && !hasLng) {
+    if (options.context === "map-readiness" && !coordinates.hasLat && !coordinates.hasLng) {
       issues.push({
         code: "coordinates_required",
         field: "lat",
@@ -176,14 +195,14 @@ const evaluate = (
       });
     }
 
-    if (draft.positioned !== hasValidCoordinates(draft)) {
+    if (draft.positioned !== coordinates.valid) {
       issues.push({
         code: "placement_mismatch",
         field: "positioned",
         message: "Placement state must match valid paired coordinates.",
       });
     }
-  } else if (hasLat || hasLng || draft.positioned) {
+  } else if (coordinates.hasLat || coordinates.hasLng || draft.positioned) {
     issues.push({
       code: "outdoor_position_forbidden",
       field: "lat",
