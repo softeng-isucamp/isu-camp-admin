@@ -69,6 +69,42 @@ describe("map draft review", () => {
     expect(result.errors[0]).toMatchObject({ object: { type: "location", id: "loc-1" } });
   });
 
+  it("requires outdoor Locations to be positioned for map readiness", () => {
+    const unpositioned = location({ lat: null, lng: null, positioned: false });
+    const result = reviewMapDraft({
+      original: { locations: [unpositioned], nodes: [], pathways: [], buildings: [] },
+      current: { locations: [unpositioned], nodes: [], pathways: [], buildings: [] },
+      deleted: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual([{
+      object: { type: "location", id: "loc-1", label: "Library" },
+      message: "Outdoor Locations require latitude and longitude for map readiness.",
+    }]);
+  });
+
+  it.each([
+    ["Floor", { parentId: "building-1", building: "Library", lat: 16.975, lng: 121.731, positioned: true }],
+    ["Room", { parentId: null, building: undefined, lat: null, lng: null, positioned: false }],
+    ["Room", { parentId: "loc-1", building: "Library", lat: null, lng: null, positioned: false }],
+    ["Room", { parentId: "building-1", building: "Library", lat: 16.975, lng: 121.731, positioned: true }],
+  ] as const)("reports shared Location readiness issues for %s records", (type, overrides) => {
+    const candidate = location({ type, ...overrides });
+    const directory = type === "Floor" || overrides.parentId === "building-1"
+      ? [candidate, location({ id: "building-1", name: "Library", type: "Building" })]
+      : [candidate];
+    const result = reviewMapDraft({
+      original: { locations: directory, nodes: [], pathways: [], buildings: [] },
+      current: { locations: directory, nodes: [], pathways: [], buildings: [] },
+      deleted: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]?.object.id).toBe("loc-1");
+    expect(result.errors[0]?.message).toMatch(/Building|unpositioned|coordinates|map/i);
+  });
+
   it("rejects new or modified objects outside campus while allowing unchanged legacy data", () => {
     const result = reviewMapDraft({
       original: { locations: [location({ lat: 16.725 })], nodes: [node(), node({ id: "node-2" })], pathways: [pathway()], buildings: [building()] },

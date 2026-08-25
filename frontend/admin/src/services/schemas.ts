@@ -42,35 +42,13 @@ const locationImportFields = z.object({
   lat: z.number().nullable(),
   lng: z.number().nullable(),
 });
-const validateCoordinates = (value: { lat: number | null; lng: number | null }, ctx: z.RefinementCtx) => {
-  const hasLat = value.lat !== null;
-  const hasLng = value.lng !== null;
-  if (hasLat !== hasLng) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [hasLat ? "lng" : "lat"], message: "Latitude and longitude must be provided together." });
-  }
-  if (value.lat !== null && (value.lat < -90 || value.lat > 90)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lat"], message: "Latitude must be between -90 and 90." });
-  }
-  if (value.lng !== null && (value.lng < -180 || value.lng > 180)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["lng"], message: "Longitude must be between -180 and 180." });
-  }
-};
-export const locationImportSchema = locationImportFields.superRefine(validateCoordinates);
+export const locationImportSchema = locationImportFields;
 export const locationSchema = locationImportFields.extend({
   building: z.string().optional(),
   floor: z.string().optional(),
   function: z.string().optional(),
   keywords: z.string().optional(),
   positioned: z.boolean(),
-}).superRefine((value, ctx) => {
-  validateCoordinates(value, ctx);
-  const hasLat = value.lat !== null;
-  const hasLng = value.lng !== null;
-  if (value.positioned !== (hasLat && hasLng)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Positioned must match whether coordinates are present." });
-  const isChild = ["Room", "Office", "Laboratory", "Restroom"].includes(value.type);
-  if (isChild && (value.lat !== null || value.lng !== null || value.positioned)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Child locations must not be positioned on the outdoor map." });
-  }
 });
 export const routeImportSchema = z.object({
   id: z.string(),
