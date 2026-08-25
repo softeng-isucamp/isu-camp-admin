@@ -8,7 +8,6 @@ frontend/admin/e2e/portal.spec.ts-snapshots/
 .DS_Store
 .env
 .pytest_cache/
-.scratch/
 *.db
 
 # Disposable Admin mock backend runtime state (local-only; not tracked)
