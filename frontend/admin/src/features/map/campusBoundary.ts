@@ -47,8 +47,27 @@ export function pointOnCampus(point: MapPoint, boundary: MapPoint[]): boolean {
   return pointInPolygon(point, boundary);
 }
 
+function segmentsIntersect(a: MapPoint, b: MapPoint, c: MapPoint, d: MapPoint): boolean {
+  const orientation = (p: MapPoint, q: MapPoint, r: MapPoint) =>
+    (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const onSegment = (p: MapPoint, q: MapPoint, r: MapPoint) =>
+    Math.min(p[0], r[0]) <= q[0] && q[0] <= Math.max(p[0], r[0]) &&
+    Math.min(p[1], r[1]) <= q[1] && q[1] <= Math.max(p[1], r[1]);
+  const first = orientation(a, b, c);
+  const second = orientation(a, b, d);
+  const third = orientation(c, d, a);
+  const fourth = orientation(c, d, b);
+  return (first * second < 0 && third * fourth < 0) ||
+    (first === 0 && onSegment(a, c, b)) || (second === 0 && onSegment(a, d, b)) ||
+    (third === 0 && onSegment(c, a, d)) || (fourth === 0 && onSegment(c, b, d));
+}
+
 export function geometryOnCampus(points: MapPoint[], boundary: MapPoint[]): boolean {
-  return points.length > 0 && points.every((point) => pointOnCampus(point, boundary));
+  if (points.length === 0 || !points.every((point) => pointOnCampus(point, boundary))) return false;
+  const edges = boundary.map((point, index) => [point, boundary[(index + 1) % boundary.length]] as const);
+  return points.slice(1).every((point, index) =>
+    !edges.some(([start, end]) => segmentsIntersect(points[index], point, start, end)),
+  );
 }
 
 export function paddedCampusBounds(boundary: MapPoint[], paddingMeters = campusBoundaryPaddingMeters) {

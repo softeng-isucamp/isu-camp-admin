@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   Marker,
@@ -17,10 +17,9 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { reviewMapDraft, type MapObjectReference } from "./mapEditing";
+import { polygonCentroid, reviewMapDraft, type MapObjectReference } from "./mapEditing";
 import {
   echagueCampusBoundary,
-  formatBoundaryCandidate,
   geometryOnCampus,
   paddedCampusBounds,
   pointOnCampus,
@@ -63,21 +62,60 @@ interface MapControllerProps {
   onMapClick: (latlng: [number, number]) => void;
   flyTarget: [number, number] | null;
   navigationBounds: [[number, number], [number, number]];
+  onViewportChange?: (bounds: L.LatLngBounds | null, zoom: number) => void;
 }
+
+const isPointInBounds = (
+  lat: number,
+  lng: number,
+  bounds: L.LatLngBounds | null,
+  margin = 0.002
+) => {
+  if (!bounds || typeof bounds.getSouth !== "function") return true;
+  const south = bounds.getSouth() - margin;
+  const north = bounds.getNorth() + margin;
+  const west = bounds.getWest() - margin;
+  const east = bounds.getEast() + margin;
+  return lat >= south && lat <= north && lng >= west && lng <= east;
+};
 
 const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
   const changes = new Map(changed.map((item) => [item.id, item]));
   return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
 };
 
-function MapController({ onMapClick, flyTarget, navigationBounds }: MapControllerProps) {
+function MapController({
+  onMapClick,
+  flyTarget,
+  navigationBounds,
+  onViewportChange,
+}: MapControllerProps) {
   const map = useMap();
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  const initialFitDoneRef = useRef(false);
 
   useMapEvents({
     click: (e) => {
       onMapClick([e.latlng.lat, e.latlng.lng]);
     },
+    moveend: () => {
+      if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+        onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+      }
+    },
+    zoomend: () => {
+      if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+        onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+      }
+    },
   });
+
+  useEffect(() => {
+    if (typeof map.getBounds === "function" && typeof map.getZoom === "function") {
+      onViewportChangeRef.current?.(map.getBounds(), map.getZoom());
+    }
+  }, [map]);
 
   useEffect(() => {
     if (flyTarget) {
@@ -89,7 +127,8 @@ function MapController({ onMapClick, flyTarget, navigationBounds }: MapControlle
     if (typeof map.getBoundsZoom !== "function" || typeof map.setMinZoom !== "function") return;
     const minimumZoom = map.getBoundsZoom(navigationBounds, false);
     map.setMinZoom(minimumZoom);
-    if (map.getZoom() < minimumZoom && typeof map.fitBounds === "function") {
+    if (!initialFitDoneRef.current && map.getZoom() < minimumZoom && typeof map.fitBounds === "function") {
+      initialFitDoneRef.current = true;
       map.fitBounds(navigationBounds, { animate: false });
     }
   }, [map, navigationBounds]);
@@ -160,6 +199,8 @@ export function MapEditor() {
   const [placingAssociatedPlaceId, setPlacingAssociatedPlaceId] = useState<
     string | null
   >(null);
+  const [addLocationOpen, setAddLocationOpen] = useState(false);
+  const [newLocation, setNewLocation] = useState({ name: "", code: "", type: "Facility" as Location["type"], status: "Active" as Location["status"], parentId: null as string | null, building: "", floor: "" });
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
@@ -169,6 +210,10 @@ export function MapEditor() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
+  const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
+  const handleViewportChange = useCallback((bounds: L.LatLngBounds | null) => {
+    setCurrentMapBounds(bounds);
+  }, []);
 
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
@@ -184,6 +229,8 @@ export function MapEditor() {
     const merged = overlayChanges(directoryBuildings, localBuildings);
     return mode === "area" && points.length > 0 ? [...merged, { id: "pending-building", name: buildingName, code: buildingCode, points }] : merged;
   }, [buildingCode, buildingName, directoryBuildings, localBuildings, mode, points]);
+  const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
+    .some((item) => item.source?.provider === "OpenStreetMap");
   const campusBoundary = useMemo(
     () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
     [directoryBuildings],
@@ -214,6 +261,31 @@ export function MapEditor() {
     const buildings = currentBuildings.filter((item) => !geometryOnCampus(item.points, campusBoundary)).length;
     return locations + nodes + pathways + buildings;
   }, [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways]);
+
+  // Mode-driven dynamic filtering & viewport culling for fast, lag-free rendering
+  const filteredBuildings = useMemo(() => {
+    return currentBuildings;
+  }, [currentBuildings]);
+
+  const filteredLocations = useMemo(() => {
+    const positioned = currentLocations.filter(isPositionedLocation);
+    if (mode === "area") return [];
+    return positioned.filter(
+      (loc) => isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id
+    );
+  }, [currentLocations, currentMapBounds, mode, selected?.id]);
+
+  const filteredNodes = useMemo(() => {
+    if (mode === "place" || mode === "area") return [];
+    return currentNodes.filter(
+      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds) || selected?.id === node.id
+    );
+  }, [currentMapBounds, currentNodes, mode, selected?.id]);
+
+  const filteredPathways = useMemo(() => {
+    if (mode === "area") return [];
+    return currentPathways;
+  }, [currentPathways, mode]);
 
   const selectedLocation =
     currentLocations.find((item) => item.id === selected?.id);
@@ -314,11 +386,11 @@ export function MapEditor() {
     if (mode === "area") {
       const nextPoints = [...points, point];
       setPoints(nextPoints);
-      console.info("[Map Editor]", formatBoundaryCandidate(nextPoints));
       setDirty(true);
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
       setDirty(true);
+      if (mode === "place" && placingObjectType === "location" && placingId === "__new__") setAddLocationOpen(true);
     } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
       setPathPoints((current) => [...current, point]);
       setDirty(true);
@@ -383,15 +455,12 @@ export function MapEditor() {
     }
     const target = directoryLocations.find((l) => l.id === placingId);
     if (target) {
-      try {
-        await services.locations.savePosition({ id: placingId, lat: temporary[0], lng: temporary[1] });
-        await queryClient.invalidateQueries({ queryKey: ["map"] });
-        setMode("select");
-        setSelected({ type: "location", id: placingId });
-        setTemporary(null);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to save location position.");
-      }
+      const updated = { ...target, lat: temporary[0], lng: temporary[1], positioned: true };
+      setLocalLocations((current) => [...current.filter((item) => item.id !== target.id), updated]);
+      setMode("select");
+      setSelected({ type: "location", id: placingId });
+      setTemporary(null);
+      setDirty(true);
     }
   };
 
@@ -415,6 +484,13 @@ export function MapEditor() {
     setPlacingNodeName("");
     setMode("select");
     setSelected({ type: "node", id: newNodeId });
+  };
+
+  const handleSaveNewLocation = () => {
+    if (!newLocation.name.trim() || !newLocation.code.trim()) return;
+    const location: Location = { id: `location-${Date.now()}`, ...newLocation, lat: temporary?.[0] ?? null, lng: temporary?.[1] ?? null, positioned: Boolean(temporary) };
+    setLocalLocations((current) => [...current, location]);
+    setDirty(true); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
   };
 
   const handleSavePathShape = () => {
@@ -444,7 +520,6 @@ export function MapEditor() {
       setError("The building footprint must stay inside the ISU Echague campus boundary.");
       return;
     }
-    console.info("[Map Editor]", formatBoundaryCandidate(points));
     const building: Building = {
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
@@ -458,6 +533,7 @@ export function MapEditor() {
     setBuildingCode("");
     setMode("select");
     setSelected({ type: "building", id: building.id });
+    setPlacingAssociatedPlaceId(building.id);
   };
 
   const resetDraft = () => {
@@ -527,6 +603,9 @@ export function MapEditor() {
         selected: selected ?? undefined,
         pathPoints: pathPoints.length ? pathPoints : undefined,
         areaPoints: points.length >= 3 ? points : undefined,
+        locations: localLocations,
+        nodes: localNodes,
+        buildings: localBuildings,
       });
       await queryClient.invalidateQueries({ queryKey: ["map"] });
       setDirty(false);
@@ -592,15 +671,15 @@ export function MapEditor() {
           zoom={18}
           minZoom={15}
           maxBounds={navigationBounds}
-          maxBoundsViscosity={1}
+          maxBoundsViscosity={0.7}
           zoomControl={false}
           className="w-full h-full"
         >
           <TileLayer
             attribution={
               basemap === "satellite"
-                ? "© Esri"
-                : "© OpenStreetMap"
+                ? `© Esri${displaysOsmOverlays ? " · © OpenStreetMap contributors" : ""}`
+                : "© OpenStreetMap contributors"
             }
             url={
               basemap === "satellite"
@@ -608,34 +687,71 @@ export function MapEditor() {
                 : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             }
           />
-          <MapController onMapClick={onMapClick} flyTarget={flyTarget} navigationBounds={navigationBounds} />
+          <MapController
+            onMapClick={onMapClick}
+            flyTarget={flyTarget}
+            navigationBounds={navigationBounds}
+            onViewportChange={handleViewportChange}
+          />
 
-          {currentBuildings.map((building) => (
-            <Polygon
-              key={building.id}
-              positions={building.points}
-              pathOptions={{
-                color: !geometryOnCampus(building.points, campusBoundary) ? "#b42318" : selected?.id === building.id ? "#e67e22" : "#278b70",
-                fillColor: "#8fd1bd",
-                fillOpacity: selected?.id === building.id ? 0.35 : 0.22,
-                weight: selected?.id === building.id ? 3 : 2,
-              }}
-              eventHandlers={{
-                click: () => selectObject("building", building.id),
-              }}
-            >
-              <Tooltip direction="center" permanent className="map-label">
-                {building.name}{!geometryOnCampus(building.points, campusBoundary) ? " · Outside campus boundary" : ""}
-              </Tooltip>
-            </Polygon>
-          ))}
+          {filteredBuildings.map((building) => {
+            const isSelected = selected?.id === building.id;
+            const buildingFillOpacity =
+              mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
-          {currentPathways.map((path) => {
+            return (
+              <Fragment key={building.id}>
+              <Polygon
+                key={building.id}
+                positions={building.points}
+                pathOptions={{
+                  color: !geometryOnCampus(building.points, campusBoundary)
+                    ? "#b42318"
+                    : isSelected
+                      ? "#e67e22"
+                      : "#278b70",
+                  fillColor: isSelected ? "#f97316" : "#8fd1bd",
+                  fillOpacity: buildingFillOpacity,
+                  weight: isSelected ? 3 : 2,
+                }}
+                eventHandlers={{
+                  click: () => {
+                    selectObject("building", building.id);
+                  },
+                }}
+              >
+                <Tooltip sticky direction="top" className="map-label">
+                  <div className="font-bold text-xs">{building.name}</div>
+                  {building.code && <div className="text-[10px] text-gray-500 font-normal">{building.code}</div>}
+                  {!geometryOnCampus(building.points, campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+              </Polygon>
+              {localBuildings.some((draft) => draft.id === building.id) && (
+                <Marker
+                  position={polygonCentroid(building.points)}
+                  icon={createLocationPinIcon(isSelected)}
+                  eventHandlers={{ click: () => selectObject("building", building.id) }}
+                />
+              )}
+              </Fragment>
+            );
+          })}
+
+          {filteredPathways.map((path) => {
             const source = currentNodes.find((node) => node.id === path.sourceNodeId);
             const destination = currentNodes.find((node) => node.id === path.destinationNodeId);
             const isEditingThisPath = editingPathId === path.id && mode === "path";
             const currentPoints = isEditingThisPath ? pathPoints : path.pathPoints;
             const isSelected = selected?.id === path.id || isEditingThisPath;
+
+            const pathOpacity =
+              mode === "place" || mode === "area"
+                ? 0.25
+                : isSelected
+                  ? 0.95
+                  : 0.8;
 
             return source && destination ? (
               <Polyline
@@ -651,43 +767,61 @@ export function MapEditor() {
                     ...currentPoints,
                     ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
                   ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
-                  weight: isSelected ? 6 : 4,
+                  weight: isSelected ? 6 : mode === "path" ? 5 : 4,
                   dashArray: isSelected ? undefined : "7 6",
-                  opacity: isSelected ? 0.95 : 0.8,
+                  opacity: pathOpacity,
                 }}
                 eventHandlers={{
-                  click: () => selectObject("pathway", path.id),
+                  click: () => {
+                    selectObject("pathway", path.id);
+                  },
                 }}
-              />
+              >
+                <Tooltip sticky direction="top" className="map-label">
+                  <div className="font-bold text-xs">{path.name || "Campus Pathway"}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">Shade: {path.shade} · {path.direction}</div>
+                  {!geometryOnCampus([
+                    ...(source ? [[source.lat, source.lng] as [number, number]] : []),
+                    ...currentPoints,
+                    ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
+                  ], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+              </Polyline>
             ) : null;
           })}
 
-          {currentLocations
-            .filter(isPositionedLocation)
-            .map((loc) => {
-              const isSelected = selected?.type === "location" && selected?.id === loc.id;
-              return (
-                <Marker
-                  key={loc.id}
-                  position={[loc.lat, loc.lng]}
-                  icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{
-                    click: () => selectObject("location", loc.id),
-                  }}
-                >
-                  <Tooltip direction="top" offset={[0, -28]}>
-                    {loc.name}{!pointOnCampus([loc.lat, loc.lng], campusBoundary) ? " · Outside campus boundary" : ""}
-                  </Tooltip>
-                  <Popup>
-                    <strong>{loc.name}</strong>
-                    <br />
-                    <small>{loc.type} · {loc.code}</small>
-                  </Popup>
-                </Marker>
-              );
-            })}
+          {filteredLocations.map((loc) => {
+            const isSelected = selected?.type === "location" && selected?.id === loc.id;
+            return (
+              <Marker
+                key={loc.id}
+                position={[loc.lat, loc.lng]}
+                icon={createLocationPinIcon(isSelected)}
+                eventHandlers={{
+                  click: () => {
+                    selectObject("location", loc.id);
+                  },
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -28]} className="map-label">
+                  <div className="font-bold text-xs">{loc.name}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">{loc.type} · {loc.code}</div>
+                  {!pointOnCampus([loc.lat, loc.lng], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
+                </Tooltip>
+                <Popup>
+                  <strong>{loc.name}</strong>
+                  <br />
+                  <small>{loc.type} · {loc.code}</small>
+                </Popup>
+              </Marker>
+            );
+          })}
 
-          {currentNodes.map((node) => {
+          {filteredNodes.map((node) => {
             const isSelected = selected?.type === "node" && selected?.id === node.id;
             return (
               <Marker
@@ -695,11 +829,17 @@ export function MapEditor() {
                 position={[node.lat, node.lng]}
                 icon={createNodeIcon(isSelected)}
                 eventHandlers={{
-                  click: () => selectObject("node", node.id),
+                  click: () => {
+                    selectObject("node", node.id);
+                  },
                 }}
               >
-                <Tooltip direction="top" offset={[0, -10]}>
-                  {node.name}{!pointOnCampus([node.lat, node.lng], campusBoundary) ? " · Outside campus boundary" : ""}
+                <Tooltip direction="top" offset={[0, -10]} className="map-label">
+                  <div className="font-bold text-xs">{node.name}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">Route Node ({node.nodeType})</div>
+                  {!pointOnCampus([node.lat, node.lng], campusBoundary) && (
+                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
+                  )}
                 </Tooltip>
               </Marker>
             );
@@ -766,6 +906,11 @@ export function MapEditor() {
             <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
           </div>
         )}
+        {localBuildings.length > 0 && mode === "select" && (
+          <div className="absolute bottom-4 left-4 z-[900] rounded-2xl border border-emerald-200 bg-emerald-50/95 px-4 py-3 text-xs text-emerald-900 shadow-lg" role="status">
+            Building saved. Place an Entrance Route Node and associate it with the building.
+          </div>
+        )}
 
         <div className="absolute top-4 left-4 z-[900] bg-white/95 backdrop-blur-md p-1.5 rounded-full shadow-lg border border-[#e1e3e4] flex items-center gap-1">
           <button
@@ -810,6 +955,7 @@ export function MapEditor() {
             onClick={() => {
               setMode("place");
               setSelected(null);
+              setPlacingId("__new__");
             }}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -930,13 +1076,15 @@ export function MapEditor() {
             ) : mode === "area" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building Footprint</h2>
-                <p className="text-xs text-[#3f4941] mt-1">Click the campus boundary points in order. Each point is logged; when finished, click <strong>Log Boundary Geometry</strong>, then copy the <code>ISU_ECHAGUE_BOUNDARY_CANDIDATE=...</code> line from the browser console and send it to me.</p>
+                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Draw Building / Location Footprint</h2>
+                <p className="text-xs text-[#3f4941] mt-1">
+                  Click on the map to plot the perimeter corners of the building or area footprint. A minimum of 3 points is required to form a closed polygon.
+                </p>
                 <label className="mt-3 block text-xs font-semibold text-[#3f4941]">Building name
-                  <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                  <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                 </label>
                 <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
-                  <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                  <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                 </label>
                 <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -961,19 +1109,12 @@ export function MapEditor() {
                   <button
                     type="button"
                     className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                    onClick={() => setMode("select")}
+                    onClick={() => {
+                      setPoints([]);
+                      setMode("select");
+                    }}
                   >
                     Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={points.length < 3}
-                    onClick={() => {
-                      if (points.length >= 3) console.info("[Map Editor]", formatBoundaryCandidate(points));
-                    }}
-                    className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-full text-xs font-bold hover:bg-amber-100 disabled:opacity-40 transition cursor-pointer"
-                  >
-                    Log Boundary Geometry
                   </button>
                   <button
                     type="button"
@@ -1016,6 +1157,7 @@ export function MapEditor() {
                         onChange={(e) => setPlacingId(e.target.value)}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
+                        <option value="__new__">＋ Add New Location Record (Click Map)</option>
                         {directoryLocations.map((l) => (
                           <option key={l.id} value={l.id}>
                             {l.name} ({l.type})
@@ -1028,6 +1170,9 @@ export function MapEditor() {
                         ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
                         : "Click the map to preview a new position."}
                     </div>
+                    {temporary && (
+                      <div className="text-xs text-[#3f4941]">Latitude {temporary[0].toFixed(6)} · Longitude {temporary[1].toFixed(6)}</div>
+                    )}
                     <div className="flex items-center gap-2 mt-4">
                       <button
                         type="button"
@@ -1078,7 +1223,7 @@ export function MapEditor() {
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
                         <option value="">None</option>
-                        {directoryBuildings.map((b) => (
+                        {currentBuildings.map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.name} (Building)
                           </option>
@@ -1090,6 +1235,12 @@ export function MapEditor() {
                         ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
                         : "Click the map to position this route node."}
                     </div>
+                    <label className="block text-xs font-semibold text-[#3f4941]">Latitude
+                      <input aria-label="Placement latitude" type="number" step="any" value={temporary?.[0] ?? ""} onChange={(e) => setTemporary([Number(e.target.value), temporary?.[1] ?? campusCenter[1]])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                    </label>
+                    <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
+                      <input aria-label="Placement longitude" type="number" step="any" value={temporary?.[1] ?? ""} onChange={(e) => setTemporary([temporary?.[0] ?? campusCenter[0], Number(e.target.value)])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                    </label>
                     <div className="flex items-center gap-2 mt-4">
                       <button
                         type="button"
@@ -1205,6 +1356,26 @@ export function MapEditor() {
                     <dd className="text-[#191c1d] font-bold">{selectedBuilding.code}</dd>
                   </div>
                 </dl>
+                <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
+                    <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => {
+                      setTemporary(null);
+                      setNewLocation({ name: "", code: "", type: "Room", status: "Active", parentId: selectedBuilding.id, building: selectedBuilding.name, floor: "" });
+                      setAddLocationOpen(true);
+                    }}>＋ Add Room</button>
+                  </div>
+                  {(() => {
+                    const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
+                    const grouped = new Map<string, Location[]>();
+                    children.forEach((child) => { const key = child.floor || "Unassigned floor"; grouped.set(key, [...(grouped.get(key) ?? []), child]); });
+                    return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => <div key={floor} className="mt-3"><div className="text-[10px] font-bold uppercase tracking-wide text-[#005931]">{floor}</div>{rooms.map((room) => <div key={room.id} className="flex justify-between gap-2 py-1 text-xs"><span className="font-semibold">{room.name}</span><span className="text-[#6b7280]">{room.code}</span></div>)}</div>) : <p className="mt-2 text-xs text-[#6b7280]">No rooms yet.</p>;
+                  })()}
+                </section>
+                <section aria-label="Building entrances" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
+                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { setPlacingObjectType("node"); setPlacingNodeType("Entrance"); setPlacingAssociatedPlaceId(selectedBuilding.id); setMode("place"); }}>＋ Place Entrance</button></div>
+                  {currentNodes.filter((node) => node.nodeType === "Entrance" && node.associatedPlaceId === selectedBuilding.id).map((node) => <div key={node.id} className="py-1 text-xs">{node.name}</div>)}
+                </section>
                 <div className="mt-4">
                   <button
                     type="button"
@@ -1413,6 +1584,28 @@ export function MapEditor() {
           </div>
         </div>
       </div>
+
+      {addLocationOpen && (
+        <Modal title="Add Location" subtitle="Create a positioned location at the selected map coordinates." size="sm" variant="green" onClose={() => setAddLocationOpen(false)}>
+          <label className="block text-xs font-semibold text-[#3f4941]">Name
+            <input aria-label="New location name" value={newLocation.name} onChange={(e) => setNewLocation({ ...newLocation, name: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Code
+            <input aria-label="New location code" value={newLocation.code} onChange={(e) => setNewLocation({ ...newLocation, code: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Type
+            <select aria-label="New location type" value={newLocation.type} onChange={(e) => setNewLocation({ ...newLocation, type: e.target.value as Location["type"] })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option>Facility</option><option>Building</option><option>Room</option><option>Office</option></select>
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Parent Building
+            <select aria-label="New location parent building" disabled={Boolean(newLocation.parentId)} value={newLocation.parentId ?? ""} onChange={(e) => { const building = currentBuildings.find((item) => item.id === e.target.value); setNewLocation({ ...newLocation, parentId: e.target.value || null, building: building?.name ?? "" }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option value="">None / Standalone</option>{currentBuildings.map((building) => <option key={building.id} value={building.id}>{building.name}</option>)}</select>
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Floor
+            <input aria-label="New location floor" value={newLocation.floor} onChange={(e) => setNewLocation({ ...newLocation, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <div className="mt-3 text-xs text-[#3f4941]">{temporary ? `Latitude: ${temporary[0].toFixed(6)} · Longitude: ${temporary[1].toFixed(6)}` : "This room will be added without a map position."}</div>
+          <div className="modal-actions"><Button variant="subtle" onClick={() => setAddLocationOpen(false)}>Cancel</Button><Button disabled={!newLocation.name.trim() || !newLocation.code.trim()} onClick={handleSaveNewLocation}>Add Location</Button></div>
+        </Modal>
+      )}
 
       {confirm && (
         <Modal

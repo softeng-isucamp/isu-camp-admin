@@ -1,6 +1,10 @@
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "./campusBoundary";
 
+export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
+  ? [points.reduce((sum, [lat]) => sum + lat, 0) / points.length, points.reduce((sum, [, lng]) => sum + lng, 0) / points.length]
+  : [0, 0];
+
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
 
@@ -87,8 +91,17 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Location code is required.");
     if (!object.type) addError(reference, "Location type is required.");
     if (!object.status) addError(reference, "Location status is required.");
-    if (object.lat === null || object.lng === null || !validCoordinate([object.lat, object.lng])) addError(reference, "Location latitude and longitude must be valid coordinates.");
+    const isUnpositionedChild = ["Room", "Office", "Laboratory", "Restroom"].includes(object.type);
+    if (isUnpositionedChild) {
+      if (object.lat !== null || object.lng !== null || object.positioned) addError(reference, "Child locations must remain unpositioned on the outdoor map.");
+      if (!object.parentId) addError(reference, "Child locations must reference a parent Building.");
+    } else if (object.lat === null || object.lng === null || !validCoordinate([object.lat, object.lng])) {
+      addError(reference, "Location latitude and longitude must be valid coordinates.");
+    }
     if (object.parentId && !locationIds.has(object.parentId)) addError(reference, "Parent Location does not exist.");
+    if (isUnpositionedChild && object.parentId && !current.locations.some((parent) => parent.id === object.parentId && parent.type === "Building")) {
+      addError(reference, "Child locations must reference a Building parent.");
+    }
   });
   current.nodes.forEach((object) => {
     const reference = { type: "node" as const, id: object.id, label: label(object) };

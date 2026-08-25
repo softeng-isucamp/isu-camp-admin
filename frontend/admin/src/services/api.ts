@@ -12,6 +12,9 @@ import type {
   Session,
   UserAccount,
 } from "../types";
+import { z } from "zod";
+export { createLocationsBulkImportTemplate } from "./locationImport";
+import type { LocationImportRequest } from "./locationImport";
 
 import {
   auditEntries,
@@ -31,6 +34,8 @@ import {
   routeImportSchema,
   userAccountSchema,
 } from "./schemas";
+import { generatedMapFixture } from "./generatedMapFixture";
+import { createLocalAdapter } from "./localAdapter";
 
 
 // ==========================================
@@ -39,15 +44,23 @@ import {
 
 export type ApiMode = "local" | "mock" | "real";
 
-// `local` preserves the deterministic in-browser fixtures used by unit tests.
-// Development and Playwright should set VITE_API_MODE=mock; production points
-// at the remote backend with VITE_API_MODE=real and VITE_API_BASE_URL.
+// `local` is the explicit development/test adapter for deterministic in-browser fixtures.
+// HTTP-backed environments use `mock` for the mock API or `real` for production,
+// with VITE_API_BASE_URL selecting the backend when needed.
 export const API_MODE: ApiMode =
   (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local";
+export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
+const localAdapter = createLocalAdapter(
+  USE_GENERATED_MAP_FIXTURE
+    ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
+        nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
+    : { buildings, locations, nodes: routeNodes, pathways },
+  !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
+);
 
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_URL}${path}`, {
@@ -90,12 +103,16 @@ const matches = (value: string, query: string) =>
 
 export type FailureKey =
   | "locationSave"
+  | "locationRemove"
+  | "buildingRemove"
   | "routeSave"
   | "userUpdate"
   | "mapSave";
 
 export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
+  locationRemove: false,
+  buildingRemove: false,
   routeSave: false,
   userUpdate: false,
   mapSave: false,
@@ -180,6 +197,8 @@ export interface Services {
       actor?: string,
       date?: string
     ): Promise<Page<AuditEntry>>;
+
+    forLocation(id: string, name?: string): Promise<Page<AuditEntry>>;
   };
 
   notifications: {
@@ -192,6 +211,8 @@ export interface Services {
 
   map: {
     buildings(): Promise<typeof buildings>;
+
+    removeBuilding(id: string): Promise<void>;
 
     locations(): Promise<Location[]>;
 
@@ -206,8 +227,7 @@ export interface Services {
 
   imports: {
     locations(
-      json: string,
-      commit?: boolean
+      request: LocationImportRequest
     ): Promise<{
       imported: number;
       errors: string[];
@@ -231,18 +251,35 @@ export interface Services {
 const addAudit = (
   action: string,
   target: string,
-  category: AuditEntry["category"] = "Admin"
+  category: AuditEntry["category"] = "Admin",
+  targetId?: string,
 ) => {
   auditEntries.unshift({
     id: `a-${Date.now()}`,
     actor: "admin01",
     action,
     target,
+    targetId,
     createdAt: "Just now",
     category,
   });
 };
 
+const locationAuditActions = new Set([
+  "Updated Location", "Positioned Location", "Removed Location",
+  "Bulk Imported Location", "Bulk Updated Location",
+]);
+
+const enrichLegacyLocationAuditIds = () => {
+  auditEntries.forEach((entry) => {
+    if (entry.targetId || !locationAuditActions.has(entry.action)) return;
+    const namedLocations = locations.filter((location) => location.name === entry.target);
+    if (namedLocations.length === 1) entry.targetId = namedLocations[0].id;
+  });
+};
+
+// Link unambiguous seeded history before any location can be renamed.
+enrichLegacyLocationAuditIds();
 
 // ==========================================
 // Services
@@ -274,6 +311,10 @@ export const services: Services = {
       username,
       password
     ) => {
+
+      if (!USE_HTTP_API) {
+        return localAdapter.auth.login(username, password);
+      }
 
       const response = await fetch(
         `${API_URL}/api/login`,
@@ -335,6 +376,10 @@ export const services: Services = {
 
     logout: async () => {
 
+      if (!USE_HTTP_API) {
+        return localAdapter.auth.logout();
+      }
+
       const response = await fetch(
         `${API_URL}/api/logout`,
         {
@@ -374,6 +419,8 @@ export const services: Services = {
     // --------------------------------------
 
     me: async () => {
+
+      if (!USE_HTTP_API) return localAdapter.auth.me();
 
       const response = await fetch(
         `${API_URL}/api/me`,
@@ -544,42 +591,15 @@ export const services: Services = {
       const nextLocation: Location = { ...location, id: location.id || `loc-${Date.now()}` };
       locationSchema.parse(nextLocation);
 
-      const index =
-        locations.findIndex(
-          (item) =>
-            item.id === nextLocation.id
-        );
-
-      if (index >= 0) {
-
-        locations[index] =
-          clone(nextLocation);
-
-      } else {
-
-        locations.push(
-          clone(nextLocation)
-        );
-      }
-
-      addAudit(
-        "Updated Location",
-        nextLocation.name
-      );
-
-      return wait(
-        clone(nextLocation)
-      );
+      const saved = localAdapter.locations.save(nextLocation);
+      addAudit("Updated Location", saved.name, "Admin", saved.id);
+      return wait(clone(saved));
     },
 
     savePosition: async (position) => {
       if (USE_HTTP_API) return apiJson<Location>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng, positioned: true }) });
-      const location = locations.find((item) => item.id === position.id);
-      if (!location) throw new Error("Location not found.");
-      location.lat = position.lat;
-      location.lng = position.lng;
-      location.positioned = true;
-      addAudit("Positioned Location", location.name);
+      const location = localAdapter.map.savePosition(position.id, position.lat, position.lng);
+      addAudit("Positioned Location", location.name, "Admin", location.id);
       return wait(clone(location));
     },
 
@@ -591,27 +611,12 @@ export const services: Services = {
         return;
       }
 
-      const index =
-        locations.findIndex(
-          (location) =>
-            location.id === id
-        );
+      failIfConfigured("locationRemove");
 
-      if (index >= 0) {
-
-        const removed =
-          locations.splice(
-            index,
-            1
-          )[0];
-
-        addAudit(
-          "Removed Location",
-          removed.name
-        );
-      }
-
+      const removed = localAdapter.locations.remove(id);
+      if (removed) addAudit("Removed Location", removed.name, "Admin", removed.id);
       return wait(undefined);
+
     },
   },
 
@@ -935,6 +940,12 @@ export const services: Services = {
         pageSize: 20,
       });
     },
+
+    forLocation: async (id) => {
+      enrichLegacyLocationAuditIds();
+      const entries = auditEntries.filter((entry) => entry.targetId === id);
+      return wait({ items: clone(entries), total: entries.length, page: 1, pageSize: 20 });
+    },
   },
 
 
@@ -987,22 +998,34 @@ export const services: Services = {
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
-      : wait(clone(buildings)),
+    : wait(clone(localAdapter.map.buildings())),
+
+    removeBuilding: async (id) => {
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/map/buildings/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return;
+      }
+
+      failIfConfigured("buildingRemove");
+      const removed = localAdapter.map.removeBuilding(id);
+      if (removed) addAudit("Removed Building", removed.name, "Admin", removed.id);
+      return wait(undefined);
+    },
 
 
     locations: async () => USE_HTTP_API
       ? apiJson<Location[]>("/api/map/locations")
-      : wait(clone(locations)),
+      : wait(clone(localAdapter.map.locations())),
 
 
     nodes: async () => USE_HTTP_API
       ? apiJson<RouteNode[]>("/api/map/nodes")
-      : wait(clone(routeNodes)),
+      : wait(clone(localAdapter.map.nodes())),
 
 
     pathways: async () => USE_HTTP_API
       ? apiJson<Pathway[]>("/api/map/pathways")
-      : wait(clone(pathways)),
+      : wait(clone(localAdapter.map.pathways())),
 
 
     save: async (edit) => {
@@ -1153,6 +1176,28 @@ export const services: Services = {
         });
       }
 
+      if (edit?.locations) {
+        edit.locations.forEach((location) => {
+          const index = locations.findIndex((item) => item.id === location.id);
+          if (index >= 0) locations[index] = clone(location);
+          else locations.push(clone(location));
+        });
+      }
+      if (edit?.nodes) {
+        edit.nodes.forEach((node) => {
+          const index = routeNodes.findIndex((item) => item.id === node.id);
+          if (index >= 0) routeNodes[index] = clone(node);
+          else routeNodes.push(clone(node));
+        });
+      }
+      if (edit?.buildings) {
+        edit.buildings.forEach((building) => {
+          const index = buildings.findIndex((item) => item.id === building.id);
+          if (index >= 0) buildings[index] = clone(building);
+          else buildings.push(clone(building));
+        });
+      }
+
 
       // ------------------------------------
       // Path Points
@@ -1254,10 +1299,7 @@ export const services: Services = {
     // Locations Import
     // --------------------------------------
 
-    locations: async (
-      json,
-      commit = false
-    ) => {
+    locations: async ({ json, commit = false, mode = "add" }) => {
 
       let parsed: unknown;
 
@@ -1283,64 +1325,75 @@ export const services: Services = {
           : [parsed];
 
       const errors: string[] = [];
+      const validRows: Array<{ row: z.infer<typeof locationImportSchema>; index: number }> = [];
 
-      const pending: Location[] =
-        [];
-
-
-      rows.forEach(
-        (row, index) => {
-
-          const result =
-            locationImportSchema.safeParse(
-              row
-            );
-
-
-          if (!result.success) {
-
-            errors.push(
-              `Row ${
-                index + 1
-              }: invalid location fields.`
-            );
-
-          } else if (
-            result.data.parentId &&
-            !locations.some(
-              (location) =>
-                location.id ===
-                result.data.parentId
-            )
-          ) {
-
-            errors.push(
-              `Row ${
-                index + 1
-              }: parent location reference not found.`
-            );
-
-          } else {
-
-            pending.push({
-
-              ...result.data,
-
-              id: result.data.id || `loc-import-${Date.now()}-${index}`,
-
-              function: "",
-
-              keywords: "",
-
-              building: undefined,
-
-              floor: undefined,
-
-              positioned: result.data.lat !== null && result.data.lng !== null,
-            });
-          }
+      rows.forEach((row, index) => {
+        const result = locationImportSchema.safeParse(row);
+        if (!result.success) {
+          result.error.issues.forEach((issue) => {
+            const field = issue.path.join(".") || "record";
+            errors.push(`Row ${index + 1}, ${field}: ${issue.message}`);
+          });
+          return;
         }
+        validRows.push({ row: result.data, index });
+      });
+
+      const batchIds = new Set(validRows.flatMap(({ row }) => row.id ? [row.id] : []));
+      const seenIds = new Set<string>();
+      const seenCodes = new Set<string>();
+      const pending: Array<{ location: Location; existingIndex: number | null }> = [];
+
+      validRows.forEach(({ row, index }) => {
+        const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
+        const matchedByCode = locations.findIndex((location) => location.code === row.code);
+        const existingIndex = matchedById >= 0 ? matchedById : matchedByCode;
+        const id = row.id || `loc-import-${Date.now()}-${index}`;
+
+        if (seenIds.has(id)) errors.push(`Row ${index + 1}, id: duplicates another row in this file.`);
+        if (seenCodes.has(row.code)) errors.push(`Row ${index + 1}, code: duplicates another row in this file.`);
+        seenIds.add(id);
+        seenCodes.add(row.code);
+
+        if (mode === "add" && existingIndex >= 0) {
+          errors.push(`Row ${index + 1}, ${matchedById >= 0 ? "id" : "code"}: already exists.`);
+        }
+        if (mode === "update" && existingIndex < 0) {
+          errors.push(`Row ${index + 1}, id/code: no existing location matches this row.`);
+        }
+        if (row.parentId && !locations.some((location) => location.id === row.parentId) && !batchIds.has(row.parentId)) {
+          errors.push(`Row ${index + 1}, parentId: parent location reference not found.`);
+        }
+
+        const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
+        pending.push({
+          existingIndex: existingIndex >= 0 ? existingIndex : null,
+          location: {
+            ...existing,
+            ...row,
+            id: mode === "update" && existing ? existing.id : id,
+            function: existing?.function ?? "",
+            keywords: existing?.keywords ?? "",
+            building: existing?.building,
+            floor: existing?.floor,
+            positioned: row.lat !== null && row.lng !== null,
+          },
+        });
+      });
+
+      // A row can identify an existing parent by code while its children still
+      // reference the ID supplied in this file. Resolve that temporary ID to
+      // the parent's durable curated ID before committing the batch.
+      const effectiveIdsByImportedId = new Map(
+        validRows.flatMap(({ row }, pendingIndex) => row.id
+          ? [[row.id, pending[pendingIndex].location.id] as const]
+          : []),
       );
+      pending.forEach(({ location }) => {
+        if (location.parentId) {
+          location.parentId = effectiveIdsByImportedId.get(location.parentId) ?? location.parentId;
+        }
+      });
 
 
       if (
@@ -1348,17 +1401,17 @@ export const services: Services = {
         errors.length === 0
       ) {
 
-        locations.push(
-          ...pending
-        );
+        pending.forEach(({ location, existingIndex }) => {
+          if (existingIndex === null) locations.push(clone(location));
+          else locations[existingIndex] = clone(location);
+        });
 
-        if (pending.length) {
-
-          addAudit(
-            "Imported Locations",
-            `${pending.length} locations`
-          );
-        }
+        pending.forEach(({ location }) => addAudit(
+          mode === "update" ? "Bulk Updated Location" : "Bulk Imported Location",
+          location.name,
+          "Admin",
+          location.id,
+        ));
       }
 
 
