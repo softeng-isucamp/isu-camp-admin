@@ -14,6 +14,9 @@ import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 
+const childLocationTypes = new Set<LocationType>(["Room", "Office", "Laboratory", "Restroom"]);
+const standardFloorLevels = ["Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement"] as const;
+
 const blankLocation = (): LocationDraft => ({
   name: "",
   code: `LOC-${Date.now().toString().slice(-4)}`,
@@ -114,7 +117,7 @@ export function Locations() {
   });
 
   const allLocations = directory?.items ?? data?.items ?? initialLocations;
-  const buildingOptions = allLocations.filter((item) => item.type === "Building").map((item) => item.name);
+  const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
   const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
   const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.name === building);
@@ -450,7 +453,7 @@ export function Locations() {
             >
               <option>All Buildings</option>
               {buildingOptions.map((value) => (
-                <option key={value}>{value}</option>
+                <option key={value.id}>{value.name}</option>
               ))}
             </SelectField>
             <SelectField
@@ -843,7 +846,12 @@ export function Locations() {
                   label="LOCATION TYPE"
                   required
                   value={draft.type}
-                  onChange={(event) => setDraft({ ...draft, type: event.target.value as LocationType })}
+                  onChange={(event) => {
+                    const nextType = event.target.value as LocationType;
+                    setDraft(childLocationTypes.has(nextType) || nextType === "Floor"
+                      ? { ...draft, type: nextType, floor: childLocationTypes.has(nextType) ? draft.floor : undefined }
+                      : { ...draft, type: nextType, parentId: null, building: undefined, floor: undefined });
+                  }}
                 >
                   {["Laboratory", "Room", "Office", "Facility", "Building", "Floor", "Restroom"].map((v) => (
                     <option key={v}>{v}</option>
@@ -878,37 +886,35 @@ export function Locations() {
                 />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <SelectField
-                  label="PARENT BUILDING"
-                  value={draft.building ?? ""}
-                  subhelper="Required for rooms, offices, laboratories, restrooms, and facilities."
-                  onChange={(event) => {
-                    const building = event.target.value;
-                    const parent = allLocations.find((item) => item.name === building && item.type === "Building");
-                    setDraft({ ...draft, building, parentId: draft.floor ? draft.parentId : parent?.id ?? null });
-                  }}
-                >
-                  <option value="">None / Standalone</option>
-                  {buildingOptions.map((b) => (
-                    <option key={b}>{b}</option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label="PARENT FLOOR"
-                  value={floors.find((item) => item.name === draft.floor && item.parentId === allLocations.find((location) => location.type === "Building" && location.name === draft.building)?.id)?.id ?? ""}
-                  onChange={(event) => {
-                    const parent = allLocations.find((item) => item.id === event.target.value && item.type === "Floor");
-                    const building = allLocations.find((item) => item.type === "Building" && item.name === draft.building);
-                    setDraft({ ...draft, floor: parent?.name, parentId: building?.id ?? null });
-                  }}
-                >
-                  <option value="">None</option>
-                  {floors.filter((parentFloor) => !draft.building || parentFloor.parentId === allLocations.find((item) => item.type === "Building" && item.name === draft.building)?.id).map((parentFloor) => (
-                    <option key={parentFloor.id} value={parentFloor.id}>{parentFloor.name}</option>
-                  ))}
-                </SelectField>
-              </div>
+              {(childLocationTypes.has(draft.type) || draft.type === "Floor") && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <SelectField
+                    label="PARENT BUILDING"
+                    value={draft.parentId ?? ""}
+                    onChange={(event) => {
+                      const parent = buildingOptions.find((item) => item.id === event.target.value);
+                      setDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name });
+                    }}
+                  >
+                    <option value="">None / Standalone</option>
+                    {buildingOptions.map((buildingOption) => (
+                      <option key={buildingOption.id} value={buildingOption.id}>{buildingOption.name}</option>
+                    ))}
+                  </SelectField>
+                  {childLocationTypes.has(draft.type) && (
+                    <SelectField
+                      label="FLOOR LEVEL"
+                      value={draft.floor ?? ""}
+                      onChange={(event) => setDraft({ ...draft, floor: event.target.value || undefined })}
+                    >
+                      <option value="">None</option>
+                      {standardFloorLevels.map((floorLevel) => (
+                        <option key={floorLevel} value={floorLevel}>{floorLevel}</option>
+                      ))}
+                    </SelectField>
+                  )}
+                </div>
+              )}
 
               <Field
                 label="FUNCTION / PURPOSE"
