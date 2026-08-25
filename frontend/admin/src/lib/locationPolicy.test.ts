@@ -73,14 +73,19 @@ describe("Location policy", () => {
   );
 
   it("normalizes an indoor child from its authoritative Building parent", () => {
-    expect(locationPolicy.normalize(draft({
+    const input = draft({
       parentId: building.id,
       building: "Stale Building Name",
       floor: "2nd Floor",
       lat: 16.721,
       lng: 121.691,
       positioned: true,
-    }), { directory: [building] })).toEqual(draft({
+    });
+
+    expect(locationPolicy.normalize(input, {
+      directory: [building],
+      previous: input,
+    })).toEqual(draft({
       parentId: building.id,
       building: building.name,
       floor: "2nd Floor",
@@ -88,7 +93,7 @@ describe("Location policy", () => {
   });
 
   it("normalizes an outdoor Location from its coordinate pair", () => {
-    expect(locationPolicy.normalize(draft({
+    const input = draft({
       type: "Facility",
       parentId: building.id,
       building: building.name,
@@ -96,7 +101,12 @@ describe("Location policy", () => {
       lat: 16.721,
       lng: 121.691,
       positioned: false,
-    }), { directory: [building] })).toEqual(draft({
+    });
+
+    expect(locationPolicy.normalize(input, {
+      directory: [building],
+      previous: input,
+    })).toEqual(draft({
       type: "Facility",
       lat: 16.721,
       lng: 121.691,
@@ -273,7 +283,7 @@ describe("Location policy", () => {
   );
 
   it("normalizes a Floor as an unpositioned Building child", () => {
-    expect(locationPolicy.normalize(draft({
+    const input = draft({
       type: "Floor",
       parentId: building.id,
       building: "Stale Building Name",
@@ -281,7 +291,12 @@ describe("Location policy", () => {
       lat: 16.72,
       lng: 121.69,
       positioned: true,
-    }), { directory: [building] })).toEqual(draft({
+    });
+
+    expect(locationPolicy.normalize(input, {
+      directory: [building],
+      previous: input,
+    })).toEqual(draft({
       type: "Floor",
       parentId: building.id,
       building: building.name,
