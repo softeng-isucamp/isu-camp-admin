@@ -17,7 +17,7 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { reviewMapDraft, type MapObjectReference } from "./mapEditing";
+import { polygonCentroid, reviewMapDraft, type MapObjectReference } from "./mapEditing";
 import {
   echagueCampusBoundary,
   formatBoundaryCandidate,
@@ -200,6 +200,8 @@ export function MapEditor() {
   const [placingAssociatedPlaceId, setPlacingAssociatedPlaceId] = useState<
     string | null
   >(null);
+  const [addLocationOpen, setAddLocationOpen] = useState(false);
+  const [newLocation, setNewLocation] = useState({ name: "", code: "", type: "Facility" as Location["type"], status: "Active" as Location["status"] });
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
@@ -390,6 +392,7 @@ export function MapEditor() {
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
       setDirty(true);
+      if (mode === "place" && placingObjectType === "location" && placingId === "__new__") setAddLocationOpen(true);
     } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
       setPathPoints((current) => [...current, point]);
       setDirty(true);
@@ -488,6 +491,13 @@ export function MapEditor() {
     setSelected({ type: "node", id: newNodeId });
   };
 
+  const handleSaveNewLocation = () => {
+    if (!temporary || !newLocation.name.trim() || !newLocation.code.trim()) return;
+    const location: Location = { id: `location-${Date.now()}`, ...newLocation, parentId: null, lat: temporary[0], lng: temporary[1], positioned: true };
+    setLocalLocations((current) => [...current, location]);
+    setDirty(true); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
+  };
+
   const handleSavePathShape = () => {
     if (!editingPathId) return;
     const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
@@ -529,6 +539,7 @@ export function MapEditor() {
     setBuildingCode("");
     setMode("select");
     setSelected({ type: "building", id: building.id });
+    setPlacingAssociatedPlaceId(building.id);
   };
 
   const resetDraft = () => {
@@ -692,6 +703,7 @@ export function MapEditor() {
               mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
             return (
+              <>
               <Polygon
                 key={building.id}
                 positions={building.points}
@@ -719,6 +731,8 @@ export function MapEditor() {
                   )}
                 </Tooltip>
               </Polygon>
+              <Marker position={polygonCentroid(building.points)} icon={L.divIcon({ className: "building-centroid", html: "<span>🏢</span>", iconSize: [24, 24], iconAnchor: [12, 12] })} eventHandlers={{ click: () => selectObject("building", building.id) }} />
+              </>
             );
           })}
 
@@ -889,6 +903,11 @@ export function MapEditor() {
             <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
           </div>
         )}
+        {localBuildings.length > 0 && mode === "select" && (
+          <div className="absolute bottom-4 left-4 z-[900] rounded-2xl border border-emerald-200 bg-emerald-50/95 px-4 py-3 text-xs text-emerald-900 shadow-lg" role="status">
+            Building saved. Place an Entrance Route Node and associate it with the building.
+          </div>
+        )}
 
         <div className="absolute top-4 left-4 z-[900] bg-white/95 backdrop-blur-md p-1.5 rounded-full shadow-lg border border-[#e1e3e4] flex items-center gap-1">
           <button
@@ -933,6 +952,7 @@ export function MapEditor() {
             onClick={() => {
               setMode("place");
               setSelected(null);
+              setPlacingId("__new__");
             }}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1139,6 +1159,7 @@ export function MapEditor() {
                         onChange={(e) => setPlacingId(e.target.value)}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
+                        <option value="__new__">＋ Add New Location Record (Click Map)</option>
                         {directoryLocations.map((l) => (
                           <option key={l.id} value={l.id}>
                             {l.name} ({l.type})
@@ -1151,6 +1172,9 @@ export function MapEditor() {
                         ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
                         : "Click the map to preview a new position."}
                     </div>
+                    {temporary && (
+                      <div className="text-xs text-[#3f4941]">Latitude {temporary[0].toFixed(6)} · Longitude {temporary[1].toFixed(6)}</div>
+                    )}
                     <div className="flex items-center gap-2 mt-4">
                       <button
                         type="button"
@@ -1201,7 +1225,7 @@ export function MapEditor() {
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
                         <option value="">None</option>
-                        {directoryBuildings.map((b) => (
+                        {currentBuildings.map((b) => (
                           <option key={b.id} value={b.id}>
                             {b.name} (Building)
                           </option>
@@ -1213,6 +1237,12 @@ export function MapEditor() {
                         ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
                         : "Click the map to position this route node."}
                     </div>
+                    <label className="block text-xs font-semibold text-[#3f4941]">Latitude
+                      <input aria-label="Placement latitude" type="number" step="any" value={temporary?.[0] ?? ""} onChange={(e) => setTemporary([Number(e.target.value), temporary?.[1] ?? campusCenter[1]])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                    </label>
+                    <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
+                      <input aria-label="Placement longitude" type="number" step="any" value={temporary?.[1] ?? ""} onChange={(e) => setTemporary([temporary?.[0] ?? campusCenter[0], Number(e.target.value)])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                    </label>
                     <div className="flex items-center gap-2 mt-4">
                       <button
                         type="button"
@@ -1536,6 +1566,22 @@ export function MapEditor() {
           </div>
         </div>
       </div>
+
+      {addLocationOpen && (
+        <Modal title="Add Location" subtitle="Create a positioned location at the selected map coordinates." size="sm" variant="green" onClose={() => setAddLocationOpen(false)}>
+          <label className="block text-xs font-semibold text-[#3f4941]">Name
+            <input aria-label="New location name" value={newLocation.name} onChange={(e) => setNewLocation({ ...newLocation, name: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Code
+            <input aria-label="New location code" value={newLocation.code} onChange={(e) => setNewLocation({ ...newLocation, code: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Type
+            <select aria-label="New location type" value={newLocation.type} onChange={(e) => setNewLocation({ ...newLocation, type: e.target.value as Location["type"] })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option>Facility</option><option>Building</option><option>Room</option><option>Office</option></select>
+          </label>
+          <div className="mt-3 text-xs text-[#3f4941]">Latitude: {temporary?.[0].toFixed(6)} · Longitude: {temporary?.[1].toFixed(6)}</div>
+          <div className="modal-actions"><Button variant="subtle" onClick={() => setAddLocationOpen(false)}>Cancel</Button><Button disabled={!newLocation.name.trim() || !newLocation.code.trim()} onClick={handleSaveNewLocation}>Add Location</Button></div>
+        </Modal>
+      )}
 
       {confirm && (
         <Modal

@@ -1,6 +1,10 @@
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "./campusBoundary";
 
+export const polygonCentroid = (points: MapPoint): MapPoint => points.length
+  ? [points.reduce((sum, [lat]) => sum + lat, 0) / points.length, points.reduce((sum, [, lng]) => sum + lng, 0) / points.length]
+  : [0, 0];
+
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
 
