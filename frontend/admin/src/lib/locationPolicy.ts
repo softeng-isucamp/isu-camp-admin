@@ -41,7 +41,7 @@ export interface LocationPolicyOptions {
 
 export interface LocationNormalizationOptions {
   directory: readonly Location[];
-  previous?: LocationDraft;
+  previous: LocationDraft;
 }
 
 export interface LocationPolicy {
@@ -105,8 +105,7 @@ const normalize = (
   const parent = options.directory.find(
     (location) => location.id === draft.parentId && location.type === "Building",
   );
-  const parentChanged = options.previous !== undefined
-    && options.previous.parentId !== draft.parentId;
+  const parentChanged = options.previous.parentId !== draft.parentId;
 
   return {
     ...draft,
