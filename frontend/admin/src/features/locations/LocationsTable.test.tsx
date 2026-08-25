@@ -148,17 +148,35 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(cancelButton);
   });
 
-  it("creates a building, floor, and unpositioned room through the hierarchy fields", async () => {
+  it("creates a child location with a parent building and standard floor level", async () => {
     const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const floor = await services.locations.save({ id: "hierarchy-test-floor", name: "Hierarchy Test Floor", code: "HIER-FLR", type: "Floor", parentId: building.id, building: building.name, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
-    await waitFor(() => expect(screen.getAllByRole("option", { name: floor.name }).length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    expect(screen.queryByLabelText("PARENT BUILDING")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("FLOOR LEVEL")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Floor" } });
+    expect(screen.getByLabelText("PARENT BUILDING")).toBeInTheDocument();
+    expect(screen.queryByLabelText("FLOOR LEVEL")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+    const parentBuilding = screen.getByLabelText("PARENT BUILDING");
+    const floorLevel = screen.getByLabelText("FLOOR LEVEL");
+    expect(parentBuilding).toHaveDisplayValue("None / Standalone");
+    expect(Array.from((parentBuilding as HTMLSelectElement).options).find((option) => option.text === building.name)).toHaveValue(building.id);
+    expect(Array.from((floorLevel as HTMLSelectElement).options).map((option) => option.text)).toEqual([
+      "None",
+      "Ground Floor",
+      "1st Floor",
+      "2nd Floor",
+      "3rd Floor",
+      "4th Floor",
+      "5th Floor",
+      "Basement",
+    ]);
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Hierarchy Test Room" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "HIER-ROOM" } });
-    fireEvent.change(screen.getByLabelText("PARENT BUILDING"), { target: { value: building.name } });
-    fireEvent.change(screen.getByLabelText("PARENT FLOOR"), { target: { value: floor.id } });
+    fireEvent.change(parentBuilding, { target: { value: building.id } });
+    fireEvent.change(floorLevel, { target: { value: "2nd Floor" } });
     fireEvent.click(screen.getByRole("button", { name: /save location/i }));
     await screen.findByText(/saved successfully/i);
     const room = (await services.locations.list("Hierarchy Test Room")).items[0];
@@ -166,7 +184,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       type: "Room",
       parentId: building.id,
       building: building.name,
-      floor: floor.name,
+      floor: "2nd Floor",
       lat: null,
       lng: null,
       positioned: false,
@@ -174,6 +192,17 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Hierarchy Test Room" } });
     expect(await screen.findByText("Hierarchy Test Room")).toBeInTheDocument();
+  });
+
+  it("populates the parent building and floor level when editing a child location", async () => {
+    const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations(["/locations?q=Edit%20Child%20Room"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Child Room" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
+    expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
   });
 
   it("opens the Bulk Import modal with a file input and template", async () => {
