@@ -81,6 +81,7 @@ export interface AuditEntry {
   actor: string;
   action: string;
   target: string;
+  targetId?: string;
   detail?: string;
   createdAt: string;
   category: "Admin" | "User" | "System";
