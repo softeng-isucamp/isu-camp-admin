@@ -36,6 +36,8 @@ const locationImportFields = z.object({
   code: z.string().min(1),
   type: locationTypeSchema,
   parentId: z.string().nullable(),
+  building: z.string().optional(),
+  floor: z.string().optional(),
   status: recordStatusSchema,
   lat: z.number().nullable(),
   lng: z.number().nullable(),

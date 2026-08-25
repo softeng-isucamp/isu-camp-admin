@@ -300,8 +300,26 @@ describe("mock service contracts", () => {
     await expect(services.imports.locations({ json: JSON.stringify({ id: "missing", name: "Missing", code: "MISSING", type: "Facility", parentId: null, status: "Active", lat: null, lng: null }), commit: true, mode: "update" })).resolves.toMatchObject({ imported: 0, errors: [expect.stringMatching(/no existing location/)] });
     expect((await services.locations.list()).total).toBe(before);
     const template = createLocationsBulkImportTemplate();
-    expect(JSON.parse(template)).toHaveLength(3);
+    expect(JSON.parse(template)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "Building" }),
+      expect.objectContaining({ type: "Room", parentId: "bldg-library", floor: "2nd Floor" }),
+      expect.objectContaining({ type: "Facility", parentId: null }),
+    ]));
     await expect(services.imports.locations({ json: template, mode: "add" })).resolves.toMatchObject({ imported: 3, errors: [] });
+  });
+
+  it("soft-deactivates a building, its connected children, and audits each record", async () => {
+    const building = await services.locations.save({ id: "deactivate-building", name: "Deactivate Building", code: "DEACT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const child = await services.locations.save({ id: "deactivate-room", name: "Deactivate Room", code: "DEACT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+
+    await services.locations.remove(building.id);
+
+    expect((await services.locations.list()).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: building.id, status: "Inactive" }),
+      expect.objectContaining({ id: child.id, status: "Inactive" }),
+    ]));
+    expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({ action: "Removed Location", targetId: building.id });
+    expect((await services.logs.forLocation(child.id)).items[0]).toMatchObject({ action: "Removed Location", targetId: child.id });
   });
 
   it("uses a code-matched parent's durable ID for batch children and records exact histories", async () => {
