@@ -36,16 +36,32 @@ const facility: Location = {
   type: "Facility",
 };
 
+const secondBuilding: Location = {
+  ...building,
+  id: "building-2",
+  name: "Engineering Building",
+  code: "ENG",
+};
+
+const locationTypes = [
+  "Building",
+  "Facility",
+  "Floor",
+  "Room",
+  "Office",
+  "Laboratory",
+  "Restroom",
+] satisfies LocationType[];
+
 describe("Location policy", () => {
-  it.each([
-    ["Building", "outdoor"],
-    ["Facility", "outdoor"],
-    ["Floor", "floor"],
-    ["Room", "indoor"],
-    ["Office", "indoor"],
-    ["Laboratory", "indoor"],
-    ["Restroom", "indoor"],
-  ] satisfies Array<[LocationType, "outdoor" | "floor" | "indoor"]>)(
+  it.each(locationTypes.map((type) => [
+    type,
+    type === "Building" || type === "Facility"
+      ? "outdoor"
+      : type === "Floor"
+        ? "floor"
+        : "indoor",
+  ] satisfies [LocationType, "outdoor" | "floor" | "indoor"]))(
     "classifies %s Locations as %s",
     (type, kind) => {
       expect(locationPolicy.classify(type)).toEqual({
@@ -64,7 +80,7 @@ describe("Location policy", () => {
       lat: 16.721,
       lng: 121.691,
       positioned: true,
-    }), [building])).toEqual(draft({
+    }), { directory: [building] })).toEqual(draft({
       parentId: building.id,
       building: building.name,
       floor: "2nd Floor",
@@ -80,7 +96,7 @@ describe("Location policy", () => {
       lat: 16.721,
       lng: 121.691,
       positioned: false,
-    }), [building])).toEqual(draft({
+    }), { directory: [building] })).toEqual(draft({
       type: "Facility",
       lat: 16.721,
       lng: 121.691,
@@ -129,6 +145,24 @@ describe("Location policy", () => {
       expect(result.valid).toBe(false);
     },
   );
+
+  it("rejects non-finite outdoor coordinates", () => {
+    const result = locationPolicy.evaluate(draft({
+      type: "Facility",
+      lat: Number.NaN,
+      lng: Number.POSITIVE_INFINITY,
+      positioned: false,
+    }), {
+      context: "map-readiness",
+      directory: [],
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.map(({ code, field }) => [code, field])).toEqual([
+      ["latitude_out_of_range", "lat"],
+      ["longitude_out_of_range", "lng"],
+    ]);
+  });
 
   it.each([
     [draft(), [], "building_parent_required"],
@@ -212,15 +246,7 @@ describe("Location policy", () => {
     ]);
   });
 
-  it.each(([
-    "Building",
-    "Facility",
-    "Floor",
-    "Room",
-    "Office",
-    "Laboratory",
-    "Restroom",
-  ] satisfies LocationType[]).flatMap((type) => [
+  it.each(locationTypes.flatMap((type) => [
     [type, "record" as const],
     [type, "map-readiness" as const],
   ]))(
@@ -255,10 +281,31 @@ describe("Location policy", () => {
       lat: 16.72,
       lng: 121.69,
       positioned: true,
-    }), [building])).toEqual(draft({
+    }), { directory: [building] })).toEqual(draft({
       type: "Floor",
       parentId: building.id,
       building: building.name,
+    }));
+  });
+
+  it("clears stale floor metadata when an indoor child changes parent Building", () => {
+    const previous = draft({
+      type: "Room",
+      parentId: building.id,
+      building: building.name,
+      floor: "2nd Floor",
+    });
+
+    expect(locationPolicy.normalize({
+      ...previous,
+      parentId: secondBuilding.id,
+    }, {
+      directory: [building, secondBuilding],
+      previous,
+    })).toEqual(draft({
+      type: "Room",
+      parentId: secondBuilding.id,
+      building: secondBuilding.name,
     }));
   });
 
