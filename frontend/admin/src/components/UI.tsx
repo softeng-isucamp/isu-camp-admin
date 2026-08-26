@@ -87,6 +87,7 @@ export interface SelectFieldProps
   label: string;
   helper?: string;
   subhelper?: string;
+  error?: string;
   badge?: string;
 }
 
@@ -94,6 +95,7 @@ export function SelectField({
   label,
   helper,
   subhelper,
+  error,
   badge,
   children,
   className,
@@ -113,7 +115,7 @@ export function SelectField({
         {badge && <span className="field-badge">{badge}</span>}
       </div>
       <div className="relative flex items-center">
-        <select id={id} className="field-select pr-9 appearance-none" required={required} {...props}>
+        <select id={id} className={cx("field-select pr-9 appearance-none", error ? "field-input-error" : "")} required={required} aria-invalid={error ? true : undefined} {...props}>
           {children}
         </select>
         <div className="pointer-events-none absolute right-3 text-[#5b716b]">
@@ -123,6 +125,7 @@ export function SelectField({
         </div>
       </div>
       {sub && <span className="field-subhelper">{sub}</span>}
+      {error && <span className="field-error-msg">{error}</span>}
     </div>
   );
 }
@@ -236,25 +239,20 @@ export function Pagination({
   onChange?: (page: number) => void;
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), pages);
+  const pageNumbers = Array.from({ length: pages }, (_, i) => i + 1);
   return (
     <div className="pagination">
       <span>
-        Showing {(page - 1) * pageSize + 1}–{Math.min(total, page * pageSize)}{" "}
+        Showing {total === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(total, currentPage * pageSize)}{" "}
         of {total}
       </span>
       <div>
-        {Array.from({ length: Math.min(pages, 3) }, (_, i) => i + 1).map(
-          (p) => (
-            <button
-              key={p}
-              type="button"
-              className={p === page ? "active" : ""}
-              onClick={() => onChange?.(p)}
-            >
-              {p}
-            </button>
-          ),
-        )}
+        <button type="button" disabled={currentPage === 1} onClick={() => onChange?.(currentPage - 1)}>Previous</button>
+        {pageNumbers.map((p) => (
+          <button key={p} type="button" className={p === currentPage ? "active" : ""} onClick={() => onChange?.(p)}>{p}</button>
+        ))}
+        <button type="button" disabled={currentPage === pages} onClick={() => onChange?.(currentPage + 1)}>Next</button>
       </div>
     </div>
   );
