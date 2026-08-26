@@ -76,6 +76,7 @@ export function Locations() {
   }, []);
 
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
+  const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
   const [importText, setImportText] = useState("");
   const [importFileName, setImportFileName] = useState("");
@@ -86,15 +87,18 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<string[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [photoName, setPhotoName] = useState("");
+  const [customFloorMode, setCustomFloorMode] = useState(false);
   const [success, setSuccess] = useState<{
     name: string;
     id: string;
     building?: string;
     floor?: string;
+    mapTargetId: string;
+    indoor: boolean;
     kind: "added" | "edited";
   } | null>(null);
   const [importSuccess, setImportSuccess] = useState<number | null>(null);
@@ -132,7 +136,13 @@ export function Locations() {
         return { id: `${item.parentId}-floor-${item.floor}`, name: item.floor!, code: `${parent?.code ?? "BLDG"}-${item.floor}`, type: "Floor" as const, parentId: item.parentId, building: parent?.name ?? item.building, status: parent?.status ?? item.status, lat: null, lng: null, positioned: false } satisfies Location;
       });
     const unique = new Map<string, Location>();
-    [...compatibilityFloors, ...derivedFloors].forEach((floor) => {
+    const unspecifiedFloors = allLocations
+      .filter((item) => indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) && item.parentId && !item.floor)
+      .map((item) => {
+        const parent = buildingsById.get(item.parentId!);
+        return { id: `${item.parentId}-floor-Unspecified-Floor`, name: "Unspecified Floor", code: `${parent?.code ?? "BLDG"}-UNSPECIFIED`, type: "Floor" as const, parentId: item.parentId, building: parent?.name ?? item.building, status: parent?.status ?? item.status, lat: null, lng: null, positioned: false } satisfies Location;
+      });
+    [...compatibilityFloors, ...derivedFloors, ...unspecifiedFloors].forEach((floor) => {
       const key = `${floor.parentId}:${floor.name}`;
       if (!unique.has(key)) unique.set(key, floor);
     });
@@ -156,24 +166,32 @@ export function Locations() {
     );
   }, [rawItems, type, status, building, floorId, selectedFloorRecord]);
 
-  useEffect(() => setPage(1), [query, type, status, building, floorId]);
+  useEffect(() => setPage(1), [query, type, status, building, floorId, viewMode]);
 
-  // Build hierarchy tree
-  const hierarchyRows = useMemo(() => {
-    if (viewMode === "flat") return items.map((item) => ({ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }));
+  const matchingIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
 
-    const result: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
+  // Build complete hierarchy families. Filtering can reduce a family to the
+  // matching descendants, but a matching indoor record always keeps its root
+  // Building and Floor Level context visible.
+  const hierarchyFamilies = useMemo(() => {
+    if (viewMode === "flat") return items.map((item) => [{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
+
+    const result: Array<Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }>> = [];
 
     // Find roots
-    const rootBuildings = items.filter((loc) => loc.type === "Building");
+    const rootBuildings = allLocations.filter((loc) => loc.type === "Building" && (
+      matchingIds.has(loc.id) || allLocations.some((child) => matchingIds.has(child.id) && (child.parentId === loc.id || child.building === loc.name))
+    ));
     const standalone = items.filter((loc) => loc.parentId === null && loc.type === "Facility");
 
     for (const bldg of rootBuildings) {
+      const rootWasMatched = matchingIds.has(bldg.id);
       const bldgCollapsed = collapsedNodes.has(bldg.id);
       const explicitFloors = allLocations.filter((loc) => loc.parentId === bldg.id && loc.type === "Floor");
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && loc.type !== "Building" &&
-        (loc.parentId === bldg.id || loc.building === bldg.name),
+        (loc.parentId === bldg.id || loc.building === bldg.name) &&
+        (rootWasMatched || matchingIds.has(loc.id)),
       );
       const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
       const inferredFloorNames = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)));
@@ -193,7 +211,8 @@ export function Locations() {
           positioned: false,
         }));
       const childFloors = [...explicitFloors, ...inferredFloors];
-      result.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
+      const family: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
+      family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
 
       if (!bldgCollapsed) {
         childFloors.forEach((flr, flrIndex) => {
@@ -201,7 +220,7 @@ export function Locations() {
           const childRooms = allLocations.filter(
             (loc) => loc.parentId === flr.id || (loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building")
           );
-          result.push({
+          family.push({
             item: flr,
             level: 1,
             hasChildren: childRooms.length > 0,
@@ -211,7 +230,7 @@ export function Locations() {
 
           if (!flrCollapsed) {
             childRooms.forEach((rm, rmIndex) => {
-              result.push({
+              family.push({
                 item: rm,
                 level: 2,
                 hasChildren: false,
@@ -222,25 +241,38 @@ export function Locations() {
           }
         });
       }
+      result.push(family);
     }
 
     // Add standalone items
     for (const s of standalone) {
-      result.push({ item: s, level: 0, hasChildren: false, isLast: false, isCollapsed: false });
+      result.push([{ item: s, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
     }
 
     // If filter produced items not in tree, include them
-    const includedIds = new Set(result.map((r) => r.item.id));
+    const includedIds = new Set(result.flat().map((r) => r.item.id));
     for (const item of items) {
       if (!includedIds.has(item.id)) {
-        result.push({ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false });
+        result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
       }
     }
 
     return result;
-  }, [items, allLocations, viewMode, collapsedNodes]);
+  }, [items, matchingIds, allLocations, viewMode, collapsedNodes]);
 
-  const visibleRows = hierarchyRows.slice((page - 1) * pageSize, page * pageSize);
+  const hierarchyRows = hierarchyFamilies.flat();
+  const hierarchyPageFamilies = viewMode === "flat"
+    ? []
+    : hierarchyFamilies.slice((page - 1) * pageSize, page * pageSize);
+
+  const visibleRows = viewMode === "flat"
+    ? hierarchyRows.slice((page - 1) * pageSize, page * pageSize)
+    : hierarchyPageFamilies.flat();
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil((viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length) / pageSize));
+    setPage((current) => Math.min(current, totalPages));
+  }, [hierarchyRows.length, hierarchyFamilies.length, viewMode]);
 
   const toggleCollapse = (id: string) => {
     setCollapsedNodes((prev) => {
@@ -268,13 +300,13 @@ export function Locations() {
       ["code", "Location code is required."],
       ["function", "Description / purpose is required."],
     ] as const;
-    const validationMessages = [
-      ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([, message]) => message),
-      ...(adding && normalized.type === "Floor" ? ["Floor records are read-only compatibility data and cannot be created here."] : []),
-      ...evaluation.issues.map((issue) => issue.message),
+    const validationIssues = [
+      ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([field, message]) => ({ field: field as keyof LocationDraft, message })),
+      ...(adding && normalized.type === "Floor" ? [{ field: "type" as keyof LocationDraft, message: "Floor records are read-only compatibility data and cannot be created here." }] : []),
+      ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
     ];
-    if (validationMessages.length) {
-      setFieldErrors([...new Set(validationMessages)]);
+    if (validationIssues.length) {
+      setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
       return;
     }
     try {
@@ -287,6 +319,8 @@ export function Locations() {
         id: saved.id,
         building: normalized.building,
         floor: normalized.floor,
+        mapTargetId: isChildType(saved.type) && saved.parentId ? saved.parentId : saved.id,
+        indoor: isChildType(saved.type),
         kind: adding ? "added" : "edited",
       });
     } catch (cause) {
@@ -331,6 +365,8 @@ export function Locations() {
     setSelected(item);
     setDraft({ ...item });
     setPhotoName("");
+    setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
+    setLockedParentId(null);
     setDialog("edit");
   };
 
@@ -341,9 +377,11 @@ export function Locations() {
       type: "Room",
       parentId: parent.id,
       building: parent.name,
-      floor: "1st Floor",
+      floor: undefined,
     });
     setPhotoName("");
+    setCustomFloorMode(false);
+    setLockedParentId(parent.id);
     setActionMenuId(null);
     setDialog("add");
   };
@@ -411,6 +449,7 @@ export function Locations() {
         );
     }
   };
+  const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
 
   return (
     <div className="page locations-page">
@@ -608,6 +647,8 @@ export function Locations() {
               onClick={() => {
                 setDraft(blankLocation());
                 setPhotoName("");
+                setCustomFloorMode(false);
+                setLockedParentId(null);
                 setDialog("add");
               }}
             >
@@ -645,8 +686,8 @@ export function Locations() {
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.id}`)}>
-                {success.kind === "added" ? "Place on map" : "Edit position on map"}
+              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.mapTargetId}`)}>
+                {success.indoor ? "View parent building on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
               </Button>
               <Button variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
                 Done
@@ -886,7 +927,7 @@ export function Locations() {
           )}
         </div>
         <Pagination
-          total={hierarchyRows.length}
+          total={viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length}
           page={page}
           pageSize={pageSize}
           onChange={setPage}
@@ -931,7 +972,7 @@ export function Locations() {
             <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
               {(error || fieldErrors.length > 0) && (
                 <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
-                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map((message) => <li key={message}>{message}</li>)}</ul>}
+                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
@@ -944,8 +985,8 @@ export function Locations() {
                     setDraft(normalizeDraft({ ...draft, type: nextType }));
                   }}
                 >
-                  {["Laboratory", "Room", "Office", "Facility", "Building", "Floor", "Restroom"].map((v) => (
-                    <option key={v} value={v} aria-disabled={v === "Floor"}>{v === "Floor" ? "Floor (legacy records only)" : v}</option>
+                  {["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor"] : [])].map((v) => (
+                    <option key={v} value={v}>{v === "Floor" ? "Floor (legacy records only)" : v}</option>
                   ))}
                 </SelectField>
                 <SelectField
@@ -964,6 +1005,7 @@ export function Locations() {
                 <Field
                   label="LOCATION NAME"
                   required
+                  error={errorFor("name")}
                   value={draft.name}
                   placeholder="Computer Lab 1"
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
@@ -971,21 +1013,27 @@ export function Locations() {
                 <Field
                   label="LOCATION CODE / ID"
                   required
+                  error={errorFor("code")}
                   value={draft.code}
                   placeholder="LAB-CCSICT-201"
                   onChange={(event) => setDraft({ ...draft, code: event.target.value })}
                 />
               </div>
 
-              {isChildType(draft.type) && (
+              {(isChildType(draft.type) || draft.parentId !== null) && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <SelectField
                     label="PARENT BUILDING"
-                    value={draft.parentId ?? ""}
-                    disabled={dialog === "add" && draft.type === "Room" && draft.parentId !== null}
-                    onChange={(event) => {
-                      const parent = buildingOptions.find((item) => item.id === event.target.value);
-                      setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
+                    aria-label="PARENT BUILDING"
+                    required
+                    error={errorFor("parentId")}
+                  value={draft.parentId ?? ""}
+                    disabled={lockedParentId !== null}
+                    aria-describedby={errorFor("parentId") ? "parent-building-error" : undefined}
+                        onChange={(event) => {
+                          const parent = buildingOptions.find((item) => item.id === event.target.value);
+                          setCustomFloorMode(false);
+                          setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
                     }}
                   >
                     <option value="">None / Standalone</option>
@@ -993,17 +1041,29 @@ export function Locations() {
                       <option key={buildingOption.id} value={buildingOption.id}>{buildingOption.name}</option>
                     ))}
                   </SelectField>
+                  {lockedParentId && <p style={{ gridColumn: "1 / -1", margin: "-8px 0 0", color: "#365047", fontSize: "12px" }}>This Building was selected from its quick-add action and is locked to preserve that context.</p>}
                   {draft.type !== "Floor" && (
-                    <SelectField
-                      label="FLOOR LEVEL"
-                      value={draft.floor ?? ""}
-                      onChange={(event) => setDraft({ ...draft, floor: event.target.value || undefined })}
-                    >
-                      <option value="">None</option>
-                      {standardFloorLevels.map((floorLevel) => (
-                        <option key={floorLevel} value={floorLevel}>{floorLevel}</option>
-                      ))}
-                    </SelectField>
+                    <div>
+                      <SelectField
+                        label="FLOOR LEVEL"
+                        aria-label="FLOOR LEVEL"
+                        required
+                        error={!customFloorMode ? errorFor("floor") : undefined}
+                        value={customFloorMode ? "__custom__" : draft.floor ?? ""}
+                        onChange={(event) => {
+                          const custom = event.target.value === "__custom__";
+                          setCustomFloorMode(custom);
+                          setDraft({ ...draft, floor: custom ? "" : event.target.value || undefined });
+                        }}
+                      >
+                        <option value="">None</option>
+                        {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
+                        <option value="__custom__">Custom Floor Level</option>
+                      </SelectField>
+                      {customFloorMode && (
+                        <Field label="CUSTOM FLOOR LEVEL" required value={draft.floor ?? ""} placeholder="Mezzanine" error={errorFor("floor")} onChange={(event) => setDraft({ ...draft, floor: event.target.value })} />
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -1012,16 +1072,23 @@ export function Locations() {
                 label="DESCRIPTION"
                 required
                 aria-label="DESCRIPTION"
+                error={errorFor("function")}
                 value={draft.function ?? ""}
                 placeholder="Programming and computer-based activities"
                 onChange={(event) => setDraft({ ...draft, function: event.target.value })}
               />
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
-                <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
-              </div>
-              <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
+              {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
+                    <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
+                  </div>
+                  <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
+                </>
+              ) : (
+                <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>Indoor Locations inherit map position and routing from their selected Building.</p>
+              )}
 
               <Field
                 label="KEYWORDS / TAGS"
@@ -1076,7 +1143,7 @@ export function Locations() {
                 <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
                 <p style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
                   {selectedChildren.length > 0
-                    ? `This building contains ${selectedChildren.length} connected rooms/offices. Deactivating this building will mark it and its child rooms as Inactive.`
+                    ? `This Building contains ${selectedChildren.length} associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.`
                     : `This will remove ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}.`}
                 </p>
               </div>
@@ -1086,7 +1153,7 @@ export function Locations() {
                 Cancel
               </Button>
               <Button style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
-                {selectedChildren.length > 0 ? "Deactivate" : "Delete"}
+                Delete
               </Button>
             </div>
           </div>

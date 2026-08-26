@@ -557,6 +557,8 @@ export const services: Services = {
               location.type,
               location.function ?? "",
               location.keywords ?? "",
+              location.building ?? "",
+              location.floor ?? "",
             ].some((value) =>
               matches(value, q)
             )

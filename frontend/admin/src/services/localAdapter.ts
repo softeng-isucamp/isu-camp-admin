@@ -67,8 +67,9 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         return location;
       },
       remove: (id: string): Location | undefined => {
-        const location = mapData.locations.find((item) => item.id === id);
-        if (location) location.status = "Inactive";
+        const index = mapData.locations.findIndex((item) => item.id === id);
+        if (index < 0) return undefined;
+        const [location] = mapData.locations.splice(index, 1);
         return location;
       },
     },

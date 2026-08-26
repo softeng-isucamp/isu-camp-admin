@@ -131,7 +131,7 @@ const normalize = (
   return {
     ...draft,
     building: parent?.name,
-    floor: classification.kind === "floor" || parentChanged ? undefined : draft.floor,
+    floor: classification.kind === "floor" || parentChanged ? undefined : draft.floor?.trim() || undefined,
     lat: null,
     lng: null,
     positioned: false,
