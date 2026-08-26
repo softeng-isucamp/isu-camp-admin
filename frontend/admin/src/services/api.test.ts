@@ -323,8 +323,8 @@ describe("mock service contracts", () => {
   });
 
   it("permanently deletes a building, its connected children, and audits each record", async () => {
-    const building = await services.locations.save({ id: "deactivate-building", name: "Deactivate Building", code: "DEACT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const child = await services.locations.save({ id: "deactivate-room", name: "Deactivate Room", code: "DEACT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const child = await services.locations.save({ id: "deleted-room", name: "Deleted Room", code: "DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     await services.locations.remove(building.id);
 

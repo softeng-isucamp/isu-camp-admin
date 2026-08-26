@@ -49,10 +49,10 @@ export function Locations() {
     return undefined;
   }, []);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
   useEffect(() => {
     const q = new URLSearchParams(routeLocation.search).get("q");
-    if (q !== null) setQuery(q);
+    setQuery(q ?? "");
   }, [routeLocation.search]);
 
   const [type, setType] = useState("All Types");
@@ -289,7 +289,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => loc.parentId === flr.id || (loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building")
+            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || (loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building"))
           );
           family.push({
             item: flr,

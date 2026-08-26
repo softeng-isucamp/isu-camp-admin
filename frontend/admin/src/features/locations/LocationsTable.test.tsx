@@ -93,6 +93,15 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.queryByText("Only floor B child")).not.toBeInTheDocument();
   });
 
+  it("keeps only matching indoor locations while retaining building and floor context in search", async () => {
+    renderLocations(["/locations?q=Laboratory%20107"]);
+
+    expect((await screen.findAllByText("Administration Building")).length).toBeGreaterThan(1);
+    expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
+    expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
+  });
+
   it("dims an unpositioned type icon without rendering placement status text", async () => {
     await services.locations.save({ id: "unpositioned-icon-test", name: "Unpositioned icon test", code: "ICON-TEST", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=Unpositioned%20icon%20test"]);
@@ -269,9 +278,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     setMockFailure("locationRemove", false);
   });
 
-  it("warns about connected children and deactivates the building hierarchy", async () => {
-    const building = await services.locations.save({ id: "ui-deactivate-building", name: "UI Deactivate Building", code: "UI-DEACT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const child = await services.locations.save({ id: "ui-deactivate-room", name: "UI Deactivate Room", code: "UI-DEACT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+  it("warns about connected children and permanently deletes the building hierarchy", async () => {
+    const building = await services.locations.save({ id: "ui-deleted-building", name: "UI Deleted Building", code: "UI-DELETED-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const child = await services.locations.save({ id: "ui-deleted-room", name: "UI Deleted Room", code: "UI-DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations([`/locations?q=${encodeURIComponent(building.name)}`]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
