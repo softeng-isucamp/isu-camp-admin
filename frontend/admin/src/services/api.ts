@@ -267,7 +267,7 @@ const addAudit = (
 };
 
 const locationAuditActions = new Set([
-  "Updated Location", "Positioned Location", "Removed Location",
+  "Updated Location", "Positioned Location", "Deleted Location",
   "Bulk Imported Location", "Bulk Updated Location",
 ]);
 
@@ -602,6 +602,7 @@ export const services: Services = {
       const evaluation = locationPolicy.evaluate(normalized, {
         context: "record",
         directory: locations,
+        requireFloorLevel: !location.id,
       });
       if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
 
@@ -628,13 +629,14 @@ export const services: Services = {
       failIfConfigured("locationRemove");
 
       const target = locations.find((location) => location.id === id);
+      if (target?.type === "Building") failIfConfigured("buildingRemove");
       const children = target?.type === "Building"
         ? locations.filter((location) => location.parentId === id || location.building === target.name)
         : [];
       const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
       affected.forEach((location) => {
         localAdapter.locations.remove(location.id);
-        addAudit("Removed Location", location.name, "Admin", location.id);
+        addAudit("Deleted Location", location.name, "Admin", location.id);
       });
       return wait(undefined);
 
@@ -1366,6 +1368,9 @@ export const services: Services = {
       const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
 
       validRows.forEach(({ row, index }) => {
+        if (row.type === "Floor") {
+          errors.push(`Row ${index + 1}, type: Floor records are legacy compatibility data and cannot be imported.`);
+        }
         const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
         const matchedByCode = locations.findIndex((location) => location.code === row.code);
         const existingIndex = matchedById >= 0 ? matchedById : matchedByCode;
@@ -1427,6 +1432,7 @@ export const services: Services = {
         const evaluation = locationPolicy.evaluate(candidate, {
           context: "record",
           directory: batchDirectory,
+          requireFloorLevel: true,
         });
         if (!evaluation.valid) {
           evaluation.issues.forEach((issue) => errors.push(`Row ${entry.rowIndex + 1}, ${issue.field}: ${issue.message}`));

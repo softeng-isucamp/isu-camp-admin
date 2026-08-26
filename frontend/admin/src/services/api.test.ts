@@ -168,7 +168,7 @@ describe("mock service contracts", () => {
     });
   });
 
-  it("preserves hierarchical child locations and soft-deletes by status", async () => {
+  it("preserves hierarchical child locations and permanently deletes families", async () => {
     const building = await services.locations.save({
       id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Building",
       parentId: null, status: "Active", lat: 16.72, lng: 121.69, positioned: true,
@@ -184,14 +184,14 @@ describe("mock service contracts", () => {
 
     await services.locations.remove(building.id);
     const persistedBuilding = (await services.locations.list()).items.find((item) => item.id === building.id);
-    expect(persistedBuilding).toMatchObject({ status: "Inactive" });
-    expect((await services.locations.list()).items.find((item) => item.id === room.id)).toBeDefined();
+    expect(persistedBuilding).toBeUndefined();
+    expect((await services.locations.list()).items.find((item) => item.id === room.id)).toBeUndefined();
     expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({
-      action: "Removed Location", targetId: building.id, target: building.name,
+      action: "Deleted Location", targetId: building.id, target: building.name,
     });
   });
 
-  it("soft-deletes buildings and records an exact-ID audit entry", async () => {
+  it("keeps map-building compatibility behavior and records an exact-ID audit entry", async () => {
     const building = {
       id: "ticket-01-map-building",
       name: "Map Building",
@@ -286,7 +286,7 @@ describe("mock service contracts", () => {
   it("validates bulk imports transactionally with batch parents and field-level errors", async () => {
     const before = (await services.locations.list()).total;
     const invalid = JSON.stringify([
-      { id: "bulk-room", name: "Batch room", code: "BATCH-ROOM", type: "Room", parentId: "bulk-building", status: "Active", lat: null, lng: null },
+      { id: "bulk-room", name: "Batch room", code: "BATCH-ROOM", type: "Room", parentId: "bulk-building", floor: "Ground Floor", status: "Active", lat: null, lng: null },
       { id: "bulk-building", name: "Batch building", code: "BATCH-BLDG", type: "Building", parentId: null, status: "Active", lat: 16.72, lng: 121.69 },
       { id: "bad", name: "", code: "", type: "Facility", parentId: null, status: "Active", lat: null, lng: null },
     ]);
@@ -316,24 +316,21 @@ describe("mock service contracts", () => {
     const template = createLocationsBulkImportTemplate();
     expect(JSON.parse(template)).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "Building" }),
-      expect.objectContaining({ type: "Room", parentId: "bldg-library", floor: "2nd Floor" }),
+      expect.objectContaining({ type: "Room", parentId: "building-library", floor: "Ground Floor" }),
       expect.objectContaining({ type: "Facility", parentId: null }),
     ]));
-    await expect(services.imports.locations({ json: template, mode: "add" })).resolves.toMatchObject({ imported: 3, errors: [] });
+    await expect(services.imports.locations({ json: template, mode: "add" })).resolves.toMatchObject({ imported: 4, errors: [] });
   });
 
-  it("soft-deactivates a building, its connected children, and audits each record", async () => {
+  it("permanently deletes a building, its connected children, and audits each record", async () => {
     const building = await services.locations.save({ id: "deactivate-building", name: "Deactivate Building", code: "DEACT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "deactivate-room", name: "Deactivate Room", code: "DEACT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     await services.locations.remove(building.id);
 
-    expect((await services.locations.list()).items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: building.id, status: "Inactive" }),
-      expect.objectContaining({ id: child.id, status: "Inactive" }),
-    ]));
-    expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({ action: "Removed Location", targetId: building.id });
-    expect((await services.logs.forLocation(child.id)).items[0]).toMatchObject({ action: "Removed Location", targetId: child.id });
+    expect((await services.locations.list()).items.some((item) => item.id === building.id || item.id === child.id)).toBe(false);
+    expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({ action: "Deleted Location", targetId: building.id });
+    expect((await services.logs.forLocation(child.id)).items[0]).toMatchObject({ action: "Deleted Location", targetId: child.id });
   });
 
   it("uses a code-matched parent's durable ID for batch children and records exact histories", async () => {
@@ -348,7 +345,7 @@ describe("mock service contracts", () => {
     const updateRows = JSON.stringify([
       { id: child.id, name: "Updated by ID", code: "NEW-CODE", type: child.type, parentId: null, status: child.status, lat: null, lng: null },
       { id: "incoming-parent-id", name: parent.name, code: parent.code, type: parent.type, parentId: null, status: parent.status, lat: null, lng: null },
-      { id: "incoming-child", name: "Imported Child", code: "INCOMING-CHILD", type: "Room", parentId: "incoming-parent-id", status: "Active", lat: null, lng: null },
+      { id: "incoming-child", name: "Imported Child", code: "INCOMING-CHILD", type: "Room", parentId: "incoming-parent-id", floor: "Ground Floor", status: "Active", lat: null, lng: null },
     ]);
     await expect(services.imports.locations({ json: updateRows, commit: true, mode: "update" })).resolves.toMatchObject({ imported: 0, errors: [expect.stringMatching(/no existing location/)] });
 
