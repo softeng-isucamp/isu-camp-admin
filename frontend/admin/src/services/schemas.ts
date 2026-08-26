@@ -49,6 +49,7 @@ export const locationSchema = locationImportFields.extend({
   function: z.string().optional(),
   keywords: z.string().optional(),
   positioned: z.boolean(),
+  photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
 });
 export const routeImportSchema = z.object({
   id: z.string(),

@@ -30,6 +30,9 @@ const blankLocation = (): LocationDraft => ({
   positioned: false,
 });
 
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
 export function Locations() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -102,6 +105,7 @@ export function Locations() {
     kind: "added" | "edited";
   } | null>(null);
   const [importSuccess, setImportSuccess] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
@@ -333,14 +337,16 @@ export function Locations() {
   const remove = async () => {
     if (!selected) return;
     setError("");
+    setDeleting(true);
     try {
       await services.locations.remove(selected.id);
       await refresh();
       setDialog(null);
-      setNotice(`${selected.name} removed successfully.`);
+      setNotice(`${selected.name} permanently deleted.`);
     } catch (cause) {
-      setDialog(null);
       setError(cause instanceof Error ? cause.message : "Unable to delete location.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -364,10 +370,40 @@ export function Locations() {
   const openEdit = (item: Location) => {
     setSelected(item);
     setDraft({ ...item });
-    setPhotoName("");
+    setPhotoName(item.photo?.name ?? "");
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
     setDialog("edit");
+  };
+
+  const selectPhoto = (file: File | undefined) => {
+    if (!file) return;
+    const extension = file.name.toLowerCase().split(".").pop();
+    const validType = PHOTO_TYPES.has(file.type) || (file.type === "" && ["png", "jpg", "jpeg", "webp"].includes(extension ?? ""));
+    if (!validType) {
+      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Choose a PNG, JPEG, or WebP image." }]);
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Photo must be 5 MB or smaller." }]);
+      return;
+    }
+    // Show the user's selection immediately, even while the preview is being decoded.
+    setPhotoName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string } }));
+      setPhotoName(file.name);
+      setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removePhoto = () => {
+    setDraft((current) => ({ ...current, photo: undefined }));
+    setPhotoName("");
+    setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
   };
 
   const openAddRoom = (parent: Location) => {
@@ -865,7 +901,13 @@ export function Locations() {
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
-                              const target = isChildLocation(item) && item.parentId ? item.parentId : item.id;
+                              const parent = item.parentId ? allLocations.find((location) => location.id === item.parentId && location.type === "Building") : undefined;
+                              if (isChildLocation(item) && !parent) {
+                                setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
+                                setActionMenuId(null);
+                                return;
+                              }
+                              const target = isChildLocation(item) && parent ? parent.id : item.id;
                               navigate(`/map-editor?location=${target}`);
                               setActionMenuId(null);
                             }}
@@ -1098,19 +1140,27 @@ export function Locations() {
               />
 
               {/* Upload Box */}
-              <div style={{ border: "1px dashed #d1d5db", borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb" }}>
+              <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                  <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#d6ede0", display: "grid", placeItems: "center" }}>
+                  {draft.photo ? <img src={draft.photo.dataUrl} alt="Selected location photo preview" style={{ width: "56px", height: "56px", objectFit: "cover", borderRadius: "8px" }} /> : <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#d6ede0", display: "grid", placeItems: "center" }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                     </svg>
-                  </div>
+                  </div>}
                   <div>
                     <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
-                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPG, or WEBP"}</p>
+                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPEG, or WebP · max 5 MB"}</p>
+                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>Preview is retained for this mock session only; it is not uploaded permanently.</p>
+                    {errorFor("photo") && <p role="alert" style={{ margin: "3px 0 0", color: "#dc2626", fontSize: "12px" }}>{errorFor("photo")}</p>}
                   </div>
                 </div>
-                <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setPhotoName(event.target.files?.[0]?.name ?? "")} />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <label style={{ border: "1px solid #0c7441", borderRadius: "999px", padding: "8px 12px", color: "#0c7441", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}>
+                    {draft.photo ? "Replace photo" : "Choose photo"}
+                    <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(event) => selectPhoto(event.target.files?.[0])} />
+                  </label>
+                  {draft.photo && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
+                </div>
               </div>
             </div>
 
@@ -1144,16 +1194,16 @@ export function Locations() {
                 <p style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
                   {selectedChildren.length > 0
                     ? `This Building contains ${selectedChildren.length} associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.`
-                    : `This will remove ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}.`}
+                    : `This will permanently delete ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}. This action cannot be undone.`}
                 </p>
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={() => setDialog(null)}>
+              <Button disabled={deleting} variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={() => setDialog(null)}>
                 Cancel
               </Button>
-              <Button style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
-                Delete
+              <Button disabled={deleting} style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
+                {deleting ? "Deleting…" : "Delete"}
               </Button>
             </div>
           </div>
