@@ -1418,6 +1418,48 @@ td small {
   display: flex;
   flex-direction: column;
 }
+.locations-overlay {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.locations-modal-card {
+  min-width: 0;
+}
+.locations-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 640px) {
+  .locations-overlay {
+    align-items: flex-start;
+    padding: 8px;
+  }
+  .locations-modal-card {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: calc(100vh - 16px) !important;
+    border-radius: 20px !important;
+  }
+  .locations-modal-card > div[style*="padding: 24px 30px"],
+  .locations-modal-card > div[style*="padding: 20px 28px"] {
+    padding: 18px 20px !important;
+  }
+  .locations-modal-body {
+    padding: 20px !important;
+    max-height: none !important;
+  }
+  .locations-form-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .locations-modal-card > div:last-child {
+    padding: 14px 20px !important;
+    flex-wrap: wrap;
+  }
+  .locations-modal-card > div:last-child > button {
+    flex: 1 1 140px;
+  }
+}
 .modal-sm {
   max-width: 420px;
 }

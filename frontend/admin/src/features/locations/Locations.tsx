@@ -106,6 +106,73 @@ export function Locations() {
   } | null>(null);
   const [importSuccess, setImportSuccess] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const pendingRef = useRef(false);
+  pendingRef.current = saving || validating || importing || deleting;
+
+  const activeOverlay = success ? "success" : importSuccess !== null ? "import-success" : dialog;
+  const openDialog = (next: NonNullable<typeof dialog>) => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDialog(next);
+  };
+  const closeOverlay = () => {
+    if (pendingRef.current) return;
+    setDialog(null);
+    setSuccess(null);
+    setImportSuccess(null);
+  };
+
+  useEffect(() => {
+    if (!activeOverlay) return;
+    const overlay = document.querySelector<HTMLElement>(".locations-overlay");
+    if (!overlay) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const page = document.querySelector<HTMLElement>(".locations-page");
+    const backgroundNodes = page
+      ? Array.from(page.children).filter((node) => !node.contains(overlay))
+      : [];
+    backgroundNodes.forEach((node) => {
+      node.setAttribute("aria-hidden", "true");
+      (node as HTMLElement).inert = true;
+    });
+    const focusable = () => Array.from(overlay.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ));
+    const initial = overlay.querySelector<HTMLElement>("[data-modal-initial]") ?? focusable()[0];
+    window.setTimeout(() => initial?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (!pendingRef.current) closeOverlay();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute("aria-hidden");
+        (node as HTMLElement).inert = false;
+      });
+      if (openerRef.current?.isConnected) window.setTimeout(() => openerRef.current?.focus(), 0);
+    };
+  }, [activeOverlay]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
@@ -313,6 +380,7 @@ export function Locations() {
       setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
       return;
     }
+    setSaving(true);
     try {
       const saved = await services.locations.save(normalized);
       await refresh();
@@ -331,6 +399,8 @@ export function Locations() {
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
       );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -351,20 +421,37 @@ export function Locations() {
   };
 
   const validateImport = async () => {
-    setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
+    setValidating(true);
+    try {
+      setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to validate locations.");
+    } finally {
+      setValidating(false);
+    }
   };
 
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
-    const committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
+    setImporting(true);
+    let committed;
+    try {
+      committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to import locations.");
+      setImporting(false);
+      return;
+    }
     if (committed.errors.length) {
       setImportResult(committed);
+      setImporting(false);
       return;
     }
     await refresh();
     setDialog(null);
     setNotice(`${committed.imported} locations imported successfully.`);
     setImportSuccess(committed.imported);
+    setImporting(false);
   };
 
   const openEdit = (item: Location) => {
@@ -373,7 +460,7 @@ export function Locations() {
     setPhotoName(item.photo?.name ?? "");
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
-    setDialog("edit");
+    openDialog("edit");
   };
 
   const selectPhoto = (file: File | undefined) => {
@@ -419,7 +506,7 @@ export function Locations() {
     setCustomFloorMode(false);
     setLockedParentId(parent.id);
     setActionMenuId(null);
-    setDialog("add");
+    openDialog("add");
   };
 
   const isChildLocation = (item: Location) => isChildType(item.type);
@@ -660,7 +747,7 @@ export function Locations() {
                 setImportText("");
                 setImportFileName("");
                 setImportResult(null);
-                setDialog("import");
+                openDialog("import");
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -685,7 +772,7 @@ export function Locations() {
                 setPhotoName("");
                 setCustomFloorMode(false);
                 setLockedParentId(null);
-                setDialog("add");
+                openDialog("add");
               }}
             >
               ＋ Add Location
@@ -699,7 +786,7 @@ export function Locations() {
           {notice}
         </div>
       )}
-      {error && (
+      {error && !dialog && (
         <div className="error" role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 16px", borderRadius: "12px" }}>
           {error}
         </div>
@@ -707,17 +794,17 @@ export function Locations() {
 
       {/* Success Dialogs */}
       {success && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-success-title" aria-describedby="location-success-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ width: "54px", height: "54px", background: "#d6ede0", color: "#0c7441", borderRadius: "50%", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>
+            <h2 id="location-success-title" tabIndex={-1} style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>
               {success.kind === "added" ? "Location added" : "Location updated"}
             </h2>
-            <p style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
+            <p id="location-success-description" style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
               <strong>{success.name}</strong> was {success.kind === "added" ? "added" : "updated"}
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
@@ -725,7 +812,7 @@ export function Locations() {
               <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.mapTargetId}`)}>
                 {success.indoor ? "View parent building on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
               </Button>
-              <Button variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
+              <Button data-modal-initial variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
                 Done
               </Button>
             </div>
@@ -734,18 +821,18 @@ export function Locations() {
       )}
 
       {importSuccess !== null && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-success-title" aria-describedby="location-import-success-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center" }}>
             <div style={{ width: "54px", height: "54px", background: "#d6ede0", color: "#0c7441", borderRadius: "50%", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>Locations Imported</h2>
-            <p style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
+            <h2 id="location-import-success-title" tabIndex={-1} style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>Locations Imported</h2>
+            <p id="location-import-success-description" style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
               <strong>{importSuccess} locations</strong> were imported into the campus directory successfully.
             </p>
-            <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setImportSuccess(null)}>
+            <Button data-modal-initial style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setImportSuccess(null)}>
               Done
             </Button>
           </div>
@@ -938,7 +1025,7 @@ export function Locations() {
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
                               setSelected(item);
-                              setDialog("history");
+                              openDialog("history");
                               setActionMenuId(null);
                             }}
                           >
@@ -949,7 +1036,7 @@ export function Locations() {
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
                             onClick={() => {
                               setSelected(item);
-                              setDialog("remove");
+                              openDialog("remove");
                               setActionMenuId(null);
                             }}
                           >
@@ -978,8 +1065,8 @@ export function Locations() {
 
       {/* Add / Edit Location Modal */}
       {(dialog === "add" || dialog === "edit") && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "720px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-form-title" aria-describedby="location-form-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "720px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             {/* Top Green Banner */}
             <div style={{ background: "#005931", color: "#fff", padding: "24px 30px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
@@ -989,18 +1076,19 @@ export function Locations() {
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: 0 }}>
+                  <h2 id="location-form-title" tabIndex={-1} style={{ fontSize: "22px", fontWeight: "bold", margin: 0 }}>
                     {dialog === "add" ? "Add Location" : "Edit Location"}
                   </h2>
-                  <p style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
+                  <p id="location-form-description" style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Add a building, floor, room, office, laboratory, restroom, or facility.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                aria-label="Close"
-                onClick={() => setDialog(null)}
+                aria-label="Close location dialog"
+                data-modal-initial
+                onClick={closeOverlay}
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1011,13 +1099,13 @@ export function Locations() {
             </div>
 
             {/* Form Body */}
-            <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
+            <div className="locations-modal-body" style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
               {(error || fieldErrors.length > 0) && (
                 <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
                   {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <SelectField
                   label="LOCATION TYPE"
                   required
@@ -1043,7 +1131,7 @@ export function Locations() {
                 </SelectField>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <Field
                   label="LOCATION NAME"
                   required
@@ -1063,7 +1151,7 @@ export function Locations() {
               </div>
 
               {(isChildType(draft.type) || draft.parentId !== null) && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <SelectField
                     label="PARENT BUILDING"
                     aria-label="PARENT BUILDING"
@@ -1071,7 +1159,6 @@ export function Locations() {
                     error={errorFor("parentId")}
                   value={draft.parentId ?? ""}
                     disabled={lockedParentId !== null}
-                    aria-describedby={errorFor("parentId") ? "parent-building-error" : undefined}
                         onChange={(event) => {
                           const parent = buildingOptions.find((item) => item.id === event.target.value);
                           setCustomFloorMode(false);
@@ -1122,7 +1209,7 @@ export function Locations() {
 
               {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
                 <>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                     <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
                     <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
                   </div>
@@ -1166,11 +1253,11 @@ export function Locations() {
 
             {/* Bottom Actions */}
             <div style={{ padding: "18px 32px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
-                Save Location
+              <Button disabled={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
+                {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>
           </div>
@@ -1179,8 +1266,8 @@ export function Locations() {
 
       {/* Delete Confirmation Modal */}
       {dialog === "remove" && selected && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-delete-title" aria-describedby="location-delete-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "grid", placeItems: "center", flexShrink: 0 }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1190,16 +1277,17 @@ export function Locations() {
                 </svg>
               </div>
               <div>
-                <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
-                <p style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
+                <h2 id="location-delete-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
+                <p id="location-delete-description" style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
                   {selectedChildren.length > 0
                     ? `This Building contains ${selectedChildren.length} associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.`
                     : `This will permanently delete ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}. This action cannot be undone.`}
                 </p>
               </div>
             </div>
+            {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px", marginBottom: "16px" }}>{error}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
-              <Button disabled={deleting} variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={() => setDialog(null)}>
+              <Button disabled={deleting} data-modal-initial variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
               <Button disabled={deleting} style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
@@ -1212,11 +1300,11 @@ export function Locations() {
 
       {/* View History Modal */}
       {dialog === "history" && selected && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "540px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
-            <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Audit History</h2>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-history-title" aria-describedby="location-history-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "540px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+            <h2 id="location-history-title" tabIndex={-1} style={{ fontSize: "22px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Audit History</h2>
             <p style={{ color: "#0c7441", fontWeight: 600, margin: "4px 0 2px" }}>{selected.name}</p>
-            <p style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 20px" }}>Record changes for this location.</p>
+            <p id="location-history-description" style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 20px" }}>Record changes for this location.</p>
 
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "360px", overflowY: "auto" }}>
               {history?.items.length ? history.items.map((entry) => (
@@ -1233,7 +1321,7 @@ export function Locations() {
             </div>
 
             <div style={{ marginTop: "24px", textAlign: "center" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", width: "100%", border: "1px solid #0c7441", color: "#0c7441" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" data-modal-initial style={{ borderRadius: "999px", width: "100%", border: "1px solid #0c7441", color: "#0c7441" }} onClick={closeOverlay}>
                 Close
               </Button>
             </div>
@@ -1243,8 +1331,8 @@ export function Locations() {
 
       {/* Bulk Import Modal */}
       {dialog === "import" && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-title" aria-describedby="location-import-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
                 <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }}>
@@ -1253,16 +1341,17 @@ export function Locations() {
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
-                  <p style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
+                  <h2 id="location-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
+                  <p id="location-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Validate campus location records before importing.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                aria-label="Close"
-                onClick={() => setDialog(null)}
+                aria-label="Close import dialog"
+                data-modal-initial
+                onClick={closeOverlay}
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1272,7 +1361,8 @@ export function Locations() {
               </button>
             </div>
 
-            <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div className="locations-modal-body" style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+              {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>{error}</div>}
               {/* Dropzone container */}
               <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -1383,28 +1473,32 @@ export function Locations() {
               </div>
 
               {importResult && (
-                <div style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
+                <div role={importResult.errors.length ? "alert" : "status"} aria-live="polite" style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
                   {importResult.errors.length ? <ul style={{ margin: 0, paddingLeft: "18px" }}>{importResult.errors.map((message) => <li key={message}>{message}</li>)}</ul> : `Validation passed for ${importResult.imported} locations.`}
                 </div>
               )}
             </div>
 
             <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={closeOverlay}>
                 Cancel
               </Button>
               <Button
                 variant="subtle"
                 style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }}
+                disabled={validating || importing}
+                aria-busy={validating}
                 onClick={validateImport}
               >
-                Validate
+                {validating ? "Validating…" : "Validate"}
               </Button>
               <Button
                 style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }}
+                disabled={validating || importing || !importResult || importResult.errors.length > 0}
+                aria-busy={importing}
                 onClick={applyImport}
               >
-                Import Locations
+                {importing ? "Importing…" : "Import Locations"}
               </Button>
             </div>
           </div>

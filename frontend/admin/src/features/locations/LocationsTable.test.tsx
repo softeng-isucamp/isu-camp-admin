@@ -309,4 +309,35 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("button", { name: /add location/i }));
     expect(screen.queryByText("campus.jpg")).not.toBeInTheDocument();
   });
+
+  it("enters, contains, and restores focus for a dismissible dialog", async () => {
+    renderLocations();
+    const addButton = await screen.findByRole("button", { name: /add location/i });
+    addButton.focus();
+    fireEvent.click(addButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "Add Location" });
+    expect(dialog).toHaveAttribute("aria-describedby", "location-form-description");
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Close location dialog"));
+
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button, input, select"));
+    controls[controls.length - 1].focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(controls[0]);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add Location" })).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(addButton);
+  });
+
+  it("associates validation messages with their fields", async () => {
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+
+    const nameInput = await screen.findByLabelText(/location name/i);
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(nameInput.getAttribute("aria-describedby")).toContain("field-location-name-error");
+    expect(screen.getByRole("alert")).toHaveTextContent("Location name is required.");
+  });
 });
