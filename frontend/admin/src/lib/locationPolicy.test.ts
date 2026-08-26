@@ -54,6 +54,23 @@ const locationTypes = [
 ] satisfies LocationType[];
 
 describe("Location policy", () => {
+  it("requires floor metadata for new indoor records while accepting legacy records without it", () => {
+    const withoutFloor = draft({ parentId: building.id, building: building.name });
+
+    expect(locationPolicy.evaluate(withoutFloor, {
+      context: "record",
+      directory: [building],
+      requireFloorLevel: true,
+    }).issues).toEqual([
+      expect.objectContaining({ code: "floor_level_required", field: "floor" }),
+    ]);
+    expect(locationPolicy.evaluate({ ...withoutFloor, id: "legacy-room" }, {
+      context: "record",
+      directory: [building],
+      requireFloorLevel: false,
+    })).toEqual({ valid: true, issues: [] });
+  });
+
   it.each(locationTypes.map((type) => [
     type,
     type === "Building" || type === "Facility"

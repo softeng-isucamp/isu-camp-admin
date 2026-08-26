@@ -13,9 +13,7 @@ import {
 import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
-import { locationPolicy } from "../../lib/locationPolicy";
-
-const standardFloorLevels = ["Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement"] as const;
+import { indoorLocationTypes, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -125,7 +123,21 @@ export function Locations() {
   });
   const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
-  const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
+  const floors = useMemo(() => {
+    const compatibilityFloors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
+    const derivedFloors = allLocations
+      .filter((item) => indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) && item.parentId && item.floor)
+      .map((item) => {
+        const parent = buildingsById.get(item.parentId!);
+        return { id: `${item.parentId}-floor-${item.floor}`, name: item.floor!, code: `${parent?.code ?? "BLDG"}-${item.floor}`, type: "Floor" as const, parentId: item.parentId, building: parent?.name ?? item.building, status: parent?.status ?? item.status, lat: null, lng: null, positioned: false } satisfies Location;
+      });
+    const unique = new Map<string, Location>();
+    [...compatibilityFloors, ...derivedFloors].forEach((floor) => {
+      const key = `${floor.parentId}:${floor.name}`;
+      if (!unique.has(key)) unique.set(key, floor);
+    });
+    return [...unique.values()];
+  }, [allLocations, buildingsById]);
   const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.name === building);
   const availableFloors = useMemo(() => {
     if (building === "All Buildings" || !selectedBuildingRecord) return floors;
@@ -164,7 +176,9 @@ export function Locations() {
         (loc.parentId === bldg.id || loc.building === bldg.name),
       );
       const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
-      const inferredFloors = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)))
+      const inferredFloorNames = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)));
+      if (childLocations.some((loc) => !loc.floor)) inferredFloorNames.push("Unspecified Floor");
+      const inferredFloors = inferredFloorNames
         .filter((floorName) => !knownFloorNames.has(floorName as string))
         .map((floorName) => ({
           id: `${bldg.id}-floor-${floorName}`,
@@ -185,7 +199,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => loc.parentId === flr.id || (loc.building === bldg.name && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building")
+            (loc) => loc.parentId === flr.id || (loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building")
           );
           result.push({
             item: flr,
@@ -248,7 +262,7 @@ export function Locations() {
     setFieldErrors([]);
     const adding = dialog === "add";
     const normalized = normalizeDraft(draft);
-    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations });
+    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding });
     const requiredIssues = [
       ["name", "Location name is required."],
       ["code", "Location code is required."],
@@ -256,6 +270,7 @@ export function Locations() {
     ] as const;
     const validationMessages = [
       ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([, message]) => message),
+      ...(adding && normalized.type === "Floor" ? ["Floor records are read-only compatibility data and cannot be created here."] : []),
       ...evaluation.issues.map((issue) => issue.message),
     ];
     if (validationMessages.length) {
@@ -776,7 +791,7 @@ export function Locations() {
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
-                    <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
+                    {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
                         aria-label={`Actions for ${item.name}`}
@@ -859,7 +874,7 @@ export function Locations() {
                           </button>
                         </div>
                       )}
-                    </div>
+                    </div>}
                   </td>
                 </tr>
                 );
@@ -930,7 +945,7 @@ export function Locations() {
                   }}
                 >
                   {["Laboratory", "Room", "Office", "Facility", "Building", "Floor", "Restroom"].map((v) => (
-                    <option key={v}>{v}</option>
+                    <option key={v} value={v} aria-disabled={v === "Floor"}>{v === "Floor" ? "Floor (legacy records only)" : v}</option>
                   ))}
                 </SelectField>
                 <SelectField

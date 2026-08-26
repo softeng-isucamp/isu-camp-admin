@@ -3,6 +3,7 @@ import { createLocationsBulkImportTemplate, services, setMockFailure } from "./a
 import { auditEntries } from "./mockData";
 import { resetPasswordSchema, resetSchema } from "./schemas";
 import { reviewMapDraft } from "../features/map/mapEditing";
+import { indoorLocationTypes } from "../lib/locationPolicy";
 
 describe("mock service contracts", () => {
   afterEach(() => {
@@ -50,6 +51,19 @@ describe("mock service contracts", () => {
     const result = await services.locations.list("computer lab");
     expect(result.items).toHaveLength(1);
     expect(result.items[0].name).toBe("Computer Laboratory Building");
+  });
+
+  it("ships a representative indoor directory with metadata-owned floor levels", async () => {
+    const inventory = (await services.locations.list()).items;
+    const indoor = inventory.filter((location) =>
+      indoorLocationTypes.includes(location.type as typeof indoorLocationTypes[number]),
+    );
+
+    expect(indoor.length).toBeGreaterThanOrEqual(15);
+    expect(new Set(indoor.map((location) => location.parentId)).size).toBeGreaterThanOrEqual(3);
+    expect(indoor.every((location) => location.parentId && location.floor && location.lat === null && location.lng === null && !location.positioned)).toBe(true);
+    expect(new Set(indoor.map((location) => location.floor)).size).toBeGreaterThanOrEqual(3);
+    expect(new Set(indoor.map((location) => location.type))).toEqual(new Set(indoorLocationTypes));
   });
 
   it("returns the dashboard metric counts through the service boundary", async () => {

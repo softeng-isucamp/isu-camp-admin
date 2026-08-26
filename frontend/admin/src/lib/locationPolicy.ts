@@ -2,6 +2,14 @@ import type { Location, LocationDraft, LocationType } from "../types";
 
 export type LocationKind = "outdoor" | "floor" | "indoor";
 
+export const indoorLocationTypes = ["Room", "Office", "Laboratory", "Restroom"] as const;
+export const standardFloorLevels = [
+  "Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement",
+] as const;
+
+export const isIndoorLocationType = (type: LocationType) =>
+  (indoorLocationTypes as readonly string[]).includes(type);
+
 export interface LocationClassification {
   kind: LocationKind;
   requiresBuildingParent: boolean;
@@ -21,7 +29,8 @@ export type LocationPolicyIssueCode =
   | "longitude_out_of_range"
   | "coordinates_required"
   | "placement_mismatch"
-  | "outdoor_position_forbidden";
+  | "outdoor_position_forbidden"
+  | "floor_level_required";
 
 export interface LocationPolicyIssue {
   code: LocationPolicyIssueCode;
@@ -47,6 +56,8 @@ export class LocationPolicyError extends Error {
 export interface LocationPolicyOptions {
   context: LocationPolicyContext;
   directory: readonly Location[];
+  /** New indoor records require a floor; legacy records may omit it. */
+  requireFloorLevel?: boolean;
 }
 
 export interface LocationNormalizationOptions {
@@ -168,6 +179,14 @@ const evaluate = (
       code: "outdoor_hierarchy_forbidden",
       field: "parentId",
       message: `${draft.type} Locations cannot belong to an indoor Building hierarchy.`,
+    });
+  }
+
+  if (options.requireFloorLevel && isIndoorLocationType(draft.type) && !draft.floor?.trim()) {
+    issues.push({
+      code: "floor_level_required",
+      field: "floor",
+      message: "Indoor Locations require a Floor Level.",
     });
   }
 
