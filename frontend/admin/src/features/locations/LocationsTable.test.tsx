@@ -242,7 +242,11 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: /bulk import locations/i })).toBeInTheDocument();
     expect(screen.getByText(/validate campus location records before importing/i)).toBeInTheDocument();
     expect(screen.getByText(/upload json file/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/choose location json file/i)).toHaveAttribute("type", "file");
+    const dialog = screen.getByRole("dialog", { name: /bulk import locations/i });
+    const fileInput = screen.getByLabelText(/choose location json file/i);
+    expect(fileInput).toHaveAttribute("type", "file");
+    expect(fileInput).toHaveAttribute("accept", "application/json,.json");
+    expect(dialog.querySelector("textarea")).toBeNull();
     expect(screen.getByRole("link", { name: /download template/i })).toHaveAttribute("download", "locations-bulk-template.json");
     expect(screen.getByText(/add new/i)).toBeInTheDocument();
     expect(screen.getByText(/update existing/i)).toBeInTheDocument();

@@ -314,7 +314,10 @@ describe("mock service contracts", () => {
     await expect(services.imports.locations({ json: JSON.stringify({ id: "missing", name: "Missing", code: "MISSING", type: "Facility", parentId: null, status: "Active", lat: null, lng: null }), commit: true, mode: "update" })).resolves.toMatchObject({ imported: 0, errors: [expect.stringMatching(/no existing location/)] });
     expect((await services.locations.list()).total).toBe(before);
     const template = createLocationsBulkImportTemplate();
-    expect(JSON.parse(template)).toEqual(expect.arrayContaining([
+    const templateRows = JSON.parse(template) as Array<Record<string, unknown>>;
+    const importContractFields = ["id", "name", "code", "type", "parentId", "status", "lat", "lng"];
+    expect(templateRows.every((row) => importContractFields.every((field) => field in row))).toBe(true);
+    expect(templateRows).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "Building" }),
       expect.objectContaining({ type: "Room", parentId: "building-library", floor: "Ground Floor" }),
       expect.objectContaining({ type: "Facility", parentId: null }),
