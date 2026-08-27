@@ -7,9 +7,56 @@ import type {
   UserAccount,
 } from "../types";
 import { generatedMapFixture } from "./generatedMapFixture";
+import { indoorLocationTypes } from "../lib/locationPolicy";
 
 export const campusCenter: [number, number] = [16.720868, 121.689698];
 export const buildings: Building[] = [...generatedMapFixture.buildings];
+
+const seededIndoorLocations: Location[] = [
+  [
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
+    ["osm-location-a79c2a5f1065583f", "Science Building", "2nd Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "1st Floor"],
+  ],
+  [
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "1st Floor"],
+    ["osm-location-a79c2a5f1065583f", "Science Building", "Ground Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "2nd Floor"],
+  ],
+  [
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "2nd Floor"],
+    ["osm-location-a79c2a5f1065583f", "Science Building", "3rd Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "3rd Floor"],
+  ],
+  [
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
+    ["osm-location-a79c2a5f1065583f", "Science Building", "2nd Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "1st Floor"],
+  ],
+  [
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "1st Floor"],
+    ["osm-location-a79c2a5f1065583f", "Science Building", "Ground Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "2nd Floor"],
+  ],
+].flat().flatMap(([buildingId, buildingName, floor], index) => {
+  const type = indoorLocationTypes[index % indoorLocationTypes.length];
+  const label = type === "Laboratory" ? "Laboratory" : type;
+  return [{
+    id: `seed-indoor-${index + 1}`,
+    name: `${buildingName} ${floor} ${label} ${101 + index}`,
+    code: `${buildingId.slice(-3).toUpperCase()}-${floor.replace(/[^0-9]/g, "G") || "B"}-${101 + index}`,
+    type,
+    parentId: buildingId,
+    building: buildingName,
+    floor,
+    function: `${label} for campus teaching, services, and daily operations.`,
+    keywords: `${label.toLowerCase()}, ${buildingName.toLowerCase()}, ${floor.toLowerCase()}`,
+    status: index % 5 === 4 ? "Inactive" : "Active",
+    lat: null,
+    lng: null,
+    positioned: false,
+  } satisfies Location];
+});
 
 export const locations: Location[] = [
   {
@@ -1052,6 +1099,7 @@ export const locations: Location[] = [
       rawId: "osmraw-c9a6c0d0ab1280f4",
     },
   },
+  ...seededIndoorLocations,
 ];
 
 export const topSearchedLocations: Array<{

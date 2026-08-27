@@ -36,6 +36,7 @@ import {
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
+import { LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 
 
 // ==========================================
@@ -266,7 +267,7 @@ const addAudit = (
 };
 
 const locationAuditActions = new Set([
-  "Updated Location", "Positioned Location", "Removed Location",
+  "Updated Location", "Positioned Location", "Deleted Location",
   "Bulk Imported Location", "Bulk Updated Location",
 ]);
 
@@ -556,6 +557,8 @@ export const services: Services = {
               location.type,
               location.function ?? "",
               location.keywords ?? "",
+              location.building ?? "",
+              location.floor ?? "",
             ].some((value) =>
               matches(value, q)
             )
@@ -591,7 +594,19 @@ export const services: Services = {
       const nextLocation: Location = { ...location, id: location.id || `loc-${Date.now()}` };
       locationSchema.parse(nextLocation);
 
-      const saved = localAdapter.locations.save(nextLocation);
+      const previous = locations.find((item) => item.id === nextLocation.id) ?? nextLocation;
+      const normalized = locationPolicy.normalize(nextLocation, {
+        directory: locations,
+        previous,
+      });
+      const evaluation = locationPolicy.evaluate(normalized, {
+        context: "record",
+        directory: locations,
+        requireFloorLevel: !location.id,
+      });
+      if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
+
+      const saved = localAdapter.locations.save(normalized);
       addAudit("Updated Location", saved.name, "Admin", saved.id);
       return wait(clone(saved));
     },
@@ -613,8 +628,16 @@ export const services: Services = {
 
       failIfConfigured("locationRemove");
 
-      const removed = localAdapter.locations.remove(id);
-      if (removed) addAudit("Removed Location", removed.name, "Admin", removed.id);
+      const target = locations.find((location) => location.id === id);
+      if (target?.type === "Building") failIfConfigured("buildingRemove");
+      const children = target?.type === "Building"
+        ? locations.filter((location) => location.parentId === id)
+        : [];
+      const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
+      affected.forEach((location) => {
+        localAdapter.locations.remove(location.id);
+        addAudit("Deleted Location", location.name, "Admin", location.id);
+      });
       return wait(undefined);
 
     },
@@ -1342,9 +1365,12 @@ export const services: Services = {
       const batchIds = new Set(validRows.flatMap(({ row }) => row.id ? [row.id] : []));
       const seenIds = new Set<string>();
       const seenCodes = new Set<string>();
-      const pending: Array<{ location: Location; existingIndex: number | null }> = [];
+      const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
 
       validRows.forEach(({ row, index }) => {
+        if (row.type === "Floor") {
+          errors.push(`Row ${index + 1}, type: Floor records are legacy compatibility data and cannot be imported.`);
+        }
         const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
         const matchedByCode = locations.findIndex((location) => location.code === row.code);
         const existingIndex = matchedById >= 0 ? matchedById : matchedByCode;
@@ -1368,14 +1394,15 @@ export const services: Services = {
         const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
         pending.push({
           existingIndex: existingIndex >= 0 ? existingIndex : null,
+          rowIndex: index,
           location: {
             ...existing,
             ...row,
             id: mode === "update" && existing ? existing.id : id,
             function: existing?.function ?? "",
             keywords: existing?.keywords ?? "",
-            building: existing?.building,
-            floor: existing?.floor,
+            building: row.building ?? existing?.building,
+            floor: row.floor ?? existing?.floor,
             positioned: row.lat !== null && row.lng !== null,
           },
         });
@@ -1393,6 +1420,28 @@ export const services: Services = {
         if (location.parentId) {
           location.parentId = effectiveIdsByImportedId.get(location.parentId) ?? location.parentId;
         }
+      });
+
+      const batchDirectory = [...locations, ...pending.map(({ location }) => location)];
+      pending.forEach((entry) => {
+        const existing = entry.existingIndex === null ? undefined : locations[entry.existingIndex];
+        const parent = batchDirectory.find((candidate) => candidate.id === entry.location.parentId);
+        const candidate = parent?.type === "Building"
+          ? { ...entry.location, building: parent.name }
+          : entry.location;
+        const evaluation = locationPolicy.evaluate(candidate, {
+          context: "record",
+          directory: batchDirectory,
+          requireFloorLevel: true,
+        });
+        if (!evaluation.valid) {
+          evaluation.issues.forEach((issue) => errors.push(`Row ${entry.rowIndex + 1}, ${issue.field}: ${issue.message}`));
+          return;
+        }
+        entry.location = locationPolicy.normalize(candidate, {
+          directory: batchDirectory,
+          previous: existing ?? candidate,
+        }) as Location;
       });
 
 

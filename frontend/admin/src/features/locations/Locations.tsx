@@ -13,6 +13,7 @@ import {
 import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
+import { indoorLocationTypes, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -28,6 +29,9 @@ const blankLocation = (): LocationDraft => ({
   lng: null,
   positioned: false,
 });
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export function Locations() {
   const queryClient = useQueryClient();
@@ -45,10 +49,10 @@ export function Locations() {
     return undefined;
   }, []);
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
   useEffect(() => {
     const q = new URLSearchParams(routeLocation.search).get("q");
-    if (q !== null) setQuery(q);
+    setQuery(q ?? "");
   }, [routeLocation.search]);
 
   const [type, setType] = useState("All Types");
@@ -75,6 +79,7 @@ export function Locations() {
   }, []);
 
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
+  const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
   const [importText, setImportText] = useState("");
   const [importFileName, setImportFileName] = useState("");
@@ -85,17 +90,89 @@ export function Locations() {
   } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [photoName, setPhotoName] = useState("");
+  const [customFloorMode, setCustomFloorMode] = useState(false);
   const [success, setSuccess] = useState<{
     name: string;
     id: string;
     building?: string;
     floor?: string;
+    mapTargetId: string;
+    indoor: boolean;
     kind: "added" | "edited";
   } | null>(null);
   const [importSuccess, setImportSuccess] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const pendingRef = useRef(false);
+  pendingRef.current = saving || validating || importing || deleting;
+
+  const activeOverlay = success ? "success" : importSuccess !== null ? "import-success" : dialog;
+  const openDialog = (next: NonNullable<typeof dialog>) => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDialog(next);
+  };
+  const closeOverlay = () => {
+    if (pendingRef.current) return;
+    setDialog(null);
+    setSuccess(null);
+    setImportSuccess(null);
+  };
+
+  useEffect(() => {
+    if (!activeOverlay) return;
+    const overlay = document.querySelector<HTMLElement>(".locations-overlay");
+    if (!overlay) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const page = document.querySelector<HTMLElement>(".locations-page");
+    const backgroundNodes = page
+      ? Array.from(page.children).filter((node) => !node.contains(overlay))
+      : [];
+    backgroundNodes.forEach((node) => {
+      node.setAttribute("aria-hidden", "true");
+      (node as HTMLElement).inert = true;
+    });
+    const focusable = () => Array.from(overlay.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ));
+    const initial = overlay.querySelector<HTMLElement>("[data-modal-initial]") ?? focusable()[0];
+    window.setTimeout(() => initial?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (!pendingRef.current) closeOverlay();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = focusable();
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      backgroundNodes.forEach((node) => {
+        node.removeAttribute("aria-hidden");
+        (node as HTMLElement).inert = false;
+      });
+      if (openerRef.current?.isConnected) window.setTimeout(() => openerRef.current?.focus(), 0);
+    };
+  }, [activeOverlay]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["locations", query],
@@ -114,9 +191,34 @@ export function Locations() {
   });
 
   const allLocations = directory?.items ?? data?.items ?? initialLocations;
-  const buildingOptions = allLocations.filter((item) => item.type === "Building").map((item) => item.name);
+  const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
+  const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
+    directory: allLocations,
+    previous: draft,
+  });
+  const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
-  const floors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
+  const floors = useMemo(() => {
+    const compatibilityFloors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
+    const derivedFloors = allLocations
+      .filter((item) => indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) && item.parentId && item.floor)
+      .map((item) => {
+        const parent = buildingsById.get(item.parentId!);
+        return { id: `${item.parentId}-floor-${item.floor}`, name: item.floor!, code: `${parent?.code ?? "BLDG"}-${item.floor}`, type: "Floor" as const, parentId: item.parentId, building: parent?.name ?? item.building, status: parent?.status ?? item.status, lat: null, lng: null, positioned: false } satisfies Location;
+      });
+    const unique = new Map<string, Location>();
+    const unspecifiedFloors = allLocations
+      .filter((item) => indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) && item.parentId && !item.floor)
+      .map((item) => {
+        const parent = buildingsById.get(item.parentId!);
+        return { id: `${item.parentId}-floor-Unspecified-Floor`, name: "Unspecified Floor", code: `${parent?.code ?? "BLDG"}-UNSPECIFIED`, type: "Floor" as const, parentId: item.parentId, building: parent?.name ?? item.building, status: parent?.status ?? item.status, lat: null, lng: null, positioned: false } satisfies Location;
+      });
+    [...compatibilityFloors, ...derivedFloors, ...unspecifiedFloors].forEach((floor) => {
+      const key = `${floor.parentId}:${floor.name}`;
+      if (!unique.has(key)) unique.set(key, floor);
+    });
+    return [...unique.values()];
+  }, [allLocations, buildingsById]);
   const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.name === building);
   const availableFloors = useMemo(() => {
     if (building === "All Buildings" || !selectedBuildingRecord) return floors;
@@ -124,40 +226,79 @@ export function Locations() {
   }, [floors, building, selectedBuildingRecord]);
 
   const rawItems = data?.items ?? initialLocations;
+  const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
   const items = useMemo(() => {
     return rawItems.filter(
       (item) =>
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (building === "All Buildings" || item.building === building || item.name === building) &&
-        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId),
+        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
-  }, [rawItems, type, status, building, floorId]);
+  }, [rawItems, type, status, building, floorId, selectedFloorRecord]);
 
-  useEffect(() => setPage(1), [query, type, status, building, floorId]);
+  useEffect(() => setPage(1), [query, type, status, building, floorId, viewMode]);
 
-  // Build hierarchy tree
-  const hierarchyRows = useMemo(() => {
-    if (viewMode === "flat") return items.map((item) => ({ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }));
+  const matchingIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
 
-    const result: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
+  // Build complete hierarchy families. Filtering can reduce a family to the
+  // matching descendants, but a matching indoor record always keeps its root
+  // Building and Floor Level context visible.
+  const hierarchyFamilies = useMemo(() => {
+    if (viewMode === "flat") return items.map((item) => [{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
+
+    const result: Array<Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }>> = [];
 
     // Find roots
-    const rootBuildings = items.filter((loc) => loc.type === "Building");
-    const standalone = items.filter((loc) => loc.parentId === null && loc.type !== "Building");
+    const rootBuildings = allLocations.filter((loc) => loc.type === "Building" && (
+      matchingIds.has(loc.id) || allLocations.some((child) => matchingIds.has(child.id) && (child.parentId === loc.id || child.building === loc.name))
+    ));
+    const standalone = items.filter((loc) => loc.parentId === null && loc.type === "Facility");
 
     for (const bldg of rootBuildings) {
+      const rootWasMatched = matchingIds.has(bldg.id);
       const bldgCollapsed = collapsedNodes.has(bldg.id);
-      const childFloors = allLocations.filter((loc) => loc.parentId === bldg.id || (loc.building === bldg.name && loc.type === "Floor"));
-      result.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
+      const childLocations = allLocations.filter((loc) =>
+        loc.type !== "Floor" && loc.type !== "Building" &&
+        (loc.parentId === bldg.id || (!loc.parentId && loc.building === bldg.name)) &&
+        (rootWasMatched || matchingIds.has(loc.id)),
+      );
+      const explicitFloors = allLocations.filter((loc) =>
+        loc.parentId === bldg.id &&
+        loc.type === "Floor" &&
+        (rootWasMatched || childLocations.some((child) =>
+          child.parentId === loc.id ||
+          (child.floor === loc.name && (child.parentId === bldg.id || (!child.parentId && child.building === bldg.name)))
+        )),
+      );
+      const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
+      const inferredFloorNames = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)));
+      if (childLocations.some((loc) => !loc.floor)) inferredFloorNames.push("Unspecified Floor");
+      const inferredFloors = inferredFloorNames
+        .filter((floorName) => !knownFloorNames.has(floorName as string))
+        .map((floorName) => ({
+          id: `${bldg.id}-floor-${floorName}`,
+          name: floorName as string,
+          code: `${bldg.code}-${floorName}`,
+          type: "Floor" as const,
+          parentId: bldg.id,
+          building: bldg.name,
+          status: bldg.status,
+          lat: null,
+          lng: null,
+          positioned: false,
+        }));
+      const childFloors = [...explicitFloors, ...inferredFloors];
+      const family: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
+      family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
 
       if (!bldgCollapsed) {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => loc.parentId === flr.id || (loc.building === bldg.name && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building")
+            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || ((!loc.parentId || loc.parentId === bldg.id) && loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building"))
           );
-          result.push({
+          family.push({
             item: flr,
             level: 1,
             hasChildren: childRooms.length > 0,
@@ -167,7 +308,7 @@ export function Locations() {
 
           if (!flrCollapsed) {
             childRooms.forEach((rm, rmIndex) => {
-              result.push({
+              family.push({
                 item: rm,
                 level: 2,
                 hasChildren: false,
@@ -178,25 +319,38 @@ export function Locations() {
           }
         });
       }
+      result.push(family);
     }
 
     // Add standalone items
     for (const s of standalone) {
-      result.push({ item: s, level: 0, hasChildren: false, isLast: false, isCollapsed: false });
+      result.push([{ item: s, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
     }
 
     // If filter produced items not in tree, include them
-    const includedIds = new Set(result.map((r) => r.item.id));
+    const includedIds = new Set(result.flat().map((r) => r.item.id));
     for (const item of items) {
       if (!includedIds.has(item.id)) {
-        result.push({ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false });
+        result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
       }
     }
 
     return result;
-  }, [items, allLocations, viewMode, collapsedNodes]);
+  }, [items, matchingIds, allLocations, viewMode, collapsedNodes]);
 
-  const visibleRows = hierarchyRows.slice((page - 1) * pageSize, page * pageSize);
+  const hierarchyRows = hierarchyFamilies.flat();
+  const hierarchyPageFamilies = viewMode === "flat"
+    ? []
+    : hierarchyFamilies.slice((page - 1) * pageSize, page * pageSize);
+
+  const visibleRows = viewMode === "flat"
+    ? hierarchyRows.slice((page - 1) * pageSize, page * pageSize)
+    : hierarchyPageFamilies.flat();
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil((viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length) / pageSize));
+    setPage((current) => Math.min(current, totalPages));
+  }, [hierarchyRows.length, hierarchyFamilies.length, viewMode]);
 
   const toggleCollapse = (id: string) => {
     setCollapsedNodes((prev) => {
@@ -215,63 +369,158 @@ export function Locations() {
 
   const save = async () => {
     setError("");
+    setFieldErrors([]);
     const adding = dialog === "add";
+    const normalized = normalizeDraft(draft);
+    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding });
+    const requiredIssues = [
+      ["name", "Location name is required."],
+      ["code", "Location code is required."],
+      ["function", "Description / purpose is required."],
+    ] as const;
+    const validationIssues = [
+      ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([field, message]) => ({ field: field as keyof LocationDraft, message })),
+      ...(adding && normalized.type === "Floor" ? [{ field: "type" as keyof LocationDraft, message: "Floor records are read-only compatibility data and cannot be created here." }] : []),
+      ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
+    ];
+    if (validationIssues.length) {
+      setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
+      return;
+    }
+    setSaving(true);
     try {
-      const saved = await services.locations.save(draft);
+      const saved = await services.locations.save(normalized);
       await refresh();
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
       setSuccess({
         name: saved.name || "Location",
         id: saved.id,
-        building: draft.building,
-        floor: draft.floor,
+        building: normalized.building,
+        floor: normalized.floor,
+        mapTargetId: isChildType(saved.type) && saved.parentId ? saved.parentId : saved.id,
+        indoor: isChildType(saved.type),
         kind: adding ? "added" : "edited",
       });
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
       );
+    } finally {
+      setSaving(false);
     }
   };
 
   const remove = async () => {
     if (!selected) return;
     setError("");
+    setDeleting(true);
     try {
       await services.locations.remove(selected.id);
       await refresh();
       setDialog(null);
-      setNotice(`${selected.name} removed successfully.`);
+      setNotice(`${selected.name} permanently deleted.`);
     } catch (cause) {
-      setDialog(null);
       setError(cause instanceof Error ? cause.message : "Unable to delete location.");
+    } finally {
+      setDeleting(false);
     }
   };
 
   const validateImport = async () => {
-    setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
+    setValidating(true);
+    try {
+      setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to validate locations.");
+    } finally {
+      setValidating(false);
+    }
   };
 
   const applyImport = async () => {
     if (!importResult || importResult.errors.length) return;
-    const committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
+    setImporting(true);
+    let committed;
+    try {
+      committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to import locations.");
+      setImporting(false);
+      return;
+    }
     if (committed.errors.length) {
       setImportResult(committed);
+      setImporting(false);
       return;
     }
     await refresh();
     setDialog(null);
     setNotice(`${committed.imported} locations imported successfully.`);
     setImportSuccess(committed.imported);
+    setImporting(false);
   };
 
   const openEdit = (item: Location) => {
     setSelected(item);
     setDraft({ ...item });
-    setPhotoName("");
-    setDialog("edit");
+    setPhotoName(item.photo?.name ?? "");
+    setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
+    setLockedParentId(null);
+    openDialog("edit");
   };
+
+  const selectPhoto = (file: File | undefined) => {
+    if (!file) return;
+    const extension = file.name.toLowerCase().split(".").pop();
+    const validType = PHOTO_TYPES.has(file.type) || (file.type === "" && ["png", "jpg", "jpeg", "webp"].includes(extension ?? ""));
+    if (!validType) {
+      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Choose a PNG, JPEG, or WebP image." }]);
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Photo must be 5 MB or smaller." }]);
+      return;
+    }
+    // Show the user's selection immediately, even while the preview is being decoded.
+    setPhotoName(file.name);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string } }));
+      setPhotoName(file.name);
+      setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removePhoto = () => {
+    setDraft((current) => ({ ...current, photo: undefined }));
+    setPhotoName("");
+    setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
+  };
+
+  const openAddRoom = (parent: Location) => {
+    setSelected(parent);
+    setDraft({
+      ...blankLocation(),
+      type: "Room",
+      parentId: parent.id,
+      building: parent.name,
+      floor: undefined,
+    });
+    setPhotoName("");
+    setCustomFloorMode(false);
+    setLockedParentId(parent.id);
+    setActionMenuId(null);
+    openDialog("add");
+  };
+
+  const isChildLocation = (item: Location) => isChildType(item.type);
+  const isBuilding = (item: Location) => item.type === "Building";
+  const selectedChildren = selected?.type === "Building"
+    ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
+    : [];
 
   const renderLocationTypeIcon = (locType: string) => {
     switch (locType.toLowerCase()) {
@@ -330,6 +579,7 @@ export function Locations() {
         );
     }
   };
+  const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
 
   return (
     <div className="page locations-page">
@@ -450,7 +700,7 @@ export function Locations() {
             >
               <option>All Buildings</option>
               {buildingOptions.map((value) => (
-                <option key={value}>{value}</option>
+                <option key={value.id}>{value.name}</option>
               ))}
             </SelectField>
             <SelectField
@@ -504,7 +754,7 @@ export function Locations() {
                 setImportText("");
                 setImportFileName("");
                 setImportResult(null);
-                setDialog("import");
+                openDialog("import");
               }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -527,7 +777,9 @@ export function Locations() {
               onClick={() => {
                 setDraft(blankLocation());
                 setPhotoName("");
-                setDialog("add");
+                setCustomFloorMode(false);
+                setLockedParentId(null);
+                openDialog("add");
               }}
             >
               ＋ Add Location
@@ -541,7 +793,7 @@ export function Locations() {
           {notice}
         </div>
       )}
-      {error && (
+      {error && !dialog && (
         <div className="error" role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 16px", borderRadius: "12px" }}>
           {error}
         </div>
@@ -549,25 +801,25 @@ export function Locations() {
 
       {/* Success Dialogs */}
       {success && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-success-title" aria-describedby="location-success-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ width: "54px", height: "54px", background: "#d6ede0", color: "#0c7441", borderRadius: "50%", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>
+            <h2 id="location-success-title" tabIndex={-1} style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>
               {success.kind === "added" ? "Location added" : "Location updated"}
             </h2>
-            <p style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
+            <p id="location-success-description" style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
               <strong>{success.name}</strong> was {success.kind === "added" ? "added" : "updated"}
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.id}`)}>
-                {success.kind === "added" ? "Place on map" : "Edit position on map"}
+              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.mapTargetId}`)}>
+                {success.indoor ? "View parent building on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
               </Button>
-              <Button variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
+              <Button data-modal-initial variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
                 Done
               </Button>
             </div>
@@ -576,18 +828,18 @@ export function Locations() {
       )}
 
       {importSuccess !== null && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-success-title" aria-describedby="location-import-success-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center" }}>
             <div style={{ width: "54px", height: "54px", background: "#d6ede0", color: "#0c7441", borderRadius: "50%", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2 style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>Locations Imported</h2>
-            <p style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
+            <h2 id="location-import-success-title" tabIndex={-1} style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>Locations Imported</h2>
+            <p id="location-import-success-description" style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
               <strong>{importSuccess} locations</strong> were imported into the campus directory successfully.
             </p>
-            <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setImportSuccess(null)}>
+            <Button data-modal-initial style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setImportSuccess(null)}>
               Done
             </Button>
           </div>
@@ -685,6 +937,11 @@ export function Locations() {
                       <div>
                         <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
                         <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
+                        {level > 0 && item.floor && (
+                          <span style={{ display: "inline-block", marginTop: "5px", padding: "2px 8px", borderRadius: "999px", background: "#eef6f1", color: "#0c7441", fontSize: "11px", fontWeight: 600 }}>
+                            {item.floor}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -705,7 +962,7 @@ export function Locations() {
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
-                    <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
+                    {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
                         aria-label={`Actions for ${item.name}`}
@@ -738,12 +995,28 @@ export function Locations() {
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
-                              navigate(`/map-editor?location=${item.id}`);
+                              const parent = item.parentId ? allLocations.find((location) => location.id === item.parentId && location.type === "Building") : undefined;
+                              if (isChildLocation(item) && !parent) {
+                                setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
+                                setActionMenuId(null);
+                                return;
+                              }
+                              const target = isChildLocation(item) && parent ? parent.id : item.id;
+                              navigate(`/map-editor?location=${target}`);
                               setActionMenuId(null);
                             }}
                           >
-                            Locate on map
+                            {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                           </button>
+                          {isBuilding(item) && (
+                            <button
+                              role="menuitem"
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
+                              onClick={() => openAddRoom(item)}
+                            >
+                              ＋ Add room to this building
+                            </button>
+                          )}
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -759,7 +1032,7 @@ export function Locations() {
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
                               setSelected(item);
-                              setDialog("history");
+                              openDialog("history");
                               setActionMenuId(null);
                             }}
                           >
@@ -770,7 +1043,7 @@ export function Locations() {
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
                             onClick={() => {
                               setSelected(item);
-                              setDialog("remove");
+                              openDialog("remove");
                               setActionMenuId(null);
                             }}
                           >
@@ -778,7 +1051,7 @@ export function Locations() {
                           </button>
                         </div>
                       )}
-                    </div>
+                    </div>}
                   </td>
                 </tr>
                 );
@@ -790,7 +1063,7 @@ export function Locations() {
           )}
         </div>
         <Pagination
-          total={hierarchyRows.length}
+          total={viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length}
           page={page}
           pageSize={pageSize}
           onChange={setPage}
@@ -799,8 +1072,8 @@ export function Locations() {
 
       {/* Add / Edit Location Modal */}
       {(dialog === "add" || dialog === "edit") && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "720px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-form-title" aria-describedby="location-form-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "720px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             {/* Top Green Banner */}
             <div style={{ background: "#005931", color: "#fff", padding: "24px 30px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
@@ -810,18 +1083,19 @@ export function Locations() {
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: 0 }}>
+                  <h2 id="location-form-title" tabIndex={-1} style={{ fontSize: "22px", fontWeight: "bold", margin: 0 }}>
                     {dialog === "add" ? "Add Location" : "Edit Location"}
                   </h2>
-                  <p style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
+                  <p id="location-form-description" style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Add a building, floor, room, office, laboratory, restroom, or facility.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                aria-label="Close"
-                onClick={() => setDialog(null)}
+                aria-label="Close location dialog"
+                data-modal-initial
+                onClick={closeOverlay}
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -832,21 +1106,24 @@ export function Locations() {
             </div>
 
             {/* Form Body */}
-            <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
-              {error && (
+            <div className="locations-modal-body" style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
+              {(error || fieldErrors.length > 0) && (
                 <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
-                  {error}
+                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <SelectField
                   label="LOCATION TYPE"
                   required
                   value={draft.type}
-                  onChange={(event) => setDraft({ ...draft, type: event.target.value as LocationType })}
+                  onChange={(event) => {
+                    const nextType = event.target.value as LocationType;
+                    setDraft(normalizeDraft({ ...draft, type: nextType }));
+                  }}
                 >
-                  {["Laboratory", "Room", "Office", "Facility", "Building", "Floor", "Restroom"].map((v) => (
-                    <option key={v}>{v}</option>
+                  {["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor"] : [])].map((v) => (
+                    <option key={v} value={v}>{v === "Floor" ? "Floor (legacy records only)" : v}</option>
                   ))}
                 </SelectField>
                 <SelectField
@@ -861,10 +1138,11 @@ export function Locations() {
                 </SelectField>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                 <Field
                   label="LOCATION NAME"
                   required
+                  error={errorFor("name")}
                   value={draft.name}
                   placeholder="Computer Lab 1"
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
@@ -872,64 +1150,81 @@ export function Locations() {
                 <Field
                   label="LOCATION CODE / ID"
                   required
+                  error={errorFor("code")}
                   value={draft.code}
                   placeholder="LAB-CCSICT-201"
                   onChange={(event) => setDraft({ ...draft, code: event.target.value })}
                 />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <SelectField
-                  label="PARENT BUILDING"
-                  value={draft.building ?? ""}
-                  subhelper="Required for rooms, offices, laboratories, restrooms, and facilities."
-                  onChange={(event) => {
-                    const building = event.target.value;
-                    const parent = allLocations.find((item) => item.name === building && item.type === "Building");
-                    setDraft({ ...draft, building, parentId: draft.floor ? draft.parentId : parent?.id ?? null });
-                  }}
-                >
-                  <option value="">None / Standalone</option>
-                  {buildingOptions.map((b) => (
-                    <option key={b}>{b}</option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label="PARENT FLOOR"
-                  value={floors.find((item) => item.name === draft.floor && item.parentId === allLocations.find((location) => location.type === "Building" && location.name === draft.building)?.id)?.id ?? ""}
-                  onChange={(event) => {
-                    const parent = allLocations.find((item) => item.id === event.target.value && item.type === "Floor");
-                    const building = allLocations.find((item) => item.type === "Building" && item.name === draft.building);
-                    setDraft({ ...draft, floor: parent?.name, parentId: building?.id ?? null });
-                  }}
-                >
-                  <option value="">None</option>
-                  {floors.filter((parentFloor) => !draft.building || parentFloor.parentId === allLocations.find((item) => item.type === "Building" && item.name === draft.building)?.id).map((parentFloor) => (
-                    <option key={parentFloor.id} value={parentFloor.id}>{parentFloor.name}</option>
-                  ))}
-                </SelectField>
-              </div>
+              {(isChildType(draft.type) || draft.parentId !== null) && (
+                <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <SelectField
+                    label="PARENT BUILDING"
+                    aria-label="PARENT BUILDING"
+                    required
+                    error={errorFor("parentId")}
+                  value={draft.parentId ?? ""}
+                    disabled={lockedParentId !== null}
+                        onChange={(event) => {
+                          const parent = buildingOptions.find((item) => item.id === event.target.value);
+                          setCustomFloorMode(false);
+                          setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
+                    }}
+                  >
+                    <option value="">None / Standalone</option>
+                    {buildingOptions.map((buildingOption) => (
+                      <option key={buildingOption.id} value={buildingOption.id}>{buildingOption.name}</option>
+                    ))}
+                  </SelectField>
+                  {lockedParentId && <p style={{ gridColumn: "1 / -1", margin: "-8px 0 0", color: "#365047", fontSize: "12px" }}>This Building was selected from its quick-add action and is locked to preserve that context.</p>}
+                  {draft.type !== "Floor" && (
+                    <div>
+                      <SelectField
+                        label="FLOOR LEVEL"
+                        aria-label="FLOOR LEVEL"
+                        required
+                        error={!customFloorMode ? errorFor("floor") : undefined}
+                        value={customFloorMode ? "__custom__" : draft.floor ?? ""}
+                        onChange={(event) => {
+                          const custom = event.target.value === "__custom__";
+                          setCustomFloorMode(custom);
+                          setDraft({ ...draft, floor: custom ? "" : event.target.value || undefined });
+                        }}
+                      >
+                        <option value="">None</option>
+                        {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
+                        <option value="__custom__">Custom Floor Level</option>
+                      </SelectField>
+                      {customFloorMode && (
+                        <Field label="CUSTOM FLOOR LEVEL" required value={draft.floor ?? ""} placeholder="Mezzanine" error={errorFor("floor")} onChange={(event) => setDraft({ ...draft, floor: event.target.value })} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <Field
-                label="FUNCTION / PURPOSE"
+                label="DESCRIPTION"
                 required
+                aria-label="DESCRIPTION"
+                error={errorFor("function")}
                 value={draft.function ?? ""}
                 placeholder="Programming and computer-based activities"
                 onChange={(event) => setDraft({ ...draft, function: event.target.value })}
               />
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null })} />
-                <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null })} />
-              </div>
-              <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
-
-              <Field
-                label="DESCRIPTION"
-                value={draft.function ?? ""}
-                placeholder="A computer laboratory used for programming, software development, and hands-on IT exercises."
-                onChange={(event) => setDraft({ ...draft, function: event.target.value })}
-              />
+              {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
+                <>
+                  <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
+                    <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
+                  </div>
+                  <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
+                </>
+              ) : (
+                <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>Indoor Locations inherit map position and routing from their selected Building.</p>
+              )}
 
               <Field
                 label="KEYWORDS / TAGS"
@@ -939,29 +1234,37 @@ export function Locations() {
               />
 
               {/* Upload Box */}
-              <div style={{ border: "1px dashed #d1d5db", borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb" }}>
+              <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                  <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#d6ede0", display: "grid", placeItems: "center" }}>
+                  {draft.photo ? <img src={draft.photo.dataUrl} alt="Selected location photo preview" style={{ width: "56px", height: "56px", objectFit: "cover", borderRadius: "8px" }} /> : <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#d6ede0", display: "grid", placeItems: "center" }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
                     </svg>
-                  </div>
+                  </div>}
                   <div>
                     <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
-                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPG, or WEBP"}</p>
+                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPEG, or WebP · max 5 MB"}</p>
+                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>Preview is retained for this mock session only; it is not uploaded permanently.</p>
+                    {errorFor("photo") && <p role="alert" style={{ margin: "3px 0 0", color: "#dc2626", fontSize: "12px" }}>{errorFor("photo")}</p>}
                   </div>
                 </div>
-                <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setPhotoName(event.target.files?.[0]?.name ?? "")} />
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <label style={{ border: "1px solid #0c7441", borderRadius: "999px", padding: "8px 12px", color: "#0c7441", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}>
+                    {draft.photo ? "Replace photo" : "Choose photo"}
+                    <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(event) => selectPhoto(event.target.files?.[0])} />
+                  </label>
+                  {draft.photo && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
+                </div>
               </div>
             </div>
 
             {/* Bottom Actions */}
             <div style={{ padding: "18px 32px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
-                Save Location
+              <Button disabled={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
+                {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>
           </div>
@@ -970,8 +1273,8 @@ export function Locations() {
 
       {/* Delete Confirmation Modal */}
       {dialog === "remove" && selected && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-delete-title" aria-describedby="location-delete-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", marginBottom: "16px" }}>
               <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "grid", placeItems: "center", flexShrink: 0 }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -981,18 +1284,22 @@ export function Locations() {
                 </svg>
               </div>
               <div>
-                <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
-                <p style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
-                  This will remove {selected.name} from {selected.building ?? "campus"}{selected.floor ? ` / ${selected.floor}` : ""}.
+                <h2 id="location-delete-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
+                <strong style={{ display: "block", marginTop: "4px", color: "#191c1d", fontSize: "14px" }}>Delete {selected.name}?</strong>
+                <p id="location-delete-description" style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
+                  {selectedChildren.length > 0
+                    ? `This Building contains ${selectedChildren.length} associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.`
+                    : `This will permanently delete ${selected.name} from ${selected.building ?? "campus"}${selected.floor ? ` / ${selected.floor}` : ""}. This action cannot be undone.`}
                 </p>
               </div>
             </div>
+            {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px", marginBottom: "16px" }}>{error}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={() => setDialog(null)}>
+              <Button disabled={deleting} data-modal-initial variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
-                Delete
+              <Button disabled={deleting} style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
+                {deleting ? "Deleting…" : "Delete"}
               </Button>
             </div>
           </div>
@@ -1001,11 +1308,11 @@ export function Locations() {
 
       {/* View History Modal */}
       {dialog === "history" && selected && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "540px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
-            <h2 style={{ fontSize: "22px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Audit History</h2>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-history-title" aria-describedby="location-history-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "540px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+            <h2 id="location-history-title" tabIndex={-1} style={{ fontSize: "22px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Audit History</h2>
             <p style={{ color: "#0c7441", fontWeight: 600, margin: "4px 0 2px" }}>{selected.name}</p>
-            <p style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 20px" }}>Record changes for this location.</p>
+            <p id="location-history-description" style={{ color: "#6b7280", fontSize: "13px", margin: "0 0 20px" }}>Record changes for this location.</p>
 
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "16px", padding: "16px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "360px", overflowY: "auto" }}>
               {history?.items.length ? history.items.map((entry) => (
@@ -1022,7 +1329,7 @@ export function Locations() {
             </div>
 
             <div style={{ marginTop: "24px", textAlign: "center" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", width: "100%", border: "1px solid #0c7441", color: "#0c7441" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" data-modal-initial style={{ borderRadius: "999px", width: "100%", border: "1px solid #0c7441", color: "#0c7441" }} onClick={closeOverlay}>
                 Close
               </Button>
             </div>
@@ -1032,8 +1339,8 @@ export function Locations() {
 
       {/* Bulk Import Modal */}
       {dialog === "import" && (
-        <div className="modal-backdrop">
-          <div className="modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+        <div className="modal-backdrop locations-overlay">
+          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-title" aria-describedby="location-import-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
                 <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }}>
@@ -1042,16 +1349,17 @@ export function Locations() {
                   </svg>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
-                  <p style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
+                  <h2 id="location-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
+                  <p id="location-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
                     Validate campus location records before importing.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                aria-label="Close"
-                onClick={() => setDialog(null)}
+                aria-label="Close import dialog"
+                data-modal-initial
+                onClick={closeOverlay}
                 style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", display: "grid", placeItems: "center" }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1061,7 +1369,8 @@ export function Locations() {
               </button>
             </div>
 
-            <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div className="locations-modal-body" style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+              {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>{error}</div>}
               {/* Dropzone container */}
               <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
@@ -1172,28 +1481,32 @@ export function Locations() {
               </div>
 
               {importResult && (
-                <div style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
+                <div role={importResult.errors.length ? "alert" : "status"} aria-live="polite" style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
                   {importResult.errors.length ? <ul style={{ margin: 0, paddingLeft: "18px" }}>{importResult.errors.map((message) => <li key={message}>{message}</li>)}</ul> : `Validation passed for ${importResult.imported} locations.`}
                 </div>
               )}
             </div>
 
             <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={() => setDialog(null)}>
+              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={closeOverlay}>
                 Cancel
               </Button>
               <Button
                 variant="subtle"
                 style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }}
+                disabled={validating || importing}
+                aria-busy={validating}
                 onClick={validateImport}
               >
-                Validate
+                {validating ? "Validating…" : "Validate"}
               </Button>
               <Button
                 style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }}
+                disabled={validating || importing || !importResult || importResult.errors.length > 0}
+                aria-busy={importing}
                 onClick={applyImport}
               >
-                Import Locations
+                {importing ? "Importing…" : "Import Locations"}
               </Button>
             </div>
           </div>
