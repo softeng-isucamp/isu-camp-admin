@@ -333,6 +333,19 @@ describe("mock service contracts", () => {
     expect((await services.logs.forLocation(child.id)).items[0]).toMatchObject({ action: "Deleted Location", targetId: child.id });
   });
 
+  it("cascades only the Indoor Locations directly owned by the deleted Building", async () => {
+    const first = await services.locations.save({ id: "same-name-building-a", name: "Duplicate Name Building", code: "DUP-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const second = await services.locations.save({ id: "same-name-building-b", name: "Duplicate Name Building", code: "DUP-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const firstChild = await services.locations.save({ id: "same-name-room-a", name: "Room A", code: "DUP-A-ROOM", type: "Room", parentId: first.id, building: first.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    const secondChild = await services.locations.save({ id: "same-name-room-b", name: "Room B", code: "DUP-B-ROOM", type: "Room", parentId: second.id, building: second.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+
+    await services.locations.remove(first.id);
+
+    const remaining = (await services.locations.list()).items;
+    expect(remaining.some((item) => item.id === first.id || item.id === firstChild.id)).toBe(false);
+    expect(remaining.some((item) => item.id === second.id || item.id === secondChild.id)).toBe(true);
+  });
+
   it("uses a code-matched parent's durable ID for batch children and records exact histories", async () => {
     const parent = await services.locations.save({
       id: "durable-parent", name: "Durable Parent", code: "DURABLE", type: "Building", parentId: null,

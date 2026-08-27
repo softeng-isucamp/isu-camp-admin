@@ -631,7 +631,7 @@ export const services: Services = {
       const target = locations.find((location) => location.id === id);
       if (target?.type === "Building") failIfConfigured("buildingRemove");
       const children = target?.type === "Building"
-        ? locations.filter((location) => location.parentId === id || location.building === target.name)
+        ? locations.filter((location) => location.parentId === id)
         : [];
       const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
       affected.forEach((location) => {

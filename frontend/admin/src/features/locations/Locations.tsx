@@ -258,11 +258,18 @@ export function Locations() {
     for (const bldg of rootBuildings) {
       const rootWasMatched = matchingIds.has(bldg.id);
       const bldgCollapsed = collapsedNodes.has(bldg.id);
-      const explicitFloors = allLocations.filter((loc) => loc.parentId === bldg.id && loc.type === "Floor");
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && loc.type !== "Building" &&
-        (loc.parentId === bldg.id || loc.building === bldg.name) &&
+        (loc.parentId === bldg.id || (!loc.parentId && loc.building === bldg.name)) &&
         (rootWasMatched || matchingIds.has(loc.id)),
+      );
+      const explicitFloors = allLocations.filter((loc) =>
+        loc.parentId === bldg.id &&
+        loc.type === "Floor" &&
+        (rootWasMatched || childLocations.some((child) =>
+          child.parentId === loc.id ||
+          (child.floor === loc.name && (child.parentId === bldg.id || (!child.parentId && child.building === bldg.name)))
+        )),
       );
       const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
       const inferredFloorNames = Array.from(new Set(childLocations.map((loc) => loc.floor).filter(Boolean)));
@@ -289,7 +296,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || (loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building"))
+            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || ((!loc.parentId || loc.parentId === bldg.id) && loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building"))
           );
           family.push({
             item: flr,
@@ -512,7 +519,7 @@ export function Locations() {
   const isChildLocation = (item: Location) => isChildType(item.type);
   const isBuilding = (item: Location) => item.type === "Building";
   const selectedChildren = selected?.type === "Building"
-    ? allLocations.filter((location) => isChildType(location.type) && (location.parentId === selected.id || location.building === selected.name))
+    ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
     : [];
 
   const renderLocationTypeIcon = (locType: string) => {
@@ -1278,6 +1285,7 @@ export function Locations() {
               </div>
               <div>
                 <h2 id="location-delete-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#191c1d" }}>Delete location?</h2>
+                <strong style={{ display: "block", marginTop: "4px", color: "#191c1d", fontSize: "14px" }}>Delete {selected.name}?</strong>
                 <p id="location-delete-description" style={{ margin: "4px 0 0", color: "#525c57", fontSize: "14px" }}>
                   {selectedChildren.length > 0
                     ? `This Building contains ${selectedChildren.length} associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.`
