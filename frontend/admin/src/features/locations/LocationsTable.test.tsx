@@ -102,6 +102,26 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
   });
 
+  it("omits empty compatibility Floor Levels from a filtered hierarchy family", async () => {
+    await services.locations.save({
+      id: "filtered-empty-floor",
+      name: "Filtered Empty Floor",
+      code: "FILTERED-EMPTY-FLOOR",
+      type: "Floor",
+      parentId: "osm-location-c5fb7a267a8ca63d",
+      building: "Administration Building",
+      status: "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+    });
+
+    renderLocations(["/locations?q=Laboratory%20107"]);
+
+    expect(await screen.findByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("row", { name: /Filtered Empty Floor/ })).not.toBeInTheDocument());
+  });
+
   it("dims an unpositioned type icon without rendering placement status text", async () => {
     await services.locations.save({ id: "unpositioned-icon-test", name: "Unpositioned icon test", code: "ICON-TEST", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=Unpositioned%20icon%20test"]);
@@ -285,6 +305,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
     expect(await screen.findByText("This Building contains 1 associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`Delete ${building.name}`))).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(async () => {
       expect((await services.locations.list()).items.some((item) => item.id === building.id || item.id === child.id)).toBe(false);
