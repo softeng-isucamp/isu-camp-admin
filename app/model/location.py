@@ -17,13 +17,15 @@ class Location(db.Model):
 
     building_id = db.Column(
         db.BigInteger,
-        nullable=False
+        nullable=True
     )
 
     floor_id = db.Column(
         db.BigInteger,
-        nullable=False
+        nullable=True
     )
+
+    floor_level = db.Column(db.Text, nullable=True)
 
     type_id = db.Column(
         db.BigInteger,
@@ -113,11 +115,12 @@ class Location(db.Model):
             "type": location_type,
             "parentId": None if is_building else (str(self.building_id) if self.building_id is not None else None),
             "building": building,
-            "floor": floor,
+            "floor": self.floor_level or floor,
             "function": self.description,
             "keywords": self.keywords,
             "status": "Active",
             "lat": None,
             "lng": None,
             "positioned": False,
+            "hasPhoto": self.photo is not None,
         }

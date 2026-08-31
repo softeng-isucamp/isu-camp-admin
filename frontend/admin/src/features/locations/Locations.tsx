@@ -404,6 +404,10 @@ export function Locations() {
         kind: adding ? "added" : "edited",
       });
     } catch (cause) {
+      const backendFields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
+      if (backendFields) {
+        setFieldErrors(Object.entries(backendFields).map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
+      }
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
       );

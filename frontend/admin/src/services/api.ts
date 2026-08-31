@@ -92,6 +92,12 @@ export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
   return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
 };
 
+export const normalizeBackendLocationMutation = (raw: unknown): Location => {
+  const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const record = value.location ?? value.data ?? raw;
+  return normalizeBackendLocation(record as BackendLocation);
+};
+
 // `local` is the explicit development/test adapter for deterministic in-browser fixtures.
 // HTTP-backed environments use `mock` for the mock API or `real` for production,
 // with VITE_API_BASE_URL selecting the backend when needed.
@@ -122,8 +128,12 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
   });
-  const data = (await response.json().catch(() => null)) as T & { message?: string } | null;
-  if (!response.ok) throw new Error(data?.message ?? `Request failed (${response.status})`);
+  const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
+  if (!response.ok) {
+    const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
+    error.fieldErrors = { ...data?.fields, ...data?.relationships };
+    throw error;
+  }
   return data as T;
 };
 
@@ -728,10 +738,11 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
-        return apiJson<Location>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
+        const response = await apiJson<unknown>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
           method: location.id ? "PUT" : "POST",
           body: JSON.stringify(location),
         });
+        return normalizeBackendLocationMutation(response);
       }
 
       failIfConfigured(

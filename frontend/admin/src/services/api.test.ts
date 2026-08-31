@@ -591,4 +591,30 @@ describe("real locations service boundary", () => {
     await expect(httpServices.locations.list()).rejects.toThrow("Authentication required");
     vi.unstubAllEnvs();
   });
+
+  it("maps create and update requests and unwraps normalized mutation responses", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const saved = { id: "42", name: "Room 204", code: "ENG-204", type: "Room", parentId: "1", building: "Engineering Hall", floor: "2nd Floor", function: "Teaching room", keywords: "lecture", status: "Active", lat: null, lng: null, positioned: false };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 200 }));
+
+    await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
+    await expect(httpServices.locations.save({ ...saved, function: "Seminar room", keywords: "seminar" })).resolves.toEqual(saved);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ ...saved, id: undefined }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42", expect.objectContaining({ method: "PUT" }));
+    vi.unstubAllEnvs();
+  });
+
+  it("preserves backend validation details for the form", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ message: "Location validation failed.", fields: { floor: "A Floor Level is required." } }), { status: 400 }));
+    const error = await httpServices.locations.save({ name: "Room", code: "R", type: "Room", parentId: "1", status: "Active", lat: null, lng: null, positioned: false }).catch((cause) => cause);
+    expect(error).toMatchObject({ message: "Location validation failed.", fieldErrors: { floor: "A Floor Level is required." } });
+    vi.unstubAllEnvs();
+  });
 });
