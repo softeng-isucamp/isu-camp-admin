@@ -596,7 +596,7 @@ describe("real locations service boundary", () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
-    const saved = { id: "42", name: "Room 204", code: "ENG-204", type: "Room", parentId: "1", building: "Engineering Hall", floor: "2nd Floor", function: "Teaching room", keywords: "lecture", status: "Active", lat: null, lng: null, positioned: false };
+    const saved = { id: "42", name: "Room 204", code: "ENG-204", type: "Room", parentId: "1", building: "Engineering Hall", floor: "2nd Floor", function: "Teaching room", keywords: "lecture", status: "Active", lat: null, lng: null, positioned: false } as const;
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 200 }));
@@ -615,6 +615,23 @@ describe("real locations service boundary", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ message: "Location validation failed.", fields: { floor: "A Floor Level is required." } }), { status: 400 }));
     const error = await httpServices.locations.save({ name: "Room", code: "R", type: "Room", parentId: "1", status: "Active", lat: null, lng: null, positioned: false }).catch((cause) => cause);
     expect(error).toMatchObject({ message: "Location validation failed.", fieldErrors: { floor: "A Floor Level is required." } });
+    vi.unstubAllEnvs();
+  });
+
+  it("maps the Locations-owned position update and clear responses", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const positioned = { id: "7", name: "Water Station", code: "WATER", type: "Facility", parentId: null, status: "Active", lat: 16.7215, lng: 121.6895, positioned: true };
+    const cleared = { ...positioned, lat: null, lng: null, positioned: false };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(positioned), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(cleared), { status: 200 }));
+
+    await expect(httpServices.locations.savePosition({ id: "7", lat: positioned.lat, lng: positioned.lng })).resolves.toEqual(positioned);
+    await expect(httpServices.locations.savePosition({ id: "7", lat: null, lng: null })).resolves.toEqual(cleared);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: positioned.lat, lng: positioned.lng }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: null, lng: null }) }));
     vi.unstubAllEnvs();
   });
 });

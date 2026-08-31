@@ -47,7 +47,7 @@ export interface Location {
   source?: SourceProvenance;
 }
 export type LocationDraft = Omit<Location, "id"> & { id?: string };
-export interface LocationPosition { id: string; lat: number; lng: number; }
+export interface LocationPosition { id: string; lat: number | null; lng: number | null; }
 export interface RouteNode {
   id: string;
   name: string;

@@ -27,6 +27,12 @@ class Location(db.Model):
 
     floor_level = db.Column(db.Text, nullable=True)
 
+    # Coordinates are owned by Locations only for standalone Outdoor Point
+    # Locations. Indoor records intentionally remain unpositioned.
+    lat = db.Column(db.Float, nullable=True)
+
+    lng = db.Column(db.Float, nullable=True)
+
     type_id = db.Column(
         db.BigInteger,
         nullable=False
@@ -76,6 +82,10 @@ class Location(db.Model):
             "location_id": self.location_id,
             "building_id": self.building_id,
             "floor_id": self.floor_id,
+            "floor_level": self.floor_level,
+            "lat": self.lat,
+            "lng": self.lng,
+            "positioned": self.lat is not None and self.lng is not None,
             "type_id": self.type_id,
             "location_code": self.location_code,
             "location_name": self.location_name,
@@ -108,6 +118,7 @@ class Location(db.Model):
         }
         location_type = type_names.get(self.type_id, "Facility")
         is_building = location_type == "Building"
+        positioned = self.lat is not None and self.lng is not None
         return {
             "id": str(self.location_id),
             "name": self.location_name,
@@ -119,8 +130,8 @@ class Location(db.Model):
             "function": self.description,
             "keywords": self.keywords,
             "status": "Active",
-            "lat": None,
-            "lng": None,
-            "positioned": False,
+            "lat": self.lat if not is_building and location_type == "Facility" else None,
+            "lng": self.lng if not is_building and location_type == "Facility" else None,
+            "positioned": positioned if not is_building and location_type == "Facility" else False,
             "hasPhoto": self.photo is not None,
         }

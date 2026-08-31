@@ -770,8 +770,11 @@ export const services: Services = {
     },
 
     savePosition: async (position) => {
-      if (USE_HTTP_API) return apiJson<Location>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng, positioned: true }) });
-      const location = localAdapter.map.savePosition(position.id, position.lat, position.lng);
+      if (USE_HTTP_API) {
+        const response = await apiJson<unknown>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng }) });
+        return normalizeBackendLocationMutation(response);
+      }
+      const location = localAdapter.locations.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name, "Admin", location.id);
       return wait(clone(location));
     },
@@ -1233,9 +1236,18 @@ export const services: Services = {
     save: async (edit) => {
 
       if (USE_HTTP_API) {
+        // Location coordinates are authoritative in Locations. Keep the
+        // broader map draft endpoint for geometry/network data, but route
+        // point writes through the narrow operation first.
+        if (edit?.selected?.type === "location" && edit.place) {
+          await services.locations.savePosition({ id: edit.selected.id, lat: edit.place[0], lng: edit.place[1] });
+        }
+        if (edit?.movedLocation) {
+          await services.locations.savePosition(edit.movedLocation);
+        }
         await apiJson<unknown>("/api/map/save", {
           method: "POST",
-          body: JSON.stringify(edit ?? {}),
+          body: JSON.stringify(edit ? { ...edit, selected: edit.selected?.type === "location" ? undefined : edit.selected, place: edit.selected?.type === "location" ? undefined : edit.place, movedLocation: undefined } : {}),
         });
         return;
       }
@@ -1270,15 +1282,7 @@ export const services: Services = {
 
 
         if (location) {
-
-          location.lat =
-            edit.place[0];
-
-          location.lng =
-            edit.place[1];
-
-          location.positioned =
-            true;
+          localAdapter.locations.savePosition(location.id, edit.place[0], edit.place[1]);
 
         } else if (node) {
 
@@ -1307,15 +1311,7 @@ export const services: Services = {
           );
 
         if (location) {
-
-          location.lat =
-            edit.movedLocation.lat;
-
-          location.lng =
-            edit.movedLocation.lng;
-
-          location.positioned =
-            true;
+          localAdapter.locations.savePosition(location.id, edit.movedLocation.lat, edit.movedLocation.lng);
         }
       }
 

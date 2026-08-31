@@ -1,3 +1,5 @@
+import math
+
 from flask import Blueprint, jsonify, request
 
 from auth import admin_required
@@ -29,6 +31,24 @@ def _payload():
 
 def _validation_error(fields=None, relationships=None):
     return jsonify({"success": False, "message": "Location validation failed.", "fields": fields or {}, "relationships": relationships or {}}), 400
+
+
+def _position_error(fields):
+    return jsonify({"success": False, "message": "Location position validation failed.", "fields": fields}), 400
+
+
+def _position_values(data):
+    """Validate a complete coordinate pair before changing the ORM row."""
+    if "lat" not in data or "lng" not in data:
+        return None, _position_error({"position": "Latitude and longitude are required together."})
+    lat, lng = data.get("lat"), data.get("lng")
+    if lat is None and lng is None:
+        return (None, None), None
+    if isinstance(lat, bool) or not isinstance(lat, (int, float)) or not math.isfinite(lat) or lat < -90 or lat > 90:
+        return None, _position_error({"lat": "Latitude must be between -90 and 90."})
+    if isinstance(lng, bool) or not isinstance(lng, (int, float)) or not math.isfinite(lng) or lng < -180 or lng > 180:
+        return None, _position_error({"lng": "Longitude must be between -180 and 180."})
+    return (float(lat), float(lng)), None
 
 
 def _validate(data, records, current=None):
@@ -109,9 +129,34 @@ def update_location(location_id):
     try:
         location.location_name, location.location_code, location.type_id = values["name"], values["code"], values["type_id"]
         location.building_id, location.floor_id, location.floor_level = values["building_id"], None, values["floor_level"]
+        if values["type_id"] != TYPE_IDS["Facility"]:
+            location.lat, location.lng = None, None
         location.description, location.keywords = values["description"], values["keywords"]
         db.session.commit()
         return jsonify(_dto(location, records)), 200
     except Exception:
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to update location."}), 500
+
+
+@location_bp.route("/<int:location_id>/position", methods=["PATCH"])
+def save_location_position(location_id):
+    _, error = admin_required()
+    if error:
+        return error
+    records = _records()
+    location = next((item for item in records if item.location_id == location_id), None)
+    if location is None:
+        return jsonify({"success": False, "message": "Location not found."}), 404
+    if location.type_id != TYPE_IDS["Facility"] or location.building_id is not None:
+        return _position_error({"position": "Only standalone Outdoor Point Locations can own an outdoor position."})
+    values, error = _position_values(_payload())
+    if error:
+        return error
+    try:
+        location.lat, location.lng = values
+        db.session.commit()
+        return jsonify(_dto(location, records)), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"success": False, "message": "Failed to save location position."}), 500
