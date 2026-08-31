@@ -175,14 +175,17 @@ export function Locations() {
     };
   }, [activeOverlay]);
 
-  const { data, isLoading, error: listError } = useQuery({
-    queryKey: ["locations", query],
-    queryFn: () => services.locations.list(query),
-  });
-
   const { data: directory } = useQuery({
     queryKey: ["locations", "directory"],
-    queryFn: () => services.locations.list("", 1, 100),
+    queryFn: async () => {
+      const first = await services.locations.list("", 1, 100);
+      const pages = Math.ceil(first.total / first.pageSize);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+          services.locations.list("", index + 2, first.pageSize)),
+      );
+      return [first, ...remaining].flatMap((result) => result.items);
+    },
   });
 
   const { data: history } = useQuery({
@@ -191,7 +194,7 @@ export function Locations() {
     enabled: dialog === "history" && selected !== null,
   });
 
-  const allLocations = directory?.items ?? data?.items ?? (API_MODE === "local" ? initialLocations : []);
+  const allLocations = directory ?? (API_MODE === "local" ? initialLocations : []);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
     directory: allLocations,
@@ -226,8 +229,18 @@ export function Locations() {
     return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
   }, [floors, building, selectedBuildingRecord]);
 
-  const rawItems = data?.items ?? (API_MODE === "local" ? initialLocations : []);
   const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
+  const { data, isLoading, error: listError } = useQuery({
+    queryKey: ["locations", "page", query, page, type, status, selectedBuildingRecord?.id, selectedFloorRecord?.name],
+    queryFn: () => services.locations.list(query, page, pageSize, {
+      type: type === "All Types" ? undefined : type as LocationType,
+      status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
+      buildingId: selectedBuildingRecord?.id,
+      floor: selectedFloorRecord?.name,
+    }),
+    placeholderData: (previous) => previous,
+  });
+  const rawItems = data?.items ?? [];
   const items = useMemo(() => {
     return rawItems.filter(
       (item) =>
@@ -340,18 +353,15 @@ export function Locations() {
   }, [items, matchingIds, allLocations, viewMode, collapsedNodes]);
 
   const hierarchyRows = hierarchyFamilies.flat();
-  const hierarchyPageFamilies = viewMode === "flat"
-    ? []
-    : hierarchyFamilies.slice((page - 1) * pageSize, page * pageSize);
-
   const visibleRows = viewMode === "flat"
-    ? hierarchyRows.slice((page - 1) * pageSize, page * pageSize)
-    : hierarchyPageFamilies.flat();
+    ? hierarchyRows
+    : hierarchyFamilies.flat();
 
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil((viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length) / pageSize));
+    if (!data) return;
+    const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize));
     setPage((current) => Math.min(current, totalPages));
-  }, [hierarchyRows.length, hierarchyFamilies.length, viewMode]);
+  }, [data]);
 
   const toggleCollapse = (id: string) => {
     setCollapsedNodes((prev) => {
@@ -1087,7 +1097,7 @@ export function Locations() {
           )}
         </div>
         <Pagination
-          total={viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length}
+          total={data?.total ?? 0}
           page={page}
           pageSize={pageSize}
           onChange={setPage}

@@ -47,6 +47,13 @@ import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, norma
 
 export type ApiMode = "local" | "mock" | "real";
 
+export type LocationListFilters = {
+  type?: Location["type"];
+  status?: Location["status"];
+  buildingId?: string;
+  floor?: string;
+};
+
 type BackendLocation = {
   id?: unknown; location_id?: unknown; name?: unknown; location_name?: unknown;
   code?: unknown; location_code?: unknown; type?: unknown; type_id?: unknown;
@@ -70,11 +77,20 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
   const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
   const lng = raw.lng === null || raw.lng === undefined ? null : Number(raw.lng);
+  if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) ||
+      (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) ||
+      ((lat === null) !== (lng === null))) {
+    throw new Error("Backend returned malformed location coordinates.");
+  }
+  const hasPosition = lat !== null && lng !== null;
+  if (raw.positioned !== undefined && (typeof raw.positioned !== "boolean" || raw.positioned !== hasPosition)) {
+    throw new Error("Backend returned inconsistent location position.");
+  }
   const normalized: Location = {
     id: String(id), name, code, type: type as Location["type"],
     parentId: raw.parentId === null || raw.parentId === undefined ? (raw.building_id == null ? null : String(raw.building_id)) : String(raw.parentId),
-    status: status as Location["status"], lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
-    positioned: raw.positioned === true || (Number.isFinite(lat) && Number.isFinite(lng)),
+    status: status as Location["status"], lat, lng,
+    positioned: hasPosition,
   };
   if (raw.building != null) normalized.building = String(raw.building);
   if (raw.floor != null) normalized.floor = String(raw.floor);
@@ -244,7 +260,7 @@ export interface Services {
   };
 
   locations: {
-    list(query?: string, page?: number, pageSize?: number): Promise<Page<Location>>;
+    list(query?: string, page?: number, pageSize?: number, filters?: LocationListFilters): Promise<Page<Location>>;
 
     save(location: LocationDraft): Promise<Location>;
 
@@ -702,17 +718,22 @@ export const services: Services = {
 
   locations: {
 
-    list: async (q, page = 1, pageSize = 20) => {
+    list: async (q, page = 1, pageSize, filters = {}) => {
 
       if (USE_HTTP_API) {
-        const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+        const resolvedPageSize = pageSize ?? 20;
+        const params = new URLSearchParams({ page: String(page), pageSize: String(resolvedPageSize) });
         if (q) params.set("q", q);
+        if (filters.type) params.set("type", filters.type);
+        if (filters.status) params.set("status", filters.status);
+        if (filters.buildingId) params.set("buildingId", filters.buildingId);
+        if (filters.floor) params.set("floor", filters.floor);
         const response = await apiJson<unknown>(`/api/locations?${params}`);
         return normalizeBackendLocationPage(response);
       }
 
-      const filtered = q
-        ? locations.filter((location) =>
+      const filtered = locations.filter((location) =>
+          (!q ||
             [
               location.name,
               location.code,
@@ -723,19 +744,23 @@ export const services: Services = {
               location.floor ?? "",
             ].some((value) =>
               matches(value, q)
-            )
-          )
-        : locations;
+            )) &&
+          (!filters.type || location.type === filters.type) &&
+          (!filters.status || location.status === filters.status) &&
+          (!filters.buildingId || location.parentId === filters.buildingId) &&
+          (!filters.floor || location.floor === filters.floor)
+        );
+      const resolvedPageSize = pageSize ?? Math.max(filtered.length, 1);
 
       return wait({
-        items: clone(filtered),
+        items: clone(filtered.slice((page - 1) * resolvedPageSize, page * resolvedPageSize)),
 
         total:
           filtered.length,
 
-        page: 1,
+        page,
 
-        pageSize: 20,
+        pageSize: resolvedPageSize,
       });
     },
 

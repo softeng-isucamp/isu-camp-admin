@@ -4,11 +4,11 @@ from flask import Blueprint, Response, jsonify, request
 
 from auth import admin_required
 from extensions import db
-from model.location import Location
+from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
-TYPE_IDS = {"Building": 1, "Floor": 2, "Room": 3, "Office": 4, "Laboratory": 5, "Restroom": 6, "Facility": 7}
+TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 CREATABLE_TYPES = set(TYPE_IDS) - {"Floor"}
 PHOTO_MAX_BYTES = 5 * 1024 * 1024
@@ -20,6 +20,10 @@ def _records():
 
 
 def _dto(record, records):
+    if record.type_id not in LOCATION_TYPE_NAMES:
+        raise ValueError(
+            f"Location {record.location_id} references an unknown location type."
+        )
     by_id = {item.location_id: item for item in records}
     building = by_id.get(record.building_id)
     legacy_floor = by_id.get(record.floor_id)
@@ -101,15 +105,34 @@ def list_locations():
     if error: return error
     try:
         query = request.args.get("q", "").strip().lower()
+        type_filter = request.args.get("type", "").strip()
+        status_filter = request.args.get("status", "").strip()
+        building_id_filter = request.args.get("buildingId", "").strip()
+        floor_filter = request.args.get("floor", "").strip().lower()
         page = max(request.args.get("page", 1, type=int) or 1, 1)
         page_size = min(max(request.args.get("pageSize", 20, type=int) or 20, 1), 100)
         records, projected = _records(), []
         for record in records:
             dto = _dto(record, records)
             searchable = " ".join(str(dto.get(field) or "") for field in ("name", "code", "type", "building", "floor", "function", "keywords")).lower()
-            if not query or query in searchable: projected.append(dto)
+            if query and query not in searchable:
+                continue
+            if type_filter and dto["type"] != type_filter:
+                continue
+            if status_filter and dto["status"] != status_filter:
+                continue
+            if building_id_filter and building_id_filter not in {
+                str(record.building_id or ""),
+                str(record.location_id) if dto["type"] == "Building" else "",
+            }:
+                continue
+            if floor_filter and str(dto.get("floor") or "").lower() != floor_filter:
+                continue
+            projected.append(dto)
         start = (page - 1) * page_size
         return jsonify({"success": True, "items": projected[start:start + page_size], "total": len(projected), "page": page, "pageSize": page_size}), 200
+    except ValueError as error:
+        return jsonify({"success": False, "message": str(error)}), 500
     except Exception:
         return jsonify({"success": False, "message": "Failed to list locations."}), 500
 
@@ -148,8 +171,20 @@ def update_location(location_id):
     photo, photo_mime_type, error = _photo_upload()
     if error: return error
     try:
+        legacy_floor = next(
+            (item for item in records if item.location_id == location.floor_id),
+            None,
+        )
+        preserve_legacy_floor = (
+            legacy_floor is not None
+            and values["type_id"] in {TYPE_IDS[name] for name in INDOOR_TYPES}
+            and values["building_id"] == location.building_id
+            and values["floor_level"] == legacy_floor.location_name
+        )
         location.location_name, location.location_code, location.type_id = values["name"], values["code"], values["type_id"]
-        location.building_id, location.floor_id, location.floor_level = values["building_id"], None, values["floor_level"]
+        location.building_id = values["building_id"]
+        location.floor_id = location.floor_id if preserve_legacy_floor else None
+        location.floor_level = None if preserve_legacy_floor else values["floor_level"]
         if values["type_id"] != TYPE_IDS["Facility"]:
             location.lat, location.lng = None, None
         location.description, location.keywords = values["description"], values["keywords"]

@@ -656,6 +656,25 @@ describe("real locations service boundary", () => {
     vi.unstubAllEnvs();
   });
 
+  it("sends directory filters to the real backend", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, page: 3, pageSize: 10 }), { status: 200 }),
+    );
+
+    await httpServices.locations.list("lab", 3, 10, {
+      type: "Laboratory", status: "Active", buildingId: "4", floor: "2nd Floor",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/locations?page=3&pageSize=10&q=lab&type=Laboratory&status=Active&buildingId=4&floor=2nd+Floor",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    vi.unstubAllEnvs();
+  });
+
   it("rejects malformed location pages and preserves authentication errors", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
@@ -665,6 +684,25 @@ describe("real locations service boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Authentication required" }), { status: 401 }));
     await expect(httpServices.locations.list()).rejects.toThrow("malformed locations page");
     await expect(httpServices.locations.list()).rejects.toThrow("Authentication required");
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects malformed or inconsistent coordinate state", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: "7", name: "Water Station", code: "WATER", type: "Facility", lat: "north", lng: 121.69, positioned: true }],
+        total: 1, page: 1, pageSize: 20,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ id: "8", name: "Gate", code: "GATE", type: "Facility", lat: null, lng: null, positioned: true }],
+        total: 1, page: 1, pageSize: 20,
+      }), { status: 200 }));
+
+    await expect(httpServices.locations.list()).rejects.toThrow("malformed location coordinates");
+    await expect(httpServices.locations.list()).rejects.toThrow("inconsistent location position");
     vi.unstubAllEnvs();
   });
 

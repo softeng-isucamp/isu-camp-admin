@@ -62,6 +62,7 @@ def make_client(monkeypatch):
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
     building = FakeRecord(1, "Engineering Hall", "ENG", 1)
     room = FakeRecord(2, "Room 204", "ENG-204", 3, building_id=1)
+    room.floor_level = "2nd Floor"
     monkeypatch.setattr(location_module, "Location", type("FakeLocation", (), {
         "query": FakeQuery([building, room]), "location_id": FakeColumn(),
     }))
@@ -78,12 +79,36 @@ def test_list_locations_returns_authenticated_searchable_page(monkeypatch):
     assert response.json["items"][0]["positioned"] is False
 
 
+def test_list_locations_applies_relationship_filters_before_pagination(monkeypatch):
+    client = make_client(monkeypatch)
+    response = client.get(
+        "/api/locations?type=Room&buildingId=1&floor=2nd%20Floor&page=1&pageSize=10"
+    )
+
+    assert response.status_code == 200
+    assert response.json["total"] == 1
+    assert [item["id"] for item in response.json["items"]] == ["2"]
+
+
 def test_list_locations_requires_authentication(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (None, ({"error": "unused"}, 401)))
     response = app.test_client().get("/api/locations")
     assert response.status_code == 401
+
+
+def test_list_locations_rejects_unknown_persisted_type(monkeypatch):
+    client = make_client(monkeypatch)
+    unknown = FakeRecord(9, "Unknown", "UNKNOWN", 999)
+    monkeypatch.setattr(location_module, "Location", type("FakeLocation", (), {
+        "query": FakeQuery([unknown]), "location_id": FakeColumn(),
+    }))
+
+    response = client.get("/api/locations")
+
+    assert response.status_code == 500
+    assert response.json["message"] == "Location 9 references an unknown location type."
 
 
 class MutationQuery:
@@ -187,6 +212,33 @@ def test_create_and_update_round_trip_keeps_description_and_keywords_separate(mo
 
     listed = client.get("/api/locations?q=ENG-205")
     assert listed.json["items"][0]["name"] == "Room 205"
+
+
+def test_update_preserves_unchanged_legacy_floor_reference(monkeypatch):
+    client, records, _ = make_mutation_client(monkeypatch)
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    legacy_floor = type(records[0])(
+        location_name="Second Floor", location_code="ENG-F2", type_id=2,
+        building_id=int(building.json["id"]), floor_id=None, floor_level=None,
+    )
+    legacy_floor.location_id = 20
+    records.append(legacy_floor)
+    room = type(records[0])(
+        location_name="Room 204", location_code="ENG-204", type_id=3,
+        building_id=int(building.json["id"]), floor_id=20, floor_level=None,
+    )
+    room.location_id = 21
+    records.append(room)
+
+    response = client.put("/api/locations/21", json={
+        "name": "Room 205", "code": "ENG-205", "type": "Room",
+        "parentId": building.json["id"], "floor": "Second Floor",
+    })
+
+    assert response.status_code == 200
+    assert response.json["floor"] == "Second Floor"
+    assert room.floor_id == 20
+    assert room.floor_level is None
 
 
 def test_mutations_validate_relationship_floor_and_duplicate_without_partial_write(monkeypatch):

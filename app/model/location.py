@@ -1,6 +1,17 @@
 from extensions import db
 from datetime import datetime
 
+LOCATION_TYPE_NAMES = {
+    1: "Building",
+    2: "Floor",
+    3: "Room",
+    4: "Office",
+    5: "Laboratory",
+    6: "Restroom",
+    7: "Facility",
+}
+LOCATION_TYPE_IDS = {name: identifier for identifier, name in LOCATION_TYPE_NAMES.items()}
+
 
 class Location(db.Model):
 
@@ -118,11 +129,12 @@ class Location(db.Model):
         compatibility values are intentionally made explicit here instead of
         leaking ORM names into the frontend.
         """
-        type_names = {
-            1: "Building", 2: "Floor", 3: "Room", 4: "Office",
-            5: "Laboratory", 6: "Restroom", 7: "Facility",
-        }
-        location_type = type_names.get(self.type_id, "Facility")
+        try:
+            location_type = LOCATION_TYPE_NAMES[self.type_id]
+        except KeyError as error:
+            raise ValueError(
+                f"Location {self.location_id} references an unknown location type."
+            ) from error
         is_building = location_type == "Building"
         positioned = self.lat is not None and self.lng is not None
         return {
