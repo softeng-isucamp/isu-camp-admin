@@ -47,6 +47,51 @@ import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, norma
 
 export type ApiMode = "local" | "mock" | "real";
 
+type BackendLocation = {
+  id?: unknown; location_id?: unknown; name?: unknown; location_name?: unknown;
+  code?: unknown; location_code?: unknown; type?: unknown; type_id?: unknown;
+  parentId?: unknown; building_id?: unknown; building?: unknown; floor_id?: unknown; floor?: unknown;
+  function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
+  lat?: unknown; lng?: unknown; positioned?: unknown;
+};
+
+const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
+const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
+
+export const normalizeBackendLocation = (raw: BackendLocation): Location => {
+  const id = raw.id ?? raw.location_id;
+  const name = raw.name ?? raw.location_name;
+  const code = raw.code ?? raw.location_code;
+  const type = raw.type ?? (typeof raw.type_id === "number" ? locationTypes[raw.type_id - 1] : undefined);
+  if (id === undefined || typeof name !== "string" || typeof code !== "string" || !locationTypes.includes(type as typeof locationTypes[number])) {
+    throw new Error("Backend returned a malformed location record.");
+  }
+  const status = raw.status ?? "Active";
+  if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
+  const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
+  const lng = raw.lng === null || raw.lng === undefined ? null : Number(raw.lng);
+  return {
+    id: String(id), name, code, type: type as Location["type"],
+    parentId: raw.parentId === null || raw.parentId === undefined ? (raw.building_id == null ? null : String(raw.building_id)) : String(raw.parentId),
+    building: raw.building == null ? undefined : String(raw.building),
+    floor: raw.floor == null ? undefined : String(raw.floor),
+    function: raw.function == null ? (raw.description == null ? undefined : String(raw.description)) : String(raw.function),
+    keywords: raw.keywords == null ? undefined : String(raw.keywords),
+    status: status as Location["status"], lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
+    positioned: raw.positioned === true || (Number.isFinite(lat) && Number.isFinite(lng)),
+  };
+};
+
+export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
+  const envelope = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const value = envelope && typeof envelope === "object" ? envelope as Record<string, unknown> : {};
+  const rows = value.items ?? value.locations;
+  if (!Array.isArray(rows) || typeof value.total !== "number" || typeof value.page !== "number" || typeof value.pageSize !== "number") {
+    throw new Error("Backend returned a malformed locations page.");
+  }
+  return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
+};
+
 // `local` is the explicit development/test adapter for deterministic in-browser fixtures.
 // HTTP-backed environments use `mock` for the mock API or `real` for production,
 // with VITE_API_BASE_URL selecting the backend when needed.
@@ -186,7 +231,7 @@ export interface Services {
   };
 
   locations: {
-    list(query?: string): Promise<Page<Location>>;
+    list(query?: string, page?: number, pageSize?: number): Promise<Page<Location>>;
 
     save(location: LocationDraft): Promise<Location>;
 
@@ -642,10 +687,13 @@ export const services: Services = {
 
   locations: {
 
-    list: async (q) => {
+    list: async (q, page = 1, pageSize = 20) => {
 
       if (USE_HTTP_API) {
-        return apiJson<Page<Location>>(`/api/locations${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+        const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+        if (q) params.set("q", q);
+        const response = await apiJson<unknown>(`/api/locations?${params}`);
+        return normalizeBackendLocationPage(response);
       }
 
       const filtered = q

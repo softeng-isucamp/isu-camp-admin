@@ -558,3 +558,37 @@ describe("mock service contracts", () => {
     ]);
   });
 });
+
+describe("real locations service boundary", () => {
+  it("maps database-shaped location rows and sends pagination parameters", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        success: true,
+        items: [{ location_id: 42, location_name: "Room 204", location_code: "ENG-204", type_id: 3, building: "Engineering Hall", floor: "2nd Floor", description: "Teaching room", keywords: "lecture" }],
+        total: 1, page: 2, pageSize: 10,
+      }), { status: 200 }),
+    );
+
+    await expect(httpServices.locations.list("LECTURE", 2, 10)).resolves.toEqual({
+      items: [expect.objectContaining({ id: "42", name: "Room 204", type: "Room", parentId: null, status: "Active", lat: null, lng: null, positioned: false })],
+      total: 1, page: 2, pageSize: 10,
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/locations?page=2&pageSize=10&q=LECTURE", expect.objectContaining({ credentials: "include" }));
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects malformed location pages and preserves authentication errors", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Authentication required" }), { status: 401 }));
+    await expect(httpServices.locations.list()).rejects.toThrow("malformed locations page");
+    await expect(httpServices.locations.list()).rejects.toThrow("Authentication required");
+    vi.unstubAllEnvs();
+  });
+});

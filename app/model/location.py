@@ -91,3 +91,33 @@ class Location(db.Model):
             "keywords": self.keywords,
             "has_photo": self.photo is not None   
         }
+
+    def to_location_dto(self, building=None, floor=None):
+        """Project the legacy row into the stable Locations API contract.
+
+        The persisted table predates the directory contract: it has no status
+        or coordinate columns and stores type/building/floor as IDs. Those
+        compatibility values are intentionally made explicit here instead of
+        leaking ORM names into the frontend.
+        """
+        type_names = {
+            1: "Building", 2: "Floor", 3: "Room", 4: "Office",
+            5: "Laboratory", 6: "Restroom", 7: "Facility",
+        }
+        location_type = type_names.get(self.type_id, "Facility")
+        is_building = location_type == "Building"
+        return {
+            "id": str(self.location_id),
+            "name": self.location_name,
+            "code": self.location_code,
+            "type": location_type,
+            "parentId": None if is_building else (str(self.building_id) if self.building_id is not None else None),
+            "building": building,
+            "floor": floor,
+            "function": self.description,
+            "keywords": self.keywords,
+            "status": "Active",
+            "lat": None,
+            "lng": None,
+            "positioned": False,
+        }

@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from extensions import db
 from model.location import Location
+from auth import admin_required
 
 
 # ==========================================
@@ -13,6 +14,47 @@ location_bp = Blueprint(
     __name__,
     url_prefix="/api/locations"
 )
+
+
+@location_bp.route("", methods=["GET"])
+def list_locations():
+    """Return authenticated, paginated directory records."""
+    _, authentication_error = admin_required()
+    if authentication_error:
+        return authentication_error
+
+    try:
+        query = request.args.get("q", "").strip().lower()
+        page = max(request.args.get("page", 1, type=int) or 1, 1)
+        page_size = min(max(request.args.get("pageSize", 20, type=int) or 20, 1), 100)
+
+        records = Location.query.order_by(Location.location_id.asc()).all()
+        by_id = {record.location_id: record for record in records}
+        projected = []
+        for record in records:
+            building_record = by_id.get(record.building_id)
+            floor_record = by_id.get(record.floor_id)
+            dto = record.to_location_dto(
+                building=building_record.location_name if building_record else None,
+                floor=floor_record.location_name if floor_record else None,
+            )
+            searchable = " ".join(str(dto.get(field) or "") for field in (
+                "name", "code", "type", "building", "floor", "function", "keywords",
+            )).lower()
+            if not query or query in searchable:
+                projected.append(dto)
+
+        total = len(projected)
+        start = (page - 1) * page_size
+        return jsonify({
+            "success": True,
+            "items": projected[start:start + page_size],
+            "total": total,
+            "page": page,
+            "pageSize": page_size,
+        }), 200
+    except Exception as error:
+        return jsonify({"success": False, "message": "Failed to list locations", "error": str(error)}), 500
 
 
 # ==========================================

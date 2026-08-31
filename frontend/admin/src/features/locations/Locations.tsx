@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
+import { API_MODE, createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -175,7 +175,7 @@ export function Locations() {
     };
   }, [activeOverlay]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: listError } = useQuery({
     queryKey: ["locations", query],
     queryFn: () => services.locations.list(query),
   });
@@ -191,7 +191,7 @@ export function Locations() {
     enabled: dialog === "history" && selected !== null,
   });
 
-  const allLocations = directory?.items ?? data?.items ?? initialLocations;
+  const allLocations = directory?.items ?? data?.items ?? (API_MODE === "local" ? initialLocations : []);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
     directory: allLocations,
@@ -226,7 +226,7 @@ export function Locations() {
     return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
   }, [floors, building, selectedBuildingRecord]);
 
-  const rawItems = data?.items ?? initialLocations;
+  const rawItems = data?.items ?? (API_MODE === "local" ? initialLocations : []);
   const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
   const items = useMemo(() => {
     return rawItems.filter(
@@ -848,6 +848,7 @@ export function Locations() {
       )}
 
       {/* Main Table Card */}
+      {listError && !dialog && <div className="error" role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 16px", borderRadius: "12px", marginBottom: "12px" }}>{listError instanceof Error ? listError.message : "Unable to load locations."}</div>}
       <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
         <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>
           <div>
