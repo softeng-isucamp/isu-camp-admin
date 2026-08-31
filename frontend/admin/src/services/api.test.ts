@@ -618,6 +618,22 @@ describe("real locations service boundary", () => {
     vi.unstubAllEnvs();
   });
 
+  it("maps delete success, not-found, and server failures through remove", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, deleted: { id: "7", count: 3, ids: ["7", "8", "9"] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Location not found." }), { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Failed to delete location." }), { status: 500 }));
+
+    await expect(httpServices.locations.remove("7")).resolves.toBeUndefined();
+    await expect(httpServices.locations.remove("missing")).rejects.toThrow("Location not found.");
+    await expect(httpServices.locations.remove("7")).rejects.toThrow("Failed to delete location.");
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations/7", expect.objectContaining({ method: "DELETE", credentials: "include" }));
+    vi.unstubAllEnvs();
+  });
+
   it("maps the Locations-owned position update and clear responses", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();

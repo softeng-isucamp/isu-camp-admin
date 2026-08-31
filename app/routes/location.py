@@ -139,6 +139,41 @@ def update_location(location_id):
         return jsonify({"success": False, "message": "Failed to update location."}), 500
 
 
+@location_bp.route("/<int:location_id>", methods=["DELETE"])
+def delete_location(location_id):
+    _, error = admin_required()
+    if error:
+        return error
+
+    records = _records()
+    location = next((item for item in records if item.location_id == location_id), None)
+    if location is None:
+        return jsonify({"success": False, "message": "Location not found."}), 404
+
+    affected = [location]
+    if location.type_id == TYPE_IDS["Building"]:
+        affected.extend(
+            item for item in records
+            if item.building_id == location_id and item.type_id in {TYPE_IDS[name] for name in INDOOR_TYPES}
+        )
+
+    try:
+        for record in affected:
+            db.session.delete(record)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "deleted": {
+                "id": str(location_id),
+                "count": len(affected),
+                "ids": [str(record.location_id) for record in affected],
+            },
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"success": False, "message": "Failed to delete location."}), 500
+
+
 @location_bp.route("/<int:location_id>/position", methods=["PATCH"])
 def save_location_position(location_id):
     _, error = admin_required()

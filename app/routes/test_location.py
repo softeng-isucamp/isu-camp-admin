@@ -103,6 +103,7 @@ class MutationSession:
         self.rollbacks = 0
         self.fail_commit = False
         self.pending = None
+        self.deleted = []
 
     def add(self, record):
         record.location_id = max((item.location_id for item in self.records), default=0) + 1
@@ -115,6 +116,10 @@ class MutationSession:
     def commit(self):
         if self.fail_commit:
             raise RuntimeError("database unavailable")
+        for record in self.deleted:
+            if record in self.records:
+                self.records.remove(record)
+        self.deleted = []
         self.commits += 1
         self.pending = None
 
@@ -122,7 +127,11 @@ class MutationSession:
         self.rollbacks += 1
         if self.pending in self.records:
             self.records.remove(self.pending)
+        self.deleted = []
         self.pending = None
+
+    def delete(self, record):
+        self.deleted.append(record)
 
 
 def make_mutation_client(monkeypatch):
@@ -200,6 +209,63 @@ def test_create_rolls_back_when_persistence_fails(monkeypatch):
     assert response.status_code == 500
     assert records == []
     assert session.rollbacks == 1
+
+
+def test_delete_removes_a_standalone_location_and_returns_affected_ids(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+    created = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+    facility = client.post("/api/locations", json={"name": "Water Station", "code": "WATER", "type": "Facility"})
+
+    response = client.delete(f"/api/locations/{facility.json['id']}")
+
+    assert response.status_code == 200
+    assert response.json == {"success": True, "deleted": {"id": facility.json["id"], "count": 1, "ids": [facility.json["id"]]}}
+    assert all(record.location_id != int(facility.json["id"]) for record in records)
+    assert records[0].location_id == int(created.json["id"])
+    assert session.commits == 3
+
+
+def test_delete_building_cascades_only_direct_indoor_locations_atomically(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    room = client.post("/api/locations", json={"name": "Room 204", "code": "ENG-204", "type": "Room", "parentId": building.json["id"], "floor": "2nd Floor"})
+    office = client.post("/api/locations", json={"name": "Office 205", "code": "ENG-205", "type": "Office", "parentId": building.json["id"], "floor": "2nd Floor"})
+    floor = client.post("/api/locations", json={"name": "Legacy Floor", "code": "ENG-F2", "type": "Facility"})
+    floor_record = next(record for record in records if record.location_id == int(floor.json["id"]))
+    floor_record.building_id = int(building.json["id"])
+
+    response = client.delete(f"/api/locations/{building.json['id']}")
+
+    assert response.status_code == 200
+    assert response.json["deleted"] == {"id": building.json["id"], "count": 3, "ids": [building.json["id"], room.json["id"], office.json["id"]]}
+    assert [record.location_id for record in records] == [int(floor.json["id"])]
+    assert session.commits == 5
+
+
+def test_delete_failure_rolls_back_all_affected_records(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    room = client.post("/api/locations", json={"name": "Room 204", "code": "ENG-204", "type": "Room", "parentId": building.json["id"], "floor": "2nd Floor"})
+    session.fail_commit = True
+
+    response = client.delete(f"/api/locations/{building.json['id']}")
+
+    assert response.status_code == 500
+    assert response.json == {"success": False, "message": "Failed to delete location."}
+    assert [record.location_id for record in records] == [int(building.json["id"]), int(room.json["id"])]
+    assert session.rollbacks == 1
+
+
+def test_delete_requires_authentication_and_returns_not_found(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(location_bp)
+    monkeypatch.setattr(location_module, "admin_required", lambda: (None, ({"error": "unauthorized"}, 401)))
+    assert app.test_client().delete("/api/locations/1").status_code == 401
+
+    client, _, _ = make_mutation_client(monkeypatch)
+    response = client.delete("/api/locations/999")
+    assert response.status_code == 404
+    assert response.json == {"success": False, "message": "Location not found."}
 
 
 def test_position_update_clear_and_reload_persist_for_outdoor_point(monkeypatch):
