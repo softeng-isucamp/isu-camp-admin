@@ -1,14 +1,23 @@
 import sys
 import os
-from urllib.parse import urlsplit, urlunsplit
 
-sys.path.insert(0, os.path.dirname(__file__))
+# Add app folder to Python path
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+
+
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from auth import auth_bp, db, mail
+from extensions import db, mail
+from auth import auth_bp
+from model.location import Location
+from routes.location import location_bp
 
 
 # ==========================================
@@ -17,14 +26,11 @@ from auth import auth_bp, db, mail
 
 load_dotenv()
 
-print("MAIL USERNAME:", os.getenv("MAIL_USERNAME"))
-print("MAIL PASSWORD LOADED:", bool(os.getenv("MAIL_PASSWORD")))
-print("MAIL PASSWORD LENGTH:", len(os.getenv("MAIL_PASSWORD", "")))
-
 
 # ==========================================
 # Create Flask App
 # ==========================================
+
 app = Flask(__name__)
 
 
@@ -63,9 +69,11 @@ if not database_url:
         "SUPABASE_DATABASE_URL is missing from .env"
     )
 
+
 parsed_database_url = urlsplit(database_url)
 
 if parsed_database_url.hostname:
+
     safe_netloc = parsed_database_url.hostname
 
     if parsed_database_url.port:
@@ -77,13 +85,17 @@ if parsed_database_url.hostname:
             safe_netloc,
             parsed_database_url.path,
             parsed_database_url.query,
-            "",
+            ""
         )
     )
+
 else:
+
     safe_database_url = "********"
 
+
 print("Database URL loaded:", safe_database_url)
+
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 
@@ -112,14 +124,15 @@ CORS(
 
 
 # ==========================================
-# Authentication
+# Register Authentication
 # ==========================================
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(location_bp)
 
 
 # ==========================================
-# TEST 1 - Backend
+# Home
 # ==========================================
 
 @app.route("/", methods=["GET"])
@@ -132,7 +145,7 @@ def home():
 
 
 # ==========================================
-# TEST 2 - Database Connection
+# Test Database
 # ==========================================
 
 @app.route("/api/test-db", methods=["GET"])
@@ -156,9 +169,7 @@ def test_db():
 
     except Exception as e:
 
-        print("================================")
-        print("DATABASE CONNECTION ERROR")
-        print("================================")
+        print("DATABASE CONNECTION ERROR:")
         print(e)
 
         return jsonify({
@@ -167,55 +178,12 @@ def test_db():
             "error": str(e)
         }), 500
 
-
 # ==========================================
-# TEST 3 - Database Information
-# ==========================================
-
-@app.route("/api/test-db-info", methods=["GET"])
-def test_db_info():
-
-    try:
-
-        with db.engine.connect() as connection:
-
-            database_name = connection.execute(
-                db.text("SELECT current_database()")
-            ).scalar()
-
-            username = connection.execute(
-                db.text("SELECT current_user")
-            ).scalar()
-
-            version = connection.execute(
-                db.text("SELECT version()")
-            ).scalar()
-
-        return jsonify({
-            "success": True,
-            "database": database_name,
-            "user": username,
-            "postgresql_version": version
-        }), 200
-
-    except Exception as e:
-
-        print("DATABASE INFO ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not retrieve database information",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# TEST 4 - Check Admin Table
+# TEST LOCATION TABLE
 # ==========================================
 
-@app.route("/api/test-admin-table", methods=["GET"])
-def test_admin_table():
+@app.route("/api/test-location-table", methods=["GET"])
+def test_location_table():
 
     try:
 
@@ -227,7 +195,7 @@ def test_admin_table():
                         SELECT 1
                         FROM information_schema.tables
                         WHERE table_schema = 'public'
-                        AND table_name = 'admin'
+                        AND table_name = 'location'
                     )
                 """)
             )
@@ -238,218 +206,54 @@ def test_admin_table():
 
             return jsonify({
                 "success": False,
-                "message": "The public.admin table does not exist."
+                "message": "The public.location table does not exist."
             }), 404
 
         return jsonify({
             "success": True,
-            "message": "The public.admin table exists."
+            "message": "The public.location table exists."
         }), 200
 
     except Exception as e:
 
-        print("ADMIN TABLE ERROR:")
+        print("LOCATION TABLE ERROR:")
         print(e)
 
         return jsonify({
             "success": False,
-            "message": "Could not check admin table",
+            "message": "Could not check location table",
             "error": str(e)
         }), 500
 
-
 # ==========================================
-# TEST 5 - Count Admin Accounts
+# Test Location Table
 # ==========================================
 
-@app.route("/api/test-admin-count", methods=["GET"])
-def test_admin_count():
+@app.route("/api/test-location", methods=["GET"])
+def test_location():
 
     try:
 
-        with db.engine.connect() as connection:
-
-            result = connection.execute(
-                db.text("""
-                    SELECT COUNT(*)
-                    FROM public.admin
-                """)
-            )
-
-            count = result.scalar()
+        locations = Location.query.limit(10).all()
 
         return jsonify({
             "success": True,
-            "message": "Admin table queried successfully",
-            "admin_count": count
-        }), 200
-
-    except Exception as e:
-
-        print("ADMIN COUNT ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not count admin accounts",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# TEST 6 - Find Specific Admin
-# ==========================================
-
-@app.route("/api/test-admin", methods=["GET"])
-def test_admin():
-
-    try:
-
-        from auth import Admin
-
-        admin = Admin.query.filter_by(
-            username="admin_justine"
-        ).first()
-
-        if not admin:
-
-            return jsonify({
-                "success": False,
-                "message": "admin_justine was not found in the admin table"
-            }), 404
-
-        return jsonify({
-            "success": True,
-            "message": "Admin found",
-            "admin": {
-                "id": admin.id,
-                "username": admin.username
-            }
-        }), 200
-
-    except Exception as e:
-
-        print("ADMIN DATABASE ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not query admin table",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# TEST 7 - Test Username + Password
-# ==========================================
-
-@app.route("/api/test-login", methods=["GET"])
-def test_login():
-
-    try:
-
-        from auth import Admin
-
-        test_username = "admin_justine"
-        test_password = "password123"
-
-        admin = Admin.query.filter_by(
-            username=test_username
-        ).first()
-
-        # ----------------------------------
-        # Username check
-        # ----------------------------------
-
-        if not admin:
-
-            return jsonify({
-                "success": False,
-                "step": "username",
-                "message": "Username does not exist",
-                "username": test_username
-            }), 404
-
-        # ----------------------------------
-        # Password check
-        # ----------------------------------
-
-        if admin.password != test_password:
-
-            return jsonify({
-                "success": False,
-                "step": "password",
-                "message": "Username exists but password does not match",
-                "username": test_username
-            }), 401
-
-        # ----------------------------------
-        # Everything matches
-        # ----------------------------------
-
-        return jsonify({
-            "success": True,
-            "message": "Username and password match!",
-            "admin": {
-                "id": admin.id,
-                "username": admin.username
-            }
-        }), 200
-
-    except Exception as e:
-
-        print("LOGIN TEST ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not test login",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# TEST 8 - Database Tables
-# ==========================================
-
-@app.route("/api/test-tables", methods=["GET"])
-def test_tables():
-
-    try:
-
-        with db.engine.connect() as connection:
-
-            result = connection.execute(
-                db.text("""
-                    SELECT table_schema, table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = 'public'
-                    ORDER BY table_name
-                """)
-            )
-
-            tables = [
-                {
-                    "schema": row[0],
-                    "table": row[1]
-                }
-                for row in result
+            "message": "Location table queried successfully",
+            "count": len(locations),
+            "locations": [
+                location.to_dict()
+                for location in locations
             ]
-
-        return jsonify({
-            "success": True,
-            "message": "Tables retrieved successfully",
-            "tables": tables
         }), 200
 
     except Exception as e:
 
-        print("TABLE LIST ERROR:")
+        print("LOCATION ERROR:")
         print(e)
 
         return jsonify({
             "success": False,
-            "message": "Could not retrieve tables",
+            "message": "Could not query location table",
             "error": str(e)
         }), 500
 
