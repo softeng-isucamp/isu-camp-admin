@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLocationsBulkImportTemplate, services, setMockFailure } from "./api";
+import {
+  createLocationsBulkImportTemplate,
+  normalizeBackendLocationPage,
+  services,
+  setMockFailure,
+} from "./api";
 import { auditEntries } from "./mockData";
 import { resetPasswordSchema, resetSchema } from "./schemas";
 import { reviewMapDraft } from "../features/map/mapEditing";
@@ -44,6 +49,77 @@ describe("mock service contracts", () => {
         body: JSON.stringify({ username: "admin_justine", password: "password123" }),
       }),
     );
+    vi.unstubAllEnvs();
+  });
+
+  it("normalizes the documented backend page and rejects malformed responses", () => {
+    expect(normalizeBackendLocationPage({
+      data: {
+        items: [{
+          location_id: 42,
+          location_name: "Backend Library",
+          location_code: "LIB-01",
+          type_id: 7,
+          building_id: null,
+          floor_level: null,
+          description: "A persisted facility",
+          keywords: "books",
+          lat: "16.7215",
+          lng: 121.6895,
+        }],
+        total: 1,
+        page: 2,
+        pageSize: 10,
+      },
+    })).toEqual({
+      items: [{
+        id: "42",
+        name: "Backend Library",
+        code: "LIB-01",
+        type: "Facility",
+        parentId: null,
+        status: "Active",
+        lat: 16.7215,
+        lng: 121.6895,
+        positioned: true,
+        function: "A persisted facility",
+        keywords: "books",
+      }],
+      total: 1,
+      page: 2,
+      pageSize: 10,
+    });
+
+    expect(() => normalizeBackendLocationPage({ items: [], total: 0 })).toThrow(
+      "Backend returned a malformed locations page.",
+    );
+    expect(() => normalizeBackendLocationPage({
+      items: [{ id: "bad", name: "Missing code", type: "Facility" }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    })).toThrow("Backend returned a malformed location record.");
+  });
+
+  it("uses only the real service response for list data and preserves pagination", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [], total: 0, page: 3, pageSize: 7,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await expect(httpServices.locations.list("missing", 3, 7)).resolves.toEqual({
+      items: [], total: 0, page: 3, pageSize: 7,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/locations?page=3&pageSize=7&q=missing",
+      expect.objectContaining({ credentials: "include" }),
+    );
+
+    fetchMock.mockRejectedValueOnce(new Error("backend unavailable"));
+    await expect(httpServices.locations.list()).rejects.toThrow("backend unavailable");
     vi.unstubAllEnvs();
   });
 

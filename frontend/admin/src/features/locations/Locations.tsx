@@ -182,7 +182,7 @@ export function Locations() {
 
   const { data: directory } = useQuery({
     queryKey: ["locations", "directory"],
-    queryFn: () => services.locations.list(),
+    queryFn: () => services.locations.list("", 1, 100),
   });
 
   const { data: history } = useQuery({
@@ -858,7 +858,9 @@ export function Locations() {
       )}
 
       {/* Main Table Card */}
-      {listError && !dialog && <div className="error" role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 16px", borderRadius: "12px", marginBottom: "12px" }}>{listError instanceof Error ? listError.message : "Unable to load locations."}</div>}
+      {listError && !dialog && <div className="error" role="alert" style={{ background: "#fee2e2", color: "#991b1b", padding: "10px 16px", borderRadius: "12px", marginBottom: "12px" }}>
+        Unable to load campus locations. {listError instanceof Error ? listError.message : "The Locations service returned an error."}
+      </div>}
       <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
         <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>
           <div>
@@ -881,6 +883,15 @@ export function Locations() {
         </div>
 
         <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
+          {isLoading && !data ? (
+            <div role="status" aria-live="polite" style={{ padding: "48px 24px", textAlign: "center", color: "#525c57" }}>
+              Loading campus locations…
+            </div>
+          ) : listError ? (
+            <div role="alert" style={{ padding: "48px 24px", textAlign: "center", color: "#991b1b" }}>
+              Campus locations are unavailable. No location records were loaded.
+            </div>
+          ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
             <thead>
               <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#4b5563", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1070,8 +1081,9 @@ export function Locations() {
               })}
             </tbody>
           </table>
-          {!items.length && (
-            <Empty>No campus location records matching filter criteria.</Empty>
+          )}
+          {!isLoading && !listError && data && !items.length && (
+            <Empty>{query ? "No campus location records matching filter criteria." : "No campus location records have been created yet."}</Empty>
           )}
         </div>
         <Pagination
@@ -1128,6 +1140,7 @@ export function Locations() {
                 draft={draft}
                 allowedTypes={["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
+                statusEditable={API_MODE === "local"}
                 onChange={setDraft}
                 onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
               />

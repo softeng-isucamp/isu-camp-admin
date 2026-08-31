@@ -56,6 +56,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("uses ten rows in both views and communicates placement only through the icon", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
+    await screen.findAllByLabelText("Positioned location");
     expect(container.querySelectorAll("tbody tr").length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText("Positioned location").length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText("Positioned location")[0]).toHaveStyle({ background: "#d6ede0", opacity: "1" });
@@ -68,6 +69,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("moves to the next ten-row page and resets to page one after filtering", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
+    await screen.findAllByLabelText("Positioned location");
     expect(screen.getByText(/Showing 1–10 of/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByText(/Showing 11–20 of/i)).toBeInTheDocument();
@@ -96,6 +98,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("keeps only matching indoor locations while retaining building and floor context in search", async () => {
     renderLocations(["/locations?q=Laboratory%20107"]);
 
+    await screen.findByText("Administration Building 2nd Floor Laboratory 107");
     expect((await screen.findAllByText("Administration Building")).length).toBeGreaterThan(1);
     expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
     expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();

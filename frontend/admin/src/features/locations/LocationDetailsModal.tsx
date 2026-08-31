@@ -9,6 +9,7 @@ interface LocationDetailsFieldsProps {
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: LocationType) => void;
+  statusEditable?: boolean;
 }
 
 const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
@@ -19,6 +20,7 @@ export function LocationDetailsFields({
   errors = {},
   onChange,
   onTypeChange,
+  statusEditable = true,
 }: LocationDetailsFieldsProps) {
   return (
     <>
@@ -39,6 +41,8 @@ export function LocationDetailsFields({
           label="STATUS"
           required
           value={draft.status}
+          disabled={!statusEditable}
+          helper={!statusEditable ? "Status is read-only until the backend persists lifecycle status." : undefined}
           onChange={(event) => onChange({ ...draft, status: event.target.value as Location["status"] })}
         >
           <option>Active</option><option>Inactive</option><option>Unknown</option>
