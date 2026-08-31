@@ -38,6 +38,7 @@ export interface Location {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  hasPhoto?: boolean;
   /** Frontend-only mock-session photo metadata; never implies server upload. */
   photo?: {
     name: string;

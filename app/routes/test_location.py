@@ -1,3 +1,4 @@
+import io
 import sys
 from pathlib import Path
 
@@ -22,6 +23,8 @@ class FakeRecord:
         self.keywords = "directory keyword"
         self.lat = None
         self.lng = None
+        self.photo = None
+        self.photo_mime_type = None
 
     def to_location_dto(self, building=None, floor=None):
         return {
@@ -32,6 +35,7 @@ class FakeRecord:
             "keywords": self.keywords, "status": "Active",
             "lat": self.lat, "lng": self.lng,
             "positioned": self.lat is not None and self.lng is not None,
+            "hasPhoto": self.photo is not None,
         }
 
 
@@ -157,6 +161,7 @@ def make_mutation_client(monkeypatch):
             dto = super().to_location_dto(building, self.floor_level or floor)
             dto["function"] = self.description
             dto["keywords"] = self.keywords
+            dto["hasPhoto"] = self.photo is not None
             return dto
 
     monkeypatch.setattr(location_module, "Location", MutationRecord)
@@ -339,3 +344,41 @@ def test_position_rejects_a_facility_attached_to_a_building_and_type_change_clea
     assert update.status_code == 200
     assert update.json["positioned"] is False
     assert next(record for record in records if record.location_id == int(standalone.json["id"])).lat is None
+
+
+def test_photo_upload_persists_metadata_and_retrieves_bytes_without_json_binary(monkeypatch):
+    client, records, _ = make_mutation_client(monkeypatch)
+    created = client.post(
+        "/api/locations",
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png")},
+        content_type="multipart/form-data",
+    )
+    assert created.status_code == 201
+    assert created.json["hasPhoto"] is True
+    assert "photo" not in created.json
+    record = records[0]
+    assert record.photo_mime_type == "image/png"
+
+    response = client.get(f"/api/locations/{created.json['id']}/photo")
+    assert response.status_code == 200
+    assert response.data == b"png-bytes"
+    assert response.content_type == "image/png"
+
+
+def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+    invalid = client.post(
+        "/api/locations",
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"no"), "library.txt")},
+        content_type="multipart/form-data",
+    )
+    assert invalid.status_code == 400
+    assert records == []
+    oversized = client.post(
+        "/api/locations",
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"x" * (5 * 1024 * 1024 + 1)), "library.png")},
+        content_type="multipart/form-data",
+    )
+    assert oversized.status_code == 400
+    assert records == []
+    assert session.commits == 0

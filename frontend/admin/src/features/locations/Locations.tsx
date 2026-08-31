@@ -473,6 +473,12 @@ export function Locations() {
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
     openDialog("edit");
+    if (item.hasPhoto && !item.photo) {
+      void services.locations.getPhoto(item.id).then((blob) => {
+        setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) } }));
+        setPhotoName("Location photo");
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load location photo."));
+    }
   };
 
   const selectPhoto = (file: File | undefined) => {
@@ -1196,7 +1202,7 @@ export function Locations() {
                   <div>
                     <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
                     <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPEG, or WebP · max 5 MB"}</p>
-                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>Preview is retained for this mock session only; it is not uploaded permanently.</p>
+                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>{draft.hasPhoto && !draft.photo ? "Stored photo will be loaded from the photo service." : "PNG, JPEG, or WebP photos are stored with the Location."}</p>
                     {errorFor("photo") && <p role="alert" style={{ margin: "3px 0 0", color: "#dc2626", fontSize: "12px" }}>{errorFor("photo")}</p>}
                   </div>
                 </div>

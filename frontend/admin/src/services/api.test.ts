@@ -650,4 +650,26 @@ describe("real locations service boundary", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: null, lng: null }) }));
     vi.unstubAllEnvs();
   });
+
+  it("uploads photos as multipart and retrieves them through the photo operation", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }))
+      .mockResolvedValueOnce(new Response("photo-bytes", { status: 200, headers: { "Content-Type": "image/png" } }));
+
+    const saved = await httpServices.locations.save({
+      name: "Library", code: "LIB", type: "Building", parentId: null,
+      status: "Active", lat: null, lng: null, positioned: false,
+      photo: { name: "library.png", type: "image/png", dataUrl: "data:image/png;base64,cGhvdG8=" },
+    });
+    expect(saved).toMatchObject({ id: "42", hasPhoto: true });
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(request?.body).toBeInstanceOf(FormData);
+    expect((request?.body as FormData).get("photo")).toBeInstanceOf(Blob);
+    expect(await httpServices.locations.getPhoto("42")).toBeInstanceOf(Blob);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42/photo", { credentials: "include" });
+    vi.unstubAllEnvs();
+  });
 });

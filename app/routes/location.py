@@ -1,6 +1,6 @@
 import math
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from auth import admin_required
 from extensions import db
@@ -11,6 +11,8 @@ location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 TYPE_IDS = {"Building": 1, "Floor": 2, "Room": 3, "Office": 4, "Laboratory": 5, "Restroom": 6, "Facility": 7}
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 CREATABLE_TYPES = set(TYPE_IDS) - {"Floor"}
+PHOTO_MAX_BYTES = 5 * 1024 * 1024
+PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 
 def _records():
@@ -27,6 +29,19 @@ def _dto(record, records):
 
 def _payload():
     return (request.get_json(silent=True) or {}) if request.is_json else request.form.to_dict()
+
+
+def _photo_upload():
+    """Read and validate an optional multipart photo before touching a row."""
+    upload = request.files.get("photo")
+    if upload is None or not upload.filename:
+        return None, None, None
+    if upload.mimetype not in PHOTO_MIME_TYPES:
+        return None, None, _validation_error({"photo": "Choose a PNG, JPEG, or WebP image."})
+    content = upload.read(PHOTO_MAX_BYTES + 1)
+    if len(content) > PHOTO_MAX_BYTES:
+        return None, None, _validation_error({"photo": "Photo must be 5 MB or smaller."})
+    return content, upload.mimetype, None
 
 
 def _validation_error(fields=None, relationships=None):
@@ -106,8 +121,12 @@ def create_location():
     records = _records()
     values, error = _validate(_payload(), records)
     if error: return error
+    photo, photo_mime_type, error = _photo_upload()
+    if error: return error
     try:
         location = Location(building_id=values["building_id"], floor_id=None, floor_level=values["floor_level"], type_id=values["type_id"], location_code=values["code"], location_name=values["name"], description=values["description"], keywords=values["keywords"])
+        if photo is not None:
+            location.photo, location.photo_mime_type = photo, photo_mime_type
         db.session.add(location)
         db.session.flush()
         db.session.commit()
@@ -126,12 +145,18 @@ def update_location(location_id):
     if location is None: return jsonify({"success": False, "message": "Location not found."}), 404
     values, error = _validate(_payload(), records, location)
     if error: return error
+    photo, photo_mime_type, error = _photo_upload()
+    if error: return error
     try:
         location.location_name, location.location_code, location.type_id = values["name"], values["code"], values["type_id"]
         location.building_id, location.floor_id, location.floor_level = values["building_id"], None, values["floor_level"]
         if values["type_id"] != TYPE_IDS["Facility"]:
             location.lat, location.lng = None, None
         location.description, location.keywords = values["description"], values["keywords"]
+        if photo is not None:
+            location.photo, location.photo_mime_type = photo, photo_mime_type
+        if request.form.get("removePhoto", "").lower() == "true":
+            location.photo, location.photo_mime_type = None, None
         db.session.commit()
         return jsonify(_dto(location, records)), 200
     except Exception:
@@ -195,3 +220,17 @@ def save_location_position(location_id):
     except Exception:
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to save location position."}), 500
+
+
+@location_bp.route("/<int:location_id>/photo", methods=["GET"])
+def get_location_photo(location_id):
+    _, error = admin_required()
+    if error:
+        return error
+    location = Location.query.get(location_id)
+    if location is None or getattr(location, "photo", None) is None:
+        return jsonify({"success": False, "message": "Location photo not found."}), 404
+    mime_type = getattr(location, "photo_mime_type", None)
+    if not mime_type:
+        return jsonify({"success": False, "message": "Location photo metadata is unavailable."}), 404
+    return Response(location.photo, mimetype=mime_type, headers={"Content-Disposition": "inline"})

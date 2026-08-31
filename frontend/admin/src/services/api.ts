@@ -52,7 +52,7 @@ type BackendLocation = {
   code?: unknown; location_code?: unknown; type?: unknown; type_id?: unknown;
   parentId?: unknown; building_id?: unknown; building?: unknown; floor_id?: unknown; floor?: unknown;
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
-  lat?: unknown; lng?: unknown; positioned?: unknown;
+  lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown;
 };
 
 const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
@@ -70,16 +70,18 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
   const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
   const lng = raw.lng === null || raw.lng === undefined ? null : Number(raw.lng);
-  return {
+  const normalized: Location = {
     id: String(id), name, code, type: type as Location["type"],
     parentId: raw.parentId === null || raw.parentId === undefined ? (raw.building_id == null ? null : String(raw.building_id)) : String(raw.parentId),
-    building: raw.building == null ? undefined : String(raw.building),
-    floor: raw.floor == null ? undefined : String(raw.floor),
-    function: raw.function == null ? (raw.description == null ? undefined : String(raw.description)) : String(raw.function),
-    keywords: raw.keywords == null ? undefined : String(raw.keywords),
     status: status as Location["status"], lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null,
     positioned: raw.positioned === true || (Number.isFinite(lat) && Number.isFinite(lng)),
   };
+  if (raw.building != null) normalized.building = String(raw.building);
+  if (raw.floor != null) normalized.floor = String(raw.floor);
+  if (raw.function != null || raw.description != null) normalized.function = String(raw.function ?? raw.description);
+  if (raw.keywords != null) normalized.keywords = String(raw.keywords);
+  if (Object.prototype.hasOwnProperty.call(raw, "hasPhoto")) normalized.hasPhoto = raw.hasPhoto === true;
+  return normalized;
 };
 
 export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
@@ -123,9 +125,10 @@ const canonicalNetwork = createCanonicalNetworkStore(
 );
 
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const isMultipart = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { ...(isMultipart ? {} : { "Content-Type": "application/json" }), ...(init?.headers ?? {}) },
     ...init,
   });
   const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
@@ -246,6 +249,8 @@ export interface Services {
     save(location: LocationDraft): Promise<Location>;
 
     savePosition(position: LocationPosition): Promise<Location>;
+
+    getPhoto(id: string): Promise<Blob>;
 
     remove(id: string): Promise<void>;
   };
@@ -738,9 +743,24 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
+        const body = location.photo
+          ? (() => {
+              const form = new FormData();
+              Object.entries(location).forEach(([key, value]) => {
+                if (key === "photo" || key === "id" || value === undefined || value === null) return;
+                form.append(key, String(value));
+              });
+              const comma = location.photo.dataUrl.indexOf(",");
+              const encoded = comma >= 0 ? location.photo.dataUrl.slice(comma + 1) : location.photo.dataUrl;
+              const binary = atob(encoded);
+              const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+              form.append("photo", new Blob([bytes], { type: location.photo.type }), location.photo.name);
+              return form;
+            })()
+          : JSON.stringify(location);
         const response = await apiJson<unknown>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
           method: location.id ? "PUT" : "POST",
-          body: JSON.stringify(location),
+          body,
         });
         return normalizeBackendLocationMutation(response);
       }
@@ -777,6 +797,20 @@ export const services: Services = {
       const location = localAdapter.locations.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name, "Admin", location.id);
       return wait(clone(location));
+    },
+
+    getPhoto: async (id) => {
+      if (USE_HTTP_API) {
+        const response = await fetch(`${API_URL}/api/locations/${encodeURIComponent(id)}/photo`, { credentials: "include" });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null) as { message?: string } | null;
+          throw new Error(data?.message ?? `Request failed (${response.status})`);
+        }
+        return response.blob();
+      }
+      const location = locations.find((item) => item.id === id);
+      if (!location?.photo?.dataUrl) throw new Error("Location photo not found.");
+      return fetch(location.photo.dataUrl).then((response) => response.blob());
     },
 
 

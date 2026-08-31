@@ -76,6 +76,11 @@ class Location(db.Model):
         nullable=True
     )
 
+    photo_mime_type = db.Column(
+        db.String(64),
+        nullable=True
+    )
+
     def to_dict(self):
 
         return {
@@ -101,7 +106,8 @@ class Location(db.Model):
                 else None
             ),
             "keywords": self.keywords,
-            "has_photo": self.photo is not None   
+            "has_photo": self.photo is not None,
+            "photo_mime_type": self.photo_mime_type,
         }
 
     def to_location_dto(self, building=None, floor=None):
