@@ -38,16 +38,18 @@ export interface Location {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  hasPhoto?: boolean;
   /** Frontend-only mock-session photo metadata; never implies server upload. */
   photo?: {
     name: string;
     type: string;
     dataUrl: string;
   };
+  photoRemoved?: boolean;
   source?: SourceProvenance;
 }
 export type LocationDraft = Omit<Location, "id"> & { id?: string };
-export interface LocationPosition { id: string; lat: number; lng: number; }
+export interface LocationPosition { id: string; lat: number | null; lng: number | null; }
 export interface RouteNode {
   id: string;
   name: string;

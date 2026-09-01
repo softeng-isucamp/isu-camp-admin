@@ -39,26 +39,19 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
       me: async (): Promise<Session | null> => session,
     },
-    map: {
-      buildings: () => mapData.buildings,
-      removeBuilding: (id: string): Building | undefined => {
-        const building = mapData.buildings.find((item) => item.id === id);
-        if (building) building.status = "Inactive";
-        return building;
-      },
-      locations: () => mapData.locations,
-      nodes: () => mapData.nodes,
-      pathways: () => mapData.pathways,
-      savePosition: (id: string, lat: number, lng: number): Location => {
+    locations: {
+      savePosition: (id: string, lat: number | null, lng: number | null): Location => {
         const location = mapData.locations.find((item) => item.id === id);
         if (!location) throw new Error("Location not found.");
+        if (location.type !== "Facility" || location.parentId !== null) throw new Error("Only standalone Outdoor Point Locations can own an outdoor position.");
+        if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
+        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
+        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
         location.lat = lat;
         location.lng = lng;
-        location.positioned = true;
+        location.positioned = lat !== null && lng !== null;
         return location;
       },
-    },
-    locations: {
       save: (draft: LocationDraft): Location => {
         const location: Location = { ...draft, id: draft.id || `loc-${Date.now()}` };
         const index = mapData.locations.findIndex((item) => item.id === location.id);
@@ -72,6 +65,17 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const [location] = mapData.locations.splice(index, 1);
         return location;
       },
+    },
+    map: {
+      buildings: () => mapData.buildings,
+      removeBuilding: (id: string): Building | undefined => {
+        const building = mapData.buildings.find((item) => item.id === id);
+        if (building) building.status = "Inactive";
+        return building;
+      },
+      locations: () => mapData.locations,
+      nodes: () => mapData.nodes,
+      pathways: () => mapData.pathways,
     },
   };
 };

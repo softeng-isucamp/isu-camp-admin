@@ -47,6 +47,80 @@ import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, norma
 
 export type ApiMode = "local" | "mock" | "real";
 
+export type LocationListFilters = {
+  type?: Location["type"];
+  status?: Location["status"];
+  buildingId?: string;
+  floor?: string;
+};
+
+type BackendLocation = {
+  id?: unknown; location_id?: unknown; name?: unknown; location_name?: unknown;
+  code?: unknown; location_code?: unknown; type?: unknown; type_id?: unknown;
+  parentId?: unknown; building_id?: unknown; building?: unknown; floor_id?: unknown; floor?: unknown;
+  function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
+  lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown;
+};
+
+const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
+const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
+
+export const normalizeBackendLocation = (raw: BackendLocation): Location => {
+  const id = raw.id ?? raw.location_id;
+  const name = raw.name ?? raw.location_name;
+  const code = raw.code ?? raw.location_code;
+  const type = raw.type ?? (typeof raw.type_id === "number" ? locationTypes[raw.type_id - 1] : undefined);
+  if (id === undefined || typeof name !== "string" || typeof code !== "string" || !locationTypes.includes(type as typeof locationTypes[number])) {
+    throw new Error("Backend returned a malformed location record.");
+  }
+  const status = raw.status ?? "Active";
+  if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
+  const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
+  const lng = raw.lng === null || raw.lng === undefined ? null : Number(raw.lng);
+  if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) ||
+      (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) ||
+      ((lat === null) !== (lng === null))) {
+    throw new Error("Backend returned malformed location coordinates.");
+  }
+  const hasPosition = lat !== null && lng !== null;
+  if (raw.positioned !== undefined && (typeof raw.positioned !== "boolean" || raw.positioned !== hasPosition)) {
+    throw new Error("Backend returned inconsistent location position.");
+  }
+  const normalized: Location = {
+    id: String(id), name, code, type: type as Location["type"],
+    parentId: raw.parentId === null || raw.parentId === undefined ? (raw.building_id == null ? null : String(raw.building_id)) : String(raw.parentId),
+    status: status as Location["status"], lat, lng,
+    positioned: hasPosition,
+  };
+  if (raw.building != null) normalized.building = String(raw.building);
+  if (raw.floor != null) normalized.floor = String(raw.floor);
+  if (raw.function != null || raw.description != null) normalized.function = String(raw.function ?? raw.description);
+  if (raw.keywords != null) normalized.keywords = String(raw.keywords);
+  if (Object.prototype.hasOwnProperty.call(raw, "hasPhoto")) normalized.hasPhoto = raw.hasPhoto === true;
+  return normalized;
+};
+
+export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
+  const envelope = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const value = envelope && typeof envelope === "object" ? envelope as Record<string, unknown> : {};
+  const rows = value.items ?? value.locations;
+  if (!Array.isArray(rows) || typeof value.total !== "number" || typeof value.page !== "number" || typeof value.pageSize !== "number") {
+    throw new Error("Backend returned a malformed locations page.");
+  }
+  return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
+};
+
+const locationWritePayload = (location: LocationDraft) => {
+  const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, ...payload } = location;
+  return payload;
+};
+
+export const normalizeBackendLocationMutation = (raw: unknown): Location => {
+  const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const record = value.location ?? value.data ?? raw;
+  return normalizeBackendLocation(record as BackendLocation);
+};
+
 // `local` is the explicit development/test adapter for deterministic in-browser fixtures.
 // HTTP-backed environments use `mock` for the mock API or `real` for production,
 // with VITE_API_BASE_URL selecting the backend when needed.
@@ -72,13 +146,18 @@ const canonicalNetwork = createCanonicalNetworkStore(
 );
 
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const isMultipart = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { ...(isMultipart ? {} : { "Content-Type": "application/json" }), ...(init?.headers ?? {}) },
     ...init,
   });
-  const data = (await response.json().catch(() => null)) as T & { message?: string } | null;
-  if (!response.ok) throw new Error(data?.message ?? `Request failed (${response.status})`);
+  const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
+  if (!response.ok) {
+    const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
+    error.fieldErrors = { ...data?.fields, ...data?.relationships };
+    throw error;
+  }
   return data as T;
 };
 
@@ -186,11 +265,13 @@ export interface Services {
   };
 
   locations: {
-    list(query?: string): Promise<Page<Location>>;
+    list(query?: string, page?: number, pageSize?: number, filters?: LocationListFilters): Promise<Page<Location>>;
 
     save(location: LocationDraft): Promise<Location>;
 
     savePosition(position: LocationPosition): Promise<Location>;
+
+    getPhoto(id: string): Promise<Blob>;
 
     remove(id: string): Promise<void>;
   };
@@ -642,14 +723,22 @@ export const services: Services = {
 
   locations: {
 
-    list: async (q) => {
+    list: async (q, page = 1, pageSize, filters = {}) => {
 
       if (USE_HTTP_API) {
-        return apiJson<Page<Location>>(`/api/locations${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+        const resolvedPageSize = pageSize ?? 20;
+        const params = new URLSearchParams({ page: String(page), pageSize: String(resolvedPageSize) });
+        if (q) params.set("q", q);
+        if (filters.type) params.set("type", filters.type);
+        if (filters.status) params.set("status", filters.status);
+        if (filters.buildingId) params.set("buildingId", filters.buildingId);
+        if (filters.floor) params.set("floor", filters.floor);
+        const response = await apiJson<unknown>(`/api/locations?${params}`);
+        return normalizeBackendLocationPage(response);
       }
 
-      const filtered = q
-        ? locations.filter((location) =>
+      const filtered = locations.filter((location) =>
+          (!q ||
             [
               location.name,
               location.code,
@@ -660,19 +749,23 @@ export const services: Services = {
               location.floor ?? "",
             ].some((value) =>
               matches(value, q)
-            )
-          )
-        : locations;
+            )) &&
+          (!filters.type || location.type === filters.type) &&
+          (!filters.status || location.status === filters.status) &&
+          (!filters.buildingId || location.parentId === filters.buildingId) &&
+          (!filters.floor || location.floor === filters.floor)
+        );
+      const resolvedPageSize = pageSize ?? Math.max(filtered.length, 1);
 
       return wait({
-        items: clone(filtered),
+        items: clone(filtered.slice((page - 1) * resolvedPageSize, page * resolvedPageSize)),
 
         total:
           filtered.length,
 
-        page: 1,
+        page,
 
-        pageSize: 20,
+        pageSize: resolvedPageSize,
       });
     },
 
@@ -680,10 +773,31 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
-        return apiJson<Location>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
-          method: location.id ? "PUT" : "POST",
-          body: JSON.stringify(location),
+        if (location.id) throw new Error("Updating locations is not available yet.");
+        const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
+        const body = uploadsNewPhoto
+          ? (() => {
+              const form = new FormData();
+              Object.entries(locationWritePayload(location)).forEach(([key, value]) => {
+                if (value === undefined || value === null) return;
+                form.append(key, String(value));
+              });
+              if (location.photo) {
+                const comma = location.photo.dataUrl.indexOf(",");
+                const encoded = location.photo.dataUrl.slice(comma + 1);
+                const binary = atob(encoded);
+                const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                form.append("photo", new Blob([bytes], { type: location.photo.type }), location.photo.name);
+              }
+              return form;
+            })()
+          : JSON.stringify(locationWritePayload(location));
+        const response = await apiJson<unknown>("/api/locations", {
+          method: "POST",
+          body,
         });
+        const saved = normalizeBackendLocationMutation(response);
+        return saved;
       }
 
       failIfConfigured(
@@ -711,18 +825,28 @@ export const services: Services = {
     },
 
     savePosition: async (position) => {
-      if (USE_HTTP_API) return apiJson<Location>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng, positioned: true }) });
-      const location = localAdapter.map.savePosition(position.id, position.lat, position.lng);
+      if (USE_HTTP_API) {
+        throw new Error("Updating location positions is not available yet.");
+      }
+      const location = localAdapter.locations.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name, "Admin", location.id);
       return wait(clone(location));
+    },
+
+    getPhoto: async (id) => {
+      if (USE_HTTP_API) {
+        throw new Error("Location photo retrieval is not available yet.");
+      }
+      const location = locations.find((item) => item.id === id);
+      if (!location?.photo?.dataUrl) throw new Error("Location photo not found.");
+      return fetch(location.photo.dataUrl).then((response) => response.blob());
     },
 
 
     remove: async (id) => {
 
       if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}`, { method: "DELETE" });
-        return;
+        throw new Error("Deleting locations is not available yet.");
       }
 
       failIfConfigured("locationRemove");
@@ -1174,9 +1298,18 @@ export const services: Services = {
     save: async (edit) => {
 
       if (USE_HTTP_API) {
+        // Location coordinates are authoritative in Locations. Keep the
+        // broader map draft endpoint for geometry/network data, but route
+        // point writes through the narrow operation first.
+        if (edit?.selected?.type === "location" && edit.place) {
+          await services.locations.savePosition({ id: edit.selected.id, lat: edit.place[0], lng: edit.place[1] });
+        }
+        if (edit?.movedLocation) {
+          await services.locations.savePosition(edit.movedLocation);
+        }
         await apiJson<unknown>("/api/map/save", {
           method: "POST",
-          body: JSON.stringify(edit ?? {}),
+          body: JSON.stringify(edit ? { ...edit, selected: edit.selected?.type === "location" ? undefined : edit.selected, place: edit.selected?.type === "location" ? undefined : edit.place, movedLocation: undefined } : {}),
         });
         return;
       }
@@ -1211,15 +1344,7 @@ export const services: Services = {
 
 
         if (location) {
-
-          location.lat =
-            edit.place[0];
-
-          location.lng =
-            edit.place[1];
-
-          location.positioned =
-            true;
+          localAdapter.locations.savePosition(location.id, edit.place[0], edit.place[1]);
 
         } else if (node) {
 
@@ -1248,15 +1373,7 @@ export const services: Services = {
           );
 
         if (location) {
-
-          location.lat =
-            edit.movedLocation.lat;
-
-          location.lng =
-            edit.movedLocation.lng;
-
-          location.positioned =
-            true;
+          localAdapter.locations.savePosition(location.id, edit.movedLocation.lat, edit.movedLocation.lng);
         }
       }
 

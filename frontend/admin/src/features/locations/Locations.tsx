@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
+import { API_MODE, createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -175,14 +175,17 @@ export function Locations() {
     };
   }, [activeOverlay]);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["locations", query],
-    queryFn: () => services.locations.list(query),
-  });
-
   const { data: directory } = useQuery({
     queryKey: ["locations", "directory"],
-    queryFn: () => services.locations.list(),
+    queryFn: async () => {
+      const first = await services.locations.list("", 1, 100);
+      const pages = Math.ceil(first.total / first.pageSize);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+          services.locations.list("", index + 2, first.pageSize)),
+      );
+      return [first, ...remaining].flatMap((result) => result.items);
+    },
   });
 
   const { data: history } = useQuery({
@@ -191,7 +194,7 @@ export function Locations() {
     enabled: dialog === "history" && selected !== null,
   });
 
-  const allLocations = directory?.items ?? data?.items ?? initialLocations;
+  const allLocations = directory ?? (API_MODE === "local" ? initialLocations : []);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
     directory: allLocations,
@@ -226,8 +229,18 @@ export function Locations() {
     return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
   }, [floors, building, selectedBuildingRecord]);
 
-  const rawItems = data?.items ?? initialLocations;
   const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
+  const { data, isLoading, error: listError } = useQuery({
+    queryKey: ["locations", "page", query, page, type, status, selectedBuildingRecord?.id, selectedFloorRecord?.name],
+    queryFn: () => services.locations.list(query, page, pageSize, {
+      type: type === "All Types" ? undefined : type as LocationType,
+      status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
+      buildingId: selectedBuildingRecord?.id,
+      floor: selectedFloorRecord?.name,
+    }),
+    placeholderData: (previous) => previous,
+  });
+  const rawItems = data?.items ?? [];
   const items = useMemo(() => {
     return rawItems.filter(
       (item) =>
@@ -340,18 +353,15 @@ export function Locations() {
   }, [items, matchingIds, allLocations, viewMode, collapsedNodes]);
 
   const hierarchyRows = hierarchyFamilies.flat();
-  const hierarchyPageFamilies = viewMode === "flat"
-    ? []
-    : hierarchyFamilies.slice((page - 1) * pageSize, page * pageSize);
-
   const visibleRows = viewMode === "flat"
-    ? hierarchyRows.slice((page - 1) * pageSize, page * pageSize)
-    : hierarchyPageFamilies.flat();
+    ? hierarchyRows
+    : hierarchyFamilies.flat();
 
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil((viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length) / pageSize));
+    if (!data) return;
+    const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize));
     setPage((current) => Math.min(current, totalPages));
-  }, [hierarchyRows.length, hierarchyFamilies.length, viewMode]);
+  }, [data]);
 
   const toggleCollapse = (id: string) => {
     setCollapsedNodes((prev) => {
@@ -404,6 +414,10 @@ export function Locations() {
         kind: adding ? "added" : "edited",
       });
     } catch (cause) {
+      const backendFields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
+      if (backendFields) {
+        setFieldErrors(Object.entries(backendFields).map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
+      }
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
       );
@@ -464,11 +478,17 @@ export function Locations() {
 
   const openEdit = (item: Location) => {
     setSelected(item);
-    setDraft({ ...item });
+    setDraft({ ...item, photoRemoved: false });
     setPhotoName(item.photo?.name ?? "");
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
     openDialog("edit");
+    if (item.hasPhoto && !item.photo) {
+      void services.locations.getPhoto(item.id).then((blob) => {
+        setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) }, photoRemoved: false }));
+        setPhotoName("Location photo");
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load location photo."));
+    }
   };
 
   const selectPhoto = (file: File | undefined) => {
@@ -488,7 +508,7 @@ export function Locations() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") return;
-      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string } }));
+      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string }, photoRemoved: false }));
       setPhotoName(file.name);
       setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
     };
@@ -496,7 +516,7 @@ export function Locations() {
   };
 
   const removePhoto = () => {
-    setDraft((current) => ({ ...current, photo: undefined }));
+    setDraft((current) => ({ ...current, photo: undefined, photoRemoved: current.id !== undefined && current.hasPhoto === true }));
     setPhotoName("");
     setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
   };
@@ -848,6 +868,9 @@ export function Locations() {
       )}
 
       {/* Main Table Card */}
+      {listError && !dialog && <div className="error" role="alert" style={{ background: "#fee2e2", color: "#991b1b", padding: "10px 16px", borderRadius: "12px", marginBottom: "12px" }}>
+        Unable to load campus locations. {listError instanceof Error ? listError.message : "The Locations service returned an error."}
+      </div>}
       <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
         <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>
           <div>
@@ -870,6 +893,15 @@ export function Locations() {
         </div>
 
         <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
+          {isLoading && !data ? (
+            <div role="status" aria-live="polite" style={{ padding: "48px 24px", textAlign: "center", color: "#525c57" }}>
+              Loading campus locations…
+            </div>
+          ) : listError ? (
+            <div role="alert" style={{ padding: "48px 24px", textAlign: "center", color: "#991b1b" }}>
+              Campus locations are unavailable. No location records were loaded.
+            </div>
+          ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left" }}>
             <thead>
               <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb", color: "#4b5563", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1059,12 +1091,13 @@ export function Locations() {
               })}
             </tbody>
           </table>
-          {!items.length && (
-            <Empty>No campus location records matching filter criteria.</Empty>
+          )}
+          {!isLoading && !listError && data && !items.length && (
+            <Empty>{query ? "No campus location records matching filter criteria." : "No campus location records have been created yet."}</Empty>
           )}
         </div>
         <Pagination
-          total={viewMode === "flat" ? hierarchyRows.length : hierarchyFamilies.length}
+          total={data?.total ?? 0}
           page={page}
           pageSize={pageSize}
           onChange={setPage}
@@ -1117,6 +1150,7 @@ export function Locations() {
                 draft={draft}
                 allowedTypes={["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
+                statusEditable={API_MODE === "local"}
                 onChange={setDraft}
                 onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
               />
@@ -1191,7 +1225,7 @@ export function Locations() {
                   <div>
                     <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
                     <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPEG, or WebP · max 5 MB"}</p>
-                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>Preview is retained for this mock session only; it is not uploaded permanently.</p>
+                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>{draft.hasPhoto && !draft.photo ? "Stored photo will be loaded from the photo service." : "PNG, JPEG, or WebP photos are stored with the Location."}</p>
                     {errorFor("photo") && <p role="alert" style={{ margin: "3px 0 0", color: "#dc2626", fontSize: "12px" }}>{errorFor("photo")}</p>}
                   </div>
                 </div>
@@ -1200,7 +1234,7 @@ export function Locations() {
                     {draft.photo ? "Replace photo" : "Choose photo"}
                     <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(event) => selectPhoto(event.target.files?.[0])} />
                   </label>
-                  {draft.photo && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
+                  {(draft.photo || draft.hasPhoto) && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
                 </div>
               </div>
             </div>
