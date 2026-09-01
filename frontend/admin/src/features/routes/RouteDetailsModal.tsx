@@ -90,7 +90,7 @@ function RouteNodeDetailsForm({ node, locations, onClose, onSubmit }: {
       }}>
         <option>Entrance</option><option>Junction</option><option>Access Point</option>
       </SelectField>
-      <SelectField aria-label="Associated Location" label="ASSOCIATED BUILDING" value={draft.associatedPlaceId ?? ""} disabled={draft.nodeType !== "Entrance"} onChange={(event) => setDraft({ ...draft, associatedPlaceId: event.target.value || null })}>
+      <SelectField aria-label="Associated Building" label="ASSOCIATED BUILDING" value={draft.associatedPlaceId ?? ""} disabled={draft.nodeType !== "Entrance"} onChange={(event) => setDraft({ ...draft, associatedPlaceId: event.target.value || null })}>
         <option value="">None</option>
         {locations.filter((location) => location.type === "Building").map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
       </SelectField>
