@@ -241,6 +241,23 @@ def test_update_preserves_unchanged_legacy_floor_reference(monkeypatch):
     assert room.floor_level is None
 
 
+def test_invalid_legacy_floor_relationship_is_reported_instead_of_projected(monkeypatch):
+    client, records, _ = make_mutation_client(monkeypatch)
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Building"})
+    floor = type(records[0])(location_name="Second Floor", location_code="OTHER-F2", type_id=2, building_id=int(wrong_building.json["id"]), floor_id=None, floor_level=None)
+    floor.location_id = 20
+    records.append(floor)
+    room = type(records[0])(location_name="Room 204", location_code="ENG-204", type_id=3, building_id=int(building.json["id"]), floor_id=20, floor_level=None)
+    room.location_id = 21
+    records.append(room)
+
+    response = client.get("/api/locations")
+
+    assert response.status_code == 500
+    assert "invalid legacy Floor relationship" in response.json["message"]
+
+
 def test_mutations_validate_relationship_floor_and_duplicate_without_partial_write(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)
     building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})

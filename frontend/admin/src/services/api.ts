@@ -110,6 +110,11 @@ export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
   return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
 };
 
+const locationWritePayload = (location: LocationDraft) => {
+  const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, ...payload } = location;
+  return payload;
+};
+
 export const normalizeBackendLocationMutation = (raw: unknown): Location => {
   const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   const record = value.location ?? value.data ?? raw;
@@ -768,26 +773,36 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
-        const body = location.photo
+        const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
+        const body = uploadsNewPhoto || location.photoRemoved
           ? (() => {
               const form = new FormData();
-              Object.entries(location).forEach(([key, value]) => {
-                if (key === "photo" || key === "id" || value === undefined || value === null) return;
+              Object.entries(locationWritePayload(location)).forEach(([key, value]) => {
+                if (value === undefined || value === null) return;
                 form.append(key, String(value));
               });
-              const comma = location.photo.dataUrl.indexOf(",");
-              const encoded = comma >= 0 ? location.photo.dataUrl.slice(comma + 1) : location.photo.dataUrl;
-              const binary = atob(encoded);
-              const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-              form.append("photo", new Blob([bytes], { type: location.photo.type }), location.photo.name);
+              if (uploadsNewPhoto && location.photo) {
+                const comma = location.photo.dataUrl.indexOf(",");
+                const encoded = location.photo.dataUrl.slice(comma + 1);
+                const binary = atob(encoded);
+                const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                form.append("photo", new Blob([bytes], { type: location.photo.type }), location.photo.name);
+              }
+              if (location.photoRemoved) form.append("removePhoto", "true");
               return form;
             })()
-          : JSON.stringify(location);
+          : JSON.stringify(locationWritePayload(location));
         const response = await apiJson<unknown>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
           method: location.id ? "PUT" : "POST",
           body,
         });
-        return normalizeBackendLocationMutation(response);
+        const saved = normalizeBackendLocationMutation(response);
+        const standaloneFacility = location.type === "Facility" && location.parentId === null;
+        const coordinatesChanged = location.lat !== null || location.lng !== null || (Boolean(location.id) && saved.positioned && location.lat === null && location.lng === null);
+        if (standaloneFacility && coordinatesChanged) {
+          return services.locations.savePosition({ id: saved.id, lat: location.lat, lng: location.lng });
+        }
+        return saved;
       }
 
       failIfConfigured(

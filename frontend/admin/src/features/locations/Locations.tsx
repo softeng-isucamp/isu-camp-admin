@@ -478,14 +478,14 @@ export function Locations() {
 
   const openEdit = (item: Location) => {
     setSelected(item);
-    setDraft({ ...item });
+    setDraft({ ...item, photoRemoved: false });
     setPhotoName(item.photo?.name ?? "");
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
     openDialog("edit");
     if (item.hasPhoto && !item.photo) {
       void services.locations.getPhoto(item.id).then((blob) => {
-        setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) } }));
+        setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) }, photoRemoved: false }));
         setPhotoName("Location photo");
       }).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load location photo."));
     }
@@ -508,7 +508,7 @@ export function Locations() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") return;
-      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string } }));
+      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string }, photoRemoved: false }));
       setPhotoName(file.name);
       setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
     };
@@ -516,7 +516,7 @@ export function Locations() {
   };
 
   const removePhoto = () => {
-    setDraft((current) => ({ ...current, photo: undefined }));
+    setDraft((current) => ({ ...current, photo: undefined, photoRemoved: current.id !== undefined && current.hasPhoto === true }));
     setPhotoName("");
     setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
   };
@@ -1234,7 +1234,7 @@ export function Locations() {
                     {draft.photo ? "Replace photo" : "Choose photo"}
                     <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(event) => selectPhoto(event.target.files?.[0])} />
                   </label>
-                  {draft.photo && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
+                  {(draft.photo || draft.hasPhoto) && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
                 </div>
               </div>
             </div>

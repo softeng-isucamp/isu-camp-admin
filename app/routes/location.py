@@ -1,4 +1,5 @@
 import math
+import logging
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -13,25 +14,39 @@ INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 CREATABLE_TYPES = set(TYPE_IDS) - {"Floor"}
 PHOTO_MAX_BYTES = 5 * 1024 * 1024
 PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
+logger = logging.getLogger(__name__)
 
 
-def _records():
-    return Location.query.order_by(Location.location_id.asc()).all()
+def _all_locations():
+    try:
+        return Location.query.order_by(Location.location_id.asc()).all()
+    except Exception:
+        logger.exception("Failed to load locations")
+        raise
 
 
-def _dto(record, records):
+def _legacy_floor(record, records):
+    if record.floor_id is None:
+        return None
+    floor = next((item for item in records if item.location_id == record.floor_id), None)
+    if floor is None or floor.type_id != TYPE_IDS["Floor"] or floor.building_id != record.building_id:
+        raise ValueError(f"Location {record.location_id} references an invalid legacy Floor relationship.")
+    return floor
+
+
+def _location_dto(record, records):
     if record.type_id not in LOCATION_TYPE_NAMES:
         raise ValueError(
             f"Location {record.location_id} references an unknown location type."
         )
     by_id = {item.location_id: item for item in records}
     building = by_id.get(record.building_id)
-    legacy_floor = by_id.get(record.floor_id)
+    legacy_floor = _legacy_floor(record, records)
     floor = getattr(record, "floor_level", None)
     return record.to_location_dto(building=building.location_name if building else None, floor=floor or (legacy_floor.location_name if legacy_floor else None))
 
 
-def _payload():
+def _request_payload():
     return (request.get_json(silent=True) or {}) if request.is_json else request.form.to_dict()
 
 
@@ -111,9 +126,9 @@ def list_locations():
         floor_filter = request.args.get("floor", "").strip().lower()
         page = max(request.args.get("page", 1, type=int) or 1, 1)
         page_size = min(max(request.args.get("pageSize", 20, type=int) or 20, 1), 100)
-        records, projected = _records(), []
+        records, projected = _all_locations(), []
         for record in records:
-            dto = _dto(record, records)
+            dto = _location_dto(record, records)
             searchable = " ".join(str(dto.get(field) or "") for field in ("name", "code", "type", "building", "floor", "function", "keywords")).lower()
             if query and query not in searchable:
                 continue
@@ -132,8 +147,10 @@ def list_locations():
         start = (page - 1) * page_size
         return jsonify({"success": True, "items": projected[start:start + page_size], "total": len(projected), "page": page, "pageSize": page_size}), 200
     except ValueError as error:
+        logger.warning("Invalid persisted location data: %s", error)
         return jsonify({"success": False, "message": str(error)}), 500
     except Exception:
+        logger.exception("Failed to list locations")
         return jsonify({"success": False, "message": "Failed to list locations."}), 500
 
 
@@ -141,8 +158,11 @@ def list_locations():
 def create_location():
     _, error = admin_required()
     if error: return error
-    records = _records()
-    values, error = _validate(_payload(), records)
+    try:
+        records = _all_locations()
+    except Exception:
+        return jsonify({"success": False, "message": "Failed to create location."}), 500
+    values, error = _validate(_request_payload(), records)
     if error: return error
     photo, photo_mime_type, error = _photo_upload()
     if error: return error
@@ -153,8 +173,9 @@ def create_location():
         db.session.add(location)
         db.session.flush()
         db.session.commit()
-        return jsonify(_dto(location, records + [location])), 201
+        return jsonify(_location_dto(location, records + [location])), 201
     except Exception:
+        logger.exception("Failed to create location")
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to create location."}), 500
 
@@ -163,18 +184,18 @@ def create_location():
 def update_location(location_id):
     _, error = admin_required()
     if error: return error
-    records = _records()
+    try:
+        records = _all_locations()
+    except Exception:
+        return jsonify({"success": False, "message": "Failed to update location."}), 500
     location = next((item for item in records if item.location_id == location_id), None)
     if location is None: return jsonify({"success": False, "message": "Location not found."}), 404
-    values, error = _validate(_payload(), records, location)
+    values, error = _validate(_request_payload(), records, location)
     if error: return error
     photo, photo_mime_type, error = _photo_upload()
     if error: return error
     try:
-        legacy_floor = next(
-            (item for item in records if item.location_id == location.floor_id),
-            None,
-        )
+        legacy_floor = _legacy_floor(location, records)
         preserve_legacy_floor = (
             legacy_floor is not None
             and values["type_id"] in {TYPE_IDS[name] for name in INDOOR_TYPES}
@@ -193,8 +214,9 @@ def update_location(location_id):
         if request.form.get("removePhoto", "").lower() == "true":
             location.photo, location.photo_mime_type = None, None
         db.session.commit()
-        return jsonify(_dto(location, records)), 200
+        return jsonify(_location_dto(location, records)), 200
     except Exception:
+        logger.exception("Failed to update location %s", location_id)
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to update location."}), 500
 
@@ -205,7 +227,10 @@ def delete_location(location_id):
     if error:
         return error
 
-    records = _records()
+    try:
+        records = _all_locations()
+    except Exception:
+        return jsonify({"success": False, "message": "Failed to delete location."}), 500
     location = next((item for item in records if item.location_id == location_id), None)
     if location is None:
         return jsonify({"success": False, "message": "Location not found."}), 404
@@ -230,6 +255,7 @@ def delete_location(location_id):
             },
         }), 200
     except Exception:
+        logger.exception("Failed to delete location %s", location_id)
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to delete location."}), 500
 
@@ -239,20 +265,24 @@ def save_location_position(location_id):
     _, error = admin_required()
     if error:
         return error
-    records = _records()
+    try:
+        records = _all_locations()
+    except Exception:
+        return jsonify({"success": False, "message": "Failed to save location position."}), 500
     location = next((item for item in records if item.location_id == location_id), None)
     if location is None:
         return jsonify({"success": False, "message": "Location not found."}), 404
     if location.type_id != TYPE_IDS["Facility"] or location.building_id is not None:
         return _position_error({"position": "Only standalone Outdoor Point Locations can own an outdoor position."})
-    values, error = _position_values(_payload())
+    values, error = _position_values(_request_payload())
     if error:
         return error
     try:
         location.lat, location.lng = values
         db.session.commit()
-        return jsonify(_dto(location, records)), 200
+        return jsonify(_location_dto(location, records)), 200
     except Exception:
+        logger.exception("Failed to save location position %s", location_id)
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to save location position."}), 500
 

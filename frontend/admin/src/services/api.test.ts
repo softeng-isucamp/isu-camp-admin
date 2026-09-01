@@ -717,7 +717,7 @@ describe("real locations service boundary", () => {
 
     await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
     await expect(httpServices.locations.save({ ...saved, function: "Seminar room", keywords: "seminar" })).resolves.toEqual(saved);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ ...saved, id: undefined }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, building: saved.building, floor: saved.floor, function: saved.function, keywords: saved.keywords, status: saved.status }) }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42", expect.objectContaining({ method: "PUT" }));
     vi.unstubAllEnvs();
   });
@@ -784,6 +784,40 @@ describe("real locations service boundary", () => {
     expect((request?.body as FormData).get("photo")).toBeInstanceOf(Blob);
     expect(await httpServices.locations.getPhoto("42")).toBeInstanceOf(Blob);
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42/photo", { credentials: "include" });
+    vi.unstubAllEnvs();
+  });
+
+  it("orchestrates standalone Facility coordinates through the position seam", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const saved = { id: "7", name: "Water Station", code: "WATER", type: "Facility" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const positioned = { ...saved, lat: 16.7215, lng: 121.6895, positioned: true };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(positioned), { status: 200 }));
+
+    await expect(httpServices.locations.save({ ...saved, id: undefined, lat: positioned.lat, lng: positioned.lng })).resolves.toEqual(positioned);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ body: expect.not.stringContaining('"lat"') }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: positioned.lat, lng: positioned.lng }) }));
+    vi.unstubAllEnvs();
+  });
+
+  it("retains blob photo previews and sends an explicit removal", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const base = { id: "42", name: "Library", code: "LIB", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false, hasPhoto: true };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(base), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...base, hasPhoto: false }), { status: 200 }));
+
+    await httpServices.locations.save({ ...base, photo: { name: "Location photo", type: "image/png", dataUrl: "blob:http://localhost/photo" } });
+    await httpServices.locations.save({ ...base, photoRemoved: true });
+    expect(fetchMock.mock.calls[0]?.[1]?.body).not.toBeInstanceOf(FormData);
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ body: expect.any(FormData) }));
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBeInstanceOf(FormData);
+    expect(((fetchMock.mock.calls[1]?.[1] as RequestInit).body as FormData).get("removePhoto")).toBe("true");
     vi.unstubAllEnvs();
   });
 });

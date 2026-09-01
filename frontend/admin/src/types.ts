@@ -45,6 +45,7 @@ export interface Location {
     type: string;
     dataUrl: string;
   };
+  photoRemoved?: boolean;
   source?: SourceProvenance;
 }
 export type LocationDraft = Omit<Location, "id"> & { id?: string };
