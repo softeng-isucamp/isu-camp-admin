@@ -14,6 +14,7 @@ import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
+import { LocationDetailsFields } from "./LocationDetailsModal";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -1112,50 +1113,13 @@ export function Locations() {
                   {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
-              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <SelectField
-                  label="LOCATION TYPE"
-                  required
-                  value={draft.type}
-                  onChange={(event) => {
-                    const nextType = event.target.value as LocationType;
-                    setDraft(normalizeDraft({ ...draft, type: nextType }));
-                  }}
-                >
-                  {["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor"] : [])].map((v) => (
-                    <option key={v} value={v}>{v === "Floor" ? "Floor (legacy records only)" : v}</option>
-                  ))}
-                </SelectField>
-                <SelectField
-                  label="STATUS"
-                  required
-                  value={draft.status}
-                  onChange={(event) => setDraft({ ...draft, status: event.target.value as Location["status"] })}
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                  <option value="Unknown">Unknown</option>
-                </SelectField>
-              </div>
-
-              <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <Field
-                  label="LOCATION NAME"
-                  required
-                  error={errorFor("name")}
-                  value={draft.name}
-                  placeholder="Computer Lab 1"
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                />
-                <Field
-                  label="LOCATION CODE / ID"
-                  required
-                  error={errorFor("code")}
-                  value={draft.code}
-                  placeholder="LAB-CCSICT-201"
-                  onChange={(event) => setDraft({ ...draft, code: event.target.value })}
-                />
-              </div>
+              <LocationDetailsFields
+                draft={draft}
+                allowedTypes={["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor" as const] : [])]}
+                errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
+                onChange={setDraft}
+                onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
+              />
 
               {(isChildType(draft.type) || draft.parentId !== null) && (
                 <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
@@ -1204,16 +1168,6 @@ export function Locations() {
                 </div>
               )}
 
-              <Field
-                label="DESCRIPTION"
-                required
-                aria-label="DESCRIPTION"
-                error={errorFor("function")}
-                value={draft.function ?? ""}
-                placeholder="Programming and computer-based activities"
-                onChange={(event) => setDraft({ ...draft, function: event.target.value })}
-              />
-
               {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
                 <>
                   <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
@@ -1225,13 +1179,6 @@ export function Locations() {
               ) : (
                 <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>Indoor Locations inherit map position and routing from their selected Building.</p>
               )}
-
-              <Field
-                label="KEYWORDS / TAGS"
-                value={draft.keywords ?? ""}
-                placeholder="programming, coding, computer lab"
-                onChange={(event) => setDraft({ ...draft, keywords: event.target.value })}
-              />
 
               {/* Upload Box */}
               <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>

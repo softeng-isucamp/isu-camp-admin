@@ -4,21 +4,33 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { generatedMapFixture } from "../../services/generatedMapFixture";
+import { mapEditorApiClient, normalizeMapLayers } from "../../services/mapEditorApiClient";
 import type { Location, RouteNode } from "../../types";
 import { MapEditor } from "./MapEditor";
 
 let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void) | undefined;
 let pathPointDragPosition: { lat: number; lng: number } | undefined;
+let movingPointDragPosition: { lat: number; lng: number } | undefined;
 
-vi.mock("leaflet", () => ({ default: { divIcon: () => ({}) } }));
+vi.mock("leaflet", () => ({ default: {
+  divIcon: () => ({}),
+  latLng: (lat: number, lng: number) => ({ lat, lng }),
+  point: (x: number, y: number) => ({ x, y }),
+} }));
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  Marker: ({ position, eventHandlers, draggable }: { position: [number, number]; eventHandlers?: { click?: () => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean }) => typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <div data-testid="saved-map-marker" data-position={position.join(",")} /> : null,
-  Polygon: ({ eventHandlers }: { eventHandlers?: { click?: () => void } }) => <button aria-label="building polygon" onClick={eventHandlers?.click} />,
-  Polyline: ({ positions }: { positions: [number, number][] }) => <output data-testid="path-geometry" data-positions={JSON.stringify(positions)} />,
+  Marker: ({ position, eventHandlers, draggable }: { position: [number, number]; eventHandlers?: { click?: () => void; dragstart?: () => void; drag?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean }) => eventHandlers?.drag
+    ? <button aria-label={`Move point at ${position.join(",")}`} data-testid="move-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers.click} onDragStart={eventHandlers.dragstart} onDrag={() => movingPointDragPosition && eventHandlers.drag?.({ target: { getLatLng: () => movingPointDragPosition! } })} onDragEnd={() => movingPointDragPosition && eventHandlers.dragend?.({ target: { getLatLng: () => movingPointDragPosition! } })} />
+    : typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <button aria-label={`Map marker at ${position.join(",")}`} data-testid="saved-map-marker" data-position={position.join(",")} onClick={eventHandlers.click} /> : null,
+  Polygon: ({ eventHandlers, pathOptions }: { eventHandlers?: { click?: () => void }; pathOptions?: { className?: string } }) => <button aria-label={pathOptions?.className ?? "building polygon"} onClick={eventHandlers?.click} />,
+  Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : pathOptions?.className?.startsWith("local-feature-") ? "local-feature-line" : "path-geometry"} data-positions={JSON.stringify(positions)} onClick={eventHandlers?.click}>{children}</output>,
   Popup: () => null,
-  TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: () => null,
-  useMap: () => ({ flyTo: vi.fn() }),
+  TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useMap: () => ({
+    flyTo: vi.fn(),
+    latLngToContainerPoint: ({ lat, lng }: { lat: number; lng: number }) => ({ x: lng * 100_000, y: lat * 100_000 }),
+    containerPointToLatLng: ({ x, y }: { x: number; y: number }) => ({ lat: y / 100_000, lng: x / 100_000 }),
+  }),
   useMapEvents: ({ click }: { click: (event: { latlng: { lat: number; lng: number } }) => void }) => {
     mapClickHandler = click;
   },
@@ -38,14 +50,28 @@ vi.mock("../../services/api", () => ({
     save: vi.fn(),
   } },
 }));
+vi.mock("../../services/mapEditorApiClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../services/mapEditorApiClient")>();
+  return {
+    ...actual,
+    mapEditorApiClient: {
+      getMapEditorBootstrap: vi.fn(),
+      getEligibleUnattachedRecords: vi.fn(),
+      saveDraft: vi.fn(),
+      publishDraft: vi.fn(),
+      discardDraft: vi.fn(),
+    },
+  };
+});
 
 describe("Map Editor preview", () => {
   beforeEach(() => {
     mapClickHandler = undefined;
     pathPointDragPosition = undefined;
+    movingPointDragPosition = undefined;
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services" },
     ]);
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
@@ -53,6 +79,20 @@ describe("Map Editor preview", () => {
     ]);
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.pathways).mockResolvedValue([]);
+    vi.mocked(mapEditorApiClient.getMapEditorBootstrap).mockImplementation(async () => ({
+      adminDraft: { draftVersion: 4, updatedAt: "2026-08-30T10:00:00Z", lastAuthorId: "admin-1" },
+      publishedVersionId: "pub-12",
+      campusBoundary: { type: "Polygon", coordinates: [] },
+      layers: normalizeMapLayers({
+        buildings: await services.map.buildings(),
+        locations: await services.map.locations(),
+        routeNodes: await services.map.nodes(),
+        pathways: await services.map.pathways(),
+      }),
+    }));
+    vi.mocked(mapEditorApiClient.saveDraft).mockResolvedValue({ success: true, newDraftVersion: 5, updatedAt: "2026-08-31T10:00:00Z" });
+    vi.mocked(mapEditorApiClient.publishDraft).mockResolvedValue({ success: true, newPublishedVersionId: "pub-13", publishedAt: "2026-08-31T11:00:00Z" });
+    vi.mocked(mapEditorApiClient.discardDraft).mockResolvedValue({ success: true });
   });
   afterEach(cleanup);
 
@@ -64,6 +104,300 @@ describe("Map Editor preview", () => {
   const clickMap = (lat: number, lng: number) => {
     act(() => mapClickHandler?.({ latlng: { lat, lng } }));
   };
+
+  const editLibraryName = async () => {
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+  };
+
+  it("saves every uncommitted Working Session operation in one atomic batch", async () => {
+    renderEditor();
+    await editLibraryName();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Save Draft" }));
+
+    await waitFor(() => expect(mapEditorApiClient.saveDraft).toHaveBeenCalledTimes(1));
+    expect(mapEditorApiClient.saveDraft).toHaveBeenCalledWith("isu-echague", 4, [
+      expect.objectContaining({ domain: "Locations", entityId: "loc-1", type: "update_properties" }),
+    ]);
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+    expect(screen.getByText("Draft v5")).toBeInTheDocument();
+  });
+
+  it("keeps local work and shows server and client values after a concurrency conflict", async () => {
+    vi.mocked(mapEditorApiClient.saveDraft).mockResolvedValueOnce({
+      success: false,
+      errorType: "CONCURRENCY_CONFLICT",
+      currentServerDraftVersion: 6,
+      conflictingEntities: [{ entityId: "loc-1", field: "name", serverValue: "Learning Commons", clientValue: "Main Library", conflictType: "MODIFIED_BY_OTHER" }],
+      nonConflictingOperationsCount: 0,
+    });
+    renderEditor();
+    await editLibraryName();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Save Draft" }));
+
+    const conflict = await screen.findByRole("dialog", { name: "Conflict Review" });
+    expect(conflict).toHaveTextContent("loc-1");
+    expect(conflict).toHaveTextContent("Learning Commons");
+    expect(conflict).toHaveTextContent("Main Library");
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry Against Draft v6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Save Draft" }));
+    await waitFor(() => expect(mapEditorApiClient.saveDraft).toHaveBeenLastCalledWith(
+      "isu-echague",
+      6,
+      [expect.objectContaining({ entityId: "loc-1" })],
+    ));
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+  });
+
+  it("publishes only after confirmation and updates the published revision badge", async () => {
+    renderEditor();
+    expect(await screen.findByText("Published pub-12")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Publish Map" }));
+    expect(mapEditorApiClient.publishDraft).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }));
+
+    await waitFor(() => expect(mapEditorApiClient.publishDraft).toHaveBeenCalledWith("isu-echague", 4));
+    expect(screen.getByText("Published pub-13")).toBeInTheDocument();
+  });
+
+  it("discards the server Admin Draft and local Working Session back to the published baseline", async () => {
+    renderEditor();
+    await editLibraryName();
+    vi.mocked(mapEditorApiClient.getMapEditorBootstrap).mockResolvedValueOnce({
+      adminDraft: { draftVersion: 7, updatedAt: "2026-08-31T12:00:00Z", lastAuthorId: "admin-1" },
+      publishedVersionId: "pub-12",
+      campusBoundary: { type: "Polygon", coordinates: [] },
+      layers: {
+        buildings: [],
+        outdoorLocations: [{ id: "loc-published", name: "Published Library", code: "PUB-LIB", type: "Facility", status: "Active", lat: 16.7206, lng: 121.6896, positioned: true }],
+        routeNodes: [], pathways: [], localFeatures: [], featureLinks: [],
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard Draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Discard Draft" }));
+
+    await waitFor(() => expect(mapEditorApiClient.discardDraft).toHaveBeenCalledWith("isu-echague", 4));
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+    expect(screen.queryByRole("complementary", { name: "Main Library object details" })).not.toBeInTheDocument();
+    expect(screen.getByText("Draft v7")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "Published Library" } });
+    expect(screen.getByRole("button", { name: /Published Library Location/ })).toBeInTheDocument();
+  });
+
+  it("switches drawing tools from a minimizable command dock without losing the active mode", async () => {
+    renderEditor();
+
+    const polygonTool = await screen.findByRole("button", { name: "Building Polygon" });
+    fireEvent.click(polygonTool);
+
+    expect(polygonTool).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("status", { name: "Building Polygon guidance" })).toHaveTextContent(
+      "Esc",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize map command dock" }));
+
+    const minimizedDock = screen.getByRole("button", { name: "Expand map command dock" });
+    expect(minimizedDock).toHaveTextContent("Building Polygon");
+
+    fireEvent.click(minimizedDock);
+    expect(screen.getByRole("button", { name: "Building Polygon" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Local Feature" }));
+    expect(screen.getByRole("status", { name: "Local Feature guidance" })).toBeInTheDocument();
+  });
+
+  it("offers creation choices for all five editable Local Map Feature families", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Local Feature" }));
+
+    const palette = screen.getByRole("region", { name: "Local feature creation options" });
+    expect(palette).toHaveTextContent("Building Footprint");
+    expect(palette).toHaveTextContent("Parking Area");
+    expect(palette).toHaveTextContent("Walkway");
+    expect(palette).toHaveTextContent("Vehicle Path");
+    expect(palette).toHaveTextContent("Campus Boundary");
+  });
+
+  it("creates a selected Local Map Feature family from canvas geometry", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Local Feature" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Vehicle Path/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Local feature name" }), {
+      target: { value: "East Service Lane" },
+    });
+    clickMap(16.7201, 121.6891);
+    clickMap(16.7204, 121.6894);
+    fireEvent.click(screen.getByRole("button", { name: "Create Vehicle Path" }));
+
+    expect(screen.getByRole("complementary", { name: "East Service Lane object details" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("keeps a retired feature visible with a warning and restores it instantly", async () => {
+    renderEditor();
+
+    const parkingArea = await screen.findByRole("button", { name: "local-feature-feat-poly-pkg-west" });
+    fireEvent.click(parkingArea);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Retire Feature" }));
+
+    expect(screen.getByRole("alert", { name: "Retired Local Map Feature" })).toHaveTextContent(
+      "retired in this Working Session",
+    );
+    expect(screen.getByRole("button", { name: "local-feature-feat-poly-pkg-west" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "⎌ Restore Feature" }));
+
+    expect(screen.queryByRole("alert", { name: "Retired Local Map Feature" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("2 changes");
+  });
+
+  it("edits Local Map Feature properties through curated schema controls only", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "local-feature-feat-poly-pkg-west" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
+
+    expect(screen.getByRole("combobox", { name: "SURFACE" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "ACCESS" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /OSM tag/i })).not.toBeInTheDocument();
+  });
+
+  it("retires a Building Footprint without deleting its Building from Locations", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    renderEditor();
+
+    const buildingPolygon = await screen.findByRole("button", { name: "building polygon" });
+    fireEvent.click(buildingPolygon);
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering Hall" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Retire Footprint" }));
+
+    expect(screen.getByRole("alert", { name: "Retired Local Map Feature" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    expect(buildingPolygon).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "⎌ Restore Feature" }));
+    fireEvent.click(buildingPolygon);
+    expect(screen.getByRole("complementary", { name: "Engineering Hall object details" })).toBeInTheDocument();
+  });
+
+  it("keeps an interrupted polygon draft on the suspended shelf and resumes it", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.7201, 121.6891);
+    expect(screen.getByText("Points plotted: 1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    const firstPrompt = screen.getByRole("dialog", { name: "Switch to Pathway?" });
+    fireEvent.click(screen.getByRole("button", { name: "Continue Editing" }));
+
+    expect(firstPrompt).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Building Polygon" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText("Points plotted: 1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
+
+    expect(screen.getByRole("button", { name: "Pathway" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Suspended Drafts (1)" }));
+    const shelf = screen.getByRole("dialog", { name: "Suspended Drafts" });
+    expect(shelf).toHaveTextContent("Building Polygon draft");
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume Building Polygon draft" }));
+    expect(screen.getByRole("button", { name: "Building Polygon" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByText("Points plotted: 1")).toBeInTheDocument();
+  });
+
+  it("uses Escape to cancel an incomplete drawing without retaining discarded geometry", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.7201, 121.6891);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.getByRole("dialog", { name: "Switch to Select?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Discard Geometry" }));
+
+    expect(screen.getByRole("button", { name: "Select" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Suspended Drafts/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
+    expect(screen.getByText("Points plotted: 0")).toBeInTheDocument();
+  });
+
+  it("restores the complete Point Location form when resuming a suspended draft", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "Junction" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "Library Junction" } });
+    clickMap(16.7208, 121.6902);
+
+    fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Point Location" }));
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "Access Point" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "Temporary Name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Suspended Drafts (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume Point Location draft" }));
+
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("Route Node");
+    expect(screen.getAllByRole("combobox")[1]).toHaveValue("Junction");
+    expect(screen.getByPlaceholderText("e.g. CAS Entrance")).toHaveValue("Library Junction");
+  });
+
+  it("restores the selected Path Point and drag mode when resuming a suspended pathway", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+    ]);
+    renderEditor();
+
+    await screen.findByTestId("path-geometry");
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
+    fireEvent.click(screen.getByRole("button", { name: "✥ Drag Path Point" }));
+    fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Suspended Drafts (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume Pathway draft" }));
+
+    expect(screen.getByRole("button", { name: "Stop Dragging" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Path Point latitude")).toHaveValue(16.7209);
+  });
 
   it("reports that an unchanged map has no pending changes", async () => {
     renderEditor();
@@ -90,7 +424,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Main Library" } });
     expect(await screen.findByRole("button", { name: /Main Library Location/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Point Location" }));
     clickMap(16.8, 121.7);
 
     expect(screen.getByText("New or modified geometry must stay inside the ISU Echague campus boundary.")).toBeInTheDocument();
@@ -106,7 +440,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: importedNode.name } });
     fireEvent.click(await screen.findByRole("button", { name: `${importedNode.name} Route Node` }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
+    fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
     clickMap(16.7214, 121.6908);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
@@ -122,12 +456,13 @@ describe("Map Editor preview", () => {
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: generatedMapFixture.pathways[0].name } });
     fireEvent.click((await screen.findAllByRole("button", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
-    fireEvent.click(screen.getByRole("button", { name: "Edit Path Points" }));
+    fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
     const importedPoint = generatedMapFixture.pathways[0].pathPoints[0];
     fireEvent.click((await screen.findAllByRole("button", { name: `Path Point at ${importedPoint.join(",")}` }))[0]);
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.72095" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6895" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Save Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
 
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent(`${generatedMapFixture.pathways[0].name} · pathway`);
@@ -143,7 +478,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
 
     expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
   });
 
   it("blocks a missing Route Node association and focuses its correction field", async () => {
@@ -154,7 +489,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
     const guidance = await screen.findByRole("button", { name: /Associated Location does not exist/ });
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
     fireEvent.click(guidance);
 
     await waitFor(() => expect(screen.getByLabelText("Associated Location")).toHaveFocus());
@@ -164,12 +499,16 @@ describe("Map Editor preview", () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
     fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     fireEvent.change(screen.getByLabelText("Location name"), { target: { value: "Main Library" } });
-    fireEvent.click(screen.getByRole("button", { name: "Move Marker" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /DESCRIPTION/ }), { target: { value: "Campus library services" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    fireEvent.click(screen.getByRole("button", { name: "✥ Move Marker" }));
     clickMap(16.7208, 121.6902);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
-    expect(screen.getByDisplayValue("Main Library")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
     expect(screen.getByText("16.720800")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("moved (1)");
@@ -179,16 +518,16 @@ describe("Map Editor preview", () => {
 
   it("persists a newly added Route Node's moved position", async () => {
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Place" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "New Ramp" } });
     clickMap(16.7208, 121.6902);
     fireEvent.click(screen.getByRole("button", { name: "Save Node" }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
+    fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
     clickMap(16.7212, 121.6905);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
-    expect(screen.getByDisplayValue("New Ramp")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "New Ramp object details" })).toBeInTheDocument();
     expect(screen.getByText("16.721200")).toBeInTheDocument();
     expect(screen.getByText("121.690500")).toBeInTheDocument();
     expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7212,121.6905"]')).toBeTruthy();
@@ -198,7 +537,7 @@ describe("Map Editor preview", () => {
 
   it("opens the new location modal with the coordinates from a Place-mode map click", async () => {
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Place" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
     clickMap(16.7208, 121.6902);
 
     expect(screen.getByRole("dialog", { name: "Add Location" })).toHaveTextContent(
@@ -206,11 +545,42 @@ describe("Map Editor preview", () => {
     );
   });
 
+  it("edits Location details from the object card and records a Working Session operation", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services" },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+
+    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("[Locations]");
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+
+    expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("inspects a read-only basemap feature with disabled edits and OSM lineage", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "local-feature-feat-poly-water-pond-01" }));
+
+    expect(screen.getByText("[🔒 Read-Only Basemap]")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Source Lineage & OSM Tags" }));
+    expect(screen.getByText("way/9823101")).toBeInTheDocument();
+    expect(screen.getByText("lagoon")).toBeInTheDocument();
+  });
+
   it("persists a seeded Route Node's moved position", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
     fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Move Node" }));
+    fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
     clickMap(16.7214, 121.6908);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
 
@@ -222,9 +592,96 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Entrance · node");
   });
 
+  it("moves a point through the precision HUD with nudging, commit, and cancel", async () => {
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("button", { name: "✥ Move Marker" }));
+
+    const moveHud = screen.getByRole("region", { name: "Move Library" });
+    expect(screen.getByLabelText("Move latitude")).toHaveValue(16.7205);
+    expect(screen.getByLabelText("Move longitude")).toHaveValue(121.6895);
+    expect(moveHud).toHaveTextContent("Arrow keys 0.5m");
+
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(Number((screen.getByLabelText("Move latitude") as HTMLInputElement).value)).toBeGreaterThan(16.7205);
+    expect(moveHud).toHaveTextContent("Δ 0.5m");
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("region", { name: "Move Library" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("16.720500");
+
+    fireEvent.click(screen.getByRole("button", { name: "✥ Move Marker" }));
+    fireEvent.focus(screen.getByLabelText("Move latitude"));
+    fireEvent.change(screen.getByLabelText("Move latitude"), { target: { value: "16.72" } });
+    expect(screen.getByLabelText("Move latitude")).toHaveValue(16.72);
+    fireEvent.change(screen.getByLabelText("Move latitude"), { target: { value: "16.720800" } });
+    fireEvent.change(screen.getByLabelText("Move longitude"), { target: { value: "121.690200" } });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("16.720800");
+    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("121.690200");
+  });
+
+  it("renders direct drag feedback, snaps within 18px, and blocks an out-of-bound drop", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+    ]);
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("button", { name: "✥ Move Marker" }));
+
+    const marker = screen.getByTestId("move-point-marker");
+    movingPointDragPosition = { lat: 16.7207, lng: 121.68982 };
+    fireEvent.dragStart(marker);
+    fireEvent.drag(marker);
+
+    expect(screen.getByRole("region", { name: "Move Library" })).toHaveTextContent("(Snapped)");
+    expect(screen.getByLabelText("Move longitude")).toHaveValue(121.6897);
+    expect(screen.getByTestId("point-move-tether")).toHaveAttribute(
+      "data-positions",
+      JSON.stringify([[16.7205, 121.6895], [16.7207, 121.6897]]),
+    );
+    expect(screen.getByTestId("point-move-tether-badge")).toHaveTextContent("Δ 30.8m (Snapped)");
+
+    movingPointDragPosition = { lat: 16.8, lng: 121.7 };
+    fireEvent.drag(marker);
+    expect(screen.getByRole("alert")).toHaveTextContent("outside the ISU Echague Campus Boundary");
+    expect(screen.getByRole("button", { name: "Save Position" })).toBeDisabled();
+    expect(screen.getByTestId("move-point-marker")).toHaveAttribute("data-position", "16.8,121.7");
+
+    fireEvent.dragEnd(screen.getByTestId("move-point-marker"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Point drop was blocked");
+    expect(screen.getByRole("button", { name: "Save Position" })).toBeEnabled();
+    expect(screen.getByTestId("move-point-marker")).toHaveAttribute("data-position", "16.7207,121.6897");
+  });
+
+  it("unpositions Outdoor Locations and cascades Route Node deletion to connected Pathways", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Remove Position" }));
+    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("Not positioned");
+
+    fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
+    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Deactivate Route Node" }));
+
+    fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click((await screen.findAllByRole("button", { name: "North Walk Pathway" }))[0]);
+    expect(screen.getByRole("complementary", { name: "North Walk object details" })).toHaveTextContent("Two-way · Closed");
+  });
+
   it("saves an Area polygon as the named Building shown in Preview", async () => {
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Area" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     clickMap(16.720, 121.689);
@@ -242,9 +699,100 @@ describe("Map Editor preview", () => {
     expect(preview).toHaveTextContent("Science Annex · building");
   });
 
+  it("closes a Building Footprint from V1 without showing a separate closure overlay", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.72,121.689"]')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    clickMap(16.720, 121.690);
+
+    expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
+  });
+
+  it("opens Create-or-Attach when a footprint closes and preserves its geometry across tabs", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+
+    expect(screen.getByRole("region", { name: "Create or attach building record" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "★ Create New Record" })).toHaveAttribute("aria-selected", "true");
+    expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
+
+    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Record" }));
+
+    expect(screen.getByRole("tab", { name: "🔗 Attach Existing Record" })).toHaveAttribute("aria-selected", "true");
+    expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
+  });
+
+  it("shows attach eligibility reasons and attaches only an eligible Building", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-open", name: "Science Hall", code: "SCI", points: [] },
+      { id: "building-linked", name: "University Gym", code: "GYM", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Record" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search existing Buildings" }), { target: { value: "i" } });
+
+    expect(screen.getByRole("button", { name: /University Gym/ })).toBeDisabled();
+    expect(screen.getByText("Already linked to footprint feat-poly-building-linked")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Science Hall/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    expect(screen.getByRole("alert", { name: "Building is not routable" })).toBeInTheDocument();
+  });
+
+  it("creates the feature, Building, and link as one compound Working Session change", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("Science Annex · building");
+  });
+
+  it("launches a guided Entrance Route Node draft for the completed Building", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
+    fireEvent.click(screen.getByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
+
+    expect(screen.getByRole("button", { name: "Point Location" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("combobox")[0]).toHaveValue("Route Node");
+    expect(screen.getAllByRole("combobox")[1]).toHaveValue("Entrance");
+    expect(screen.getByText("Associated Building: Science Annex")).toBeInTheDocument();
+  });
+
   it("places an Entrance by map click and allows its coordinates to be edited manually", async () => {
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Place" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Route Node" } });
     fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "Science Annex Entrance" } });
     clickMap(16.7208, 121.6902);
@@ -307,7 +855,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
 
     expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save Draft" })).toBeDisabled();
   });
 
   it("adjusts a selected Path Point with coordinates and preserves it in Preview", async () => {
@@ -316,12 +864,13 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6899" } });
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
-    fireEvent.click(screen.getByRole("button", { name: "Save Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Save Pathway" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Walk · pathway");
@@ -333,13 +882,59 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
     const point = await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" });
     fireEvent.click(point);
     expect(point).toHaveAttribute("data-draggable", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Drag Path Point" }));
+    fireEvent.click(screen.getByRole("button", { name: "✥ Drag Path Point" }));
     pathPointDragPosition = { lat: 16.7208, lng: 121.6898 };
     fireEvent.dragEnd(screen.getByRole("button", { name: "Path Point at 16.7207,121.6897" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7208,121.6898],[16.721,121.69]]");
+  });
+
+  it("blocks drawing a duplicate direct Pathway in either direction", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "＋ New Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Map marker at 16.721,121.69" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Map marker at 16.7205,121.6895" })[1]);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("A direct Pathway already connects these Route Nodes.");
+  });
+
+  it("adds a midpoint Path Point without creating a Route Node", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByTestId("path-geometry"));
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Path Point on segment 1" }));
+
+    expect(screen.getByRole("button", { name: /Path Point at 16\.72075.*121\.68975/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Map marker at 16.721,121.69" })).toBeInTheDocument();
+  });
+
+  it("prompts for a visual crossing and commits a Junction split as one Working Session change", async () => {
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "node-a", name: "A", nodeType: "Junction", lat: 16.72, lng: 121.689 },
+      { id: "node-b", name: "B", nodeType: "Junction", lat: 16.722, lng: 121.691 },
+      { id: "node-c", name: "C", nodeType: "Junction", lat: 16.72, lng: 121.691 },
+      { id: "node-d", name: "D", nodeType: "Junction", lat: 16.722, lng: 121.689 },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-ab", name: "A–B", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-cd", name: "C–D", sourceNodeId: "node-c", destinationNodeId: "node-d", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    expect(await screen.findByRole("alert", { name: "Non-routable pathway crossing" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    await waitFor(() => expect(screen.queryByRole("alert", { name: "Non-routable pathway crossing" })).not.toBeInTheDocument());
   });
 });

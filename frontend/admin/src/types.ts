@@ -55,6 +55,7 @@ export interface RouteNode {
   associatedPlaceId?: string | null;
   lat: number;
   lng: number;
+  status?: RecordStatus;
   sourceOsmNodeId?: number | null;
   sourceWayId?: number;
   sourceWayIds?: number[];
@@ -144,4 +145,5 @@ export interface MapSavePayload {
   locations?: Location[];
   nodes?: RouteNode[];
   buildings?: Building[];
+  pathways?: Pathway[];
 }

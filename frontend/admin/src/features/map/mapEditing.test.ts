@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, reviewMapDraft } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
 import { echagueCampusBoundary } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -23,8 +23,27 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("detects a bow-tie polygon while allowing a normal footprint", () => {
+    expect(polygonSelfIntersects([[0, 0], [1, 1], [0, 1], [1, 0]])).toBe(true);
+    expect(polygonSelfIntersects([[0, 0], [1, 0], [1, 1], [0, 1]])).toBe(false);
+  });
+
+  it("translates every footprint vertex by one shared delta", () => {
+    expect(translatePolygon([[1, 2], [3, 2], [3, 4]], [10, 20])).toEqual([[11, 22], [13, 22], [13, 24]]);
+  });
+
+  it("uses the area-weighted centroid as the internal feature anchor", () => {
+    expect(polygonFeatureAnchor([[0, 0], [0, 4], [2, 4], [2, 0]])).toEqual([1, 2]);
+  });
+
   it("computes a building center marker from polygon vertices", () => {
     expect(polygonCentroid([[16, 121], [18, 121], [18, 123], [16, 123]])).toEqual([17, 122]);
+  });
+
+  it("keeps pathway endpoints out of intermediate Path Points", () => {
+    expect(withoutEndpointPathPoints([
+      [1, 1], [1.5, 1.5], [2, 2], [1, 1],
+    ], [1, 1], [2, 2])).toEqual([[1.5, 1.5]]);
   });
 
   it("reports no pending changes for an unchanged map", () => {
