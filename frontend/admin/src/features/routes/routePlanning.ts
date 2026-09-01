@@ -14,8 +14,10 @@ const weight = (path: Pathway) => {
 /** Resolve indoor destinations to an associated entrance, then run Dijkstra over the pedestrian network. */
 export function planRoute(destination: Location, locations: Location[], nodes: RouteNode[], pathways: Pathway[], originNodeId?: string): PlannedRoute | null {
   const buildingId = destination.type === "Building" ? destination.id : destination.parentId;
-  if (!buildingId || (destination.type !== "Building" && !locations.some((location) => location.id === buildingId && location.type === "Building"))) return null;
-  const entrance = nodes.find((node) => node.nodeType === "Entrance" && node.associatedPlaceId === buildingId);
+  const building = locations.find((location) => location.id === buildingId && location.type === "Building");
+  if (!buildingId || !building || building.status !== "Active" || !building.positioned || building.lat === null || building.lng === null) return null;
+  if (destination.type !== "Building" && !locations.some((location) => location.id === buildingId && location.type === "Building")) return null;
+  const entrance = nodes.find((node) => node.nodeType === "Entrance" && node.associatedPlaceId === buildingId && (!("status" in node) || node.status === "Active") && Number.isFinite(node.lat) && Number.isFinite(node.lng));
   const origin = originNodeId ? nodes.find((node) => node.id === originNodeId) : undefined;
   if (!entrance || !origin) return null;
   const distances = new Map<string, number>([[origin.id, 0]]);
