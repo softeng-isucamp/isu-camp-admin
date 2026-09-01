@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { services, setMockFailure } from "../../services/api";
 import {
@@ -14,6 +15,7 @@ import {
 import type { Pathway, RouteNode, Shade } from "../../types";
 import { pathways as initialPathways } from "../../services/mockData";
 import routesModuleIcon from "../../assets/figma/modules/routes.svg";
+import { RouteDetailsModal } from "./RouteDetailsModal";
 
 const endpointLabels: Record<string, [string, string]> = {
   "ccsict-junction": ["Main Gate", "Arts & Sciences"],
@@ -23,6 +25,7 @@ const endpointLabels: Record<string, [string, string]> = {
 
 export function RoutesPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -100,15 +103,15 @@ export function RoutesPage() {
     await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
-  const save = async () => {
-    if (!draft) return;
+  const save = async (nextDraft: Pathway | null = draft) => {
+    if (!nextDraft) return;
     setError("");
     try {
-      await services.routes.save(draft);
+      await services.routes.save(nextDraft);
       await refresh();
       setDialog(null);
-      setNotice(`${draft.name} saved successfully.`);
-      setSuccess(draft.name);
+      setNotice(`${nextDraft.name} saved successfully.`);
+      setSuccess(nextDraft.name);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Unable to save route.",
@@ -118,7 +121,7 @@ export function RoutesPage() {
 
   const remove = async () => {
     if (!selected) return;
-    await services.routes.remove(selected.id);
+    await services.routes.remove(selected.id, true);
     await refresh();
     setDialog(null);
     setNotice(`${selected.name} removed successfully.`);
@@ -220,6 +223,13 @@ export function RoutesPage() {
                 : "No route selected"}
             </small>
           </div>
+          <Button
+            variant="subtle"
+            disabled={!summary}
+            onClick={() => summary && navigate(`/map-editor?pathway=${encodeURIComponent(summary.id)}`)}
+          >
+            Open in Map Editor
+          </Button>
         </Card>
 
         <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
@@ -406,6 +416,24 @@ export function RoutesPage() {
                             </button>
                             <button
                               role="menuitem"
+                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setSelected(item);
+                                setActionMenuId(null);
+                                try {
+                                  await (item.status === "Open" ? services.routes.close(item.id) : services.routes.reopen(item.id));
+                                  await refresh();
+                                  setNotice(`${item.name} ${item.status === "Open" ? "closed" : "reopened"} successfully.`);
+                                } catch (cause) {
+                                  setError(cause instanceof Error ? cause.message : "Unable to update Pathway lifecycle.");
+                                }
+                              }}
+                            >
+                              {item.status === "Open" ? "Close pathway" : "Reopen pathway"}
+                            </button>
+                            <button
+                              role="menuitem"
                               style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -436,119 +464,16 @@ export function RoutesPage() {
         </Card>
       </div>
       {(dialog === "add" || dialog === "edit") && draft && (
-        <Modal
-          title={dialog === "add" ? "Add Route / Path" : "Edit Route / Path"}
-          subtitle="Connect two campus nodes for navigation."
-          size="md"
-          variant="green"
+        <RouteDetailsModal
+          entity={{ kind: "pathway", value: draft }}
+          nodes={nodes}
+          locations={[]}
+          mode={dialog}
+          lockSpatialFields={false}
+          submitError={error}
           onClose={() => setDialog(null)}
-        >
-          {error && (
-            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="form-grid-two">
-            <SelectField
-              label="SOURCE"
-              required
-              value={draft.sourceNodeId}
-              subhelper="Required · must differ from destination"
-              onChange={(event) =>
-                setDraft({ ...draft, sourceNodeId: event.target.value })
-              }
-            >
-              <option value="">Select source</option>
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.name} ({n.nodeType})
-                </option>
-              ))}
-            </SelectField>
-            <SelectField
-              label="DESTINATION"
-              required
-              value={draft.destinationNodeId}
-              subhelper="Required · must differ from source"
-              onChange={(event) =>
-                setDraft({ ...draft, destinationNodeId: event.target.value })
-              }
-            >
-              <option value="">Select destination</option>
-              {nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.name} ({n.nodeType})
-                </option>
-              ))}
-            </SelectField>
-          </div>
-          <div className="form-grid-two">
-            <SelectField
-              label="SHADE"
-              required
-              value={draft.shade}
-              subhelper="No Shade · Partial Shade · Mostly Shaded · Fully Shaded · Indoor"
-              onChange={(event) =>
-                setDraft({ ...draft, shade: event.target.value as Shade })
-              }
-            >
-              <option value="">Select shade</option>
-              {["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded"].map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </SelectField>
-            <SelectField
-              label="PATH TYPE"
-              required
-              value={draft.type || "Walkway"}
-              subhelper="Walkway · Covered walkway · Stairs · Road crossing"
-              onChange={(event) =>
-                setDraft({ ...draft, type: event.target.value })
-              }
-            >
-              <option value="">Select path type</option>
-              {["Walkway", "Covered walkway", "Stairs", "Road crossing"].map(
-                (value) => (
-                  <option key={value}>{value}</option>
-                ),
-              )}
-            </SelectField>
-          </div>
-          <div className="form-grid-two">
-            <Field
-              label="NOTES"
-              value={draft.name}
-              placeholder="Optional notes about this connection"
-              onChange={(event) =>
-                setDraft({ ...draft, name: event.target.value })
-              }
-            />
-            <SelectField
-              label="STATUS"
-              required
-              value={draft.status}
-              subhelper="Open · Temporarily Closed · Under Maintenance · Restricted"
-              onChange={(event) =>
-                setDraft({
-                  ...draft,
-                  status: event.target.value as Pathway["status"],
-                })
-              }
-            >
-              <option value="Open">Open</option>
-              <option value="Closed">Closed</option>
-              <option value="Unknown">Unknown</option>
-            </SelectField>
-          </div>
-          <div className="modal-actions">
-            <Button variant="subtle" onClick={() => setDialog(null)}>
-              Cancel
-            </Button>
-            <Button onClick={save}>Save Route</Button>
-          </div>
-        </Modal>
+          onSubmit={(entity) => save(entity as Pathway)}
+        />
       )}
       {dialog === "remove" && (
         <Modal

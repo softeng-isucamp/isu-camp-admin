@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, reviewMapDraft } from "./mapEditing";
-import { echagueCampusBoundary } from "./campusBoundary";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
+import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
   id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null,
@@ -23,8 +23,36 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("detects a bow-tie polygon while allowing a normal footprint", () => {
+    expect(polygonSelfIntersects([[0, 0], [1, 1], [0, 1], [1, 0]])).toBe(true);
+    expect(polygonSelfIntersects([[0, 0], [1, 0], [1, 1], [0, 1]])).toBe(false);
+  });
+
+  it("translates every footprint vertex by one shared delta", () => {
+    expect(translatePolygon([[1, 2], [3, 2], [3, 4]], [10, 20])).toEqual([[11, 22], [13, 22], [13, 24]]);
+  });
+
+  it("uses an internal point as the derived Feature Anchor", () => {
+    expect(polygonFeatureAnchor([[0, 0], [0, 4], [2, 4], [2, 0]])).toEqual([1, 2]);
+    const concave: [number, number][] = [
+      [0, 0], [0, 4], [4, 4], [4, 3], [1, 3], [1, 1], [4, 1], [4, 0],
+    ];
+    expect(pointInPolygon(polygonFeatureAnchor(concave), concave)).toBe(true);
+  });
+
+  it("rejects polygons whose distinct vertices are collinear", () => {
+    expect(polygonIsNonDegenerate([[0, 0], [1, 1], [2, 2]])).toBe(false);
+    expect(polygonIsNonDegenerate([[0, 0], [0, 1], [1, 0]])).toBe(true);
+  });
+
   it("computes a building center marker from polygon vertices", () => {
     expect(polygonCentroid([[16, 121], [18, 121], [18, 123], [16, 123]])).toEqual([17, 122]);
+  });
+
+  it("keeps pathway endpoints out of intermediate Path Points", () => {
+    expect(withoutEndpointPathPoints([
+      [1, 1], [1.5, 1.5], [2, 2], [1, 1],
+    ], [1, 1], [2, 2])).toEqual([[1.5, 1.5]]);
   });
 
   it("reports no pending changes for an unchanged map", () => {
