@@ -55,6 +55,13 @@ class FakeColumn:
         return self
 
 
+class FakeFloor:
+    def __init__(self, identifier, building_id, number):
+        self.floor_id = identifier
+        self.building_id = building_id
+        self.floor_number = number
+
+
 def make_client(monkeypatch):
     app = Flask(__name__)
     app.secret_key = "test"
@@ -62,9 +69,12 @@ def make_client(monkeypatch):
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
     building = FakeRecord(1, "Engineering Hall", "ENG", 1)
     room = FakeRecord(2, "Room 204", "ENG-204", 3, building_id=1)
-    room.floor_level = "2nd Floor"
+    room.floor_id = 2
     monkeypatch.setattr(location_module, "Location", type("FakeLocation", (), {
         "query": FakeQuery([building, room]), "location_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
+        "query": FakeQuery([FakeFloor(2, 1, 2)]), "floor_id": FakeColumn(),
     }))
     return app.test_client()
 
@@ -190,6 +200,9 @@ def make_mutation_client(monkeypatch):
             return dto
 
     monkeypatch.setattr(location_module, "Location", MutationRecord)
+    monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
+        "query": FakeQuery([]), "floor_id": FakeColumn(),
+    }))
     monkeypatch.setattr(location_module.db, "session", session)
     return app.test_client(), records, session
 
@@ -198,9 +211,10 @@ def test_invalid_legacy_floor_relationship_is_reported_instead_of_projected(monk
     client, records, _ = make_mutation_client(monkeypatch)
     building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
     wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Building"})
-    floor = type(records[0])(location_name="Second Floor", location_code="OTHER-F2", type_id=2, building_id=int(wrong_building.json["id"]), floor_id=None, floor_level=None)
-    floor.location_id = 20
-    records.append(floor)
+    floor = FakeFloor(20, int(wrong_building.json["id"]), 2)
+    monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
+        "query": FakeQuery([floor]), "floor_id": FakeColumn(),
+    }))
     room = type(records[0])(location_name="Room 204", location_code="ENG-204", type_id=3, building_id=int(building.json["id"]), floor_id=20, floor_level=None)
     room.location_id = 21
     records.append(room)

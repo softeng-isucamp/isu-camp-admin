@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from auth import admin_required
 from extensions import db
+from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
@@ -24,25 +25,41 @@ def _all_locations():
         raise
 
 
-def _legacy_floor(record, records):
+def _all_floors():
+    try:
+        return Floor.query.order_by(Floor.floor_id.asc()).all()
+    except Exception:
+        logger.exception("Failed to load floors")
+        raise
+
+
+def _floor_label(floor):
+    number = floor.floor_number
+    if number == 0:
+        return "Ground Floor"
+    suffix = "th" if 10 < number % 100 < 14 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix} Floor"
+
+
+def _legacy_floor(record, floors):
     if record.floor_id is None:
         return None
-    floor = next((item for item in records if item.location_id == record.floor_id), None)
-    if floor is None or floor.type_id != TYPE_IDS["Floor"] or floor.building_id != record.building_id:
+    floor = next((item for item in floors if item.floor_id == record.floor_id), None)
+    if floor is None or floor.building_id != record.building_id:
         raise ValueError(f"Location {record.location_id} references an invalid legacy Floor relationship.")
     return floor
 
 
-def _location_dto(record, records):
+def _location_dto(record, records, floors):
     if record.type_id not in LOCATION_TYPE_NAMES:
         raise ValueError(
             f"Location {record.location_id} references an unknown location type."
         )
     by_id = {item.location_id: item for item in records}
     building = by_id.get(record.building_id)
-    legacy_floor = _legacy_floor(record, records)
+    legacy_floor = _legacy_floor(record, floors)
     floor = getattr(record, "floor_level", None)
-    return record.to_location_dto(building=building.location_name if building else None, floor=floor or (legacy_floor.location_name if legacy_floor else None))
+    return record.to_location_dto(building=building.location_name if building else None, floor=floor or (_floor_label(legacy_floor) if legacy_floor else None))
 
 
 def _request_payload():
@@ -106,9 +123,9 @@ def list_locations():
         floor_filter = request.args.get("floor", "").strip().lower()
         page = max(request.args.get("page", 1, type=int) or 1, 1)
         page_size = min(max(request.args.get("pageSize", 20, type=int) or 20, 1), 100)
-        records, projected = _all_locations(), []
+        records, floors, projected = _all_locations(), _all_floors(), []
         for record in records:
-            dto = _location_dto(record, records)
+            dto = _location_dto(record, records, floors)
             searchable = " ".join(str(dto.get(field) or "") for field in ("name", "code", "type", "building", "floor", "function", "keywords")).lower()
             if query and query not in searchable:
                 continue
@@ -153,7 +170,7 @@ def create_location():
         db.session.add(location)
         db.session.flush()
         db.session.commit()
-        return jsonify(_location_dto(location, records + [location])), 201
+        return jsonify(_location_dto(location, records + [location], _all_floors())), 201
     except Exception:
         logger.exception("Failed to create location")
         db.session.rollback()
