@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
-import { echagueCampusBoundary } from "./campusBoundary";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
+import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
   id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null,
@@ -32,8 +32,17 @@ describe("map draft review", () => {
     expect(translatePolygon([[1, 2], [3, 2], [3, 4]], [10, 20])).toEqual([[11, 22], [13, 22], [13, 24]]);
   });
 
-  it("uses the area-weighted centroid as the internal feature anchor", () => {
+  it("uses an internal point as the derived Feature Anchor", () => {
     expect(polygonFeatureAnchor([[0, 0], [0, 4], [2, 4], [2, 0]])).toEqual([1, 2]);
+    const concave: [number, number][] = [
+      [0, 0], [0, 4], [4, 4], [4, 3], [1, 3], [1, 1], [4, 1], [4, 0],
+    ];
+    expect(pointInPolygon(polygonFeatureAnchor(concave), concave)).toBe(true);
+  });
+
+  it("rejects polygons whose distinct vertices are collinear", () => {
+    expect(polygonIsNonDegenerate([[0, 0], [1, 1], [2, 2]])).toBe(false);
+    expect(polygonIsNonDegenerate([[0, 0], [0, 1], [1, 0]])).toBe(true);
   });
 
   it("computes a building center marker from polygon vertices", () => {

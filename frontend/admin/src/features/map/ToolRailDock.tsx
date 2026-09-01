@@ -15,7 +15,7 @@ const toolDefinitions: ToolDefinition[] = [
     label: "Select",
     icon: "↖",
     instruction: "Select an object to inspect",
-    detail: "Click a Campus Location, Route Node, Pathway, or Local Map Feature.",
+    detail: "Click a Campus Location, Route Node, Pathway, or Building.",
   },
   {
     id: "point",
@@ -38,13 +38,6 @@ const toolDefinitions: ToolDefinition[] = [
     instruction: "Connect two distinct Route Nodes",
     detail: "Choose the endpoints and add intermediate Path Points where needed.",
   },
-  {
-    id: "local_feature",
-    label: "Local Feature",
-    icon: "＋",
-    instruction: "Choose a Local Map Feature family",
-    detail: "Feature-family drawing and validation are introduced in the Local Features flow.",
-  },
 ];
 
 export function getToolDefinition(toolType: ToolType): ToolDefinition {
@@ -66,7 +59,7 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
 
   return (
     <>
-      <div className="absolute left-1/2 top-4 z-[902] max-w-[calc(100%-2rem)] -translate-x-1/2">
+      <div className="absolute left-4 top-20 z-[902] max-w-[calc(100%-2rem)]">
         {minimized ? (
           <button
             type="button"
@@ -117,7 +110,7 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
         <div
           role="status"
           aria-label={`${activeDefinition.label} guidance`}
-          className="absolute left-1/2 top-20 z-[901] flex w-[min(620px,calc(100%-2rem))] -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-[#005931]/20 bg-[#083f2d]/95 px-5 py-3 text-white shadow-2xl backdrop-blur"
+          className="absolute left-1/2 top-32 z-[901] flex w-[min(620px,calc(100%-2rem))] -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-[#005931]/20 bg-[#083f2d]/95 px-5 py-3 text-white shadow-2xl backdrop-blur"
         >
           <div className="min-w-0">
             <strong className="block text-sm">{activeDefinition.instruction}</strong>
