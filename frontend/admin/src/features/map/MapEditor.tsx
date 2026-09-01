@@ -17,9 +17,9 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
-import { WorkingSessionManager } from "./WorkingSessionManager";
+import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
 import {
@@ -30,13 +30,10 @@ import {
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { RouteDetailsModal } from "../routes/RouteDetailsModal";
 import {
-  mapEditorApiClient,
   normalizeMapLayers,
-  type ConflictingEntityDiff,
   type FeatureLinkEntity,
   type LocalFeatureFamily,
   type LocalMapFeatureEntity,
-  type MapEditorLayers,
 } from "../../services/mapEditorApiClient";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
 import {
@@ -59,6 +56,13 @@ import {
   segmentMidpoints,
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
+import { deactivateRouteNode } from "./routeNodeLifecycle";
+import {
+  findSelectionCandidates,
+  type CanvasSelectionType,
+  type SelectionCandidate,
+} from "./selectionCandidates";
+import { projectWorkingSessionOperation, type ProjectedCollection } from "./workingSessionProjection";
 import "leaflet/dist/leaflet.css";
 
 const createLocationPinIcon = (selected = false) =>
@@ -77,21 +81,19 @@ const createNodeIcon = (selected = false) =>
     iconAnchor: [9, 9],
   });
 
-const createPointIcon = (selected = false) =>
-  L.divIcon({
+const pointIcons = new Map<boolean, L.DivIcon>();
+const createPointIcon = (selected = false) => {
+  const existing = pointIcons.get(selected);
+  if (existing) return existing;
+  const icon = L.divIcon({
     className: `path-point-icon ${selected ? "selected" : ""}`,
     html: `<div class="point-icon ${selected ? "selected" : ""}"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
-
-const createPathPointSplitHandleIcon = () =>
-  L.divIcon({
-    className: "path-point-split-handle-icon",
-    html: '<button type="button" aria-label="Add Path Point" class="path-point-split-handle">+</button>',
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-  });
+  pointIcons.set(selected, icon);
+  return icon;
+};
 
 const createTempIcon = () =>
   L.divIcon({
@@ -399,8 +401,6 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
     && Array.isArray(pathway.pathPoints);
 };
 
-const MAP_EDITOR_PROJECT_ID = "isu-echague";
-
 export function MapEditor() {
   const queryClient = useQueryClient();
   const routeLocation = useLocation();
@@ -438,29 +438,11 @@ export function MapEditor() {
       pathways: await services.map.pathways(),
     }),
   });
-  const { data: draftBootstrap } = useQuery({
-    queryKey: ["map-editor-bootstrap", MAP_EDITOR_PROJECT_ID],
-    queryFn: () => mapEditorApiClient.getMapEditorBootstrap(MAP_EDITOR_PROJECT_ID),
-  });
-  const [draftVersion, setDraftVersion] = useState<number | null>(null);
-  const [publishedVersionId, setPublishedVersionId] = useState<string | null>(null);
-  const [authoritativeLayers, setAuthoritativeLayers] = useState<MapEditorLayers | null>(null);
-  const [conflictReview, setConflictReview] = useState<{
-    entities: ConflictingEntityDiff[];
-    serverDraftVersion: number;
-  } | null>(null);
-  const [lifecycleBusy, setLifecycleBusy] = useState(false);
-
-  useEffect(() => {
-    if (!draftBootstrap) return;
-    setDraftVersion((current) => current ?? draftBootstrap.adminDraft.draftVersion);
-    setPublishedVersionId((current) => current ?? draftBootstrap.publishedVersionId);
-    setAuthoritativeLayers((current) => current ?? draftBootstrap.layers);
-  }, [draftBootstrap]);
 
   const [localLocations, setLocalLocations] = useState<Location[]>([]);
   const [localNodes, setLocalNodes] = useState<RouteNode[]>([]);
   const [localPathways, setLocalPathways] = useState<Pathway[]>([]);
+  const [deletedPathwayIds, setDeletedPathwayIds] = useState<string[]>([]);
   const [localBuildings, setLocalBuildings] = useState<Building[]>([]);
   const [localFeatureChanges, setLocalFeatureChanges] = useState<LocalMapFeatureEntity[]>([]);
   const [localFeatureLinks, setLocalFeatureLinks] = useState<FeatureLinkEntity[]>([]);
@@ -478,6 +460,10 @@ export function MapEditor() {
     type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature";
     id: string;
   } | null>(null);
+  const [selectionPopover, setSelectionPopover] = useState<{
+    anchor: MapPoint;
+    candidates: SelectionCandidate[];
+  } | null>(null);
 
   const [search, setSearch] = useState("");
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
@@ -486,6 +472,10 @@ export function MapEditor() {
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
   const [manualPathPointDrag, setManualPathPointDrag] = useState(false);
+  const [pathPointDragPreview, setPathPointDragPreview] = useState<{
+    index: number;
+    point: [number, number];
+  } | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
@@ -522,68 +512,78 @@ export function MapEditor() {
   const [pathDraftDirty, setPathDraftDirty] = useState(false);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
-  const polygonInvalid = polygonSelfIntersects(points);
+  const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const canSaveBuilding = points.length >= 3 && distinctBuildingPointCount >= 3 && !polygonInvalid && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const [dirty, setDirty] = useState(false);
-  const [confirm, setConfirm] = useState<"save" | "discard" | "publish" | null>(null);
+  const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
 
+  const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
+    if (!operation) return;
+    const replaceProjection = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
+      value === null
+        ? items.filter((item) => item.id !== entityId)
+        : [...items.filter((item) => item.id !== entityId), value as unknown as T];
+    const handlers: Record<ProjectedCollection, (entityId: string, value: Record<string, unknown> | null) => void> = {
+      locations: (entityId, value) => setLocalLocations((items) => replaceProjection(items, entityId, value)),
+      nodes: (entityId, value) => setLocalNodes((items) => replaceProjection(items, entityId, value)),
+      pathways: (entityId, value) => {
+        setLocalPathways((items) => replaceProjection(items, entityId, value));
+        setDeletedPathwayIds((ids) => value === null
+          ? [...new Set([...ids, entityId])]
+          : ids.filter((id) => id !== entityId));
+      },
+      buildings: (entityId, value) => setLocalBuildings((items) => replaceProjection(items, entityId, value)),
+      localFeatures: (entityId, value) => setLocalFeatureChanges((items) => replaceProjection(items, entityId, value)),
+      featureLinks: (entityId, value) => setLocalFeatureLinks((items) => replaceProjection(items, entityId, value)),
+    };
+    projectWorkingSessionOperation(operation, direction).forEach((projection) => {
+      handlers[projection.collection](projection.entityId, projection.value);
+    });
+    setDirty(workingSessionManager.getIsDirty());
+  }, [workingSessionManager]);
+
+  useEffect(() => {
+    const onWorkingSessionShortcut = (event: KeyboardEvent) => {
+      handleWorkingSessionKeyboardShortcut(event, workingSessionManager, {
+        onUndo: (operation) => applyWorkingSessionOperation(operation, "undo"),
+        onRedo: (operation) => applyWorkingSessionOperation(operation, "redo"),
+      });
+    };
+    window.addEventListener("keydown", onWorkingSessionShortcut);
+    return () => window.removeEventListener("keydown", onWorkingSessionShortcut);
+  }, [applyWorkingSessionOperation, workingSessionManager]);
+
   const completeToolDraft = (toolType: Exclude<ToolType, "select">) => {
-    if (toolType === "point") setPointDraftDirty(false);
-    if (toolType === "pathway") {
-      setPathDraftDirty(false);
-      setProvisionalPathwayId(null);
-    }
+    const completionHandlers: Record<Exclude<ToolType, "select">, () => void> = {
+      point: () => setPointDraftDirty(false),
+      polygon: () => undefined,
+      pathway: () => {
+        setPathDraftDirty(false);
+        setProvisionalPathwayId(null);
+      },
+      local_feature: () => undefined,
+    };
+    completionHandlers[toolType]();
     workingSessionManager.discardActiveDraft();
   };
   const handleViewportChange = useCallback((bounds: L.LatLngBounds | null) => {
     setCurrentMapBounds(bounds);
   }, []);
 
-  const directoryLocations: Location[] = authoritativeLayers
-    ? authoritativeLayers.outdoorLocations.map((location) => {
-        const canonicalLocation = data?.locations.find((candidate) => candidate.id === location.id);
-        return {
-          ...canonicalLocation,
-          ...location,
-          parentId: canonicalLocation?.parentId ?? null,
-          function: canonicalLocation?.function ?? location.category ?? "Campus location",
-        };
-      })
-    : data?.locations || [];
-  const directoryNodes: RouteNode[] = authoritativeLayers
-    ? authoritativeLayers.routeNodes.map((node) => ({ ...node }))
-    : data?.nodes || [];
-  const directoryPathways: Pathway[] = authoritativeLayers
-    ? authoritativeLayers.pathways.map((pathway) => ({
-        ...pathway,
-        distance: pathway.distance ?? "",
-        time: pathway.time ?? "",
-        shade: pathway.shade ?? "Unknown",
-        direction: pathway.direction ?? "Unknown",
-      }))
-    : data?.pathways || [];
-  const directoryBuildings: Building[] = authoritativeLayers
-    ? authoritativeLayers.buildings.map((building) => {
-        const footprint = authoritativeLayers.localFeatures.find((feature) =>
-          feature.id === building.linkedFeatureId
-          || (feature.family === "building_footprint" && feature.linkedBuildingId === building.id),
-        );
-        const points = footprint?.geometryType === "polygon" && Array.isArray(footprint.coordinates[0])
-          ? footprint.coordinates as [number, number][]
-          : [];
-        return { ...building, points };
-      }).filter((building) => building.points.length >= 3)
-    : (data?.buildings || []).filter((building) => building.points.length >= 3);
-  const directoryMapLayers = useMemo(() => authoritativeLayers ?? normalizeMapLayers({
+  const directoryLocations = data?.locations || [];
+  const directoryNodes = data?.nodes || [];
+  const directoryPathways = data?.pathways || [];
+  const directoryBuildings = (data?.buildings || []).filter((building) => building.points.length >= 3);
+  const directoryMapLayers = useMemo(() => normalizeMapLayers({
     buildings: data?.buildings || [],
     locations: data?.locations || [],
     routeNodes: data?.nodes || [],
     pathways: data?.pathways || [],
-  }), [authoritativeLayers, data?.buildings, data?.locations, data?.nodes, data?.pathways]);
+  }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
   const currentFeatureLinks = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
   const buildingAttachmentEligibility = (building: Building) => {
@@ -601,8 +601,9 @@ export function MapEditor() {
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
   const currentPathways = useMemo(() => {
     const merged = overlayChanges(directoryPathways, localPathways);
-    return mode === "path" && editingPathId ? merged.map((item) => item.id === editingPathId ? { ...item, pathPoints } : item) : merged;
-  }, [directoryPathways, editingPathId, localPathways, mode, pathPoints]);
+    const visible = merged.filter((item) => !deletedPathwayIds.includes(item.id));
+    return mode === "path" && editingPathId ? visible.map((item) => item.id === editingPathId ? { ...item, pathPoints } : item) : visible;
+  }, [deletedPathwayIds, directoryPathways, editingPathId, localPathways, mode, pathPoints]);
   const pathwayCrossings = useMemo(
     () => findPathwayCrossings(currentPathways, currentNodes),
     [currentNodes, currentPathways],
@@ -645,8 +646,8 @@ export function MapEditor() {
     [currentBuildings, currentLocations, currentNodes, currentPathways],
   );
   const currentLocalFeatures = useMemo(
-    () => overlayChanges(authoritativeLayers?.localFeatures ?? normalizedLocalFeatures, localFeatureChanges),
-    [authoritativeLayers, localFeatureChanges, normalizedLocalFeatures],
+    () => overlayChanges(normalizedLocalFeatures, localFeatureChanges),
+    [localFeatureChanges, normalizedLocalFeatures],
   );
   // Local map features are retained by the data/service layer for compatibility,
   // but are intentionally not rendered in this editor. The campus boundary is
@@ -655,17 +656,17 @@ export function MapEditor() {
     (family) => family.id === selectedLocalFeatureFamily,
   )!;
   const localFeatureMinimumPoints = selectedLocalFeatureDefinition.geometryType === "line" ? 2 : 3;
+  const localFeaturePolygonInvalid = selectedLocalFeatureDefinition.geometryType === "polygon"
+    && (!polygonIsNonDegenerate(localFeaturePoints) || polygonSelfIntersects(localFeaturePoints));
   const canCreateLocalFeature = selectedLocalFeatureFamily === "building_footprint"
-    || (localFeatureName.trim().length > 0 && localFeaturePoints.length >= localFeatureMinimumPoints);
+    || (localFeatureName.trim().length > 0 && localFeaturePoints.length >= localFeatureMinimumPoints
+      && !localFeaturePolygonInvalid);
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
-  const campusBoundary = useMemo(() => {
-    const bootstrapRing = draftBootstrap?.campusBoundary.coordinates[0];
-    if (bootstrapRing && bootstrapRing.length >= 3) {
-      return bootstrapRing.map(([lng, lat]) => [lat, lng] as MapPoint);
-    }
-    return directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary;
-  }, [directoryBuildings, draftBootstrap?.campusBoundary]);
+  const campusBoundary = useMemo(
+    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
+    [directoryBuildings],
+  );
   const navigationBounds = useMemo(() => {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
@@ -795,7 +796,7 @@ export function MapEditor() {
     const q = search.trim().toLowerCase();
     const allLocs = directoryLocations.length ? directoryLocations : localLocations;
     const allNodes = directoryNodes.length ? directoryNodes : localNodes;
-    const allPaths = directoryPathways.length ? directoryPathways : localPathways;
+    const allPaths = currentPathways;
 
     const matchedLocs = allLocs
       .filter((l) => l.name.toLowerCase().includes(q) || l.type.toLowerCase().includes(q))
@@ -807,14 +808,15 @@ export function MapEditor() {
       .filter((p) => p.name.toLowerCase().includes(q) || p.shade.toLowerCase().includes(q))
       .map((item) => ({ ...item, kind: "Pathway" as const }));
     return [...matchedLocs, ...matchedNodes, ...matchedPaths].slice(0, 8);
-  }, [directoryLocations, directoryNodes, directoryPathways, localLocations, localNodes, localPathways, search]);
+  }, [currentPathways, directoryLocations, directoryNodes, localLocations, localNodes, search]);
 
   const selectObject = useCallback(
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
       setSelected({ type, id });
+      setSelectionPopover(null);
       setLocalFeatureActionNotice("");
       if (type === "pathway") {
-        const path = localPathways.find((p) => p.id === id) || directoryPathways.find((p) => p.id === id);
+        const path = currentPathways.find((p) => p.id === id);
         if (path) {
           setEditingPathId(path.id);
           setPathPoints(path.pathPoints || []);
@@ -822,8 +824,31 @@ export function MapEditor() {
       }
       setTemporary(null);
     },
-    [directoryPathways, localPathways],
+    [currentPathways],
   );
+
+  const selectCanvasObject = (
+    type: CanvasSelectionType,
+    id: string,
+    anchor: MapPoint,
+  ) => {
+    if (mode !== "select") {
+      selectObject(type, id);
+      return;
+    }
+    const candidates = findSelectionCandidates(anchor, {
+      locations: currentLocations,
+      nodes: currentNodes,
+      pathways: currentPathways,
+      buildings: currentBuildings,
+    });
+    if (candidates.length <= 1) {
+      selectObject(type, id);
+      return;
+    }
+    setSelected(null);
+    setSelectionPopover({ anchor, candidates });
+  };
 
   const handleSearchResultClick = (item: {
     id: string;
@@ -841,7 +866,7 @@ export function MapEditor() {
       if (n) setFlyTarget([n.lat, n.lng]);
     } else if (item.kind === "Pathway") {
       selectObject("pathway", item.id);
-      const p = directoryPathways.find((path) => path.id === item.id) || localPathways.find((path) => path.id === item.id);
+      const p = currentPathways.find((path) => path.id === item.id);
       if (p) {
         const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || localNodes.find((n) => n.id === p.sourceNodeId);
         if (src) setFlyTarget([src.lat, src.lng]);
@@ -851,7 +876,12 @@ export function MapEditor() {
   };
 
   const onMapClick = (point: [number, number]) => {
-    if (mode !== "area" && mode !== "move" && !pointOnCampus(point, campusBoundary)) {
+    if (mode === "select") {
+      setSelected(null);
+      setSelectionPopover(null);
+      return;
+    }
+    if (mode !== "move" && !pointOnCampus(point, campusBoundary)) {
       setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
       return;
     }
@@ -879,10 +909,14 @@ export function MapEditor() {
       setError("Cannot close the footprint while its edges intersect.");
       return;
     }
+    if (!geometryOnCampus(points, campusBoundary)) {
+      setError("The building footprint must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     setPolygonClosed(true);
     setBuildingRecordMode("create");
     setError("");
-  }, [mode, points, polygonInteraction]);
+  }, [campusBoundary, mode, points, polygonInteraction]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -893,7 +927,15 @@ export function MapEditor() {
   }, [closePolygon]);
 
   const updatePolygonVertex = (index: number, point: [number, number]) => {
-    setPoints((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? point : candidate));
+    setPoints((current) => {
+      const next = current.map((candidate, candidateIndex) => candidateIndex === index ? point : candidate);
+      if (!geometryOnCampus(next, campusBoundary)) {
+        setError("The building footprint must stay inside the ISU Echague campus boundary.");
+        return current;
+      }
+      setError("");
+      return next;
+    });
   };
 
   const insertPolygonVertex = (index: number) => {
@@ -1041,6 +1083,8 @@ export function MapEditor() {
     if (target) {
       const updated = { ...target, lat: temporary[0], lng: temporary[1], positioned: true };
       setLocalLocations((current) => [...current.filter((item) => item.id !== target.id), updated]);
+      workingSessionManager.executeOperation({ type: "update_geometry", domain: "Locations", entityId: target.id,
+        before: target as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, description: `Move ${target.name}` });
       setMode("select");
       setSelected({ type: "location", id: placingId });
       setTemporary(null);
@@ -1065,6 +1109,8 @@ export function MapEditor() {
       lng: temporary[1],
     };
     setLocalNodes((current) => [...current, newNode]);
+    workingSessionManager.executeOperation({ type: "create_entity", domain: "Routes & Paths", entityId: newNode.id,
+      before: null, after: newNode as unknown as Record<string, unknown>, description: `Place ${newNode.name}` });
     if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
       setNonRoutableBuildingId(null);
     }
@@ -1079,6 +1125,8 @@ export function MapEditor() {
     if (!newLocation.name.trim() || !newLocation.code.trim()) return;
     const location: Location = { id: `location-${Date.now()}`, ...newLocation, lat: temporary?.[0] ?? null, lng: temporary?.[1] ?? null, positioned: Boolean(temporary) };
     setLocalLocations((current) => [...current, location]);
+    workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
+      before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
     setDirty(true); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
     completeToolDraft("point");
   };
@@ -1101,6 +1149,8 @@ export function MapEditor() {
         const filtered = current.filter((p) => p.id !== editingPathId);
         return [...filtered, updatedPath];
       });
+      workingSessionManager.executeOperation({ type: "update_geometry", domain: "Routes & Paths", entityId: target.id,
+        before: target as unknown as Record<string, unknown>, after: updatedPath as unknown as Record<string, unknown>, description: `Reshape ${target.name}` });
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
       const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
       if (src && !localNodes.some((n) => n.id === src.id)) setLocalNodes((c) => [...c, src]);
@@ -1230,6 +1280,10 @@ export function MapEditor() {
   const handleAttachBuildingRecord = () => {
     const existing = (data?.buildings || []).find((building) => building.id === selectedBuildingRecordId);
     if (!existing || !buildingAttachmentEligibility(existing).eligible) return;
+    if (!geometryOnCampus(points, campusBoundary)) {
+      setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     completeBuildingRecordWorkflow(existing, "attach");
   };
 
@@ -1249,6 +1303,7 @@ export function MapEditor() {
     setLocalLocations([]);
     setLocalNodes([]);
     setLocalPathways([]);
+    setDeletedPathwayIds([]);
     setLocalBuildings([]);
     setLocalFeatureChanges([]);
     setLocalFeatureLinks([]);
@@ -1281,7 +1336,21 @@ export function MapEditor() {
 
   const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
   const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
-  const updatePathway = (updated: Pathway) => { setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updatePathway = (updated: Pathway): boolean => {
+    const connectionError = pathwayConnectionError(
+      updated.sourceNodeId,
+      updated.destinationNodeId,
+      currentPathways.filter((pathway) => pathway.id !== updated.id),
+    );
+    if (connectionError) {
+      setError(connectionError);
+      return false;
+    }
+    setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    setDirty(true);
+    setError("");
+    return true;
+  };
   const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
   const focusObject = (object: MapObjectReference, fieldLabel?: string) => {
     setPreviewOpen(false);
@@ -1323,61 +1392,28 @@ export function MapEditor() {
 
   const commit = async () => {
     if (confirm === "discard") {
-      if (draftVersion === null) return;
-      setLifecycleBusy(true);
-      try {
-        const result = await mapEditorApiClient.discardDraft(MAP_EDITOR_PROJECT_ID, draftVersion);
-        if (!result.success) throw new Error("Unable to discard the Admin Draft.");
-        const baseline = await mapEditorApiClient.getMapEditorBootstrap(MAP_EDITOR_PROJECT_ID);
-        resetDraft();
-        setDraftVersion(baseline.adminDraft.draftVersion);
-        setPublishedVersionId(baseline.publishedVersionId);
-        setAuthoritativeLayers(baseline.layers);
-        queryClient.setQueryData(["map-editor-bootstrap", MAP_EDITOR_PROJECT_ID], baseline);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to discard the Admin Draft.");
-      } finally {
-        setLifecycleBusy(false);
-      }
+      resetDraft();
       return;
     }
-    if (confirm === "publish") {
-      if (draftVersion === null) return;
-      setLifecycleBusy(true);
-      try {
-        const result = await mapEditorApiClient.publishDraft(MAP_EDITOR_PROJECT_ID, draftVersion);
-        if (!result.success) throw new Error(result.warnings?.join(" ") || "Draft validation failed.");
-        setPublishedVersionId(result.newPublishedVersionId);
-        setConfirm(null);
-        setError("");
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to publish the Admin Draft.");
-      } finally {
-        setLifecycleBusy(false);
-      }
-      return;
-    }
-    if (draftVersion === null) return;
     try {
-      setLifecycleBusy(true);
-      const result = await mapEditorApiClient.saveDraft(
-        MAP_EDITOR_PROJECT_ID,
-        draftVersion,
-        workingSessionManager.getUncommittedOperations(),
-      );
-      if (!result.success) {
-        if (result.errorType === "CONCURRENCY_CONFLICT") {
-          setConflictReview({
-            entities: result.conflictingEntities,
-            serverDraftVersion: result.currentServerDraftVersion,
-          });
-          setConfirm(null);
-          return;
-        }
-        throw new Error(result.message);
-      }
-      setDraftVersion(result.newDraftVersion);
-      workingSessionManager.markSaved();
+      const pathwaysToSave = currentPathways
+        .filter((pathway) => localPathways.some((draft) => draft.id === pathway.id) || pathway.id === editingPathId)
+        .map((pathway) => ({
+          ...pathway,
+          pathPoints: withoutEndpointPathPoints(
+            pathway.id === editingPathId ? pathPoints : pathway.pathPoints,
+            routeNodePoint(currentNodes, pathway.sourceNodeId),
+            routeNodePoint(currentNodes, pathway.destinationNodeId),
+          ),
+        }));
+      await services.map.save({
+        selected: selected ?? undefined,
+        areaPoints: points.length >= 3 ? points : undefined,
+        locations: localLocations,
+        nodes: localNodes,
+        buildings: localBuildings,
+        pathways: pathwaysToSave,
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["map"] }),
         queryClient.invalidateQueries({ queryKey: ["routes"] }),
@@ -1390,8 +1426,6 @@ export function MapEditor() {
       setError(
         cause instanceof Error ? cause.message : "Unable to save map changes.",
       );
-    } finally {
-      setLifecycleBusy(false);
     }
   };
 
@@ -1462,8 +1496,10 @@ export function MapEditor() {
         : mode;
 
   const draftSnapshot = useMemo<Omit<ActiveToolDraft, "id" | "isSuspended"> | null>(() => {
-    if (activeTool === "point" && temporary && pointDraftDirty) {
-      return {
+    type DraftSnapshot = Omit<ActiveToolDraft, "id" | "isSuspended">;
+    const snapshotBuilders: Record<ToolType, () => DraftSnapshot | null> = {
+      select: () => null,
+      point: () => temporary && pointDraftDirty ? ({
         toolType: "point",
         label: "Point Location draft",
         provisionalGeometry: {
@@ -1482,10 +1518,8 @@ export function MapEditor() {
           newLocation,
           selected,
         },
-      };
-    }
-    if (activeTool === "polygon" && points.length > 0) {
-      return {
+      }) : null,
+      polygon: () => points.length > 0 ? ({
         toolType: "polygon",
         label: "Building Polygon draft",
         provisionalGeometry: {
@@ -1493,10 +1527,8 @@ export function MapEditor() {
           isClosed: polygonClosed,
         },
         nestedRecords: { buildingName, buildingCode, editingBuildingId, polygonClosed },
-      };
-    }
-    if (activeTool === "pathway" && (pathStartNodeId || pathDraftDirty)) {
-      return {
+      }) : null,
+      pathway: () => pathStartNodeId || pathDraftDirty ? ({
         toolType: "pathway",
         label: "Pathway draft",
         provisionalGeometry: {
@@ -1513,10 +1545,8 @@ export function MapEditor() {
             ? localPathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
             : null,
         },
-      };
-    }
-    if (activeTool === "local_feature" && localFeaturePoints.length > 0) {
-      return {
+      }) : null,
+      local_feature: () => localFeaturePoints.length > 0 ? ({
         toolType: "local_feature",
         label: `${selectedLocalFeatureDefinition.label} draft`,
         provisionalGeometry: {
@@ -1527,9 +1557,9 @@ export function MapEditor() {
           family: selectedLocalFeatureFamily,
           name: localFeatureName,
         },
-      };
-    }
-    return null;
+      }) : null,
+    };
+    return snapshotBuilders[activeTool]();
   }, [
     activePathway?.destinationNodeId,
     activePathway?.sourceNodeId,
@@ -1583,37 +1613,37 @@ export function MapEditor() {
   }, [activeTool, draftSnapshot, workingSessionManager]);
 
   const clearDraftGeometry = (toolType: Exclude<ToolType, "select">) => {
-    if (toolType === "point") {
-      setTemporary(null);
-      setPointDraftDirty(false);
-      setAddLocationOpen(false);
-      return;
-    }
-    if (toolType === "polygon") {
-      setPoints([]);
-      setPolygonClosed(false);
-      setBuildingRecordMode("create");
-      setBuildingRecordSearch("");
-      setSelectedBuildingRecordId(null);
-      setBuildingName("");
-      setBuildingCode("");
-      setEditingBuildingId(null);
-      return;
-    }
-    if (toolType === "pathway") {
-      if (provisionalPathwayId) {
-        setLocalPathways((pathways) => pathways.filter((pathway) => pathway.id !== provisionalPathwayId));
-      }
-      setPathPoints([]);
-      setPathStartNodeId(null);
-      setEditingPathId(null);
-      setProvisionalPathwayId(null);
-      setSelectedPathPointIndex(null);
-      setManualPathPointDrag(false);
-      setPathDraftDirty(false);
-      return;
-    }
-    setLocalFeaturePoints([]);
+    const clearHandlers: Record<Exclude<ToolType, "select">, () => void> = {
+      point: () => {
+        setTemporary(null);
+        setPointDraftDirty(false);
+        setAddLocationOpen(false);
+      },
+      polygon: () => {
+        setPoints([]);
+        setPolygonClosed(false);
+        setBuildingRecordMode("create");
+        setBuildingRecordSearch("");
+        setSelectedBuildingRecordId(null);
+        setBuildingName("");
+        setBuildingCode("");
+        setEditingBuildingId(null);
+      },
+      pathway: () => {
+        if (provisionalPathwayId) {
+          setLocalPathways((pathways) => pathways.filter((pathway) => pathway.id !== provisionalPathwayId));
+        }
+        setPathPoints([]);
+        setPathStartNodeId(null);
+        setEditingPathId(null);
+        setProvisionalPathwayId(null);
+        setSelectedPathPointIndex(null);
+        setManualPathPointDrag(false);
+        setPathDraftDirty(false);
+      },
+      local_feature: () => setLocalFeaturePoints([]),
+    };
+    clearHandlers[toolType]();
   };
 
   const selectLocalFeatureFamily = (family: Exclude<LocalFeatureFamily, "readonly_basemap">) => {
@@ -1631,7 +1661,10 @@ export function MapEditor() {
       setPolygonClosed(false);
       return;
     }
-    if (!canCreateLocalFeature) return;
+    if (!canCreateLocalFeature || !geometryOnCampus(localFeaturePoints, campusBoundary)) {
+      if (canCreateLocalFeature) setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
+      return;
+    }
     const existingBoundary = selectedLocalFeatureFamily === "campus_boundary"
       ? currentLocalFeatures.find((feature) => feature.family === "campus_boundary" && feature.status !== "retired")
       : undefined;
@@ -1669,39 +1702,40 @@ export function MapEditor() {
   };
 
   const activateTool = (toolType: ToolType) => {
-    if (toolType === "select") {
-      setMode("select");
-      setTemporary(null);
-      setPointDraftDirty(false);
-      return;
-    }
-    if (toolType === "point") {
-      setMode("place");
-      setSelected(null);
-      setPlacingId("__new__");
-      setPointDraftDirty(false);
-      return;
-    }
-    if (toolType === "polygon") {
-      setMode("area");
-      setPolygonInteraction("draw");
-      setPolygonClosed(false);
-      return;
-    }
-    if (toolType === "pathway") {
-      setMode("path");
-      if (!editingPathId && (directoryPathways.length || localPathways.length)) {
-        const first = localPathways[0] || directoryPathways[0];
-        if (first) {
-          setEditingPathId(first.id);
-          setPathPoints(first.pathPoints || []);
+    const activationHandlers: Record<ToolType, () => void> = {
+      select: () => {
+        setMode("select");
+        setTemporary(null);
+        setPointDraftDirty(false);
+      },
+      point: () => {
+        setMode("place");
+        setSelected(null);
+        setPlacingId("__new__");
+        setPointDraftDirty(false);
+      },
+      polygon: () => {
+        setMode("area");
+        setPolygonInteraction("draw");
+        setPolygonClosed(false);
+      },
+      pathway: () => {
+        setMode("path");
+        if (!editingPathId && (directoryPathways.length || localPathways.length)) {
+          const first = localPathways[0] || directoryPathways[0];
+          if (first) {
+            setEditingPathId(first.id);
+            setPathPoints(first.pathPoints || []);
+          }
         }
-      }
-      return;
-    }
-    setMode("local_feature");
-    setSelected(null);
-    setLocalFeaturePoints([]);
+      },
+      local_feature: () => {
+        setMode("local_feature");
+        setSelected(null);
+        setLocalFeaturePoints([]);
+      },
+    };
+    activationHandlers[toolType]();
   };
 
   const selectTool = (toolType: ToolType) => {
@@ -1722,73 +1756,72 @@ export function MapEditor() {
     ] as [number, number]);
     const records = draft.nestedRecords ?? {};
 
-    if (draft.toolType === "point") {
-      setTemporary(restoredPoints[0] ?? null);
-      setPointDraftDirty(true);
-      setMode(records.editorMode === "move" ? "move" : "place");
-      if (records.placingObjectType === "location" || records.placingObjectType === "node") setPlacingObjectType(records.placingObjectType);
-      if (typeof records.placingId === "string") setPlacingId(records.placingId);
-      if (records.placingNodeType === "Entrance" || records.placingNodeType === "Junction" || records.placingNodeType === "Access Point") setPlacingNodeType(records.placingNodeType);
-      if (typeof records.placingNodeName === "string") setPlacingNodeName(records.placingNodeName);
-      if (typeof records.placingAssociatedPlaceId === "string" || records.placingAssociatedPlaceId === null) setPlacingAssociatedPlaceId(records.placingAssociatedPlaceId);
-      if (records.movingType === "location" || records.movingType === "node") setMovingType(records.movingType);
-      if (typeof records.movingId === "string" || records.movingId === null) setMovingId(records.movingId);
-      setAddLocationOpen(records.addLocationOpen === true);
-      if (isNewLocationDraft(records.newLocation)) setNewLocation(records.newLocation);
-      const restoredSelection = records.selected;
-      if (
-        restoredSelection
-        && typeof restoredSelection === "object"
-        && "type" in restoredSelection
-        && "id" in restoredSelection
-        && (restoredSelection.type === "location" || restoredSelection.type === "node")
-        && typeof restoredSelection.id === "string"
-      ) {
-        setSelected({ type: restoredSelection.type, id: restoredSelection.id });
-      } else {
-        setSelected(null);
-      }
-    } else if (draft.toolType === "polygon") {
-      setPoints(restoredPoints);
-      setBuildingName(typeof records.buildingName === "string" ? records.buildingName : "");
-      setBuildingCode(typeof records.buildingCode === "string" ? records.buildingCode : "");
-      setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
-      setMode("area");
-    } else if (draft.toolType === "pathway") {
-      setPathPoints(restoredPoints);
-      setPathStartNodeId(draft.provisionalGeometry.startNodeId ?? null);
-      const restoredPathwayId = typeof records.editingPathId === "string" ? records.editingPathId : null;
-      setEditingPathId(restoredPathwayId);
-      setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
-      setManualPathPointDrag(records.manualPathPointDrag === true);
-      const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
-        ? { ...records.provisionalPathway, pathPoints: restoredPoints }
-        : null;
-      const restoredProvisionalPathwayId = typeof records.provisionalPathwayId === "string"
-        ? records.provisionalPathwayId
-        : null;
-      setProvisionalPathwayId(restoredProvisionalPathwayId);
-      if (restoredProvisionalPathway) {
-        setLocalPathways((pathways) => [
-          ...pathways.filter((pathway) => pathway.id !== restoredProvisionalPathway.id),
-          restoredProvisionalPathway,
-        ]);
-      }
-      setPathDraftDirty(true);
-      setMode("path");
-    } else {
-      const restoredFamily = records.family;
-      if (
-        restoredFamily === "building_footprint"
-        || restoredFamily === "parking_area"
-        || restoredFamily === "cartographic_walkway"
-        || restoredFamily === "vehicle_path"
-        || restoredFamily === "campus_boundary"
-      ) setSelectedLocalFeatureFamily(restoredFamily);
-      if (typeof records.name === "string") setLocalFeatureName(records.name);
-      setLocalFeaturePoints(restoredPoints);
-      setMode("local_feature");
-    }
+    const restoreHandlers: Record<ActiveToolDraft["toolType"], () => void> = {
+      point: () => {
+        setTemporary(restoredPoints[0] ?? null);
+        setPointDraftDirty(true);
+        setMode(records.editorMode === "move" ? "move" : "place");
+        if (records.placingObjectType === "location" || records.placingObjectType === "node") setPlacingObjectType(records.placingObjectType);
+        if (typeof records.placingId === "string") setPlacingId(records.placingId);
+        if (records.placingNodeType === "Entrance" || records.placingNodeType === "Junction" || records.placingNodeType === "Access Point") setPlacingNodeType(records.placingNodeType);
+        if (typeof records.placingNodeName === "string") setPlacingNodeName(records.placingNodeName);
+        if (typeof records.placingAssociatedPlaceId === "string" || records.placingAssociatedPlaceId === null) setPlacingAssociatedPlaceId(records.placingAssociatedPlaceId);
+        if (records.movingType === "location" || records.movingType === "node") setMovingType(records.movingType);
+        if (typeof records.movingId === "string" || records.movingId === null) setMovingId(records.movingId);
+        setAddLocationOpen(records.addLocationOpen === true);
+        if (isNewLocationDraft(records.newLocation)) setNewLocation(records.newLocation);
+        const restoredSelection = records.selected;
+        if (
+          restoredSelection
+          && typeof restoredSelection === "object"
+          && "type" in restoredSelection
+          && "id" in restoredSelection
+          && (restoredSelection.type === "location" || restoredSelection.type === "node")
+          && typeof restoredSelection.id === "string"
+        ) setSelected({ type: restoredSelection.type, id: restoredSelection.id });
+        else setSelected(null);
+      },
+      polygon: () => {
+        setPoints(restoredPoints);
+        setBuildingName(typeof records.buildingName === "string" ? records.buildingName : "");
+        setBuildingCode(typeof records.buildingCode === "string" ? records.buildingCode : "");
+        setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
+        setMode("area");
+      },
+      pathway: () => {
+        setPathPoints(restoredPoints);
+        setPathStartNodeId(draft.provisionalGeometry.startNodeId ?? null);
+        setEditingPathId(typeof records.editingPathId === "string" ? records.editingPathId : null);
+        setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
+        setManualPathPointDrag(records.manualPathPointDrag === true);
+        const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
+          ? { ...records.provisionalPathway, pathPoints: restoredPoints }
+          : null;
+        setProvisionalPathwayId(typeof records.provisionalPathwayId === "string" ? records.provisionalPathwayId : null);
+        if (restoredProvisionalPathway) {
+          setLocalPathways((pathways) => [
+            ...pathways.filter((pathway) => pathway.id !== restoredProvisionalPathway.id),
+            restoredProvisionalPathway,
+          ]);
+        }
+        setPathDraftDirty(true);
+        setMode("path");
+      },
+      local_feature: () => {
+        const restoredFamily = records.family;
+        if (
+          restoredFamily === "building_footprint"
+          || restoredFamily === "parking_area"
+          || restoredFamily === "cartographic_walkway"
+          || restoredFamily === "vehicle_path"
+          || restoredFamily === "campus_boundary"
+        ) setSelectedLocalFeatureFamily(restoredFamily);
+        if (typeof records.name === "string") setLocalFeatureName(records.name);
+        setLocalFeaturePoints(restoredPoints);
+        setMode("local_feature");
+      },
+    };
+    restoreHandlers[draft.toolType]();
   };
 
   const requestDraftResume = (draftId: string) => {
@@ -2085,34 +2118,23 @@ export function MapEditor() {
             label: "🗑 Deactivate Route Node",
             tone: "danger" as const,
             onSelect: () => {
-              const updated = { ...selectedNode, status: "Inactive" as const };
-              updateNode(updated);
-              workingSessionManager.executeOperation({
-                type: "retire_entity",
-                domain: "Routes & Paths",
-                entityId: selectedNode.id,
-                before: selectedNode as unknown as Record<string, unknown>,
-                after: updated as unknown as Record<string, unknown>,
-                description: `Deactivate ${selectedNode.name}`,
-              });
-              const closedPathways = connectedPathways.map((pathway) => ({ ...pathway, status: "Closed" as const }));
-              if (closedPathways.length > 0) {
-                setLocalPathways((items) => [
-                  ...items.filter((item) => !closedPathways.some((pathway) => pathway.id === item.id)),
-                  ...closedPathways,
-                ]);
-                closedPathways.forEach((pathway) => {
-                  const before = connectedPathways.find((candidate) => candidate.id === pathway.id)!;
-                  workingSessionManager.executeOperation({
-                    type: "update_properties",
-                    domain: "Routes & Paths",
-                    entityId: pathway.id,
-                    before: before as unknown as Record<string, unknown>,
-                    after: pathway as unknown as Record<string, unknown>,
-                    description: `Close ${pathway.name} after deactivating ${selectedNode.name}`,
-                  });
-                });
+              const deactivation = deactivateRouteNode(selectedNode, connectedPathways);
+              updateNode(deactivation.node);
+              if (deactivation.pathways.length > 0) {
+                setLocalPathways((items) => items.filter((item) =>
+                  !deactivation.pathways.some((pathway) => pathway.id === item.id),
+                ));
+                setDeletedPathwayIds((ids) => [...new Set([
+                  ...ids,
+                  ...deactivation.pathways.map((pathway) => pathway.id),
+                ])]);
               }
+              workingSessionManager.executeBatch(
+                `Deactivate ${selectedNode.name} and remove connected Pathways`,
+                "Routes & Paths",
+                selectedNode.id,
+                deactivation.operations,
+              );
               setDirty(true);
             },
           },
@@ -2286,12 +2308,6 @@ export function MapEditor() {
         </div>
 
         <div className="flex items-center gap-2">
-          {draftVersion !== null && (
-            <span className="rounded-full bg-slate-100 px-3 py-2 text-[11px] font-bold text-slate-700">Draft v{draftVersion}</span>
-          )}
-          {publishedVersionId && (
-            <span className="rounded-full bg-emerald-50 px-3 py-2 text-[11px] font-bold text-[#005931]">Published {publishedVersionId}</span>
-          )}
           <span
             role="status"
             aria-label="Working Session changes"
@@ -2308,30 +2324,22 @@ export function MapEditor() {
           </button>
           <button
             type="button"
-            disabled={lifecycleBusy || draftVersion === null}
+            disabled={!dirty}
             onClick={() => setConfirm("discard")}
             className="px-4 py-2 border border-[#dbe0e2] rounded-full text-xs font-bold text-[#3f4941] hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
           >
-            Discard Draft
+            Discard
           </button>
           <button
             type="button"
-            disabled={lifecycleBusy || draftVersion === null || workingSessionState.isDirty}
-            onClick={() => setConfirm("publish")}
-            className="px-4 py-2 border border-[#005931] rounded-full text-xs font-bold text-[#005931] hover:bg-emerald-50 disabled:opacity-40 transition cursor-pointer"
-          >
-            Publish Map
-          </button>
-          <button
-            type="button"
-            disabled={!workingSessionState.isDirty || lifecycleBusy || draftVersion === null}
+            disabled={!dirty}
             onClick={openSaveReview}
             className="px-5 py-2 bg-[#005931] hover:bg-[#004727] rounded-full text-xs font-bold text-white shadow disabled:opacity-40 transition flex items-center gap-1.5 cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
             </svg>
-            <span>Save Draft</span>
+            <span>Save Changes</span>
           </button>
         </div>
       </div>
@@ -2341,12 +2349,15 @@ export function MapEditor() {
           center={campusCenter}
           zoom={18}
           minZoom={15}
+          maxZoom={22}
           maxBounds={navigationBounds}
           maxBoundsViscosity={0.7}
           zoomControl={false}
           className="w-full h-full"
         >
           <TileLayer
+            maxNativeZoom={19}
+            maxZoom={22}
             attribution={
               basemap === "satellite"
                 ? `© Esri${displaysOsmOverlays ? " · © OpenStreetMap contributors" : ""}`
@@ -2395,9 +2406,11 @@ export function MapEditor() {
                   dashArray: footprintRetired ? "7 6" : undefined,
                 }}
                 eventHandlers={{
-                  click: () => {
+                  click: (event) => {
                     if (footprintRetired && footprint) selectObject("local_feature", footprint.id);
-                    else selectObject("building", building.id);
+                    else selectCanvasObject("building", building.id, event.latlng
+                      ? [event.latlng.lat, event.latlng.lng]
+                      : polygonCentroid(building.points));
                   },
                 }}
               >
@@ -2414,7 +2427,7 @@ export function MapEditor() {
                 <Marker
                   position={polygonCentroid(building.points)}
                   icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{ click: () => selectObject("building", building.id) }}
+                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonCentroid(building.points)) }}
                 />
               )}
               </Fragment>
@@ -2425,7 +2438,13 @@ export function MapEditor() {
             const source = currentNodes.find((node) => node.id === path.sourceNodeId);
             const destination = currentNodes.find((node) => node.id === path.destinationNodeId);
             const isEditingThisPath = editingPathId === path.id && mode === "path";
-            const currentPoints = isEditingThisPath ? pathPoints : path.pathPoints;
+            const currentPoints = isEditingThisPath
+              ? pathPointDragPreview
+                ? pathPoints.map((point, index) =>
+                    index === pathPointDragPreview.index ? pathPointDragPreview.point : point,
+                  )
+                : pathPoints
+              : path.pathPoints;
             const isSelected = selected?.id === path.id || isEditingThisPath;
 
             const pathOpacity =
@@ -2454,8 +2473,10 @@ export function MapEditor() {
                   opacity: pathOpacity,
                 }}
                 eventHandlers={{
-                  click: () => {
-                    selectObject("pathway", path.id);
+                  click: (event) => {
+                    selectCanvasObject("pathway", path.id, event.latlng
+                      ? [event.latlng.lat, event.latlng.lng]
+                      : [source.lat, source.lng]);
                   },
                 }}
               >
@@ -2484,7 +2505,7 @@ export function MapEditor() {
                 icon={createLocationPinIcon(isSelected)}
                 eventHandlers={{
                   click: () => {
-                    selectObject("location", loc.id);
+                    selectCanvasObject("location", loc.id, [loc.lat, loc.lng]);
                   },
                 }}
               >
@@ -2554,7 +2575,7 @@ export function MapEditor() {
                       setError("");
                       return;
                     }
-                    selectObject("node", node.id);
+                    selectCanvasObject("node", node.id, [node.lat, node.lng]);
                   },
                 }}
               >
@@ -2581,9 +2602,17 @@ export function MapEditor() {
                     setSelectedPathPointIndex(index);
                     setSelected({ type: "path_point", id: `${editingPathId ?? "pathway"}:point:${index}` });
                   },
+                  drag: (event) => {
+                    const marker = event.target as L.Marker;
+                    const next = marker.getLatLng();
+                    if (!pointOnCampus([next.lat, next.lng], campusBoundary)) return;
+                    setPathPointDragPreview({ index, point: [next.lat, next.lng] });
+                    setSelectedPathPointIndex(index);
+                  },
                   dragend: (event) => {
                     const marker = event.target as L.Marker;
                     const next = marker.getLatLng();
+                    setPathPointDragPreview(null);
                     if (!pointOnCampus([next.lat, next.lng], campusBoundary)) {
                       setError("The path point must stay inside the ISU Echague campus boundary.");
                       return;
@@ -2612,11 +2641,9 @@ export function MapEditor() {
                 <Marker
                   key={`path-split-handle-${segmentIndex}`}
                   position={[midpoint.latitude, midpoint.longitude]}
-                  icon={createPathPointSplitHandleIcon()}
+                  icon={createSplitIcon()}
                   eventHandlers={{ click: () => insertPathPoint(segmentIndex) }}
-                >
-                  <Tooltip permanent direction="center">+</Tooltip>
-                </Marker>
+                />
               );
             });
           })()}
@@ -2711,9 +2738,38 @@ export function MapEditor() {
           )}
         </MapContainer>
 
+        {selectionPopover && (
+          <div
+            role="dialog"
+            aria-label="Choose overlapping feature"
+            data-anchor={selectionPopover.anchor.join(",")}
+            className="absolute z-[1100] w-64 -translate-x-1/2 -translate-y-full rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
+            style={{
+              left: `${Math.max(8, Math.min(92, ((selectionPopover.anchor[1] - navigationBounds[0][1]) / (navigationBounds[1][1] - navigationBounds[0][1])) * 100))}%`,
+              top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
+            }}
+          >
+            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose a feature</p>
+            <div className="flex flex-col gap-1">
+              {selectionPopover.candidates.map((candidate) => (
+                <button
+                  key={`${candidate.type}-${candidate.id}`}
+                  type="button"
+                  aria-label={`Select ${candidate.label} ${candidate.kindLabel}`}
+                  className="rounded-xl px-3 py-2 text-left text-xs hover:bg-[#edf3ef]"
+                  onClick={() => selectObject(candidate.type, candidate.id)}
+                >
+                  <strong className="block">{candidate.label}</strong>
+                  <span className="text-[#59645e]">{candidate.kindLabel}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {outsideBoundaryCount > 0 && (
           <div className="absolute bottom-4 right-4 z-[900] max-w-xs rounded-2xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-xs text-amber-900 shadow-lg" role="status">
-            <strong>{outsideBoundaryCount} existing map object{outsideBoundaryCount === 1 ? "" : "s"} outside campus boundary.</strong>
+            <strong>{outsideBoundaryCount} existing editable campus feature{outsideBoundaryCount === 1 ? "" : "s"} outside campus boundary.</strong>
             <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
           </div>
         )}
@@ -2777,7 +2833,7 @@ export function MapEditor() {
           />
         )}
 
-        <div className="absolute top-4 right-4 z-[900] w-72 bg-white/95 backdrop-blur-md p-2 rounded-[20px] shadow-lg border border-[#e1e3e4]">
+        <div className={`${mode === "local_feature" ? "hidden " : ""}absolute top-4 right-4 z-[900] w-72 bg-white/95 backdrop-blur-md p-2 rounded-[20px] shadow-lg border border-[#e1e3e4]`}>
           <div className="relative flex items-center">
             <svg className="w-4 h-4 absolute left-3 text-[#3f4941]/60 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -2851,7 +2907,7 @@ export function MapEditor() {
           </section>
         )}
 
-        {mode !== "select" && mode !== "move" && selected?.type !== "path_point" && (
+        {mode !== "select" && mode !== "move" && mode !== "local_feature" && selected?.type !== "path_point" && (
           <aside className="absolute top-20 right-4 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto bg-white/98 backdrop-blur-md p-5 rounded-[28px] shadow-2xl border border-[#e1e3e4]">
             {error && (
               <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
@@ -3349,10 +3405,10 @@ export function MapEditor() {
                   </select>
                 </label>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Associated Building
-                  <select aria-label="Associated Location" value={selectedNode.associatedPlaceId ?? ""} onChange={(event) => updateNode({ ...selectedNode, associatedPlaceId: event.target.value || null })} disabled={selectedNode.nodeType !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
+                  <select aria-label="Associated Building" value={selectedNode.associatedPlaceId ?? ""} onChange={(event) => updateNode({ ...selectedNode, associatedPlaceId: event.target.value || null })} disabled={selectedNode.nodeType !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
                     <option value="">None</option>
                     {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
-                      <option value={selectedNode.associatedPlaceId}>Missing Location ({selectedNode.associatedPlaceId})</option>
+                      <option value={selectedNode.associatedPlaceId}>Missing Building ({selectedNode.associatedPlaceId})</option>
                     )}
                     {currentLocations.filter((location) => location.type === "Building").map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                   </select>
@@ -3526,8 +3582,9 @@ export function MapEditor() {
               updateNode(updated);
               recordPropertyOperation("Routes & Paths", selectedNode.id, selectedNode, updated, `Edit ${selectedNode.name} details`);
             } else if ("pathPoints" in updated && selectedPath) {
-              updatePathway(updated);
-              recordPropertyOperation("Routes & Paths", selectedPath.id, selectedPath, updated, `Edit ${selectedPath.name} details`);
+              if (updatePathway(updated)) {
+                recordPropertyOperation("Routes & Paths", selectedPath.id, selectedPath, updated, `Edit ${selectedPath.name} details`);
+              }
             }
             setOwnerModal(null);
           }}
@@ -3571,25 +3628,21 @@ export function MapEditor() {
       {confirm && (
         <Modal
           title={
-            confirm === "save" ? "Save Draft?" : confirm === "publish" ? "Publish Map?" : "Discard Draft?"
+            confirm === "save" ? "Save map changes?" : "Discard changes?"
           }
           subtitle={
             confirm === "save"
-              ? "Save every uncommitted Working Session operation as one atomic batch."
-              : confirm === "publish"
-                ? "Run authoritative validation before promoting this Admin Draft."
-                : "Reset the shared Admin Draft and this Working Session to the published baseline."
+              ? "Persist local draft geometry to the central backend."
+              : "Discard uncommitted marker and shape drafts."
           }
           size="sm"
-          variant={confirm === "discard" ? "danger" : "green"}
+          variant={confirm === "save" ? "green" : "danger"}
           onClose={() => setConfirm(null)}
         >
           <p className="text-xs text-[#3f4941] my-2">
             {confirm === "save"
-              ? `${workingSessionState.uncommittedCount} operation${workingSessionState.uncommittedCount === 1 ? "" : "s"} will be committed together against Draft v${draftVersion}.`
-              : confirm === "publish"
-                ? `Draft v${draftVersion} will be revalidated by the backend before publication.`
-                : "Saved draft changes and local operations after the current published revision will be lost."}
+              ? "This will save marker, node, and pathway geometry changes."
+              : "Unsaved marker, node, and pathway edits will be lost."}
           </p>
           {error && (
             <div className="p-2 my-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
@@ -3605,41 +3658,10 @@ export function MapEditor() {
             </Button>
             <Button
               onClick={commit}
-              disabled={lifecycleBusy}
-              variant={confirm === "discard" ? "danger" : "primary"}
+              variant={confirm === "save" ? "primary" : "danger"}
             >
-              {confirm === "save" ? "Confirm Save Draft" : confirm === "publish" ? "Validate & Publish" : "Confirm Discard Draft"}
+              {confirm === "save" ? "Save Changes" : "Discard"}
             </Button>
-          </div>
-        </Modal>
-      )}
-      {conflictReview && (
-        <Modal
-          title="Conflict Review"
-          subtitle="Another administrator changed the Admin Draft. Your local Working Session is preserved."
-          size="md"
-          variant="danger"
-          onClose={() => setConflictReview(null)}
-        >
-          <div className="my-3 space-y-3">
-            {conflictReview.entities.map((conflict, index) => (
-              <section key={`${conflict.entityId}-${conflict.field}-${index}`} className="rounded-xl border border-red-100 p-3">
-                <h3 className="text-sm font-bold text-[#191c1d]">{conflict.entityId} · {conflict.field}</h3>
-                <p className="mt-1 text-[11px] font-bold uppercase tracking-wide text-red-700">{conflict.conflictType}</p>
-                <dl className="mt-2 grid grid-cols-2 gap-3 text-xs">
-                  <div><dt className="font-bold text-[#3f4941]">Server value</dt><dd className="mt-1 break-words">{JSON.stringify(conflict.serverValue)}</dd></div>
-                  <div><dt className="font-bold text-[#3f4941]">Your value</dt><dd className="mt-1 break-words">{JSON.stringify(conflict.clientValue)}</dd></div>
-                </dl>
-              </section>
-            ))}
-          </div>
-          <div className="modal-actions">
-            <Button variant="subtle" onClick={() => setConflictReview(null)}>Keep Working Session</Button>
-            <Button onClick={() => {
-              setDraftVersion(conflictReview.serverDraftVersion);
-              setConflictReview(null);
-              setConfirm("save");
-            }}>Retry Against Draft v{conflictReview.serverDraftVersion}</Button>
           </div>
         </Modal>
       )}
@@ -3662,8 +3684,8 @@ export function MapEditor() {
                   type="button"
                   onClick={() => focusObject(
                     validationError.object,
-                    validationError.message === "Associated Location does not exist."
-                      ? "Associated Location"
+                    validationError.message === "Associated Building does not exist."
+                      ? "Associated Building"
                       : validationError.message === "Building code is required."
                         ? "Building code"
                         : validationError.message === "Building name is required."
