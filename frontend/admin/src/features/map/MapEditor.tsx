@@ -22,12 +22,10 @@ import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
-import { LocalFeatureFamilyPalette } from "./LocalFeatureFamilyPalette";
 import {
   buildRestoreLocalFeatureOperation,
   buildRetireLocalFeatureOperation,
   EDITABLE_LOCAL_FEATURE_FAMILIES,
-  getLocalFeaturePathOptions,
 } from "./localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { RouteDetailsModal } from "../routes/RouteDetailsModal";
@@ -650,8 +648,9 @@ export function MapEditor() {
     () => overlayChanges(authoritativeLayers?.localFeatures ?? normalizedLocalFeatures, localFeatureChanges),
     [authoritativeLayers, localFeatureChanges, normalizedLocalFeatures],
   );
-  const canvasLocalFeatures = currentLocalFeatures.filter((feature) =>
-    feature.family !== "building_footprint");
+  // Local map features are retained by the data/service layer for compatibility,
+  // but are intentionally not rendered in this editor. The campus boundary is
+  // still used below for validation and navigation bounds.
   const selectedLocalFeatureDefinition = EDITABLE_LOCAL_FEATURE_FAMILIES.find(
     (family) => family.id === selectedLocalFeatureFamily,
   )!;
@@ -2366,59 +2365,6 @@ export function MapEditor() {
             onViewportChange={handleViewportChange}
           />
 
-          {canvasLocalFeatures.map((feature) => {
-            const coordinates = feature.coordinates as [number, number][];
-            const isSelected = selected?.type === "local_feature" && selected.id === feature.id;
-            const pathOptions = getLocalFeaturePathOptions(feature, isSelected);
-            const tooltip = (
-              <Tooltip sticky direction="top" className="map-label">
-                <div className="font-bold text-xs">{feature.name}</div>
-                <div className="text-[10px] text-gray-500 font-normal">
-                  {feature.family === "readonly_basemap" ? "🔒 Read-Only Basemap" : feature.family.replaceAll("_", " ")}
-                </div>
-              </Tooltip>
-            );
-            return feature.geometryType === "line" ? (
-              <Polyline
-                key={feature.id}
-                positions={coordinates}
-                pathOptions={pathOptions}
-                eventHandlers={{ click: () => selectObject("local_feature", feature.id) }}
-              >
-                {tooltip}
-              </Polyline>
-            ) : (
-              <Polygon
-                key={feature.id}
-                positions={coordinates}
-                pathOptions={pathOptions}
-                eventHandlers={{ click: () => selectObject("local_feature", feature.id) }}
-              >
-                {tooltip}
-              </Polygon>
-            );
-          })}
-
-          {mode === "local_feature" && localFeaturePoints.length >= 2 && (() => {
-            const previewFeature: LocalMapFeatureEntity = {
-              id: "draft",
-              family: selectedLocalFeatureFamily,
-              name: localFeatureName,
-              isEditable: true,
-              geometryType: selectedLocalFeatureDefinition.geometryType,
-              coordinates: localFeaturePoints,
-              status: "active",
-            };
-            const pathOptions = {
-              ...getLocalFeaturePathOptions(previewFeature, true),
-              className: "local-feature-draft",
-              dashArray: "6 5",
-            };
-            return selectedLocalFeatureDefinition.geometryType === "line"
-              ? <Polyline positions={localFeaturePoints} pathOptions={pathOptions} />
-              : <Polygon positions={localFeaturePoints} pathOptions={pathOptions} />;
-          })()}
-
           {filteredBuildings.map((building) => {
             const isSelected = selected?.id === building.id;
             const footprint = currentLocalFeatures.find((feature) =>
@@ -2820,19 +2766,6 @@ export function MapEditor() {
           onResumeDraft={requestDraftResume}
           showGuidance={mode !== "move"}
         />
-
-        {mode === "local_feature" && (
-          <LocalFeatureFamilyPalette
-            selectedFamily={selectedLocalFeatureFamily}
-            onSelectFamily={selectLocalFeatureFamily}
-            featureName={localFeatureName}
-            onFeatureNameChange={setLocalFeatureName}
-            pointCount={localFeaturePoints.length}
-            canCreate={canCreateLocalFeature}
-            onCreate={createSelectedLocalFeature}
-            onClear={() => setLocalFeaturePoints([])}
-          />
-        )}
 
         {pendingToolRequest && workingSessionState.activeDraft && (
           <ToolInterruptionDialog

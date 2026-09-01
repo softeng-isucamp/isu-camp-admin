@@ -218,67 +218,7 @@ describe("Map Editor preview", () => {
       "true",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Local Feature" }));
-    expect(screen.getByRole("status", { name: "Local Feature guidance" })).toBeInTheDocument();
-  });
-
-  it("offers creation choices for all five editable Local Map Feature families", async () => {
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Local Feature" }));
-
-    const palette = screen.getByRole("region", { name: "Local feature creation options" });
-    expect(palette).toHaveTextContent("Building Footprint");
-    expect(palette).toHaveTextContent("Parking Area");
-    expect(palette).toHaveTextContent("Walkway");
-    expect(palette).toHaveTextContent("Vehicle Path");
-    expect(palette).toHaveTextContent("Campus Boundary");
-  });
-
-  it("creates a selected Local Map Feature family from canvas geometry", async () => {
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Local Feature" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Vehicle Path/ }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Local feature name" }), {
-      target: { value: "East Service Lane" },
-    });
-    clickMap(16.7201, 121.6891);
-    clickMap(16.7204, 121.6894);
-    fireEvent.click(screen.getByRole("button", { name: "Create Vehicle Path" }));
-
-    expect(screen.getByRole("complementary", { name: "East Service Lane object details" })).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
-  });
-
-  it("keeps a retired feature visible with a warning and restores it instantly", async () => {
-    renderEditor();
-
-    const parkingArea = await screen.findByRole("button", { name: "local-feature-feat-poly-pkg-west" });
-    fireEvent.click(parkingArea);
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Retire Feature" }));
-
-    expect(screen.getByRole("alert", { name: "Retired Local Map Feature" })).toHaveTextContent(
-      "retired in this Working Session",
-    );
-    expect(screen.getByRole("button", { name: "local-feature-feat-poly-pkg-west" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "⎌ Restore Feature" }));
-
-    expect(screen.queryByRole("alert", { name: "Retired Local Map Feature" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("2 changes");
-  });
-
-  it("edits Local Map Feature properties through curated schema controls only", async () => {
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "local-feature-feat-poly-pkg-west" }));
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
-
-    expect(screen.getByRole("combobox", { name: "SURFACE" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "ACCESS" })).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: /OSM tag/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Local Feature" })).not.toBeInTheDocument();
   });
 
   it("retires a Building Footprint without deleting its Building from Locations", async () => {
@@ -564,16 +504,11 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
-  it("inspects a read-only basemap feature with disabled edits and OSM lineage", async () => {
+  it("does not render imported local map features", async () => {
     renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: "local-feature-feat-poly-water-pond-01" }));
-
-    expect(screen.getByText("[🔒 Read-Only Basemap]")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Source Lineage & OSM Tags" }));
-    expect(screen.getByText("way/9823101")).toBeInTheDocument();
-    expect(screen.getByText("lagoon")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "local-feature-feat-poly-water-pond-01" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Campus Aquaculture Lagoon")).not.toBeInTheDocument();
   });
 
   it("persists a seeded Route Node's moved position", async () => {
