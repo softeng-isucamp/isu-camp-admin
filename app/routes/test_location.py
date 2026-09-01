@@ -29,7 +29,7 @@ class FakeRecord:
     def to_location_dto(self, building=None, floor=None):
         return {
             "id": str(self.location_id), "name": self.location_name,
-            "code": self.location_code, "type": "Room" if self.type_id == 3 else "Building",
+            "code": self.location_code, "type": {1: "Room", 2: "Laboratory", 3: "Office", 4: "Facility"}[self.type_id],
             "parentId": str(self.building_id) if self.building_id else None,
             "building": building, "floor": floor, "function": self.description,
             "keywords": self.keywords, "status": "Active",
@@ -62,16 +62,38 @@ class FakeFloor:
         self.floor_number = number
 
 
+class FakeBuilding:
+    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building"):
+        self.building_id = identifier
+        self.building_name = name
+        self.building_code = code
+        self.description = description
+        self.latitude = None
+        self.longitude = None
+
+    def to_location_dto(self):
+        return {
+            "id": str(self.building_id), "name": self.building_name,
+            "code": self.building_code, "type": "Building", "parentId": None,
+            "building": None, "floor": None, "function": self.description,
+            "keywords": None, "status": "Active", "lat": None, "lng": None,
+            "positioned": False, "hasPhoto": False,
+        }
+
+
 def make_client(monkeypatch):
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
-    building = FakeRecord(1, "Engineering Hall", "ENG", 1)
-    room = FakeRecord(2, "Room 204", "ENG-204", 3, building_id=1)
+    building = FakeBuilding(1)
+    room = FakeRecord(2, "Room 204", "ENG-204", 1, building_id=1)
     room.floor_id = 2
     monkeypatch.setattr(location_module, "Location", type("FakeLocation", (), {
-        "query": FakeQuery([building, room]), "location_id": FakeColumn(),
+        "query": FakeQuery([room]), "location_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(location_module, "Building", type("FakeBuildingModel", (), {
+        "query": FakeQuery([building]), "building_id": FakeColumn(),
     }))
     monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
         "query": FakeQuery([FakeFloor(2, 1, 2)]), "floor_id": FakeColumn(),
@@ -98,6 +120,19 @@ def test_list_locations_applies_relationship_filters_before_pagination(monkeypat
     assert response.status_code == 200
     assert response.json["total"] == 1
     assert [item["id"] for item in response.json["items"]] == ["2"]
+
+
+def test_list_locations_composes_buildings_and_uses_database_location_types(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.get("/api/locations?page=1&pageSize=10")
+
+    assert response.status_code == 200
+    assert response.json["total"] == 2
+    assert [(item["name"], item["type"]) for item in response.json["items"]] == [
+        ("Engineering Hall", "Building"),
+        ("Room 204", "Room"),
+    ]
 
 
 def test_list_locations_requires_authentication(monkeypatch):
@@ -136,8 +171,9 @@ class MutationQuery:
 
 
 class MutationSession:
-    def __init__(self, records):
+    def __init__(self, records, buildings):
         self.records = records
+        self.buildings = buildings
         self.commits = 0
         self.rollbacks = 0
         self.fail_commit = False
@@ -145,8 +181,12 @@ class MutationSession:
         self.deleted = []
 
     def add(self, record):
-        record.location_id = max((item.location_id for item in self.records), default=0) + 1
-        self.records.append(record)
+        if record.__class__.__name__ == "MutationBuilding":
+            record.building_id = max((item.building_id for item in self.buildings), default=0) + 1
+            self.buildings.append(record)
+        else:
+            record.location_id = max((item.location_id for item in self.records), default=0) + 1
+            self.records.append(record)
         self.pending = record
 
     def flush(self):
@@ -166,6 +206,8 @@ class MutationSession:
         self.rollbacks += 1
         if self.pending in self.records:
             self.records.remove(self.pending)
+        if self.pending in self.buildings:
+            self.buildings.remove(self.pending)
         self.deleted = []
         self.pending = None
 
@@ -179,7 +221,8 @@ def make_mutation_client(monkeypatch):
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
     records = []
-    session = MutationSession(records)
+    buildings = []
+    session = MutationSession(records, buildings)
 
     class MutationRecord(FakeRecord):
         query = MutationQuery(records)
@@ -200,6 +243,14 @@ def make_mutation_client(monkeypatch):
             return dto
 
     monkeypatch.setattr(location_module, "Location", MutationRecord)
+    class MutationBuilding(FakeBuilding):
+        query = FakeQuery(buildings)
+        building_id = FakeColumn()
+
+        def __init__(self, **values):
+            super().__init__(0, values["building_name"], values["building_code"], values.get("description"))
+
+    monkeypatch.setattr(location_module, "Building", MutationBuilding)
     monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
         "query": FakeQuery([]), "floor_id": FakeColumn(),
     }))
@@ -215,7 +266,7 @@ def test_invalid_legacy_floor_relationship_is_reported_instead_of_projected(monk
     monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
         "query": FakeQuery([floor]), "floor_id": FakeColumn(),
     }))
-    room = type(records[0])(location_name="Room 204", location_code="ENG-204", type_id=3, building_id=int(building.json["id"]), floor_id=20, floor_level=None)
+    room = FakeRecord(21, "Room 204", "ENG-204", 1, building_id=int(building.json["id"]), floor_id=20)
     room.location_id = 21
     records.append(room)
 
@@ -252,18 +303,16 @@ def test_create_rolls_back_when_persistence_fails(monkeypatch):
     assert session.rollbacks == 1
 
 
-def test_photo_upload_persists_metadata_without_json_binary(monkeypatch):
+def test_building_photo_upload_is_rejected_without_building_photo_schema(monkeypatch):
     client, records, _ = make_mutation_client(monkeypatch)
     created = client.post(
         "/api/locations",
         data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png")},
         content_type="multipart/form-data",
     )
-    assert created.status_code == 201
-    assert created.json["hasPhoto"] is True
-    assert "photo" not in created.json
-    record = records[0]
-    assert record.photo_mime_type == "image/png"
+    assert created.status_code == 400
+    assert created.json["fields"]["photo"]
+    assert records == []
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)

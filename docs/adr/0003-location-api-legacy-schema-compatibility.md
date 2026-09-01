@@ -12,6 +12,9 @@ Outdoor Point Locations are edited only through the narrow authenticated
 `PATCH /api/locations/<id>/position` operation; ordinary create/update writes
 are orchestrated through that operation by the frontend adapter.
 
-`building_id` and `floor_id` are resolved against persisted location rows for
-display context. Floor rows remain readable compatibility data; new floor
-grouping behavior follows ADR 0001.
+`building_id` is resolved against the persisted `public.building` table and
+`floor_id` is resolved against `public.floor` for display context. Buildings
+are composed into the directory from `public.building`; `public.location`
+contains only the types represented by `public.location_type`. Floor rows
+remain readable compatibility data; new floor grouping behavior follows ADR
+0001.

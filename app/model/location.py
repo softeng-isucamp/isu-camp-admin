@@ -1,14 +1,13 @@
 from extensions import db
 from datetime import datetime
 
+# These are the IDs currently persisted by public.location_type. Buildings
+# and Floors are separate tables and are therefore not location type IDs.
 LOCATION_TYPE_NAMES = {
-    1: "Building",
-    2: "Floor",
-    3: "Room",
-    4: "Office",
-    5: "Laboratory",
-    6: "Restroom",
-    7: "Facility",
+    1: "Room",
+    2: "Laboratory",
+    3: "Office",
+    4: "Facility",
 }
 LOCATION_TYPE_IDS = {name: identifier for identifier, name in LOCATION_TYPE_NAMES.items()}
 
