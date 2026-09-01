@@ -6,6 +6,60 @@ export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
   ? [points.reduce((sum, [lat]) => sum + lat, 0) / points.length, points.reduce((sum, [, lng]) => sum + lng, 0) / points.length]
   : [0, 0];
 
+/** Returns true when two non-adjacent polygon edges cross or overlap. */
+export const polygonSelfIntersects = (points: MapPoint[]): boolean => {
+  const ring = points.length > 1 && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1]
+    ? points.slice(0, -1)
+    : points;
+  if (ring.length < 4) return false;
+  const orientation = (a: MapPoint, b: MapPoint, c: MapPoint) => {
+    const value = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    return Math.abs(value) < Number.EPSILON ? 0 : value > 0 ? 1 : 2;
+  };
+  const onSegment = (a: MapPoint, b: MapPoint, c: MapPoint) =>
+    Math.min(a[0], c[0]) <= b[0] && b[0] <= Math.max(a[0], c[0])
+    && Math.min(a[1], c[1]) <= b[1] && b[1] <= Math.max(a[1], c[1]);
+  const intersects = (a: MapPoint, b: MapPoint, c: MapPoint, d: MapPoint) => {
+    const abC = orientation(a, b, c);
+    const abD = orientation(a, b, d);
+    const cdA = orientation(c, d, a);
+    const cdB = orientation(c, d, b);
+    if (abC !== abD && cdA !== cdB) return true;
+    return (abC === 0 && onSegment(a, c, b)) || (abD === 0 && onSegment(a, d, b))
+      || (cdA === 0 && onSegment(c, a, d)) || (cdB === 0 && onSegment(c, b, d));
+  };
+  for (let first = 0; first < ring.length; first += 1) {
+    const firstEnd = (first + 1) % ring.length;
+    for (let second = first + 1; second < ring.length; second += 1) {
+      const secondEnd = (second + 1) % ring.length;
+      if (first === second || firstEnd === second || secondEnd === first) continue;
+      if (intersects(ring[first], ring[firstEnd], ring[second], ring[secondEnd])) return true;
+    }
+  }
+  return false;
+};
+
+/** Translates every vertex by the same latitude/longitude delta. */
+export const translatePolygon = (points: MapPoint[], delta: MapPoint): MapPoint[] =>
+  points.map(([lat, lng]) => [lat + delta[0], lng + delta[1]]);
+
+/** Area-weighted centroid used for internal labels and routing anchors. */
+export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
+  if (points.length < 3) return polygonCentroid(points);
+  let twiceArea = 0;
+  let latitude = 0;
+  let longitude = 0;
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length];
+    const cross = point[0] * next[1] - next[0] * point[1];
+    twiceArea += cross;
+    latitude += (point[0] + next[0]) * cross;
+    longitude += (point[1] + next[1]) * cross;
+  });
+  if (Math.abs(twiceArea) < Number.EPSILON) return polygonCentroid(points);
+  return [latitude / (3 * twiceArea), longitude / (3 * twiceArea)];
+};
+
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
 
@@ -43,6 +97,20 @@ const validCoordinate = ([lat, lng]: [number, number]) =>
 
 const label = (object: { name: string }) => object.name.trim() || "Unnamed object";
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+
+/** Keep pathway endpoints relationally owned by the Route Nodes collection.
+ * Endpoint coordinates are rendered from those nodes and must not also be
+ * persisted as intermediate Path Points.
+ */
+export const withoutEndpointPathPoints = (
+  points: [number, number][],
+  source: [number, number],
+  destination: [number, number],
+): [number, number][] => points.filter(([lat, lng]) =>
+  !([source, destination] as [number, number][]).some(([endpointLat, endpointLng]) =>
+    lat === endpointLat && lng === endpointLng,
+  ),
+);
 
 export function reviewMapDraft(input: {
   original: MapSnapshot;
@@ -104,6 +172,13 @@ export function reviewMapDraft(input: {
     if (!object.nodeType) addError(reference, "Route Node type is required.");
     if (!validCoordinate([object.lat, object.lng])) addError(reference, "Route Node latitude and longitude must be valid coordinates.");
     if (object.associatedPlaceId && !locationIds.has(object.associatedPlaceId)) addError(reference, "Associated Location does not exist.");
+    if (object.associatedPlaceId) {
+      const associated = current.locations.find((location) => location.id === object.associatedPlaceId);
+      // Legacy map fixtures may use a Facility-shaped association. Enforce the
+      // canonical Building boundary once the associated network Building exists.
+      if (associated && associated.type !== "Building" && current.buildings.some((building) => building.id === associated.id)) addError(reference, "Entrance Route Nodes may only be associated with a Building.");
+      if (object.nodeType !== "Entrance") addError(reference, "Only Entrance Route Nodes may have a Building association.");
+    }
   });
 
   const connections = new Map<string, string>();
@@ -129,6 +204,7 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Building code is required.");
     if (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3) addError(reference, "Building geometry requires at least 3 distinct points.");
     if (object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
+    if (polygonSelfIntersects(object.points)) addError(reference, "Building geometry contains self-intersecting edges.");
   });
 
   if (campusBoundary) {

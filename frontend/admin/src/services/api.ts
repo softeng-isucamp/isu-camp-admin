@@ -37,6 +37,8 @@ import {
 import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
 import { LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
+import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
+import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
 
 
 // ==========================================
@@ -60,6 +62,12 @@ const localAdapter = createLocalAdapter(
     ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
         nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
     : { buildings, locations, nodes: routeNodes, pathways },
+  !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
+);
+const canonicalNetwork = createCanonicalNetworkStore(
+  USE_GENERATED_MAP_FIXTURE
+    ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location) => location.type === "Building") }
+    : { buildings, nodes: routeNodes, pathways, locationBuildings: locations.filter((location) => location.type === "Building").map((location) => ({ id: location.id, name: location.name })) },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
 
@@ -138,6 +146,22 @@ const failIfConfigured = (key: FailureKey) => {
 // ==========================================
 
 export interface Services {
+  network: {
+    snapshot(): Promise<NetworkSnapshot>;
+    buildings(): Promise<NetworkBuilding[]>;
+    routeNodes(): Promise<NetworkRouteNode[]>;
+    pathways(): Promise<NetworkPathway[]>;
+    saveBuilding(building: BuildingWriteRequest): Promise<NetworkBuilding>;
+    saveRouteNode(node: RouteNodeWriteRequest): Promise<NetworkRouteNode>;
+    associateEntrance(nodeId: string, buildingId: string): Promise<NetworkRouteNode>;
+    clearEntranceAssociation(nodeId: string): Promise<NetworkRouteNode>;
+    savePathway(pathway: PathwayWriteRequest): Promise<NetworkPathway>;
+    closePathway(id: string): Promise<NetworkPathway>;
+    reopenPathway(id: string): Promise<NetworkPathway>;
+    removePathway(id: string, confirmed?: boolean): Promise<void>;
+    saveMapDraft(draft: MapDraftSaveRequest): Promise<NetworkSnapshot>;
+  };
+
   auth: {
     login(
       username: string,
@@ -176,7 +200,9 @@ export interface Services {
 
     save(path: Pathway): Promise<Pathway>;
 
-    remove(id: string): Promise<void>;
+    close(id: string): Promise<Pathway>;
+    reopen(id: string): Promise<Pathway>;
+    remove(id: string, confirmed?: boolean): Promise<void>;
   };
 
   users: {
@@ -236,7 +262,8 @@ export interface Services {
 
     routes(
       json: string,
-      commit?: boolean
+      commit?: boolean,
+      mode?: "add" | "update"
     ): Promise<{
       imported: number;
       errors: string[];
@@ -297,6 +324,78 @@ function checkRateLimit(response: Response): void {
 }
 
 export const services: Services = {
+
+  // ========================================
+  // CANONICAL WALKING NETWORK
+  // ========================================
+
+  network: {
+    snapshot: async () => USE_HTTP_API
+      ? apiJson<NetworkSnapshot>("/api/network")
+      : wait(canonicalNetwork.snapshot()),
+    buildings: async () => USE_HTTP_API
+      ? apiJson<NetworkBuilding[]>("/api/network/buildings")
+      : wait(canonicalNetwork.buildings()),
+    routeNodes: async () => USE_HTTP_API
+      ? apiJson<NetworkRouteNode[]>("/api/network/route-nodes")
+      : wait(canonicalNetwork.routeNodes()),
+    pathways: async () => USE_HTTP_API
+      ? apiJson<NetworkPathway[]>("/api/network/pathways")
+      : wait(canonicalNetwork.pathways()),
+    saveBuilding: async (building) => {
+      const next = { ...building, id: building.id ?? `building-${Date.now()}` };
+      if (USE_HTTP_API) return apiJson<NetworkBuilding>(`/api/network/buildings${building.id ? `/${encodeURIComponent(building.id)}` : ""}`, { method: building.id ? "PUT" : "POST", body: JSON.stringify(next) });
+      const current = canonicalNetwork.snapshot();
+      const index = current.buildings.findIndex((item) => item.id === next.id);
+      if (index >= 0) current.buildings[index] = next;
+      else current.buildings.push(next);
+      return wait(canonicalNetwork.save(current).buildings.find((item) => item.id === next.id)!);
+    },
+    saveRouteNode: async (node) => {
+      const next = { ...node, id: node.id ?? `node-${Date.now()}` } as NetworkRouteNode;
+      if (USE_HTTP_API) return apiJson<NetworkRouteNode>(`/api/network/route-nodes${node.id ? `/${encodeURIComponent(node.id)}` : ""}`, { method: node.id ? "PUT" : "POST", body: JSON.stringify(next) });
+      const current = canonicalNetwork.snapshot();
+      const index = current.routeNodes.findIndex((item) => item.id === next.id);
+      if (index >= 0) current.routeNodes[index] = next;
+      else current.routeNodes.push(next);
+      return wait(canonicalNetwork.save(current).routeNodes.find((item) => item.id === next.id)!);
+    },
+    associateEntrance: async (nodeId, buildingId) => {
+      if (USE_HTTP_API) return apiJson<NetworkRouteNode>(`/api/network/route-nodes/${encodeURIComponent(nodeId)}/entrance`, { method: "POST", body: JSON.stringify({ buildingId }) });
+      return wait(canonicalNetwork.associateEntrance(nodeId, buildingId));
+    },
+    clearEntranceAssociation: async (nodeId) => {
+      if (USE_HTTP_API) return apiJson<NetworkRouteNode>(`/api/network/route-nodes/${encodeURIComponent(nodeId)}/entrance`, { method: "DELETE" });
+      return wait(canonicalNetwork.clearEntranceAssociation(nodeId));
+    },
+    savePathway: async (pathway) => {
+      const next = { ...pathway, id: pathway.id ?? `pathway-${Date.now()}` } as NetworkPathway;
+      if (USE_HTTP_API) return apiJson<NetworkPathway>(`/api/network/pathways${pathway.id ? `/${encodeURIComponent(pathway.id)}` : ""}`, { method: pathway.id ? "PUT" : "POST", body: JSON.stringify(next) });
+      return wait(canonicalNetwork.savePathway(next));
+    },
+    closePathway: async (id) => {
+      if (USE_HTTP_API) return apiJson<NetworkPathway>(`/api/network/pathways/${encodeURIComponent(id)}/close`, { method: "POST" });
+      return wait(canonicalNetwork.closePathway(id));
+    },
+    reopenPathway: async (id) => {
+      if (USE_HTTP_API) return apiJson<NetworkPathway>(`/api/network/pathways/${encodeURIComponent(id)}/reopen`, { method: "POST" });
+      return wait(canonicalNetwork.reopenPathway(id));
+    },
+    removePathway: async (id, confirmed = false) => {
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/network/pathways/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ confirmed }) });
+        return;
+      }
+      canonicalNetwork.removePathway(id, confirmed);
+      await wait(undefined);
+    },
+    saveMapDraft: async (draft) => {
+      if (USE_HTTP_API) return apiJson<NetworkSnapshot>("/api/network/map-draft", { method: "POST", body: JSON.stringify(draft) });
+      const current = canonicalNetwork.snapshot();
+      const next = { ...current, ...draft };
+      return wait(canonicalNetwork.save(next));
+    },
+  },
 
   // ========================================
   // AUTHENTICATION
@@ -695,6 +794,7 @@ export const services: Services = {
       pathwaySchema.parse(
         path
       );
+      canonicalNetwork.savePathway(normalizePathway(path));
 
       const index =
         pathways.findIndex(
@@ -725,12 +825,32 @@ export const services: Services = {
     },
 
 
-    remove: async (id) => {
+    close: async (id) => {
+      if (USE_HTTP_API) return apiJson<Pathway>(`/api/routes/${encodeURIComponent(id)}/close`, { method: "POST" });
+      canonicalNetwork.closePathway(id);
+      const pathway = pathways.find((candidate) => candidate.id === id);
+      if (!pathway) throw new Error("Pathway not found.");
+      pathway.status = "Closed";
+      return wait(clone(pathway));
+    },
+
+    reopen: async (id) => {
+      if (USE_HTTP_API) return apiJson<Pathway>(`/api/routes/${encodeURIComponent(id)}/reopen`, { method: "POST" });
+      canonicalNetwork.reopenPathway(id);
+      const pathway = pathways.find((candidate) => candidate.id === id);
+      if (!pathway) throw new Error("Pathway not found.");
+      pathway.status = "Open";
+      return wait(clone(pathway));
+    },
+
+    remove: async (id, confirmed = false) => {
 
       if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/routes/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await apiJson<unknown>(`/api/routes/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ confirmed }) });
         return;
       }
+
+      canonicalNetwork.removePathway(id, confirmed);
 
       const index =
         pathways.findIndex(
@@ -1220,6 +1340,13 @@ export const services: Services = {
           else buildings.push(clone(building));
         });
       }
+      if (edit?.pathways) {
+        edit.pathways.forEach((pathway) => {
+          const index = pathways.findIndex((item) => item.id === pathway.id);
+          if (index >= 0) pathways[index] = clone(pathway);
+          else pathways.push(clone(pathway));
+        });
+      }
 
 
       // ------------------------------------
@@ -1298,6 +1425,52 @@ export const services: Services = {
             clone(
               edit.areaPoints
             ),
+        });
+      }
+
+      // Keep the legacy-shaped Map Editor payload and the canonical network
+      // store in sync. Routes and Map Editor share these records, so a draft
+      // saved by one module must be visible to the other module immediately.
+      const canonical = canonicalNetwork.snapshot();
+      const mergeById = <T extends { id: string }>(original: T[], changed: T[]) => {
+        const changes = new Map(changed.map((item) => [item.id, item]));
+        return original
+          .map((item) => changes.get(item.id) ?? item)
+          .concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
+      };
+      const changedNodes = (edit?.nodes ?? []).map(normalizeRouteNode);
+      const toCanonicalPathway = (pathway: Pathway): NetworkPathway => {
+        const normalized = normalizePathway(pathway);
+        return { ...normalized, type: normalized.type ?? "Campus walkway", direction: normalized.direction ?? "two_way" };
+      };
+      const changedPathways: NetworkPathway[] = (edit?.pathways ?? []).map(toCanonicalPathway);
+      const changedBuildings = (edit?.buildings ?? []).map((building) => normalizeBuilding(building));
+      if (edit?.movedNode) {
+        const node = routeNodes.find((candidate) => candidate.id === edit.movedNode?.id);
+        if (node) changedNodes.push(normalizeRouteNode(node));
+      }
+      if (edit?.selected?.type === "node" && edit.place) {
+        const node = routeNodes.find((candidate) => candidate.id === edit.selected?.id);
+        if (node) changedNodes.push(normalizeRouteNode(node));
+      }
+      if (edit?.updatedPath) {
+        const pathway = pathways.find((candidate) => candidate.id === edit.updatedPath?.id);
+        if (pathway) changedPathways.push(toCanonicalPathway(pathway));
+      }
+      if (edit?.selected?.type === "pathway" && edit.pathPoints) {
+        const pathway = pathways.find((candidate) => candidate.id === edit.selected?.id);
+        if (pathway) changedPathways.push(toCanonicalPathway(pathway));
+      }
+      if (changedNodes.length || changedPathways.length || changedBuildings.length) {
+        canonicalNetwork.save({
+          ...canonical,
+          routeNodes: mergeById(canonical.routeNodes, changedNodes),
+          pathways: mergeById(canonical.pathways, changedPathways).map((pathway) => ({
+            ...pathway,
+            type: pathway.type ?? "Campus walkway",
+            direction: pathway.direction ?? "two_way",
+          })),
+          buildings: mergeById(canonical.buildings, changedBuildings),
         });
       }
 
@@ -1480,10 +1653,7 @@ export const services: Services = {
     // Routes Import
     // --------------------------------------
 
-    routes: async (
-      json,
-      commit = false
-    ) => {
+    routes: async (json, commit = false, mode = "add") => {
 
       let parsed: unknown;
 
@@ -1509,98 +1679,82 @@ export const services: Services = {
           : [parsed];
 
       const errors: string[] = [];
-
-      const pending: Pathway[] =
-        [];
-
-
-      rows.forEach(
-        (row, index) => {
-
-          const result =
-            routeImportSchema.safeParse(
-              row
-            );
-
-
-          if (!result.success) {
-
-            errors.push(
-              `Row ${
-                index + 1
-              }: invalid route fields.`
-            );
-
-          } else if (
-            !routeNodes.some(
-              (node) =>
-                node.id ===
-                result.data.sourceNodeId
-            ) ||
-            !routeNodes.some(
-              (node) =>
-                node.id ===
-                result.data.destinationNodeId
-            )
-          ) {
-
-            errors.push(
-              `Row ${
-                index + 1
-              }: node reference not found.`
-            );
-
-          } else {
-
-            pending.push({
-
-              ...result.data,
-
-              distance: "—",
-
-              time: "—",
-
-              shade: "Unshaded",
-
-              type: "Campus walkway",
-
-              direction: "Two-way",
-
-              status: "Open",
-            });
+      const current = canonicalNetwork.snapshot();
+      const pending: NetworkPathway[] = [];
+      const seenIds = new Set<string>();
+      const seenConnections = new Set<string>();
+      rows.forEach((row, index) => {
+        const detailed = pathwaySchema.safeParse(row);
+        const legacy = routeImportSchema.safeParse(row);
+        if (!detailed.success && !legacy.success) {
+          const result = detailed;
+          result.error.issues.forEach((issue) => errors.push(`Row ${index + 1}, ${issue.path.join(".") || "record"}: ${issue.message}`));
+          return;
+        }
+        const value = detailed.success ? detailed.data : {
+          ...legacy.data!, distance: "—", time: "—", shade: "Unknown" as const,
+          type: "Campus walkway", direction: "Two-way" as const, status: "Open" as const,
+        };
+        const id = value.id;
+        if (seenIds.has(id)) errors.push(`Row ${index + 1}, id: duplicates another row in this file.`);
+        seenIds.add(id);
+        const existing = current.pathways.find((pathway) => pathway.id === id);
+        if (mode === "add" && existing) errors.push(`Row ${index + 1}, id: already exists.`);
+        if (mode === "update" && !existing) errors.push(`Row ${index + 1}, id: no existing Pathway matches this row.`);
+        const candidate = {
+          id,
+          name: value.name,
+          sourceNodeId: value.sourceNodeId,
+          destinationNodeId: value.destinationNodeId,
+          pathSequence: { points: value.pathPoints.map(([latitude, longitude]) => ({ latitude, longitude })) },
+          distanceMeters: existing?.distanceMeters ?? null,
+          estimatedTimeSeconds: existing?.estimatedTimeSeconds ?? null,
+          type: value.type,
+          shade: value.shade === "Unknown" ? null : value.shade,
+          direction: value.direction === "Two-way" ? "two_way" as const : value.direction === "One-way" ? "one_way" as const : null,
+          status: value.status === "Open" ? "open" as const : value.status === "Closed" ? "closed" as const : "closed" as const,
+        } satisfies NetworkPathway;
+        try {
+          if (!current.routeNodes.some((node) => node.id === candidate.sourceNodeId) ||
+            !current.routeNodes.some((node) => node.id === candidate.destinationNodeId)) {
+            throw new Error("node reference not found.");
           }
+          const connection = [candidate.sourceNodeId, candidate.destinationNodeId].sort().join("::");
+          if (seenConnections.has(connection)) throw new Error("duplicate physical connection in this file.");
+          seenConnections.add(connection);
+          validatePathway(candidate, current, { existingPathwayId: mode === "update" ? id : undefined });
+          pending.push(candidate);
+        } catch (cause) {
+          errors.push(`Row ${index + 1}: ${cause instanceof Error ? cause.message : "invalid Pathway."}`);
         }
-      );
-
-
-      if (
-        commit &&
-        errors.length === 0
-      ) {
-
-        pathways.push(
-          ...pending
-        );
-
-        if (pending.length) {
-
-          addAudit(
-            "Imported Routes",
-            `${pending.length} routes`
-          );
-        }
-      }
-
-
-      return wait({
-
-        imported:
-          errors.length === 0
-            ? pending.length
-            : 0,
-
-        errors,
       });
+      if (commit && errors.length === 0) {
+        const next = current;
+        pending.forEach((pathway) => {
+          const index = next.pathways.findIndex((candidate) => candidate.id === pathway.id);
+          if (index >= 0) next.pathways[index] = pathway;
+          else next.pathways.push(pathway);
+          const legacyIndex = pathways.findIndex((candidate) => candidate.id === pathway.id);
+          const legacy = {
+            id: pathway.id,
+            name: pathway.name,
+            sourceNodeId: pathway.sourceNodeId,
+            destinationNodeId: pathway.destinationNodeId,
+            pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
+            distance: "—",
+            time: "—",
+            shade: (pathway.shade ?? "Unknown") as Pathway["shade"],
+            type: pathway.type ?? "Campus walkway",
+            direction: pathway.direction === "one_way" ? "One-way" as const : "Two-way" as const,
+            status: pathway.status === "open" ? "Open" as const : "Closed" as const,
+          };
+          if (legacyIndex >= 0) pathways[legacyIndex] = legacy;
+          else pathways.push(legacy);
+        });
+        canonicalNetwork.save(next);
+        if (pending.length) addAudit("Imported Pathways", `${pending.length} pathways`);
+      }
+      return wait({ imported: errors.length === 0 ? pending.length : 0, errors });
     },
   },
 };
