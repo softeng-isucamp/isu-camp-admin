@@ -1,7 +1,7 @@
 
 # ISU-CAMP Admin Portal
 
-The portal is now a Vite + React + TypeScript application organized by feature modules. It follows the ISU-CAMP Figma administration mockup and uses a seeded asynchronous mock API until a backend is connected.
+The portal is now a Vite + React + TypeScript application organized by feature modules. It follows the ISU-CAMP Figma administration mockup and supports local/mock adapters plus an authenticated HTTP backend in real mode.
 
 ## Development
 

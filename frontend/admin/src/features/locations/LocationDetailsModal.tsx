@@ -9,6 +9,7 @@ interface LocationDetailsFieldsProps {
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: LocationType) => void;
+  statusEditable?: boolean;
 }
 
 const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
@@ -19,6 +20,7 @@ export function LocationDetailsFields({
   errors = {},
   onChange,
   onTypeChange,
+  statusEditable = true,
 }: LocationDetailsFieldsProps) {
   return (
     <>
@@ -39,6 +41,8 @@ export function LocationDetailsFields({
           label="STATUS"
           required
           value={draft.status}
+          disabled={!statusEditable}
+          helper={!statusEditable ? "Status is read-only until the backend persists lifecycle status." : undefined}
           onChange={(event) => onChange({ ...draft, status: event.target.value as Location["status"] })}
         >
           <option>Active</option><option>Inactive</option><option>Unknown</option>
@@ -107,8 +111,10 @@ export function LocationDetailsModal({
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <LocationDetailsFields draft={draft} onChange={(next) => setDraft(next as Location)} />
       <div className="borrowed-spatial-lock" title="Coordinates are edited with the Map Editor spatial action.">
-        <strong>🔒 Spatial position</strong>
-        <span>{draft.positioned && draft.lat !== null && draft.lng !== null ? `${draft.lat.toFixed(6)}, ${draft.lng.toFixed(6)}` : "Not positioned"}</span>
+        <strong>🔒 {locationPolicy.classify(draft.type).kind === "indoor" ? "Indoor Location" : "Spatial position"}</strong>
+        <span>{locationPolicy.classify(draft.type).kind === "indoor"
+          ? "Floor context only · not independently routable"
+          : draft.positioned && draft.lat !== null && draft.lng !== null ? `${draft.lat.toFixed(6)}, ${draft.lng.toFixed(6)}` : "Not positioned"}</span>
       </div>
       <div className="modal-actions">
         <Button variant="subtle" onClick={onClose}>Cancel</Button>
