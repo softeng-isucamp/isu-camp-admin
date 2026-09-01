@@ -636,6 +636,11 @@ describe("mock service contracts", () => {
 });
 
 describe("real locations service boundary", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
   it("maps database-shaped location rows and sends pagination parameters", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
@@ -706,20 +711,16 @@ describe("real locations service boundary", () => {
     vi.unstubAllEnvs();
   });
 
-  it("maps create and update requests and unwraps normalized mutation responses", async () => {
+  it("maps create requests and unwraps normalized mutation responses", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const saved = { id: "42", name: "Room 204", code: "ENG-204", type: "Room", parentId: "1", building: "Engineering Hall", floor: "2nd Floor", function: "Teaching room", keywords: "lecture", status: "Active", lat: null, lng: null, positioned: false } as const;
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }));
 
     await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
-    await expect(httpServices.locations.save({ ...saved, function: "Seminar room", keywords: "seminar" })).resolves.toEqual(saved);
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, building: saved.building, floor: saved.floor, function: saved.function, keywords: saved.keywords, status: saved.status }) }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42", expect.objectContaining({ method: "PUT" }));
-    vi.unstubAllEnvs();
   });
 
   it("preserves backend validation details for the form", async () => {
@@ -732,46 +733,12 @@ describe("real locations service boundary", () => {
     vi.unstubAllEnvs();
   });
 
-  it("maps delete success, not-found, and server failures through remove", async () => {
+  it("uploads photos as multipart when creating a location", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, deleted: { id: "7", count: 3, ids: ["7", "8", "9"] } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Location not found." }), { status: 404 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Failed to delete location." }), { status: 500 }));
-
-    await expect(httpServices.locations.remove("7")).resolves.toBeUndefined();
-    await expect(httpServices.locations.remove("missing")).rejects.toThrow("Location not found.");
-    await expect(httpServices.locations.remove("7")).rejects.toThrow("Failed to delete location.");
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations/7", expect.objectContaining({ method: "DELETE", credentials: "include" }));
-    vi.unstubAllEnvs();
-  });
-
-  it("maps the Locations-owned position update and clear responses", async () => {
-    vi.stubEnv("VITE_API_MODE", "real");
-    vi.resetModules();
-    const { services: httpServices } = await import("./api");
-    const positioned = { id: "7", name: "Water Station", code: "WATER", type: "Facility", parentId: null, status: "Active", lat: 16.7215, lng: 121.6895, positioned: true };
-    const cleared = { ...positioned, lat: null, lng: null, positioned: false };
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(positioned), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(cleared), { status: 200 }));
-
-    await expect(httpServices.locations.savePosition({ id: "7", lat: positioned.lat, lng: positioned.lng })).resolves.toEqual(positioned);
-    await expect(httpServices.locations.savePosition({ id: "7", lat: null, lng: null })).resolves.toEqual(cleared);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: positioned.lat, lng: positioned.lng }) }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: null, lng: null }) }));
-    vi.unstubAllEnvs();
-  });
-
-  it("uploads photos as multipart and retrieves them through the photo operation", async () => {
-    vi.stubEnv("VITE_API_MODE", "real");
-    vi.resetModules();
-    const { services: httpServices } = await import("./api");
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }))
-      .mockResolvedValueOnce(new Response("photo-bytes", { status: 200, headers: { "Content-Type": "image/png" } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }));
 
     const saved = await httpServices.locations.save({
       name: "Library", code: "LIB", type: "Building", parentId: null,
@@ -782,42 +749,6 @@ describe("real locations service boundary", () => {
     const request = fetchMock.mock.calls[0]?.[1];
     expect(request?.body).toBeInstanceOf(FormData);
     expect((request?.body as FormData).get("photo")).toBeInstanceOf(Blob);
-    expect(await httpServices.locations.getPhoto("42")).toBeInstanceOf(Blob);
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/42/photo", { credentials: "include" });
-    vi.unstubAllEnvs();
-  });
-
-  it("orchestrates standalone Facility coordinates through the position seam", async () => {
-    vi.stubEnv("VITE_API_MODE", "real");
-    vi.resetModules();
-    const { services: httpServices } = await import("./api");
-    const saved = { id: "7", name: "Water Station", code: "WATER", type: "Facility" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
-    const positioned = { ...saved, lat: 16.7215, lng: 121.6895, positioned: true };
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(saved), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(positioned), { status: 200 }));
-
-    await expect(httpServices.locations.save({ ...saved, id: undefined, lat: positioned.lat, lng: positioned.lng })).resolves.toEqual(positioned);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ body: expect.not.stringContaining('"lat"') }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/locations/7/position", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ lat: positioned.lat, lng: positioned.lng }) }));
-    vi.unstubAllEnvs();
-  });
-
-  it("retains blob photo previews and sends an explicit removal", async () => {
-    vi.stubEnv("VITE_API_MODE", "real");
-    vi.resetModules();
-    const { services: httpServices } = await import("./api");
-    const base = { id: "42", name: "Library", code: "LIB", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false, hasPhoto: true };
-    const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify(base), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ...base, hasPhoto: false }), { status: 200 }));
-
-    await httpServices.locations.save({ ...base, photo: { name: "Location photo", type: "image/png", dataUrl: "blob:http://localhost/photo" } });
-    await httpServices.locations.save({ ...base, photoRemoved: true });
-    expect(fetchMock.mock.calls[0]?.[1]?.body).not.toBeInstanceOf(FormData);
-    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ body: expect.any(FormData) }));
-    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBeInstanceOf(FormData);
-    expect(((fetchMock.mock.calls[1]?.[1] as RequestInit).body as FormData).get("removePhoto")).toBe("true");
-    vi.unstubAllEnvs();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

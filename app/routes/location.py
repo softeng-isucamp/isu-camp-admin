@@ -1,7 +1,6 @@
-import math
 import logging
 
-from flask import Blueprint, Response, jsonify, request
+from flask import Blueprint, jsonify, request
 
 from auth import admin_required
 from extensions import db
@@ -67,25 +66,7 @@ def _validation_error(fields=None, relationships=None):
     return jsonify({"success": False, "message": "Location validation failed.", "fields": fields or {}, "relationships": relationships or {}}), 400
 
 
-def _position_error(fields):
-    return jsonify({"success": False, "message": "Location position validation failed.", "fields": fields}), 400
-
-
-def _position_values(data):
-    """Validate a complete coordinate pair before changing the ORM row."""
-    if "lat" not in data or "lng" not in data:
-        return None, _position_error({"position": "Latitude and longitude are required together."})
-    lat, lng = data.get("lat"), data.get("lng")
-    if lat is None and lng is None:
-        return (None, None), None
-    if isinstance(lat, bool) or not isinstance(lat, (int, float)) or not math.isfinite(lat) or lat < -90 or lat > 90:
-        return None, _position_error({"lat": "Latitude must be between -90 and 90."})
-    if isinstance(lng, bool) or not isinstance(lng, (int, float)) or not math.isfinite(lng) or lng < -180 or lng > 180:
-        return None, _position_error({"lng": "Longitude must be between -180 and 180."})
-    return (float(lat), float(lng)), None
-
-
-def _validate(data, records, current=None):
+def _validate(data, records):
     fields, relationships = {}, {}
     name, code = str(data.get("name", "")).strip(), str(data.get("code", "")).strip()
     location_type, parent_id = data.get("type"), data.get("parentId")
@@ -102,12 +83,11 @@ def _validate(data, records, current=None):
             except (TypeError, ValueError): building = None
             if building is None or building.type_id != TYPE_IDS["Building"]:
                 relationships["parentId"] = "The selected Building does not exist."
-        existing_floor = getattr(current, "floor_level", None) if current else None
-        if (not floor_level or floor_level == "Unspecified Floor") and (current is None or existing_floor):
+        if not floor_level or floor_level == "Unspecified Floor":
             fields["floor"] = "A specific Floor Level is required for a new Indoor Location."
     elif parent_id not in (None, ""):
         fields["parentId"] = "Only Indoor Locations can belong to a Building."
-    duplicate = next((item for item in records if item is not current and item.location_code.lower() == code.lower()), None)
+    duplicate = next((item for item in records if item.location_code.lower() == code.lower()), None)
     if duplicate:
         return None, (jsonify({"success": False, "message": "Location code already exists.", "fields": {"code": "Location code must be unique."}}), 409)
     if fields or relationships: return None, _validation_error(fields, relationships)
@@ -178,124 +158,3 @@ def create_location():
         logger.exception("Failed to create location")
         db.session.rollback()
         return jsonify({"success": False, "message": "Failed to create location."}), 500
-
-
-@location_bp.route("/<int:location_id>", methods=["PUT"])
-def update_location(location_id):
-    _, error = admin_required()
-    if error: return error
-    try:
-        records = _all_locations()
-    except Exception:
-        return jsonify({"success": False, "message": "Failed to update location."}), 500
-    location = next((item for item in records if item.location_id == location_id), None)
-    if location is None: return jsonify({"success": False, "message": "Location not found."}), 404
-    values, error = _validate(_request_payload(), records, location)
-    if error: return error
-    photo, photo_mime_type, error = _photo_upload()
-    if error: return error
-    try:
-        legacy_floor = _legacy_floor(location, records)
-        preserve_legacy_floor = (
-            legacy_floor is not None
-            and values["type_id"] in {TYPE_IDS[name] for name in INDOOR_TYPES}
-            and values["building_id"] == location.building_id
-            and values["floor_level"] == legacy_floor.location_name
-        )
-        location.location_name, location.location_code, location.type_id = values["name"], values["code"], values["type_id"]
-        location.building_id = values["building_id"]
-        location.floor_id = location.floor_id if preserve_legacy_floor else None
-        location.floor_level = None if preserve_legacy_floor else values["floor_level"]
-        if values["type_id"] != TYPE_IDS["Facility"]:
-            location.lat, location.lng = None, None
-        location.description, location.keywords = values["description"], values["keywords"]
-        if photo is not None:
-            location.photo, location.photo_mime_type = photo, photo_mime_type
-        if request.form.get("removePhoto", "").lower() == "true":
-            location.photo, location.photo_mime_type = None, None
-        db.session.commit()
-        return jsonify(_location_dto(location, records)), 200
-    except Exception:
-        logger.exception("Failed to update location %s", location_id)
-        db.session.rollback()
-        return jsonify({"success": False, "message": "Failed to update location."}), 500
-
-
-@location_bp.route("/<int:location_id>", methods=["DELETE"])
-def delete_location(location_id):
-    _, error = admin_required()
-    if error:
-        return error
-
-    try:
-        records = _all_locations()
-    except Exception:
-        return jsonify({"success": False, "message": "Failed to delete location."}), 500
-    location = next((item for item in records if item.location_id == location_id), None)
-    if location is None:
-        return jsonify({"success": False, "message": "Location not found."}), 404
-
-    affected = [location]
-    if location.type_id == TYPE_IDS["Building"]:
-        affected.extend(
-            item for item in records
-            if item.building_id == location_id and item.type_id in {TYPE_IDS[name] for name in INDOOR_TYPES}
-        )
-
-    try:
-        for record in affected:
-            db.session.delete(record)
-        db.session.commit()
-        return jsonify({
-            "success": True,
-            "deleted": {
-                "id": str(location_id),
-                "count": len(affected),
-                "ids": [str(record.location_id) for record in affected],
-            },
-        }), 200
-    except Exception:
-        logger.exception("Failed to delete location %s", location_id)
-        db.session.rollback()
-        return jsonify({"success": False, "message": "Failed to delete location."}), 500
-
-
-@location_bp.route("/<int:location_id>/position", methods=["PATCH"])
-def save_location_position(location_id):
-    _, error = admin_required()
-    if error:
-        return error
-    try:
-        records = _all_locations()
-    except Exception:
-        return jsonify({"success": False, "message": "Failed to save location position."}), 500
-    location = next((item for item in records if item.location_id == location_id), None)
-    if location is None:
-        return jsonify({"success": False, "message": "Location not found."}), 404
-    if location.type_id != TYPE_IDS["Facility"] or location.building_id is not None:
-        return _position_error({"position": "Only standalone Outdoor Point Locations can own an outdoor position."})
-    values, error = _position_values(_request_payload())
-    if error:
-        return error
-    try:
-        location.lat, location.lng = values
-        db.session.commit()
-        return jsonify(_location_dto(location, records)), 200
-    except Exception:
-        logger.exception("Failed to save location position %s", location_id)
-        db.session.rollback()
-        return jsonify({"success": False, "message": "Failed to save location position."}), 500
-
-
-@location_bp.route("/<int:location_id>/photo", methods=["GET"])
-def get_location_photo(location_id):
-    _, error = admin_required()
-    if error:
-        return error
-    location = Location.query.get(location_id)
-    if location is None or getattr(location, "photo", None) is None:
-        return jsonify({"success": False, "message": "Location photo not found."}), 404
-    mime_type = getattr(location, "photo_mime_type", None)
-    if not mime_type:
-        return jsonify({"success": False, "message": "Location photo metadata is unavailable."}), 404
-    return Response(location.photo, mimetype=mime_type, headers={"Content-Disposition": "inline"})

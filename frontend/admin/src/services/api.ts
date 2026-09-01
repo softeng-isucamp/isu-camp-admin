@@ -773,35 +773,30 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
+        if (location.id) throw new Error("Updating locations is not available yet.");
         const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
-        const body = uploadsNewPhoto || location.photoRemoved
+        const body = uploadsNewPhoto
           ? (() => {
               const form = new FormData();
               Object.entries(locationWritePayload(location)).forEach(([key, value]) => {
                 if (value === undefined || value === null) return;
                 form.append(key, String(value));
               });
-              if (uploadsNewPhoto && location.photo) {
+              if (location.photo) {
                 const comma = location.photo.dataUrl.indexOf(",");
                 const encoded = location.photo.dataUrl.slice(comma + 1);
                 const binary = atob(encoded);
                 const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
                 form.append("photo", new Blob([bytes], { type: location.photo.type }), location.photo.name);
               }
-              if (location.photoRemoved) form.append("removePhoto", "true");
               return form;
             })()
           : JSON.stringify(locationWritePayload(location));
-        const response = await apiJson<unknown>(`/api/locations${location.id ? `/${encodeURIComponent(location.id)}` : ""}`, {
-          method: location.id ? "PUT" : "POST",
+        const response = await apiJson<unknown>("/api/locations", {
+          method: "POST",
           body,
         });
         const saved = normalizeBackendLocationMutation(response);
-        const standaloneFacility = location.type === "Facility" && location.parentId === null;
-        const coordinatesChanged = location.lat !== null || location.lng !== null || (Boolean(location.id) && saved.positioned && location.lat === null && location.lng === null);
-        if (standaloneFacility && coordinatesChanged) {
-          return services.locations.savePosition({ id: saved.id, lat: location.lat, lng: location.lng });
-        }
         return saved;
       }
 
@@ -831,8 +826,7 @@ export const services: Services = {
 
     savePosition: async (position) => {
       if (USE_HTTP_API) {
-        const response = await apiJson<unknown>(`/api/locations/${encodeURIComponent(position.id)}/position`, { method: "PATCH", body: JSON.stringify({ lat: position.lat, lng: position.lng }) });
-        return normalizeBackendLocationMutation(response);
+        throw new Error("Updating location positions is not available yet.");
       }
       const location = localAdapter.locations.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name, "Admin", location.id);
@@ -841,12 +835,7 @@ export const services: Services = {
 
     getPhoto: async (id) => {
       if (USE_HTTP_API) {
-        const response = await fetch(`${API_URL}/api/locations/${encodeURIComponent(id)}/photo`, { credentials: "include" });
-        if (!response.ok) {
-          const data = await response.json().catch(() => null) as { message?: string } | null;
-          throw new Error(data?.message ?? `Request failed (${response.status})`);
-        }
-        return response.blob();
+        throw new Error("Location photo retrieval is not available yet.");
       }
       const location = locations.find((item) => item.id === id);
       if (!location?.photo?.dataUrl) throw new Error("Location photo not found.");
@@ -857,8 +846,7 @@ export const services: Services = {
     remove: async (id) => {
 
       if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}`, { method: "DELETE" });
-        return;
+        throw new Error("Deleting locations is not available yet.");
       }
 
       failIfConfigured("locationRemove");
