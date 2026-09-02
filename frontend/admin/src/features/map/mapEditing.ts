@@ -1,6 +1,6 @@
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { locationPolicy } from "../../lib/locationPolicy";
-import { geometryOnCampus, pointOnCampus, type MapPoint } from "./campusBoundary";
+import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
 
 export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
   ? [points.reduce((sum, [lat]) => sum + lat, 0) / points.length, points.reduce((sum, [, lng]) => sum + lng, 0) / points.length]
@@ -39,6 +39,19 @@ export const polygonSelfIntersects = (points: MapPoint[]): boolean => {
   return false;
 };
 
+/** A polygon needs three distinct vertices and measurable area. */
+export const polygonIsNonDegenerate = (points: MapPoint[]): boolean => {
+  const ring = points.length > 1 && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1]
+    ? points.slice(0, -1)
+    : points;
+  if (ring.length < 3 || new Set(ring.map((point) => point.join(","))).size < 3) return false;
+  const twiceArea = ring.reduce((sum, point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    return sum + point[0] * next[1] - next[0] * point[1];
+  }, 0);
+  return Math.abs(twiceArea) > Number.EPSILON;
+};
+
 /** Translates every vertex by the same latitude/longitude delta. */
 export const translatePolygon = (points: MapPoint[], delta: MapPoint): MapPoint[] =>
   points.map(([lat, lng]) => [lat + delta[0], lng + delta[1]]);
@@ -57,7 +70,27 @@ export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
     longitude += (point[1] + next[1]) * cross;
   });
   if (Math.abs(twiceArea) < Number.EPSILON) return polygonCentroid(points);
-  return [latitude / (3 * twiceArea), longitude / (3 * twiceArea)];
+  const areaPoint: MapPoint = [latitude / (3 * twiceArea), longitude / (3 * twiceArea)];
+  if (pointInPolygon(areaPoint, points)) return areaPoint;
+  const lats = points.map(([lat]) => lat); const lngs = points.map(([, lng]) => lng);
+  const south = Math.min(...lats); const north = Math.max(...lats);
+  const west = Math.min(...lngs); const east = Math.max(...lngs);
+  let best: MapPoint | null = null; let bestClearance = -1;
+  const distanceToEdges = (candidate: MapPoint) => Math.min(...points.map((point, index) => {
+    const next = points[(index + 1) % points.length];
+    const dx = next[0] - point[0]; const dy = next[1] - point[1];
+    const lengthSquared = dx * dx + dy * dy;
+    const projection = lengthSquared ? Math.max(0, Math.min(1, ((candidate[0] - point[0]) * dx + (candidate[1] - point[1]) * dy) / lengthSquared)) : 0;
+    const nearest: MapPoint = [point[0] + projection * dx, point[1] + projection * dy];
+    return Math.hypot(candidate[0] - nearest[0], candidate[1] - nearest[1]);
+  }));
+  for (let row = 0; row <= 32; row += 1) for (let column = 0; column <= 32; column += 1) {
+    const candidate: MapPoint = [south + (north - south) * row / 32, west + (east - west) * column / 32];
+    if (!pointInPolygon(candidate, points)) continue;
+    const clearance = distanceToEdges(candidate);
+    if (clearance > bestClearance) { best = candidate; bestClearance = clearance; }
+  }
+  return best ?? areaPoint;
 };
 
 /** Returns true when polygon vertices are not collinear (non-degenerate). */
@@ -189,7 +222,7 @@ export function reviewMapDraft(input: {
     if (!object.name.trim()) addError(reference, "Route Node name is required.");
     if (!object.nodeType) addError(reference, "Route Node type is required.");
     if (!validCoordinate([object.lat, object.lng])) addError(reference, "Route Node latitude and longitude must be valid coordinates.");
-    if (object.associatedPlaceId && !locationIds.has(object.associatedPlaceId)) addError(reference, "Associated Location does not exist.");
+    if (object.associatedPlaceId && !locationIds.has(object.associatedPlaceId)) addError(reference, "Associated Building does not exist.");
     if (object.associatedPlaceId) {
       const associated = current.locations.find((location) => location.id === object.associatedPlaceId);
       // Legacy map fixtures may use a Facility-shaped association. Enforce the
