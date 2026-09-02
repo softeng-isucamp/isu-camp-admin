@@ -129,7 +129,7 @@ export const API_MODE: ApiMode =
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
-  (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
+  (API_MODE === "real" ? "http://127.0.0.1:5001" : "");
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 const localAdapter = createLocalAdapter(
   USE_GENERATED_MAP_FIXTURE
