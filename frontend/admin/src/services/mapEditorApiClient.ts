@@ -491,7 +491,7 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
           n.nodeType === "Entrance" &&
           (n.buildingId === bld.id ||
             n.associatedPlaceId === bld.id ||
-            n.name.toLowerCase().includes(bld.name.toLowerCase()))
+            n.name.toLowerCase().includes((bld.name || "").toLowerCase()))
       )
       .map((n) => n.id);
 

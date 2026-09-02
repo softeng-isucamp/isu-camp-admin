@@ -598,7 +598,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     const preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).toHaveTextContent("added (1)");
+    expect(preview).toHaveTextContent("added (2)");
     expect(preview).toHaveTextContent("Science Annex · building");
   });
 
@@ -856,8 +856,142 @@ describe("Map Editor preview", () => {
 
     expect(await screen.findByRole("alert", { name: "Non-routable pathway crossing" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway" }));
-
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
     await waitFor(() => expect(screen.queryByRole("alert", { name: "Non-routable pathway crossing" })).not.toBeInTheDocument());
+  });
+
+  it("supports editing polygon draft with vertex removal, clear area, finish footprint, and cancel", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Last Point" }));
+    expect(screen.getByText("Points plotted: 2")).toBeInTheDocument();
+
+    clickMap(16.721, 121.690);
+    expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    expect(screen.getByText("Create or Attach Building")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "▱ Edit Shape" }));
+    expect(screen.getByText("Draw Building Footprint")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Area" }));
+    expect(screen.getByText("Points plotted: 0")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Draw Building Footprint")).not.toBeInTheDocument();
+  });
+
+  it("collects descriptive fields and creates compound batch in correct order with null outdoor coordinates", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Hall" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-01" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Classrooms and Laboratories" } });
+    fireEvent.change(screen.getByLabelText("Building keywords"), { target: { value: "engineering, labs" } });
+
+    expect(screen.getAllByText(/Derived label anchor:/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/no copied outdoor coordinate stored on Building/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("shows advisory overlap warning when polygon overlaps an existing building without blocking save", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "bld-existing", name: "Existing Hall", code: "EXT-01", points: [[16.720, 121.689], [16.722, 121.689], [16.722, 121.691], [16.720, 121.691]] },
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.721, 121.690);
+    clickMap(16.723, 121.690);
+    clickMap(16.723, 121.692);
+
+    expect(screen.getByText(/Advisory: Footprint overlaps with Existing Hall/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    expect(screen.getByText(/Advisory: Footprint overlaps with Existing Hall/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "New Overlapping Hall" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "NOH-01" } });
+
+    const saveBtn = screen.getByRole("button", { name: "Create New Building" });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("attaches footprint to eligible existing building without creating new location record", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "bld-eligible", name: "Eligible Building", code: "ELIG-01", points: [] },
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Record/i }));
+
+    expect(screen.getByText("Eligible Building · ELIG-01")).toBeInTheDocument();
+    expect(screen.getByText("Eligible")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Eligible Building · ELIG-01"));
+    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    const preview = screen.getByRole("dialog", { name: "Preview Map" });
+    expect(preview).toHaveTextContent("Eligible Building · building");
+    expect(preview).not.toHaveTextContent("Eligible Building · location");
+  });
+
+  it("suspends and restores polygon draft with all fields preserved", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Suspended Building" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SUSP-01" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Administration" } });
+    fireEvent.change(screen.getByLabelText("Building keywords"), { target: { value: "admin, office" } });
+
+    // Switch to pathway tool to trigger suspend modal
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    expect(screen.getByRole("dialog", { name: "Switch to Pathway?" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
+    expect(screen.getByRole("button", { name: "Pathway" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Suspended Drafts (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume Building Polygon draft" }));
+    expect(screen.getByLabelText("Building name")).toHaveValue("Suspended Building");
+    expect(screen.getByLabelText("Building code")).toHaveValue("SUSP-01");
+    expect(screen.getByLabelText("Building function")).toHaveValue("Administration");
+    expect(screen.getByLabelText("Building keywords")).toHaveValue("admin, office");
   });
 });

@@ -66,6 +66,15 @@ import {
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
+import {
+  buildAttachBuildingCompoundOperation,
+  buildCreateBuildingCompoundOperation,
+  detectBuildingFootprintOverlap,
+  getBuildingAttachmentEligibility,
+  validateBuildingFootprintGeometry,
+  validateBuildingOwnerDetails,
+  type BuildingOwnerInput,
+} from "./buildingFootprint";
 import "leaflet/dist/leaflet.css";
 
 // ============================================================================
@@ -88,11 +97,23 @@ function projectWorkingSessionOperation(
   operation: WorkingOperation,
   direction: "undo" | "redo"
 ): OperationProjection[] {
+  if (operation.type === "compound_batch" && operation.nestedOperations) {
+    const list = direction === "undo"
+      ? [...operation.nestedOperations].reverse()
+      : operation.nestedOperations;
+    return list.flatMap((nested) => projectWorkingSessionOperation(nested, direction));
+  }
+
   const value = direction === "undo" ? operation.before : operation.after;
 
   // Map domain + type to affected collections
   if (operation.domain === "Locations") {
-    return [{ collection: "locations", entityId: operation.entityId, value }];
+    const projections: OperationProjection[] = [{ collection: "locations", entityId: operation.entityId, value }];
+    const candidate = (value ?? (direction === "undo" ? operation.before : operation.after)) as Record<string, unknown> | null;
+    if (candidate && (candidate.type === "Building" || "points" in candidate)) {
+      projections.push({ collection: "buildings", entityId: operation.entityId, value });
+    }
+    return projections;
   } else if (operation.domain === "Routes & Paths") {
     // Pathways and nodes are in the same domain
     if (operation.type === "update_geometry" || operation.type === "create_entity" || operation.type === "retire_entity") {
@@ -108,7 +129,18 @@ function projectWorkingSessionOperation(
     if (operation.type === "link_feature" || operation.type === "unlink_feature") {
       return [{ collection: "featureLinks", entityId: operation.entityId, value }];
     }
-    return [{ collection: "localFeatures", entityId: operation.entityId, value }];
+    const projections: OperationProjection[] = [{ collection: "localFeatures", entityId: operation.entityId, value }];
+    const feat = (value ?? (direction === "undo" ? operation.before : operation.after)) as Partial<LocalMapFeatureEntity> | null;
+    if (feat && feat.family === "building_footprint" && feat.linkedBuildingId) {
+      projections.push({
+        collection: "buildings",
+        entityId: feat.linkedBuildingId,
+        value: direction === "undo"
+          ? null
+          : { id: feat.linkedBuildingId, points: feat.coordinates ?? [] },
+      });
+    }
+    return projections;
   }
 
   // Fallback for building operations (these might come through as Locations domain)
@@ -540,6 +572,8 @@ export function MapEditor() {
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
   const [buildingName, setBuildingName] = useState("");
   const [buildingCode, setBuildingCode] = useState("");
+  const [buildingFunction, setBuildingFunction] = useState("");
+  const [buildingKeywords, setBuildingKeywords] = useState("");
   const [movingType, setMovingType] = useState<"location" | "node">("location");
   const [movingId, setMovingId] = useState<string | null>(null);
   const [moveOrigin, setMoveOrigin] = useState<MapPoint | null>(null);
@@ -571,7 +605,6 @@ export function MapEditor() {
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
-  const canSaveBuilding = points.length >= 3 && distinctBuildingPointCount >= 3 && !polygonInvalid && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -594,7 +627,13 @@ export function MapEditor() {
           ? [...new Set([...ids, entityId])]
           : ids.filter((id) => id !== entityId));
       },
-      buildings: (entityId, value) => setLocalBuildings((items) => replaceProjection(items, entityId, value)),
+      buildings: (entityId, value) => setLocalBuildings((items) => {
+        if (value === null) return items.filter((item) => item.id !== entityId);
+        const existing = items.find((item) => item.id === entityId)
+          ?? data?.buildings?.find((item) => item.id === entityId);
+        const merged = existing ? { ...existing, ...value } : value;
+        return [...items.filter((item) => item.id !== entityId), merged as unknown as Building];
+      }),
       localFeatures: (entityId, value) => setLocalFeatureChanges((items) => replaceProjection(items, entityId, value)),
       featureLinks: (entityId, value) => setLocalFeatureLinks((items) => replaceProjection(items, entityId, value)),
     };
@@ -602,7 +641,7 @@ export function MapEditor() {
       handlers[projection.collection](projection.entityId, projection.value);
     });
     setDirty(workingSessionManager.getIsDirty());
-  }, [workingSessionManager]);
+  }, [data?.buildings, workingSessionManager]);
 
   useEffect(() => {
     const onWorkingSessionShortcut = (event: KeyboardEvent) => {
@@ -644,13 +683,10 @@ export function MapEditor() {
   }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
   const currentFeatureLinks = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
-  const buildingAttachmentEligibility = (building: Building) => {
-    const activeLink = currentFeatureLinks
-      .find((link) => link.targetEntityId === building.id);
-    return activeLink
-      ? { eligible: false as const, reason: `Already linked to footprint ${activeLink.featureId}` }
-      : { eligible: true as const, reason: null };
-  };
+  const buildingAttachmentEligibility = (building: Building) =>
+    getBuildingAttachmentEligibility(building, currentFeatureLinks);
+  const selectedAttachBuilding = (data?.buildings || []).find((b) => b.id === selectedBuildingRecordId);
+  const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
   const buildingRecordCandidates = (data?.buildings || []).filter((building) => {
     const query = buildingRecordSearch.trim().toLowerCase();
     return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
@@ -725,6 +761,26 @@ export function MapEditor() {
     () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
     [directoryBuildings],
   );
+  const footprintGeometryIssues = useMemo(
+    () => mode === "area" ? validateBuildingFootprintGeometry(points, campusBoundary) : [],
+    [campusBoundary, mode, points],
+  );
+  const footprintOverlapWarning = useMemo(
+    () => mode === "area" ? detectBuildingFootprintOverlap(points, currentBuildings, editingBuildingId) : null,
+    [currentBuildings, editingBuildingId, mode, points],
+  );
+  const buildingOwnerIssues = useMemo(
+    () => mode === "area" && (polygonClosed || points.length >= 3) && buildingRecordMode === "create"
+      ? validateBuildingOwnerDetails(
+          { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
+          currentLocations,
+          editingBuildingId,
+        )
+      : [],
+    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingRecordMode, currentLocations, editingBuildingId, mode, points.length, polygonClosed],
+  );
+  const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
+  const canSaveBuilding = canFinishFootprint && buildingOwnerIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const navigationBounds = useMemo(() => {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
@@ -963,19 +1019,16 @@ export function MapEditor() {
   };
 
   const closePolygon = useCallback(() => {
-    if (mode !== "area" || polygonInteraction !== "draw" || points.length < 3) return;
-    if (polygonSelfIntersects(points)) {
-      setError("Cannot close the footprint while its edges intersect.");
-      return;
-    }
-    if (!geometryOnCampus(points, campusBoundary)) {
-      setError("The building footprint must stay inside the ISU Echague campus boundary.");
+    if (mode !== "area" || points.length < 3) return;
+    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
+    if (geometryIssues.length > 0) {
+      setError(geometryIssues[0].message);
       return;
     }
     setPolygonClosed(true);
-    setBuildingRecordMode("create");
+    setPolygonInteraction("draw");
     setError("");
-  }, [campusBoundary, mode, points, polygonInteraction]);
+  }, [campusBoundary, mode, points]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1265,51 +1318,90 @@ export function MapEditor() {
     completeToolDraft("pathway");
   };
 
-  const handleSaveBuilding = () => {
-    if (!canSaveBuilding) return;
-    if (!geometryOnCampus(points, campusBoundary)) {
-      setError("The building footprint must stay inside the ISU Echague campus boundary.");
-      return;
-    }
-    const building: Building = {
-      id: editingBuildingId ?? `building-${Date.now()}`,
-      name: buildingName.trim(),
-      code: buildingCode.trim(),
-      points: [...points],
-    };
-    const before = editingBuildingId
-      ? currentBuildings.find((item) => item.id === editingBuildingId) ?? null
-      : null;
-    setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), building]);
-    workingSessionManager.executeOperation({
-      type: before ? "update_geometry" : "create_entity",
-      domain: "Locations",
-      entityId: building.id,
-      before: before as unknown as Record<string, unknown> | null,
-      after: building as unknown as Record<string, unknown>,
-      description: `${before ? "Reshape" : "Create"} ${building.name}`,
-    });
-    setDirty(true);
+  const cancelBuildingDraft = () => {
     setPoints([]);
     setBuildingName("");
     setBuildingCode("");
+    setBuildingFunction("");
+    setBuildingKeywords("");
     setEditingBuildingId(null);
-    setBuildingRecordMode("create");
+    setBuildingRecordSearch("");
+    setSelectedBuildingRecordId(null);
+    setPolygonClosed(false);
+    setPolygonInteraction("draw");
     setMode("select");
-    setSelected({ type: "building", id: building.id });
-    setPlacingAssociatedPlaceId(building.id);
+    setError("");
     completeToolDraft("polygon");
   };
 
+  const handleSaveBuilding = () => {
+    if (!canSaveBuilding) return;
+    if (editingBuildingId) {
+      if (!geometryOnCampus(points, campusBoundary)) {
+        setError("The building footprint must stay inside the ISU Echague campus boundary.");
+        return;
+      }
+      const building: Building = {
+        id: editingBuildingId,
+        name: buildingName.trim(),
+        code: buildingCode.trim(),
+        points: [...points],
+      };
+      const before = currentBuildings.find((item) => item.id === editingBuildingId) ?? null;
+      setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), building]);
+      workingSessionManager.executeOperation({
+        type: "update_geometry",
+        domain: "Locations",
+        entityId: building.id,
+        before: before as unknown as Record<string, unknown> | null,
+        after: building as unknown as Record<string, unknown>,
+        description: `Reshape ${building.name}`,
+      });
+      setDirty(true);
+      cancelBuildingDraft();
+      setSelected({ type: "building", id: building.id });
+      setPlacingAssociatedPlaceId(building.id);
+    } else {
+      handleCreateBuildingRecord();
+    }
+  };
+
   const completeBuildingRecordWorkflow = (buildingRecord: Building, intent: "create" | "attach") => {
+    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
+    if (geometryIssues.length > 0) {
+      setError(geometryIssues[0].message);
+      return;
+    }
+
     const featureId = `feat-poly-${buildingRecord.id}`;
-    const link: FeatureLinkEntity = {
-      id: `link-${featureId}-${buildingRecord.id}`,
-      featureId,
-      targetDomain: "Locations",
-      targetEntityId: buildingRecord.id,
-      linkType: "building_footprint",
-    };
+    const linkId = `link-${featureId}-${buildingRecord.id}`;
+
+    let compoundBatch: WorkingOperation;
+    if (intent === "create") {
+      const ownerInput: BuildingOwnerInput = {
+        name: buildingRecord.name,
+        code: buildingRecord.code,
+        function: buildingFunction,
+        keywords: buildingKeywords,
+        status: "Active",
+      };
+      const ownerIssues = validateBuildingOwnerDetails(ownerInput, currentLocations);
+      if (ownerIssues.length > 0) {
+        setError(ownerIssues[0].message);
+        return;
+      }
+      compoundBatch = buildCreateBuildingCompoundOperation(ownerInput, points, buildingRecord.id);
+      const locRecord = compoundBatch.nestedOperations![0].after as unknown as Location;
+      setLocalLocations((current) => [...current.filter((item) => item.id !== locRecord.id), locRecord]);
+    } else {
+      const eligibility = getBuildingAttachmentEligibility(buildingRecord, currentFeatureLinks);
+      if (!eligibility.eligible) {
+        setError(eligibility.reason);
+        return;
+      }
+      compoundBatch = buildAttachBuildingCompoundOperation(buildingRecord, points);
+    }
+
     const footprint: LocalMapFeatureEntity = {
       id: featureId,
       family: "building_footprint",
@@ -1320,35 +1412,13 @@ export function MapEditor() {
       coordinates: [...points],
       linkedBuildingId: buildingRecord.id,
     };
-    const nestedOperations: WorkingOperation[] = [
-      {
-        id: `create-${featureId}`,
-        type: "create_entity",
-        domain: "Local Map Data",
-        entityId: featureId,
-        before: null,
-        after: footprint as unknown as Record<string, unknown>,
-        description: `Create ${footprint.name}`,
-      },
-      ...(intent === "create" ? [{
-        id: `create-${buildingRecord.id}`,
-        type: "create_entity" as const,
-        domain: "Locations" as const,
-        entityId: buildingRecord.id,
-        before: null,
-        after: buildingRecord as unknown as Record<string, unknown>,
-        description: `Create ${buildingRecord.name}`,
-      }] : []),
-      {
-        id: `create-${link.id}`,
-        type: "link_feature",
-        domain: "Local Map Data",
-        entityId: link.id,
-        before: null,
-        after: link as unknown as Record<string, unknown>,
-        description: `Link footprint to ${buildingRecord.name}`,
-      },
-    ];
+    const link: FeatureLinkEntity = {
+      id: linkId,
+      featureId,
+      targetDomain: "Locations",
+      targetEntityId: buildingRecord.id,
+      linkType: "building_footprint",
+    };
 
     // The current renderer still consumes Building.points. Keep this local
     // compatibility projection separate from the geometry-free Building
@@ -1361,15 +1431,18 @@ export function MapEditor() {
       intent === "create" ? `Create ${buildingRecord.name} with footprint` : `Attach footprint to ${buildingRecord.name}`,
       "Local Map Data",
       featureId,
-      nestedOperations,
+      compoundBatch.nestedOperations!,
     );
     setDirty(true);
     setPoints([]);
     setBuildingName("");
     setBuildingCode("");
+    setBuildingFunction("");
+    setBuildingKeywords("");
     setBuildingRecordSearch("");
     setSelectedBuildingRecordId(null);
     setPolygonClosed(false);
+    setPolygonInteraction("draw");
     setMode("select");
     setSelected({ type: "building", id: buildingRecord.id });
     setPlacingAssociatedPlaceId(buildingRecord.id);
@@ -1383,7 +1456,12 @@ export function MapEditor() {
   };
 
   const handleCreateBuildingRecord = () => {
-    if (!canSaveBuilding || !geometryOnCampus(points, campusBoundary)) return;
+    if (!canSaveBuilding) return;
+    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
+    if (geometryIssues.length > 0) {
+      setError(geometryIssues[0].message);
+      return;
+    }
     completeBuildingRecordWorkflow({
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
@@ -1394,9 +1472,15 @@ export function MapEditor() {
 
   const handleAttachBuildingRecord = () => {
     const existing = (data?.buildings || []).find((building) => building.id === selectedBuildingRecordId);
-    if (!existing || !buildingAttachmentEligibility(existing).eligible) return;
-    if (!geometryOnCampus(points, campusBoundary)) {
-      setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
+    if (!existing) return;
+    const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
+    if (!eligibility.eligible) {
+      setError(eligibility.reason);
+      return;
+    }
+    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
+    if (geometryIssues.length > 0) {
+      setError(geometryIssues[0].message);
       return;
     }
     completeBuildingRecordWorkflow(existing, "attach");
@@ -1667,7 +1751,18 @@ export function MapEditor() {
           points: points.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
           isClosed: polygonClosed,
         },
-        nestedRecords: { buildingName, buildingCode, editingBuildingId, polygonClosed },
+        nestedRecords: {
+          buildingName,
+          buildingCode,
+          buildingFunction,
+          buildingKeywords,
+          editingBuildingId,
+          polygonClosed,
+          polygonInteraction,
+          buildingRecordMode,
+          selectedBuildingRecordId,
+          buildingRecordSearch,
+        },
       }) : null,
       pathway: () => pathStartNodeId || pathDraftDirty ? ({
         toolType: "pathway",
@@ -1707,8 +1802,14 @@ export function MapEditor() {
     activeTool,
     addLocationOpen,
     buildingCode,
+    buildingFunction,
+    buildingKeywords,
     buildingName,
+    buildingRecordMode,
+    buildingRecordSearch,
     editingBuildingId,
+    polygonInteraction,
+    selectedBuildingRecordId,
     editingPathId,
     localPathways,
     localFeatureName,
@@ -1936,7 +2037,20 @@ export function MapEditor() {
         setPoints(restoredPoints);
         setBuildingName(typeof records.buildingName === "string" ? records.buildingName : "");
         setBuildingCode(typeof records.buildingCode === "string" ? records.buildingCode : "");
+        setBuildingFunction(typeof records.buildingFunction === "string" ? records.buildingFunction : "");
+        setBuildingKeywords(typeof records.buildingKeywords === "string" ? records.buildingKeywords : "");
         setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
+        setPolygonClosed(records.polygonClosed === true);
+        if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
+          setPolygonInteraction(records.polygonInteraction);
+        } else {
+          setPolygonInteraction("draw");
+        }
+        if (records.buildingRecordMode === "create" || records.buildingRecordMode === "attach") {
+          setBuildingRecordMode(records.buildingRecordMode);
+        }
+        setSelectedBuildingRecordId(typeof records.selectedBuildingRecordId === "string" ? records.selectedBuildingRecordId : null);
+        setBuildingRecordSearch(typeof records.buildingRecordSearch === "string" ? records.buildingRecordSearch : "");
         setMode("area");
       },
       pathway: () => {
@@ -3090,10 +3204,15 @@ export function MapEditor() {
             {mode === "area" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{polygonClosed ? "Create or Attach Building" : "Draw Building / Location Footprint"}</h2>
+                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
                 {polygonClosed ? (
                   <section aria-label="Create or attach building record" className="mt-3">
                     <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building record it should represent.</p>
+                    {footprintOverlapWarning && (
+                      <div className="my-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-semibold text-amber-800" role="status">
+                        ⚠️ {footprintOverlapWarning.message}
+                      </div>
+                    )}
                     <div role="tablist" aria-label="Building record workflow" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[#edf3ef] p-1">
                       <button
                         type="button"
@@ -3114,7 +3233,30 @@ export function MapEditor() {
                         🔗 Attach Existing Record
                       </button>
                     </div>
-                    {buildingRecordMode === "attach" && (
+                    {buildingRecordMode === "create" ? (
+                      <div className="mt-3 space-y-2">
+                        <label className="block text-xs font-semibold text-[#3f4941]">Building name
+                          <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                        </label>
+                        <label className="block text-xs font-semibold text-[#3f4941]">Building code
+                          <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                        </label>
+                        <label className="block text-xs font-semibold text-[#3f4941]">Function / Category
+                          <input aria-label="Building function" value={buildingFunction} onChange={(event) => setBuildingFunction(event.target.value)} placeholder="e.g. Academic and Laboratories" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                        </label>
+                        <label className="block text-xs font-semibold text-[#3f4941]">Keywords
+                          <input aria-label="Building keywords" value={buildingKeywords} onChange={(event) => setBuildingKeywords(event.target.value)} placeholder="e.g. science, lab, chemistry" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                        </label>
+                        {points.length >= 3 && (
+                          <p className="mt-2 text-[11px] text-[#526359]">
+                            Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")} (no copied outdoor coordinate stored on Building)
+                          </p>
+                        )}
+                        {buildingOwnerIssues.length > 0 && (
+                          <div className="mt-2 text-xs font-semibold text-red-700">{buildingOwnerIssues[0].message}</div>
+                        )}
+                      </div>
+                    ) : (
                       <div className="mt-3 space-y-2">
                         <input
                           type="search"
@@ -3124,7 +3266,7 @@ export function MapEditor() {
                           placeholder="Search by name or code"
                           className="w-full rounded-lg border border-[#dbe0e2] px-2 py-2 text-sm"
                         />
-                        <div className="space-y-2">
+                        <div className="space-y-2 max-h-52 overflow-y-auto">
                           {buildingRecordCandidates.map((building) => {
                             const eligibility = buildingAttachmentEligibility(building);
                             return (
@@ -3134,10 +3276,18 @@ export function MapEditor() {
                                 disabled={!eligibility.eligible}
                                 aria-pressed={selectedBuildingRecordId === building.id}
                                 onClick={() => setSelectedBuildingRecordId(building.id)}
-                                className="w-full rounded-xl border border-[#dbe0e2] p-2 text-left text-xs disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500"
+                                className={`w-full rounded-xl border p-2 text-left text-xs transition cursor-pointer ${
+                                  selectedBuildingRecordId === building.id
+                                    ? "border-[#005931] bg-emerald-50 text-[#005931]"
+                                    : "border-[#dbe0e2] hover:bg-[#f8f9fa]"
+                                } disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500`}
                               >
                                 <span className="block font-bold">{building.name} · {building.code}</span>
-                                {eligibility.reason && <span className="mt-1 block text-red-700">{eligibility.reason}</span>}
+                                {eligibility.reason ? (
+                                  <span className="mt-1 block text-red-700">{eligibility.reason}</span>
+                                ) : (
+                                  <span className="mt-1 block text-emerald-700 font-medium">Eligible</span>
+                                )}
                               </button>
                             );
                           })}
@@ -3146,28 +3296,61 @@ export function MapEditor() {
                     )}
                   </section>
                 ) : (
-                  <p className="text-xs text-[#3f4941] mt-1">
-                    Click on the map to plot the perimeter corners of the building or area footprint. A minimum of 3 points is required to form a closed polygon.
-                  </p>
-                )}
-                {(!polygonClosed || buildingRecordMode === "create") && (
-                  <>
-                    <label className="mt-3 block text-xs font-semibold text-[#3f4941]">Building name
+                  <div>
+                    <p className="text-xs text-[#3f4941] mt-1">
+                      Click on the map to plot the perimeter corners of the building footprint. A minimum of 3 points is required to form a closed polygon.
+                    </p>
+                    <div className="flex items-center gap-1 my-3 bg-[#edf3ef] p-1 rounded-xl" role="group" aria-label="Footprint interaction mode">
+                      <button
+                        type="button"
+                        onClick={() => setPolygonInteraction("draw")}
+                        className={`flex-1 rounded-lg py-1 text-xs font-bold ${polygonInteraction === "draw" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
+                      >
+                        Draw
+                      </button>
+                      <button
+                        type="button"
+                        disabled={points.length < 3}
+                        onClick={() => setPolygonInteraction("reshape")}
+                        className={`flex-1 rounded-lg py-1 text-xs font-bold disabled:opacity-40 ${polygonInteraction === "reshape" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
+                      >
+                        Reshape
+                      </button>
+                      <button
+                        type="button"
+                        disabled={points.length < 3}
+                        onClick={() => setPolygonInteraction("move")}
+                        className={`flex-1 rounded-lg py-1 text-xs font-bold disabled:opacity-40 ${polygonInteraction === "move" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
+                      >
+                        Move
+                      </button>
+                    </div>
+                    <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building name
                       <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                     </label>
                     <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
                       <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                     </label>
-                  </>
+                  </div>
                 )}
                 <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
-                {polygonInvalid && (
+                {points.length >= 3 && (
+                  <div className="mb-2 text-[11px] text-[#526359]">
+                    Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")}
+                  </div>
+                )}
+                {footprintGeometryIssues.length > 0 && (
                   <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700" role="alert">
-                    Self-intersecting footprint. Untangle the red edges before confirming the shape.
+                    {footprintGeometryIssues[0].message}
+                  </div>
+                )}
+                {!polygonClosed && footprintOverlapWarning && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs font-semibold text-amber-800" role="status">
+                    ⚠️ {footprintOverlapWarning.message}
                   </div>
                 )}
                 {points.length > 0 && polygonInteraction === "reshape" && (
-                  <div className="mb-3 space-y-1">
+                  <div className="mb-3 space-y-1 max-h-36 overflow-y-auto">
                     {points.map((point, index) => (
                       <div key={`${point.join(",")}-${index}`} className="flex items-center justify-between rounded-lg bg-[#f8f9fa] px-2 py-1 text-xs">
                         <span>V{index + 1} · {point[0].toFixed(5)}, {point[1].toFixed(5)}</span>
@@ -3176,43 +3359,64 @@ export function MapEditor() {
                     ))}
                   </div>
                 )}
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <button
-                    type="button"
-                    disabled={!points.length}
-                    onClick={() => setPoints((c) => c.slice(0, -1))}
-                    className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-                  >
-                    Remove Last Point
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!points.length}
-                    onClick={() => setPoints([])}
-                    className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-                  >
-                    Clear Area
-                  </button>
-                </div>
+                {!polygonClosed && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button
+                      type="button"
+                      disabled={!points.length}
+                      onClick={() => setPoints((c) => c.slice(0, -1))}
+                      className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
+                    >
+                      Remove Last Point
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!points.length}
+                      onClick={() => setPoints([])}
+                      className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
+                    >
+                      Clear Area
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canFinishFootprint}
+                      onClick={closePolygon}
+                      className="px-3 py-1.5 bg-emerald-50 border border-[#005931] text-[#005931] rounded-full text-xs font-bold hover:bg-emerald-100 disabled:opacity-40 transition cursor-pointer"
+                    >
+                      Finish Footprint
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[#e1e3e4]">
                   <button
                     type="button"
                     className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                    onClick={() => selectTool("select")}
+                    onClick={cancelBuildingDraft}
                   >
                     Cancel
                   </button>
+                  {polygonClosed && (
+                    <button
+                      type="button"
+                      className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
+                      onClick={() => setPolygonClosed(false)}
+                    >
+                      ▱ Edit Shape
+                    </button>
+                  )}
                   <button
                     type="button"
-                    disabled={polygonClosed && buildingRecordMode === "attach" ? !selectedBuildingRecordId : !canSaveBuilding}
+                    disabled={polygonClosed
+                      ? (buildingRecordMode === "attach" ? !selectedBuildingRecordId || !selectedAttachEligibility?.eligible : !canSaveBuilding)
+                      : !canSaveBuilding}
                     onClick={polygonClosed
-                      ? buildingRecordMode === "create" ? handleCreateBuildingRecord : handleAttachBuildingRecord
+                      ? (buildingRecordMode === "create" ? handleCreateBuildingRecord : handleAttachBuildingRecord)
                       : handleSaveBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
                     {polygonClosed
-                      ? buildingRecordMode === "create" ? "Create New Building" : "Attach Selected Building"
-                      : polygonInteraction === "reshape" ? "✓ Confirm Shape" : "Save Building"}
+                      ? (buildingRecordMode === "create" ? "Create New Building" : "Attach Selected Building")
+                      : (polygonInteraction === "reshape" ? "✓ Confirm Shape" : "Save Building")}
                   </button>
                 </div>
               </div>
@@ -3887,6 +4091,18 @@ export function MapEditor() {
             <p className="my-4 text-sm text-[#3f4941]">No pending changes.</p>
           ) : (
             <div className="space-y-3 my-3">
+              {draftReview.warnings && draftReview.warnings.length > 0 && (
+                <div className="space-y-1 my-2">
+                  <div role="status" className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl font-medium">
+                    Advisory review: {draftReview.warnings.length} {draftReview.warnings.length === 1 ? "warning" : "warnings"} (non-blocking).
+                  </div>
+                  {draftReview.warnings.map((warning, index) => (
+                    <div key={`warn-${index}`} className="p-2 border border-amber-100 rounded-xl bg-amber-50/50 text-xs text-amber-800">
+                      <span className="font-bold">{warning.object.label}</span>: {warning.message}
+                    </div>
+                  ))}
+                </div>
+              )}
               {draftReview.groups.map((group) => (
                 <section key={group.kind}>
                   <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#005931]">{group.kind} ({group.objects.length})</h3>
