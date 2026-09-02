@@ -1,75 +1,99 @@
+import type { ReactNode } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { pointInPolygon, type MapPoint } from "./campusBoundary";
-import { distanceInMeters } from "./pointInteractions";
+import type { MapPoint } from "./campusBoundary";
 
 export type CanvasSelectionType = "location" | "node" | "pathway" | "building";
 
 export interface SelectionCandidate {
-  type: CanvasSelectionType;
   id: string;
+  type: CanvasSelectionType;
   label: string;
-  kindLabel: "Campus Location" | "Route Node" | "Pathway" | "Building";
+  kindLabel: string;
+  distance: number;
 }
 
-interface SelectionCandidateCollections {
+interface SelectionCandidatesInput {
   locations: Location[];
   nodes: RouteNode[];
   pathways: Pathway[];
   buildings: Building[];
 }
 
-const HIT_RADIUS_METERS = 4;
-
-const isNearPoint = (point: MapPoint, candidate: MapPoint) =>
-  distanceInMeters(point, candidate) <= HIT_RADIUS_METERS;
-
-const distanceToSegmentMeters = (point: MapPoint, start: MapPoint, end: MapPoint) => {
-  const dx = end[0] - start[0];
-  const dy = end[1] - start[1];
-  const lengthSquared = dx * dx + dy * dy;
-  const ratio = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1,
-    ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared));
-  return distanceInMeters(point, [start[0] + ratio * dx, start[1] + ratio * dy]);
-};
-
 /**
- * Resolves every selectable domain object under a canvas click. The Map Editor
- * owns presentation; this module owns the spatial hit aggregation policy.
+ * Finds selection candidates near a given anchor point.
+ * Used for disambiguation when multiple objects are near a click location.
  */
 export function findSelectionCandidates(
-  point: MapPoint,
-  collections: SelectionCandidateCollections,
+  anchor: MapPoint,
+  collections: SelectionCandidatesInput
 ): SelectionCandidate[] {
   const candidates: SelectionCandidate[] = [];
+  const maxDistance = 0.01; // Approximate search radius in degrees
 
+  // Search locations
   collections.locations.forEach((location) => {
-    if (location.lat !== null && location.lng !== null && isNearPoint(point, [location.lat, location.lng])) {
-      candidates.push({ type: "location", id: location.id, label: location.name, kindLabel: "Campus Location" });
-    }
-  });
-  collections.nodes.forEach((node) => {
-    if (isNearPoint(point, [node.lat, node.lng])) {
-      candidates.push({ type: "node", id: node.id, label: node.name, kindLabel: "Route Node" });
-    }
-  });
-  collections.buildings.forEach((building) => {
-    if (building.points.length >= 3 && pointInPolygon(point, building.points)) {
-      candidates.push({ type: "building", id: building.id, label: building.name, kindLabel: "Building" });
-    }
-  });
-  collections.pathways.forEach((pathway) => {
-    const source = collections.nodes.find((node) => node.id === pathway.sourceNodeId);
-    const destination = collections.nodes.find((node) => node.id === pathway.destinationNodeId);
-    const points: MapPoint[] = [
-      ...(source ? [[source.lat, source.lng] as MapPoint] : []),
-      ...pathway.pathPoints,
-      ...(destination ? [[destination.lat, destination.lng] as MapPoint] : []),
-    ];
-    if (points.some((candidate, index) => isNearPoint(point, candidate)
-      || (index < points.length - 1 && distanceToSegmentMeters(point, candidate, points[index + 1]) <= HIT_RADIUS_METERS))) {
-      candidates.push({ type: "pathway", id: pathway.id, label: pathway.name || "Campus Pathway", kindLabel: "Pathway" });
+    if (location.lat !== null && location.lng !== null) {
+      const distance = Math.hypot(location.lat - anchor[0], location.lng - anchor[1]);
+      if (distance < maxDistance) {
+        candidates.push({
+          id: location.id,
+          type: "location",
+          label: location.name,
+          kindLabel: location.type,
+          distance,
+        });
+      }
     }
   });
 
-  return candidates;
+  // Search nodes
+  collections.nodes.forEach((node) => {
+    const distance = Math.hypot(node.lat - anchor[0], node.lng - anchor[1]);
+    if (distance < maxDistance) {
+      candidates.push({
+        id: node.id,
+        type: "node",
+        label: node.name,
+        kindLabel: node.nodeType,
+        distance,
+      });
+    }
+  });
+
+  // Search pathways (by proximity to path points)
+  collections.pathways.forEach((pathway) => {
+    for (const point of pathway.pathPoints) {
+      const distance = Math.hypot(point[0] - anchor[0], point[1] - anchor[1]);
+      if (distance < maxDistance) {
+        candidates.push({
+          id: pathway.id,
+          type: "pathway",
+          label: pathway.name,
+          kindLabel: "Pathway",
+          distance,
+        });
+        break; // Only add once per pathway
+      }
+    }
+  });
+
+  // Search buildings (by proximity to vertices)
+  collections.buildings.forEach((building) => {
+    for (const point of building.points) {
+      const distance = Math.hypot(point[0] - anchor[0], point[1] - anchor[1]);
+      if (distance < maxDistance) {
+        candidates.push({
+          id: building.id,
+          type: "building",
+          label: building.name,
+          kindLabel: "Building",
+          distance,
+        });
+        break; // Only add once per building
+      }
+    }
+  });
+
+  // Sort by distance and return
+  return candidates.sort((a, b) => a.distance - b.distance);
 }
