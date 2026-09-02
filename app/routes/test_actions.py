@@ -20,11 +20,23 @@ class FakeQuery:
     def first(self):
         return self.record
 
+    def order_by(self, *_columns):
+        return self
+
+    def all(self):
+        return self.record
+
+
+class FakeColumn:
+    def desc(self):
+        return self
+
 
 class FakeSession:
     def __init__(self):
         self.deleted = None
         self.commits = 0
+        self.rollbacks = 0
 
     def delete(self, record):
         self.deleted = record
@@ -34,6 +46,9 @@ class FakeSession:
 
     def commit(self):
         self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
 
 
 def test_actions_blueprint_exposes_registered_action_routes(monkeypatch):
@@ -100,3 +115,98 @@ def test_actions_can_edit_a_building(monkeypatch):
     assert response.status_code == 200
     assert building.building_name == "New Hall"
     assert building.building_code == "NEW"
+
+
+def _history_app(monkeypatch, building, history):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(
+        actions_module,
+        "Building",
+        type("BuildingModel", (), {"query": FakeQuery(building)}),
+    )
+    monkeypatch.setattr(
+        actions_module,
+        "BuildingHistory",
+        type(
+            "BuildingHistoryModel",
+            (),
+            {"query": FakeQuery(history), "created_at": FakeColumn()},
+        ),
+    )
+    return app
+
+
+def test_building_history_returns_a_documented_empty_result(monkeypatch):
+    app = _history_app(monkeypatch, type("Building", (), {})(), [])
+
+    response = app.test_client().get("/api/actions/buildings/42/history")
+
+    assert response.status_code == 200
+    assert response.json == {"success": True, "data": []}
+
+
+def test_building_history_serializes_records_and_timestamps(monkeypatch):
+    from datetime import datetime, timezone
+
+    timestamp = datetime(2026, 9, 2, 8, 30, tzinfo=timezone.utc)
+    record = type(
+        "HistoryRecord",
+        (),
+        {
+            "history_id": 7,
+            "building_id": 42,
+            "action": "Updated Building",
+            "field": "building_name",
+            "old_value": "Old Hall",
+            "new_value": "New Hall",
+            "changed_by": "admin01",
+            "created_at": timestamp,
+        },
+    )()
+    app = _history_app(monkeypatch, type("Building", (), {})(), [record])
+
+    response = app.test_client().get("/api/actions/buildings/42/history")
+
+    assert response.status_code == 200
+    assert response.json["data"] == [{
+        "history_id": 7,
+        "building_id": 42,
+        "action": "Updated Building",
+        "field": "building_name",
+        "old_value": "Old Hall",
+        "new_value": "New Hall",
+        "changed_by": "admin01",
+        "created_at": "2026-09-02T08:30:00+00:00",
+    }]
+
+
+def test_building_history_returns_404_for_a_missing_building(monkeypatch):
+    app = _history_app(monkeypatch, None, [])
+
+    response = app.test_client().get("/api/actions/buildings/42/history")
+
+    assert response.status_code == 404
+    assert response.json == {"success": False, "message": "Building not found."}
+
+
+def test_building_history_rolls_back_and_returns_500_on_query_failure(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    session = FakeSession()
+
+    class FailingQuery(FakeQuery):
+        def all(self):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(type("Building", (), {})())}))
+    monkeypatch.setattr(actions_module, "BuildingHistory", type("BuildingHistoryModel", (), {"query": FailingQuery([]), "created_at": FakeColumn()}))
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
+
+    response = app.test_client().get("/api/actions/buildings/42/history")
+
+    assert response.status_code == 500
+    assert response.json == {"success": False, "message": "Failed to get building history."}
+    assert session.rollbacks == 1
