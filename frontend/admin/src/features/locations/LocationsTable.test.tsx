@@ -231,12 +231,21 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("populates the parent building and floor level when editing a child location", async () => {
     const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
-    renderLocations(["/locations?q=Edit%20Child%20Room"]);
-    fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Child Room" }));
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Administration Building" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
     expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
+  });
+
+  it("keeps row action options above neighboring table rows", async () => {
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Administration Building" }));
+    const menu = screen.getByRole("menu");
+    expect(menu).toBeVisible();
+    expect(menu.parentElement?.parentElement).toHaveStyle({ zIndex: "50" });
+    expect(screen.getByRole("menuitem", { name: "Edit location" })).toBeVisible();
   });
 
   it("opens the Bulk Import modal with a file input and template", async () => {
