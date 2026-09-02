@@ -62,8 +62,58 @@ import {
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
-import { projectWorkingSessionOperation, type ProjectedCollection } from "./workingSessionProjection";
 import "leaflet/dist/leaflet.css";
+
+// ============================================================================
+// Types & Utilities
+// ============================================================================
+
+type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";
+
+interface OperationProjection {
+  collection: ProjectedCollection;
+  entityId: string;
+  value: Record<string, unknown> | null;
+}
+
+/**
+ * Projects a WorkingOperation onto its affected collections based on domain and direction.
+ * Used during undo/redo to apply operations to local state collections.
+ */
+function projectWorkingSessionOperation(
+  operation: WorkingOperation,
+  direction: "undo" | "redo"
+): OperationProjection[] {
+  const value = direction === "undo" ? operation.before : operation.after;
+
+  // Map domain + type to affected collections
+  if (operation.domain === "Locations") {
+    return [{ collection: "locations", entityId: operation.entityId, value }];
+  } else if (operation.domain === "Routes & Paths") {
+    // Pathways and nodes are in the same domain
+    if (operation.type === "update_geometry" || operation.type === "create_entity" || operation.type === "retire_entity") {
+      // Determine if it's a pathway or node by checking the record structure
+      if (value && typeof value === "object" && ("sourceNodeId" in value || "destinationNodeId" in value)) {
+        return [{ collection: "pathways", entityId: operation.entityId, value }];
+      } else {
+        return [{ collection: "nodes", entityId: operation.entityId, value }];
+      }
+    }
+    return [{ collection: "nodes", entityId: operation.entityId, value }];
+  } else if (operation.domain === "Local Map Data") {
+    if (operation.type === "link_feature" || operation.type === "unlink_feature") {
+      return [{ collection: "featureLinks", entityId: operation.entityId, value }];
+    }
+    return [{ collection: "localFeatures", entityId: operation.entityId, value }];
+  }
+
+  // Fallback for building operations (these might come through as Locations domain)
+  if (value && typeof value === "object" && "points" in value) {
+    return [{ collection: "buildings", entityId: operation.entityId, value }];
+  }
+
+  return [];
+}
 
 const createLocationPinIcon = (selected = false) =>
   L.divIcon({
