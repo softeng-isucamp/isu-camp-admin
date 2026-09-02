@@ -121,15 +121,16 @@ export const normalizeBackendLocationMutation = (raw: unknown): Location => {
   return normalizeBackendLocation(record as BackendLocation);
 };
 
-// `local` is the explicit development/test adapter for deterministic in-browser fixtures.
-// HTTP-backed environments use `mock` for the mock API or `real` for production,
-// with VITE_API_BASE_URL selecting the backend when needed.
-export const API_MODE: ApiMode =
-  (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local";
+// The application always uses the real backend. Only Vitest's dedicated test
+// flag may opt into the adapter selected by the test harness; runtime
+// environment variables cannot switch the application to fixture data.
+export const API_MODE: ApiMode = import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true"
+  ? ((import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local")
+  : "real";
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
-  (API_MODE === "mock" ? "http://127.0.0.1:5001" : "");
+  "http://127.0.0.1:5000";
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 const localAdapter = createLocalAdapter(
   USE_GENERATED_MAP_FIXTURE
