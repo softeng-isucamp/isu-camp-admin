@@ -39,6 +39,7 @@ import { createLocalAdapter } from "./localAdapter";
 import { LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
+import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult } from "./mapEditorApiClient";
 
 
 // ==========================================
@@ -319,6 +320,7 @@ export interface Services {
   };
 
   map: {
+    getMapEditorBootstrap?(projectId: string): Promise<MapEditorBootstrap>;
     buildings(): Promise<typeof buildings>;
 
     removeBuilding(id: string): Promise<void>;
@@ -332,6 +334,8 @@ export interface Services {
     save(
       edit?: MapSavePayload
     ): Promise<void>;
+
+    saveDraft?(command: SaveDraftCommand): Promise<SaveDraftResult>;
   };
 
   imports: {
@@ -846,7 +850,10 @@ export const services: Services = {
     remove: async (id) => {
 
       if (USE_HTTP_API) {
-        throw new Error("Deleting locations is not available yet.");
+        await apiJson<unknown>(`/api/actions/locations/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        return;
       }
 
       failIfConfigured("locationRemove");
@@ -1262,6 +1269,7 @@ export const services: Services = {
   // ========================================
 
   map: {
+    getMapEditorBootstrap: (projectId) => mapEditorApiClient.getMapEditorBootstrap(projectId),
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
@@ -1599,6 +1607,7 @@ export const services: Services = {
 
       return wait(undefined);
     },
+    saveDraft: (command) => mapEditorApiClient.saveDraft(command),
   },
 
 

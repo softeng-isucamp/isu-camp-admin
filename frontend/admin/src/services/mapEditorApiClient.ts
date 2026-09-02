@@ -207,6 +207,13 @@ export interface ConflictingEntityDiff {
   conflictType: string;
 }
 
+export interface SaveDraftCommand {
+  projectId: string;
+  baseDraftVersion: number;
+  requestId: string;
+  operations: WorkingOperation[];
+}
+
 export type SaveDraftResult =
   | {
       success: true;
@@ -225,6 +232,11 @@ export type SaveDraftResult =
       errorType: "FIELD_VALIDATION_ERROR" | "FEATURE_GEOMETRY_ERROR" | "TOPOLOGY_CONSTRAINT_ERROR";
       message: string;
       details?: Record<string, unknown>;
+    }
+  | {
+      success: false;
+      errorType: "SERVICE_UNAVAILABLE";
+      message: string;
     };
 
 export interface PublishDraftResult {
@@ -249,11 +261,8 @@ export interface MapEditorApiClient {
     domain: "buildings" | "locations",
     searchQuery?: string
   ): Promise<EligibleUnattachedRecord[]>;
-  saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
-  ): Promise<SaveDraftResult>;
+  saveDraft(command: SaveDraftCommand): Promise<SaveDraftResult>;
+  saveDraft(projectId: string, baseDraftVersion: number, operations: WorkingOperation[]): Promise<SaveDraftResult>;
   publishDraft(
     projectId: string,
     draftVersion: number
@@ -648,6 +657,41 @@ export function filterNonConflictingOperations(
   });
 }
 
+function validateDraftOperations(layers: MapEditorLayers, operations: WorkingOperation[]): SaveDraftResult | null {
+  for (const operation of operations) {
+    if (operation.type === "compound_batch" && operation.nestedOperations) {
+      const nestedResult = validateDraftOperations(layers, operation.nestedOperations);
+      if (nestedResult) return nestedResult;
+      continue;
+    }
+    const collection = operation.domain === "Locations"
+      ? [...layers.buildings, ...layers.outdoorLocations]
+      : operation.domain === "Routes & Paths"
+        ? [...layers.routeNodes, ...layers.pathways]
+        : [...layers.localFeatures, ...layers.featureLinks];
+    const existing = collection.find((item) => item.id === operation.entityId);
+    if (operation.type === "create_entity" && existing) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Entity ${operation.entityId} already exists.` };
+    }
+    if (operation.type !== "create_entity" && operation.type !== "compound_batch" && operation.type !== "link_feature" && !existing) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Entity ${operation.entityId} is not owned by this Admin Draft.` };
+    }
+    if (operation.type === "unlink_feature" && !layers.featureLinks.some((link) => link.id === operation.entityId)) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Feature link ${operation.entityId} is not owned by this Admin Draft.` };
+    }
+    if (operation.type === "link_feature") {
+      const link = operation.after as Partial<FeatureLinkEntity> | null;
+      if (!link || typeof link.featureId !== "string" || typeof link.targetEntityId !== "string"
+        || !layers.localFeatures.some((feature) => feature.id === link.featureId)
+        || !layers.buildings.some((building) => building.id === link.targetEntityId)) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Feature link ${operation.entityId} references an unowned feature or Building.` };
+      }
+    }
+    applyOperationToLayers(layers, operation);
+  }
+  return null;
+}
+
 // ============================================================================
 // 6. Applying Operations to In-Memory Layers
 // ============================================================================
@@ -789,6 +833,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
         conflictingEntities?: ConflictingEntityDiff[];
       } = null;
   private simulatedError: SaveDraftResult | null = null;
+  private acceptedRequests = new Map<string, SaveDraftResult>();
 
   constructor(options?: LocalMapEditorAdapterOptions) {
     const rawSources: RawSeedSources = options?.seedSources ?? {
@@ -844,6 +889,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
     };
     this.simulatedConflict = null;
     this.simulatedError = null;
+    this.acceptedRequests.clear();
   }
 
   public async getMapEditorBootstrap(projectId: string): Promise<MapEditorBootstrap> {
@@ -912,11 +958,17 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
   }
 
   public async saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
+    commandOrProjectId: SaveDraftCommand | string,
+    legacyBaseDraftVersion?: number,
+    legacyOperations?: WorkingOperation[],
   ): Promise<SaveDraftResult> {
-    void projectId;
+    const command: SaveDraftCommand = typeof commandOrProjectId === "string"
+      ? { projectId: commandOrProjectId, baseDraftVersion: legacyBaseDraftVersion ?? this.adminDraft.draftVersion, requestId: `legacy-${Date.now()}-${Math.random()}`, operations: legacyOperations ?? [] }
+      : commandOrProjectId;
+    void command.projectId;
+
+    const prior = this.acceptedRequests.get(command.requestId);
+    if (prior) return structuredClone(prior);
 
     if (this.simulatedError) {
       return structuredClone(this.simulatedError);
@@ -924,7 +976,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
 
     if (this.simulatedConflict) {
       const { conflictingEntities, nonConflictingCount } = extractConcurrencyConflicts(
-        operations,
+        command.operations,
         this.currentLayers
       );
       return {
@@ -936,9 +988,9 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
       };
     }
 
-    if (baseDraftVersion !== this.adminDraft.draftVersion) {
+    if (command.baseDraftVersion !== this.adminDraft.draftVersion) {
       const { conflictingEntities, nonConflictingCount } = extractConcurrencyConflicts(
-        operations,
+        command.operations,
         this.currentLayers
       );
       return {
@@ -950,19 +1002,22 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
       };
     }
 
-    // Apply operations atomically
-    for (const op of operations) {
-      applyOperationToLayers(this.currentLayers, op);
-    }
+    const nextLayers = structuredClone(this.currentLayers);
+    const validation = validateDraftOperations(nextLayers, command.operations);
+    if (validation) return validation;
+    for (const op of command.operations) applyOperationToLayers(nextLayers, op);
+    this.currentLayers = nextLayers;
 
     this.adminDraft.draftVersion += 1;
     this.adminDraft.updatedAt = new Date().toISOString();
 
-    return {
+    const result: SaveDraftResult = {
       success: true,
       newDraftVersion: this.adminDraft.draftVersion,
       updatedAt: this.adminDraft.updatedAt,
     };
+    this.acceptedRequests.set(command.requestId, result);
+    return structuredClone(result);
   }
 
   public async publishDraft(
@@ -1020,7 +1075,7 @@ export class HttpMapEditorApiClient implements MapEditorApiClient {
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 409 && data?.errorType === "CONCURRENCY_CONFLICT") {
+      if (data?.success === false && typeof data?.errorType === "string") {
         return data as T;
       }
       throw new Error(data?.message ?? `Request failed (${response.status})`);
@@ -1047,14 +1102,19 @@ export class HttpMapEditorApiClient implements MapEditorApiClient {
     );
   }
 
+  public async saveDraft(command: SaveDraftCommand): Promise<SaveDraftResult>;
+  public async saveDraft(projectId: string, baseDraftVersion: number, operations: WorkingOperation[]): Promise<SaveDraftResult>;
   public async saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
+    commandOrProjectId: SaveDraftCommand | string,
+    baseDraftVersion?: number,
+    operations?: WorkingOperation[],
   ): Promise<SaveDraftResult> {
+    const command: SaveDraftCommand = typeof commandOrProjectId === "string"
+      ? { projectId: commandOrProjectId, baseDraftVersion: baseDraftVersion ?? 0, requestId: `legacy-${Date.now()}-${Math.random()}`, operations: operations ?? [] }
+      : commandOrProjectId;
     return this.fetchJson<SaveDraftResult>("/api/map-editor/drafts/save", {
       method: "POST",
-      body: JSON.stringify({ projectId, baseDraftVersion, operations }),
+      body: JSON.stringify(command),
     });
   }
 
