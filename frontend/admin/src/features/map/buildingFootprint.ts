@@ -117,27 +117,60 @@ export function validateBuildingFootprintGeometry(
   return issues;
 }
 
+export function findFirstOverlappingBuilding(
+  points: MapPoint[],
+  candidates: readonly Building[],
+  excludeBuildingId?: string | null,
+): Building | null {
+  if (points.length < 3) return null;
+
+  for (const building of candidates) {
+    if (excludeBuildingId && building.id === excludeBuildingId) continue;
+    if (!building.points || building.points.length < 3) continue;
+
+    if (polygonsOverlap(points, building.points)) {
+      return building;
+    }
+  }
+
+  return null;
+}
+
+export function findBuildingFootprintOverlaps(
+  buildings: readonly Building[],
+  filter?: (bldA: Building, bldB: Building) => boolean,
+): Array<{ bldA: Building; bldB: Building }> {
+  const overlaps: Array<{ bldA: Building; bldB: Building }> = [];
+
+  for (let i = 0; i < buildings.length; i++) {
+    const bldA = buildings[i];
+    if (!bldA.points || bldA.points.length < 3) continue;
+    for (let j = i + 1; j < buildings.length; j++) {
+      const bldB = buildings[j];
+      if (!bldB.points || bldB.points.length < 3) continue;
+      if (filter && !filter(bldA, bldB)) continue;
+      if (polygonsOverlap(bldA.points, bldB.points)) {
+        overlaps.push({ bldA, bldB });
+      }
+    }
+  }
+
+  return overlaps;
+}
+
 export function detectBuildingFootprintOverlap(
   points: MapPoint[],
   existingBuildings: readonly Building[],
   excludeBuildingId?: string | null,
 ): BuildingOverlapWarning | null {
-  if (points.length < 3) return null;
+  const overlapping = findFirstOverlappingBuilding(points, existingBuildings, excludeBuildingId);
+  if (!overlapping) return null;
 
-  for (const building of existingBuildings) {
-    if (excludeBuildingId && building.id === excludeBuildingId) continue;
-    if (!building.points || building.points.length < 3) continue;
-
-    if (polygonsOverlap(points, building.points)) {
-      return {
-        overlappingBuildingId: building.id,
-        message: `Advisory: Footprint overlaps with ${building.name}. Please review alignment.`,
-        advisory: true,
-      };
-    }
-  }
-
-  return null;
+  return {
+    overlappingBuildingId: overlapping.id,
+    message: `Advisory: Footprint overlaps with ${overlapping.name}. Please review alignment.`,
+    advisory: true,
+  };
 }
 
 export function validateBuildingIdentityDetails(
@@ -190,10 +223,11 @@ export function getBuildingAttachmentEligibility(
 export function buildCreateBuildingCompoundOperation(
   input: BuildingIdentityInput,
   footprintPoints: MapPoint[],
-  overrideId?: string,
+  overrideBuildingId?: string,
+  overrideFeatureId?: string,
 ): WorkingOperation {
-  const buildingId = overrideId ?? `building-${Date.now()}`;
-  const featureId = `feat-poly-${buildingId}`;
+  const buildingId = overrideBuildingId ?? `building-${Date.now()}`;
+  const featureId = overrideFeatureId ?? `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const linkId = `link-${featureId}-${buildingId}`;
 
   // The Building Campus Location record stores NO copied outdoor coordinate.
@@ -276,8 +310,9 @@ export function buildCreateBuildingCompoundOperation(
 export function buildAttachBuildingCompoundOperation(
   targetBuilding: Building,
   footprintPoints: MapPoint[],
+  overrideFeatureId?: string,
 ): WorkingOperation {
-  const featureId = `feat-poly-${targetBuilding.id}`;
+  const featureId = overrideFeatureId ?? `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const linkId = `link-${featureId}-${targetBuilding.id}`;
 
   const footprintFeature: LocalMapFeatureEntity = {
