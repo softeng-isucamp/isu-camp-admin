@@ -1,7 +1,7 @@
 
 # ISU-CAMP Admin Portal
 
-The portal is now a Vite + React + TypeScript application organized by feature modules. It follows the ISU-CAMP Figma administration mockup and supports local/mock adapters plus an authenticated HTTP backend in real mode.
+The portal is now a Vite + React + TypeScript application organized by feature modules. It follows the ISU-CAMP Figma administration mockup and uses the authenticated HTTP backend.
 
 ## Development
 
@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-Local development login: `admin_justine` / `password123`. This fixed demo identity is available only when `VITE_API_MODE=local`; mock and production modes authenticate through their configured HTTP backend. Password recovery uses verification code `000000` in the mock adapter.
+The frontend connects to the real backend at `http://127.0.0.1:5000` by default. Set `VITE_API_BASE_URL` when using another backend address. The backend must be running before starting the frontend.
 
 ## Verification
 
