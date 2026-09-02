@@ -994,7 +994,7 @@ export function Locations() {
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
+                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === item.id ? 50 : 0 }}>
                     {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
