@@ -200,7 +200,7 @@ export function reviewMapDraft(input: {
     if (!object.status) addError(reference, "Location status is required.");
     const hasAuthoritativeFootprint = object.type === "Building" && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
     const locationEvaluation = locationPolicy.evaluate(object, {
-      context: hasAuthoritativeFootprint ? "admin-draft" : "map-readiness",
+      context: hasAuthoritativeFootprint ? "record" : "map-readiness",
       directory: current.locations,
     });
     locationEvaluation.issues.forEach((issue) => addError(reference, issue.message));

@@ -72,8 +72,8 @@ import {
   detectBuildingFootprintOverlap,
   getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
-  validateBuildingOwnerDetails,
-  type BuildingOwnerInput,
+  validateBuildingIdentityDetails,
+  type BuildingIdentityInput,
 } from "./buildingFootprint";
 import "leaflet/dist/leaflet.css";
 
@@ -570,10 +570,23 @@ export function MapEditor() {
   const [buildingRecordSearch, setBuildingRecordSearch] = useState("");
   const [selectedBuildingRecordId, setSelectedBuildingRecordId] = useState<string | null>(null);
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
-  const [buildingName, setBuildingName] = useState("");
-  const [buildingCode, setBuildingCode] = useState("");
-  const [buildingFunction, setBuildingFunction] = useState("");
-  const [buildingKeywords, setBuildingKeywords] = useState("");
+  const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>({
+    name: "",
+    code: "",
+    function: "",
+    keywords: "",
+    status: "Active",
+  });
+  const buildingName = buildingForm.name;
+  const buildingCode = buildingForm.code;
+  const buildingFunction = buildingForm.function ?? "";
+  const buildingKeywords = buildingForm.keywords ?? "";
+  const updateBuildingField = (field: keyof BuildingIdentityInput, value: string) => {
+    setBuildingForm((current) => ({ ...current, [field]: value }));
+  };
+  const resetBuildingForm = () => {
+    setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
+  };
   const [movingType, setMovingType] = useState<"location" | "node">("location");
   const [movingId, setMovingId] = useState<string | null>(null);
   const [moveOrigin, setMoveOrigin] = useState<MapPoint | null>(null);
@@ -589,7 +602,7 @@ export function MapEditor() {
     "Entrance" | "Junction" | "Access Point"
   >("Entrance");
   const [placingNodeName, setPlacingNodeName] = useState("");
-  const [placingAssociatedPlaceId, setPlacingAssociatedPlaceId] = useState<
+  const [placingAssociatedBuildingId, setPlacingAssociatedBuildingId] = useState<
     string | null
   >(null);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
@@ -683,14 +696,6 @@ export function MapEditor() {
   }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
   const currentFeatureLinks = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
-  const buildingAttachmentEligibility = (building: Building) =>
-    getBuildingAttachmentEligibility(building, currentFeatureLinks);
-  const selectedAttachBuilding = (data?.buildings || []).find((b) => b.id === selectedBuildingRecordId);
-  const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
-  const buildingRecordCandidates = (data?.buildings || []).filter((building) => {
-    const query = buildingRecordSearch.trim().toLowerCase();
-    return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
-  });
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
   const currentPathways = useMemo(() => {
@@ -702,14 +707,26 @@ export function MapEditor() {
     () => findPathwayCrossings(currentPathways, currentNodes),
     [currentNodes, currentPathways],
   );
+  const sessionBuildings = useMemo(() => {
+    return overlayChanges(data?.buildings || [], localBuildings);
+  }, [data?.buildings, localBuildings]);
+  const buildingAttachmentEligibility = (building: Building) =>
+    getBuildingAttachmentEligibility(building, currentFeatureLinks);
+  const selectedAttachBuilding = sessionBuildings.find((b) => b.id === selectedBuildingRecordId);
+  const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
+  const buildingRecordCandidates = sessionBuildings.filter((building) => {
+    if (building.id === "pending-building" || building.id === editingBuildingId) return false;
+    const query = buildingRecordSearch.trim().toLowerCase();
+    return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
+  });
   const currentBuildings = useMemo(() => {
-    const merged = overlayChanges(directoryBuildings, localBuildings);
-    if (mode !== "area" || points.length === 0) return merged;
+    const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
+    if (mode !== "area" || points.length === 0) return validMerged;
     const pending: Building = { id: editingBuildingId ?? "pending-building", name: buildingName, code: buildingCode, points };
-    return editingBuildingId && merged.some((building) => building.id === editingBuildingId)
-      ? merged.map((building) => building.id === editingBuildingId ? pending : building)
-      : [...merged, pending];
-  }, [buildingCode, buildingName, directoryBuildings, editingBuildingId, localBuildings, mode, points]);
+    return editingBuildingId && validMerged.some((building) => building.id === editingBuildingId)
+      ? validMerged.map((building) => building.id === editingBuildingId ? pending : building)
+      : [...validMerged, pending];
+  }, [buildingCode, buildingName, editingBuildingId, mode, points, sessionBuildings]);
   const pointSnapTargets = useMemo<PointSnapTarget[]>(() => [
     ...currentBuildings.flatMap((building) => building.points.map((point, index) => ({
       kind: "building_perimeter" as const,
@@ -746,21 +763,23 @@ export function MapEditor() {
   // Local map features are retained by the data/service layer for compatibility,
   // but are intentionally not rendered in this editor. The campus boundary is
   // still used below for validation and navigation bounds.
+  const campusBoundary = useMemo(
+    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
+    [directoryBuildings],
+  );
   const selectedLocalFeatureDefinition = EDITABLE_LOCAL_FEATURE_FAMILIES.find(
     (family) => family.id === selectedLocalFeatureFamily,
   )!;
   const localFeatureMinimumPoints = selectedLocalFeatureDefinition.geometryType === "line" ? 2 : 3;
-  const localFeaturePolygonInvalid = selectedLocalFeatureDefinition.geometryType === "polygon"
-    && (!polygonIsNonDegenerate(localFeaturePoints) || polygonSelfIntersects(localFeaturePoints));
+  const localFeaturePolygonInvalid = mode === "local_feature"
+    && selectedLocalFeatureDefinition.geometryType === "polygon"
+    && localFeaturePoints.length >= 3
+    && validateBuildingFootprintGeometry(localFeaturePoints, campusBoundary).length > 0;
   const canCreateLocalFeature = selectedLocalFeatureFamily === "building_footprint"
     || (localFeatureName.trim().length > 0 && localFeaturePoints.length >= localFeatureMinimumPoints
       && !localFeaturePolygonInvalid);
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
-  const campusBoundary = useMemo(
-    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
-    [directoryBuildings],
-  );
   const footprintGeometryIssues = useMemo(
     () => mode === "area" ? validateBuildingFootprintGeometry(points, campusBoundary) : [],
     [campusBoundary, mode, points],
@@ -769,9 +788,9 @@ export function MapEditor() {
     () => mode === "area" ? detectBuildingFootprintOverlap(points, currentBuildings, editingBuildingId) : null,
     [currentBuildings, editingBuildingId, mode, points],
   );
-  const buildingOwnerIssues = useMemo(
+  const buildingIdentityIssues = useMemo(
     () => mode === "area" && (polygonClosed || points.length >= 3) && buildingRecordMode === "create"
-      ? validateBuildingOwnerDetails(
+      ? validateBuildingIdentityDetails(
           { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
           currentLocations,
           editingBuildingId,
@@ -780,7 +799,7 @@ export function MapEditor() {
     [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingRecordMode, currentLocations, editingBuildingId, mode, points.length, polygonClosed],
   );
   const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
-  const canSaveBuilding = canFinishFootprint && buildingOwnerIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
+  const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const navigationBounds = useMemo(() => {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
@@ -1216,7 +1235,7 @@ export function MapEditor() {
       id: newNodeId,
       name: placingNodeName.trim(),
       nodeType: placingNodeType,
-      associatedPlaceId: placingAssociatedPlaceId || null,
+      associatedPlaceId: placingAssociatedBuildingId || null,
       lat: temporary[0],
       lng: temporary[1],
     };
@@ -1320,10 +1339,7 @@ export function MapEditor() {
 
   const cancelBuildingDraft = () => {
     setPoints([]);
-    setBuildingName("");
-    setBuildingCode("");
-    setBuildingFunction("");
-    setBuildingKeywords("");
+    resetBuildingForm();
     setEditingBuildingId(null);
     setBuildingRecordSearch("");
     setSelectedBuildingRecordId(null);
@@ -1360,7 +1376,7 @@ export function MapEditor() {
       setDirty(true);
       cancelBuildingDraft();
       setSelected({ type: "building", id: building.id });
-      setPlacingAssociatedPlaceId(building.id);
+      setPlacingAssociatedBuildingId(building.id);
     } else {
       handleCreateBuildingRecord();
     }
@@ -1374,23 +1390,22 @@ export function MapEditor() {
     }
 
     const featureId = `feat-poly-${buildingRecord.id}`;
-    const linkId = `link-${featureId}-${buildingRecord.id}`;
 
     let compoundBatch: WorkingOperation;
     if (intent === "create") {
-      const ownerInput: BuildingOwnerInput = {
+      const identityInput: BuildingIdentityInput = {
         name: buildingRecord.name,
         code: buildingRecord.code,
         function: buildingFunction,
         keywords: buildingKeywords,
         status: "Active",
       };
-      const ownerIssues = validateBuildingOwnerDetails(ownerInput, currentLocations);
-      if (ownerIssues.length > 0) {
-        setError(ownerIssues[0].message);
+      const identityIssues = validateBuildingIdentityDetails(identityInput, currentLocations);
+      if (identityIssues.length > 0) {
+        setError(identityIssues[0].message);
         return;
       }
-      compoundBatch = buildCreateBuildingCompoundOperation(ownerInput, points, buildingRecord.id);
+      compoundBatch = buildCreateBuildingCompoundOperation(identityInput, points, buildingRecord.id);
       const locRecord = compoundBatch.nestedOperations![0].after as unknown as Location;
       setLocalLocations((current) => [...current.filter((item) => item.id !== locRecord.id), locRecord]);
     } else {
@@ -1402,31 +1417,26 @@ export function MapEditor() {
       compoundBatch = buildAttachBuildingCompoundOperation(buildingRecord, points);
     }
 
-    const footprint: LocalMapFeatureEntity = {
-      id: featureId,
-      family: "building_footprint",
-      name: `${buildingRecord.name} footprint`,
-      isEditable: true,
-      status: "active",
-      geometryType: "polygon",
-      coordinates: [...points],
-      linkedBuildingId: buildingRecord.id,
-    };
-    const link: FeatureLinkEntity = {
-      id: linkId,
-      featureId,
-      targetDomain: "Locations",
-      targetEntityId: buildingRecord.id,
-      linkType: "building_footprint",
-    };
+    const footprintOp = compoundBatch.nestedOperations!.find(
+      (op) => op.domain === "Local Map Data" && op.type === "create_entity",
+    );
+    const linkOp = compoundBatch.nestedOperations!.find(
+      (op) => op.domain === "Local Map Data" && op.type === "link_feature",
+    );
+    const footprint = footprintOp?.after as unknown as LocalMapFeatureEntity;
+    const link = linkOp?.after as unknown as FeatureLinkEntity;
 
     // The current renderer still consumes Building.points. Keep this local
     // compatibility projection separate from the geometry-free Building
     // record stored in the compound operation above.
     const renderedBuilding = { ...buildingRecord, points: [...points] };
     setLocalBuildings((current) => [...current.filter((item) => item.id !== buildingRecord.id), renderedBuilding]);
-    setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== featureId), footprint]);
-    setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== buildingRecord.id), link]);
+    if (footprint) {
+      setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== footprint.id), footprint]);
+    }
+    if (link) {
+      setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== buildingRecord.id), link]);
+    }
     workingSessionManager.executeBatch(
       intent === "create" ? `Create ${buildingRecord.name} with footprint` : `Attach footprint to ${buildingRecord.name}`,
       "Local Map Data",
@@ -1435,17 +1445,14 @@ export function MapEditor() {
     );
     setDirty(true);
     setPoints([]);
-    setBuildingName("");
-    setBuildingCode("");
-    setBuildingFunction("");
-    setBuildingKeywords("");
+    resetBuildingForm();
     setBuildingRecordSearch("");
     setSelectedBuildingRecordId(null);
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setMode("select");
     setSelected({ type: "building", id: buildingRecord.id });
-    setPlacingAssociatedPlaceId(buildingRecord.id);
+    setPlacingAssociatedBuildingId(buildingRecord.id);
     const hasActiveEntrance = currentNodes.some((node) =>
       node.nodeType === "Entrance"
       && node.associatedPlaceId === buildingRecord.id
@@ -1471,7 +1478,7 @@ export function MapEditor() {
   };
 
   const handleAttachBuildingRecord = () => {
-    const existing = (data?.buildings || []).find((building) => building.id === selectedBuildingRecordId);
+    const existing = sessionBuildings.find((building) => building.id === selectedBuildingRecordId);
     if (!existing) return;
     const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
     if (!eligibility.eligible) {
@@ -1492,7 +1499,7 @@ export function MapEditor() {
     setPlacingObjectType("node");
     setPlacingNodeType("Entrance");
     setPlacingNodeName(`${building.name} Entrance`);
-    setPlacingAssociatedPlaceId(building.id);
+    setPlacingAssociatedBuildingId(building.id);
     setTemporary(null);
     setPointDraftDirty(false);
     setMode("place");
@@ -1736,7 +1743,7 @@ export function MapEditor() {
           placingId,
           placingNodeType,
           placingNodeName,
-          placingAssociatedPlaceId,
+          placingAssociatedBuildingId,
           movingType,
           movingId,
           addLocationOpen,
@@ -1752,6 +1759,7 @@ export function MapEditor() {
           isClosed: polygonClosed,
         },
         nestedRecords: {
+          buildingForm,
           buildingName,
           buildingCode,
           buildingFunction,
@@ -1801,10 +1809,7 @@ export function MapEditor() {
     activePathway?.sourceNodeId,
     activeTool,
     addLocationOpen,
-    buildingCode,
-    buildingFunction,
-    buildingKeywords,
-    buildingName,
+    buildingForm,
     buildingRecordMode,
     buildingRecordSearch,
     editingBuildingId,
@@ -1823,7 +1828,7 @@ export function MapEditor() {
     polygonClosed,
     pathStartNodeId,
     pointDraftDirty,
-    placingAssociatedPlaceId,
+    placingAssociatedBuildingId,
     placingId,
     placingNodeName,
     placingNodeType,
@@ -1867,8 +1872,7 @@ export function MapEditor() {
         setBuildingRecordMode("create");
         setBuildingRecordSearch("");
         setSelectedBuildingRecordId(null);
-        setBuildingName("");
-        setBuildingCode("");
+        resetBuildingForm();
         setEditingBuildingId(null);
       },
       pathway: () => {
@@ -2009,7 +2013,11 @@ export function MapEditor() {
         if (typeof records.placingId === "string") setPlacingId(records.placingId);
         if (records.placingNodeType === "Entrance" || records.placingNodeType === "Junction" || records.placingNodeType === "Access Point") setPlacingNodeType(records.placingNodeType);
         if (typeof records.placingNodeName === "string") setPlacingNodeName(records.placingNodeName);
-        if (typeof records.placingAssociatedPlaceId === "string" || records.placingAssociatedPlaceId === null) setPlacingAssociatedPlaceId(records.placingAssociatedPlaceId);
+        if (typeof records.placingAssociatedBuildingId === "string" || records.placingAssociatedBuildingId === null) {
+          setPlacingAssociatedBuildingId(records.placingAssociatedBuildingId);
+        } else if (typeof records.placingAssociatedPlaceId === "string" || records.placingAssociatedPlaceId === null) {
+          setPlacingAssociatedBuildingId(records.placingAssociatedPlaceId);
+        }
         if (records.movingType === "location" || records.movingType === "node") setMovingType(records.movingType);
         if (typeof records.movingId === "string" || records.movingId === null) setMovingId(records.movingId);
         setAddLocationOpen(records.addLocationOpen === true);
@@ -2035,10 +2043,24 @@ export function MapEditor() {
       },
       polygon: () => {
         setPoints(restoredPoints);
-        setBuildingName(typeof records.buildingName === "string" ? records.buildingName : "");
-        setBuildingCode(typeof records.buildingCode === "string" ? records.buildingCode : "");
-        setBuildingFunction(typeof records.buildingFunction === "string" ? records.buildingFunction : "");
-        setBuildingKeywords(typeof records.buildingKeywords === "string" ? records.buildingKeywords : "");
+        if (records.buildingForm && typeof records.buildingForm === "object") {
+          const form = records.buildingForm as Record<string, unknown>;
+          setBuildingForm({
+            name: typeof form.name === "string" ? form.name : "",
+            code: typeof form.code === "string" ? form.code : "",
+            function: typeof form.function === "string" ? form.function : "",
+            keywords: typeof form.keywords === "string" ? form.keywords : "",
+            status: "Active",
+          });
+        } else {
+          setBuildingForm({
+            name: typeof records.buildingName === "string" ? records.buildingName : "",
+            code: typeof records.buildingCode === "string" ? records.buildingCode : "",
+            function: typeof records.buildingFunction === "string" ? records.buildingFunction : "",
+            keywords: typeof records.buildingKeywords === "string" ? records.buildingKeywords : "",
+            status: "Active",
+          });
+        }
         setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
         setPolygonClosed(records.polygonClosed === true);
         if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
@@ -2196,8 +2218,13 @@ export function MapEditor() {
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
     setEditingBuildingId(selectedBuilding.id);
-    setBuildingName(selectedBuilding.name);
-    setBuildingCode(selectedBuilding.code);
+    setBuildingForm({
+      name: selectedBuilding.name,
+      code: selectedBuilding.code,
+      function: "",
+      keywords: "",
+      status: selectedBuilding.status ?? "Active",
+    });
     setPoints([...selectedBuilding.points]);
     setPolygonInteraction("reshape");
     setPolygonClosed(true);
@@ -2207,8 +2234,13 @@ export function MapEditor() {
   const startSelectedBuildingMove = () => {
     if (!selectedBuilding) return;
     setEditingBuildingId(selectedBuilding.id);
-    setBuildingName(selectedBuilding.name);
-    setBuildingCode(selectedBuilding.code);
+    setBuildingForm({
+      name: selectedBuilding.name,
+      code: selectedBuilding.code,
+      function: "",
+      keywords: "",
+      status: selectedBuilding.status ?? "Active",
+    });
     setPoints([...selectedBuilding.points]);
     setPolygonInteraction("move");
     setPolygonClosed(true);
@@ -2304,9 +2336,15 @@ export function MapEditor() {
             label: "🗑 Retire Footprint",
             tone: "danger" as const,
             onSelect: () => {
+              const footprintLink = currentFeatureLinks.find((link) =>
+                link.targetDomain === "Locations"
+                && link.targetEntityId === selectedBuilding.id
+                && link.linkType === "building_footprint",
+              );
               const footprint = currentLocalFeatures.find((feature) =>
-                feature.family === "building_footprint"
-                && feature.linkedBuildingId === selectedBuilding.id,
+                feature.id === footprintLink?.featureId
+                || (feature.family === "building_footprint"
+                  && (feature.linkedBuildingId === selectedBuilding.id || feature.id === `feat-poly-${selectedBuilding.id}`)),
               );
               if (!footprint) return;
               retireLocalFeature(footprint);
@@ -2643,9 +2681,15 @@ export function MapEditor() {
 
           {filteredBuildings.map((building) => {
             const isSelected = selected?.id === building.id;
+            const footprintLink = currentFeatureLinks.find((link) =>
+              link.targetDomain === "Locations"
+              && link.targetEntityId === building.id
+              && link.linkType === "building_footprint",
+            );
             const footprint = currentLocalFeatures.find((feature) =>
-              feature.family === "building_footprint"
-              && (feature.linkedBuildingId === building.id || feature.id === `feat-poly-${building.id}`),
+              feature.id === footprintLink?.featureId
+              || (feature.family === "building_footprint"
+                && (feature.linkedBuildingId === building.id || feature.id === `feat-poly-${building.id}`)),
             );
             const footprintRetired = footprint?.status === "retired";
             const buildingFillOpacity =
@@ -2933,9 +2977,6 @@ export function MapEditor() {
                 icon={createVertexIcon(i)}
                 draggable={polygonInteraction === "reshape"}
                 eventHandlers={{
-                  click: () => {
-                    if (i === 0 && polygonInteraction === "draw" && !polygonClosed && points.length >= 3) closePolygon();
-                  },
                   drag: (event) => {
                     const next = (event.target as L.Marker).getLatLng();
                     updatePolygonVertex(i, [next.lat, next.lng]);
@@ -3236,24 +3277,24 @@ export function MapEditor() {
                     {buildingRecordMode === "create" ? (
                       <div className="mt-3 space-y-2">
                         <label className="block text-xs font-semibold text-[#3f4941]">Building name
-                          <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                          <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
                         <label className="block text-xs font-semibold text-[#3f4941]">Building code
-                          <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                          <input aria-label="Building code" value={buildingCode} onChange={(event) => updateBuildingField("code", event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
                         <label className="block text-xs font-semibold text-[#3f4941]">Function / Category
-                          <input aria-label="Building function" value={buildingFunction} onChange={(event) => setBuildingFunction(event.target.value)} placeholder="e.g. Academic and Laboratories" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                          <input aria-label="Building function" value={buildingFunction} onChange={(event) => updateBuildingField("function", event.target.value)} placeholder="e.g. Academic and Laboratories" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
                         <label className="block text-xs font-semibold text-[#3f4941]">Keywords
-                          <input aria-label="Building keywords" value={buildingKeywords} onChange={(event) => setBuildingKeywords(event.target.value)} placeholder="e.g. science, lab, chemistry" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                          <input aria-label="Building keywords" value={buildingKeywords} onChange={(event) => updateBuildingField("keywords", event.target.value)} placeholder="e.g. science, lab, chemistry" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
                         {points.length >= 3 && (
                           <p className="mt-2 text-[11px] text-[#526359]">
                             Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")} (no copied outdoor coordinate stored on Building)
                           </p>
                         )}
-                        {buildingOwnerIssues.length > 0 && (
-                          <div className="mt-2 text-xs font-semibold text-red-700">{buildingOwnerIssues[0].message}</div>
+                        {buildingIdentityIssues.length > 0 && (
+                          <div className="mt-2 text-xs font-semibold text-red-700">{buildingIdentityIssues[0].message}</div>
                         )}
                       </div>
                     ) : (
@@ -3326,10 +3367,10 @@ export function MapEditor() {
                       </button>
                     </div>
                     <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building name
-                      <input aria-label="Building name" value={buildingName} onChange={(event) => setBuildingName(event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                      <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                     </label>
                     <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
-                      <input aria-label="Building code" value={buildingCode} onChange={(event) => setBuildingCode(event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+                      <input aria-label="Building code" value={buildingCode} onChange={(event) => updateBuildingField("code", event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                     </label>
                   </div>
                 )}
@@ -3511,15 +3552,15 @@ export function MapEditor() {
                       />
                     </div>
                     <div className="flex flex-col gap-1.5 my-2">
-                      <label className="text-xs font-semibold text-[#3f4941]">Associated Place</label>
-                      {placingAssociatedPlaceId && placingAssociatedPlaceId === nonRoutableBuildingId && (
+                      <label className="text-xs font-semibold text-[#3f4941]">Associated Building</label>
+                      {placingAssociatedBuildingId && placingAssociatedBuildingId === nonRoutableBuildingId && (
                         <p className="text-xs font-bold text-[#005931]">
-                          Associated Building: {currentBuildings.find((building) => building.id === placingAssociatedPlaceId)?.name ?? placingAssociatedPlaceId}
+                          Associated Building: {currentBuildings.find((building) => building.id === placingAssociatedBuildingId)?.name ?? placingAssociatedBuildingId}
                         </p>
                       )}
                       <select
-                        value={placingAssociatedPlaceId ?? ""}
-                        onChange={(e) => setPlacingAssociatedPlaceId(e.target.value || null)}
+                        value={placingAssociatedBuildingId ?? ""}
+                        onChange={(e) => setPlacingAssociatedBuildingId(e.target.value || null)}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
                         <option value="">None</option>
@@ -3668,8 +3709,13 @@ export function MapEditor() {
                 <div className="text-xs text-[#3f4941] mt-2">Building footprint</div>
                 <button type="button" className="mt-2 px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold" onClick={() => {
                   setEditingBuildingId(selectedBuilding.id);
-                  setBuildingName(selectedBuilding.name);
-                  setBuildingCode(selectedBuilding.code);
+                  setBuildingForm({
+                    name: selectedBuilding.name,
+                    code: selectedBuilding.code,
+                    function: "",
+                    keywords: "",
+                    status: selectedBuilding.status ?? "Active",
+                  });
                   setPoints([...selectedBuilding.points]);
                   setMode("area");
                 }}>Edit Footprint</button>
@@ -3702,7 +3748,7 @@ export function MapEditor() {
                   })()}
                 </section>
                 <section aria-label="Building entrances" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
-                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { setPlacingObjectType("node"); setPlacingNodeType("Entrance"); setPlacingAssociatedPlaceId(selectedBuildingAssociationId ?? null); setMode("place"); }}>＋ Place Entrance</button></div>
+                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { setPlacingObjectType("node"); setPlacingNodeType("Entrance"); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? null); setMode("place"); }}>＋ Place Entrance</button></div>
                   {selectedBuildingEntrances.length ? selectedBuildingEntrances.map((node) => <div key={node.id} className="flex justify-between gap-2 py-1 text-xs"><span>{node.name}</span><span className="text-[#6b7280]">{node.status === "Inactive" ? "Inactive" : "Active"}</span></div>) : <p className="mt-2 text-xs text-amber-700">No active Entrance Route Node. Add one to make this Building routable.</p>}
                 </section>
                 <div className="mt-4">

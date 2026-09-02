@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { generatedMapFixture } from "../../services/generatedMapFixture";
+import type { SaveDraftCommand, WorkingOperation } from "../../services/mapEditorApiClient";
 import type { Location, RouteNode } from "../../types";
 import { MapEditor } from "./MapEditor";
 
@@ -40,18 +41,31 @@ vi.mock("react-leaflet", () => ({
 }));
 vi.mock("../../services/api", () => ({
   setMockFailure: vi.fn(),
-  services: { map: {
-    buildings: vi.fn(async () => []),
-    locations: vi.fn(async () => [
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
-    ]),
-    nodes: vi.fn(async () => [
-      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
-      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
-    ]),
-    pathways: vi.fn(async () => []),
-    save: vi.fn(),
-  } },
+  services: {
+    map: {
+      buildings: vi.fn(async () => []),
+      locations: vi.fn(async () => [
+        { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      ]),
+      nodes: vi.fn(async () => [
+        { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+        { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
+      ]),
+      pathways: vi.fn(async () => []),
+      save: vi.fn(),
+      saveDraft: undefined as unknown as typeof services.map.saveDraft,
+    },
+    locations: {
+      list: vi.fn(async () => ({
+        items: [
+          { id: "loc-1", name: "Library", code: "LIB", type: "Facility" as const, parentId: null, status: "Active" as const, lat: 16.7205, lng: 121.6895, positioned: true },
+        ],
+        total: 1,
+        page: 1,
+        pageSize: 50,
+      })),
+    },
+  },
 }));
 
 describe("Map Editor preview", () => {
@@ -59,6 +73,7 @@ describe("Map Editor preview", () => {
     mapClickHandler = undefined;
     pathPointDragPosition = undefined;
     movingPointDragPosition = undefined;
+    services.map.saveDraft = undefined;
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
       { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
@@ -611,7 +626,7 @@ describe("Map Editor preview", () => {
 
     expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.72,121.689"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
     clickMap(16.720, 121.690);
 
     expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
@@ -624,7 +639,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
 
     expect(screen.getByRole("region", { name: "Create or attach building record" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "★ Create New Record" })).toHaveAttribute("aria-selected", "true");
@@ -646,7 +661,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
     fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Record" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search existing Buildings" }), { target: { value: "i" } });
 
@@ -665,7 +680,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
@@ -678,12 +693,12 @@ describe("Map Editor preview", () => {
   it("launches a guided Entrance Route Node draft for the completed Building", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
-    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Move point at 16.72,121.689" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
     fireEvent.click(screen.getByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
 
@@ -993,5 +1008,81 @@ describe("Map Editor preview", () => {
     expect(screen.getByLabelText("Building code")).toHaveValue("SUSP-01");
     expect(screen.getByLabelText("Building function")).toHaveValue("Administration");
     expect(screen.getByLabelText("Building keywords")).toHaveValue("admin, office");
+  });
+
+  it("saves a created Building footprint through Admin Draft gateway and refreshes canonical Locations query", async () => {
+    const mockLocationsList: Location[] = [
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+    ];
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    services.map.saveDraft = vi.fn(async (command: SaveDraftCommand) => {
+      const flatOps = command.operations.flatMap((op: WorkingOperation) =>
+        op.type === "compound_batch" && op.nestedOperations ? op.nestedOperations : [op]
+      );
+      const locOp = flatOps.find((op: WorkingOperation) => op.domain === "Locations" && op.type === "create_entity");
+      if (locOp?.after) {
+        mockLocationsList.push(locOp.after as unknown as Location);
+      }
+      return {
+        success: true as const,
+        newDraftVersion: command.baseDraftVersion + 1,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    vi.mocked(services.locations.list).mockImplementation(async () => ({
+      items: mockLocationsList,
+      total: mockLocationsList.length,
+      page: 1,
+      pageSize: 50,
+    }));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MapEditor />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Complex" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-CMP" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Engineering Labs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    // Open save review dialog and confirm save
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    const confirmButtons = screen.getAllByRole("button", { name: "Save Changes" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(services.map.saveDraft).toHaveBeenCalledTimes(1);
+    });
+
+    const callArgs = vi.mocked(services.map.saveDraft!).mock.calls[0][0];
+    expect(callArgs.operations).toHaveLength(1);
+    expect(callArgs.operations[0].type).toBe("compound_batch");
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["locations"] });
+
+    const locationsAfterSave = await services.locations.list();
+    const createdBuilding = locationsAfterSave.items.find((loc: Location) => loc.code === "ENG-CMP");
+    expect(createdBuilding).toBeDefined();
+    expect(createdBuilding?.name).toBe("Engineering Complex");
+    expect(createdBuilding?.type).toBe("Building");
+    expect(createdBuilding?.lat).toBeNull();
+    expect(createdBuilding?.lng).toBeNull();
+    expect(createdBuilding?.positioned).toBe(false);
   });
 });
