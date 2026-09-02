@@ -11,7 +11,7 @@ import {
   polygonSelfIntersects,
 } from "./mapEditing";
 
-export interface BuildingOwnerInput {
+export interface BuildingIdentityInput {
   name: string;
   code: string;
   function?: string;
@@ -140,8 +140,8 @@ export function detectBuildingFootprintOverlap(
   return null;
 }
 
-export function validateBuildingOwnerDetails(
-  input: BuildingOwnerInput,
+export function validateBuildingIdentityDetails(
+  input: BuildingIdentityInput,
   existingLocations: readonly Location[],
   editingBuildingId?: string | null,
 ): BuildingValidationIssue[] {
@@ -188,7 +188,7 @@ export function getBuildingAttachmentEligibility(
 }
 
 export function buildCreateBuildingCompoundOperation(
-  input: BuildingOwnerInput,
+  input: BuildingIdentityInput,
   footprintPoints: MapPoint[],
   overrideId?: string,
 ): WorkingOperation {
@@ -220,7 +220,6 @@ export function buildCreateBuildingCompoundOperation(
     status: "active",
     geometryType: "polygon",
     coordinates: [...footprintPoints],
-    linkedBuildingId: buildingId,
   };
 
   const featureLink: FeatureLinkEntity = {
@@ -289,7 +288,6 @@ export function buildAttachBuildingCompoundOperation(
     status: "active",
     geometryType: "polygon",
     coordinates: [...footprintPoints],
-    linkedBuildingId: targetBuilding.id,
   };
 
   const featureLink: FeatureLinkEntity = {

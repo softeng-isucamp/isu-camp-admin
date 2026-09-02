@@ -52,6 +52,7 @@ export interface WorkingOperation {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   nestedOperations?: WorkingOperation[];
+  description?: string;
 }
 
 export interface ActiveToolDraft {

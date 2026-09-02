@@ -1620,12 +1620,21 @@ export const services: Services = {
               locations.push(loc);
             }
             if (loc.type === "Building" && !buildings.some((item) => item.id === loc.id)) {
-              const featOp = flatOps.find(
+              const linkOp = flatOps.find(
                 (other) =>
                   other.domain === "Local Map Data" &&
-                  other.type === "create_entity" &&
-                  (other.after as Record<string, unknown>)?.linkedBuildingId === loc.id
+                  other.type === "link_feature" &&
+                  (other.after as Record<string, unknown>)?.targetEntityId === loc.id
               );
+              const featId = (linkOp?.after as Record<string, unknown>)?.featureId;
+              const featOp = featId
+                ? flatOps.find((other) => other.entityId === featId)
+                : flatOps.find(
+                    (other) =>
+                      other.domain === "Local Map Data" &&
+                      other.type === "create_entity" &&
+                      (other.after as Record<string, unknown>)?.linkedBuildingId === loc.id
+                  );
               const footprintPoints = ((featOp?.after as Record<string, unknown>)?.coordinates as [number, number][]) ?? [];
               buildings.push({
                 id: loc.id,
