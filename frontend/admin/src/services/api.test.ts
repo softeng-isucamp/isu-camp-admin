@@ -723,6 +723,33 @@ describe("real locations service boundary", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, building: saved.building, floor: saved.floor, function: saved.function, keywords: saved.keywords, status: saved.status }) }));
   });
 
+  it("updates existing locations through the actions endpoint", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const saved = { id: "42", name: "Room 204", code: "ENG-204", type: "Room", parentId: "1", status: "Active", lat: null, lng: null, positioned: false } as const;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(saved), { status: 200 }),
+    );
+
+    await expect(httpServices.locations.save(saved)).resolves.toEqual(saved);
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42$/);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "PUT", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, status: saved.status }) }));
+  });
+
+  it("deletes locations through the actions endpoint", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+
+    await expect(httpServices.locations.remove("42")).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42$/);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
+
   it("preserves backend validation details for the form", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
