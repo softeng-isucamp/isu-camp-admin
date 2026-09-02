@@ -1009,6 +1009,7 @@ export function Locations() {
                         <div
                           className="row-action-menu"
                           role="menu"
+                          onMouseDown={(event) => event.stopPropagation()}
                           style={{
                             position: "absolute",
                             right: "20px",

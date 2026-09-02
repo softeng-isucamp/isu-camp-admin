@@ -245,7 +245,11 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const menu = screen.getByRole("menu");
     expect(menu).toBeVisible();
     expect(menu.parentElement?.parentElement).toHaveStyle({ zIndex: "50" });
-    expect(screen.getByRole("menuitem", { name: "Edit location" })).toBeVisible();
+    const editOption = screen.getByRole("menuitem", { name: "Edit location" });
+    expect(editOption).toBeVisible();
+    fireEvent.mouseDown(editOption);
+    fireEvent.click(editOption);
+    expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
   });
 
   it("opens the Bulk Import modal with a file input and template", async () => {
