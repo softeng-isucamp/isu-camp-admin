@@ -397,9 +397,37 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
     clickMap(16.7208, 121.6902);
 
-    expect(screen.getByRole("dialog", { name: "Add Location" })).toHaveTextContent(
-      "Latitude: 16.720800 · Longitude: 121.690200",
+    expect(screen.getByRole("dialog", { name: "Create Outdoor Point Location" })).toHaveTextContent(
+      "Candidate position: 16.720800 · 121.690200",
     );
+  });
+
+  it("keeps a new outdoor point provisional until valid owner details are completed", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
+    clickMap(16.7208, 121.6902);
+
+    expect(screen.getByText("Outdoor Point Location")).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Room" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("map-container")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Outdoor Point Location" })).toBeDisabled();
+  });
+
+  it("creates one positioned canonical Location operation after valid outdoor details", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Point Location" }));
+    clickMap(16.7208, 121.6902);
+    fireEvent.change(screen.getByLabelText("New location name"), { target: { value: "Campus Flagpole" } });
+    fireEvent.change(screen.getByLabelText("New location code"), { target: { value: "FLAGPOLE" } });
+    fireEvent.change(screen.getByLabelText("New location description"), { target: { value: "Campus landmark" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Outdoor Point Location" }));
+
+    expect(screen.getByRole("complementary", { name: "Campus Flagpole object details" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("Campus Flagpole · location");
+    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("added (1)");
   });
 
   it("edits Location details from the object card and records a Working Session operation", async () => {

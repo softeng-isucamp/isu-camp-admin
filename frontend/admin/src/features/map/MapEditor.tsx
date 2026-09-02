@@ -60,6 +60,7 @@ import {
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
 import { deactivateRouteNode } from "./routeNodeLifecycle";
+import { validateOutdoorPointLocation } from "./outdoorPointLocation";
 import {
   findSelectionCandidates,
   type CanvasSelectionType,
@@ -421,23 +422,6 @@ function MapController({
 const isPositionedLocation = (location: Location): location is Location & { lat: number; lng: number } =>
   location.positioned && location.lat !== null && location.lng !== null;
 
-type NewLocationDraft = Pick<Location, "name" | "code" | "type" | "status" | "parentId"> & {
-  building: string;
-  floor: string;
-};
-
-const isNewLocationDraft = (value: unknown): value is NewLocationDraft => {
-  if (!value || typeof value !== "object") return false;
-  const draft = value as Partial<NewLocationDraft>;
-  return typeof draft.name === "string"
-    && typeof draft.code === "string"
-    && typeof draft.type === "string"
-    && typeof draft.status === "string"
-    && (typeof draft.parentId === "string" || draft.parentId === null)
-    && typeof draft.building === "string"
-    && typeof draft.floor === "string";
-};
-
 const isPathwayDraft = (value: unknown): value is Pathway => {
   if (!value || typeof value !== "object") return false;
   const pathway = value as Partial<Pathway>;
@@ -575,7 +559,10 @@ export function MapEditor() {
     string | null
   >(null);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
-  const [newLocation, setNewLocation] = useState({ name: "", code: "", type: "Facility" as Location["type"], status: "Active" as Location["status"], parentId: null as string | null, building: "", floor: "" });
+  const [newLocation, setNewLocation] = useState({ name: "", code: "", function: "", keywords: "" });
+  const [newLocationError, setNewLocationError] = useState("");
+  const [addRoomOpen, setAddRoomOpen] = useState(false);
+  const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
   const [provisionalPathwayId, setProvisionalPathwayId] = useState<string | null>(null);
@@ -967,6 +954,7 @@ export function MapEditor() {
       setTemporary(point);
       setPointIsSnapped(false);
       setPointDraftDirty(true);
+      setNewLocationError("");
       if (mode === "place" && placingObjectType === "location" && placingId === "__new__") setAddLocationOpen(true);
     } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
       setPathPoints((current) => [...current, point]);
@@ -1193,13 +1181,58 @@ export function MapEditor() {
   };
 
   const handleSaveNewLocation = () => {
-    if (!newLocation.name.trim() || !newLocation.code.trim()) return;
-    const location: Location = { id: `location-${Date.now()}`, ...newLocation, lat: temporary?.[0] ?? null, lng: temporary?.[1] ?? null, positioned: Boolean(temporary) };
+    const issues = validateOutdoorPointLocation({
+      ...newLocation,
+      description: newLocation.function,
+      position: temporary,
+    }, currentLocations, campusBoundary);
+    if (issues.length) {
+      setNewLocationError(issues[0].message);
+      return;
+    }
+    const [lat, lng] = temporary!;
+    const location: Location = {
+      id: `location-${Date.now()}`,
+      name: newLocation.name.trim(),
+      code: newLocation.code.trim(),
+      type: "Facility",
+      status: "Active",
+      parentId: null,
+      function: newLocation.function.trim(),
+      keywords: newLocation.keywords.trim() || undefined,
+      lat,
+      lng,
+      positioned: true,
+    };
     setLocalLocations((current) => [...current, location]);
     workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
       before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
-    setDirty(true); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
+    setDirty(true); setNewLocationError(""); setAddLocationOpen(false); setTemporary(null); setMode("select"); setSelected({ type: "location", id: location.id });
     completeToolDraft("point");
+  };
+
+  const handleSaveNewRoom = () => {
+    if (!selectedBuilding || !newRoom.name.trim() || !newRoom.code.trim()) return;
+    const location: Location = {
+      id: `location-${Date.now()}`,
+      name: newRoom.name.trim(),
+      code: newRoom.code.trim(),
+      type: "Room",
+      status: "Active",
+      parentId: selectedBuilding.id,
+      building: selectedBuilding.name,
+      floor: newRoom.floor.trim() || undefined,
+      function: "",
+      lat: null,
+      lng: null,
+      positioned: false,
+    };
+    setLocalLocations((current) => [...current, location]);
+    workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
+      before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
+    setDirty(true);
+    setAddRoomOpen(false);
+    setNewRoom({ name: "", code: "", floor: "" });
   };
 
   const handleSavePathShape = () => {
@@ -1393,6 +1426,10 @@ export function MapEditor() {
     setLocalFeaturePoints([]);
     setLocalFeatureName("New Parking Area");
     setOwnerModal(null);
+    setAddRoomOpen(false);
+    setNewRoom({ name: "", code: "", floor: "" });
+    setNewLocation({ name: "", code: "", function: "", keywords: "" });
+    setNewLocationError("");
     setDirty(false);
     setTemporary(null);
     setPointDraftDirty(false);
@@ -1517,6 +1554,7 @@ export function MapEditor() {
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["map"] }),
+        queryClient.invalidateQueries({ queryKey: ["locations"] }),
         queryClient.invalidateQueries({ queryKey: ["routes"] }),
         queryClient.invalidateQueries({ queryKey: ["nodes"] }),
       ]);
@@ -1815,6 +1853,8 @@ export function MapEditor() {
         setMode("place");
         setSelected(null);
         setPlacingId("__new__");
+        setNewLocation({ name: "", code: "", function: "", keywords: "" });
+        setNewLocationError("");
         setPointDraftDirty(false);
       },
       polygon: () => {
@@ -1872,7 +1912,15 @@ export function MapEditor() {
         if (records.movingType === "location" || records.movingType === "node") setMovingType(records.movingType);
         if (typeof records.movingId === "string" || records.movingId === null) setMovingId(records.movingId);
         setAddLocationOpen(records.addLocationOpen === true);
-        if (isNewLocationDraft(records.newLocation)) setNewLocation(records.newLocation);
+        if (records.newLocation && typeof records.newLocation === "object") {
+          const restored = records.newLocation as Record<string, unknown>;
+          setNewLocation({
+            name: typeof restored.name === "string" ? restored.name : "",
+            code: typeof restored.code === "string" ? restored.code : "",
+            function: typeof restored.function === "string" ? restored.function : "",
+            keywords: typeof restored.keywords === "string" ? restored.keywords : "",
+          });
+        }
         const restoredSelection = records.selected;
         if (
           restoredSelection
@@ -2837,7 +2885,28 @@ export function MapEditor() {
           )}
 
           {temporary && mode !== "move" && (
-            <Marker position={temporary} icon={createTempIcon()} />
+            <Marker
+              position={temporary}
+              icon={createTempIcon()}
+              draggable={mode === "place" && placingObjectType === "location" && placingId === "__new__"}
+              eventHandlers={{
+                drag: (event) => {
+                  const next = (event.target as L.Marker).getLatLng();
+                  setTemporary([next.lat, next.lng]);
+                  setPointDraftDirty(true);
+                },
+                dragend: (event) => {
+                  const next = (event.target as L.Marker).getLatLng();
+                  const point: MapPoint = [next.lat, next.lng];
+                  if (pointOnCampus(point, campusBoundary)) {
+                    setTemporary(point);
+                    setNewLocationError("");
+                  } else {
+                    setError("The new position must stay inside the ISU Echague campus boundary.");
+                  }
+                },
+              }}
+            />
           )}
         </MapContainer>
 
@@ -3419,11 +3488,7 @@ export function MapEditor() {
                 <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
-                    <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => {
-                      setTemporary(null);
-                      setNewLocation({ name: "", code: "", type: "Room", status: "Active", parentId: selectedBuilding.id, building: selectedBuilding.name, floor: "" });
-                      setAddLocationOpen(true);
-                    }}>＋ Add Room</button>
+                    <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => setAddRoomOpen(true)}>＋ Add Room</button>
                   </div>
                   {(() => {
                     const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
@@ -3707,24 +3772,40 @@ export function MapEditor() {
       )}
 
       {addLocationOpen && (
-        <Modal title="Add Location" subtitle="Create a positioned location at the selected map coordinates." size="sm" variant="green" onClose={() => setAddLocationOpen(false)}>
+        <Modal title="Create Outdoor Point Location" subtitle="Complete the canonical owner details for this provisional map point." size="sm" variant="green" onClose={() => { setAddLocationOpen(false); setNewLocationError(""); }}>
+          {newLocationError && <div role="alert" className="mb-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{newLocationError}</div>}
+          <div className="mb-2 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-2 text-xs text-[#3f4941]">
+            <strong>Type</strong><div>Outdoor Point Location</div>
+          </div>
           <label className="block text-xs font-semibold text-[#3f4941]">Name
-            <input aria-label="New location name" value={newLocation.name} onChange={(e) => setNewLocation({ ...newLocation, name: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+            <input aria-label="New location name" value={newLocation.name} onChange={(e) => { setNewLocation({ ...newLocation, name: e.target.value }); setNewLocationError(""); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
           <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Code
-            <input aria-label="New location code" value={newLocation.code} onChange={(e) => setNewLocation({ ...newLocation, code: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+            <input aria-label="New location code" value={newLocation.code} onChange={(e) => { setNewLocation({ ...newLocation, code: e.target.value }); setNewLocationError(""); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
-          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Type
-            <select aria-label="New location type" value={newLocation.type} onChange={(e) => setNewLocation({ ...newLocation, type: e.target.value as Location["type"] })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option>Facility</option><option>Building</option><option>Room</option><option>Office</option></select>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Description
+            <textarea aria-label="New location description" value={newLocation.function} onChange={(e) => { setNewLocation({ ...newLocation, function: e.target.value }); setNewLocationError(""); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
-          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Parent Building
-            <select aria-label="New location parent building" disabled={Boolean(newLocation.parentId)} value={newLocation.parentId ?? ""} onChange={(e) => { const building = currentBuildings.find((item) => item.id === e.target.value); setNewLocation({ ...newLocation, parentId: e.target.value || null, building: building?.name ?? "" }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm"><option value="">None / Standalone</option>{currentBuildings.map((building) => <option key={building.id} value={building.id}>{building.name}</option>)}</select>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Keywords / tags
+            <input aria-label="New location keywords" value={newLocation.keywords} onChange={(e) => setNewLocation({ ...newLocation, keywords: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <div className="mt-3 text-xs text-[#3f4941]">{temporary ? `Candidate position: ${temporary[0].toFixed(6)} · ${temporary[1].toFixed(6)}` : "Place a point on the map before completing this record."}</div>
+          <div className="modal-actions"><Button variant="subtle" onClick={() => { setAddLocationOpen(false); setNewLocationError(""); }}>Cancel</Button><Button disabled={!temporary || !newLocation.name.trim() || !newLocation.code.trim() || !newLocation.function.trim()} onClick={handleSaveNewLocation}>Create Outdoor Point Location</Button></div>
+        </Modal>
+      )}
+
+      {addRoomOpen && selectedBuilding && (
+        <Modal title="Add Room" subtitle={`Add an indoor Room under ${selectedBuilding.name}.`} size="sm" variant="green" onClose={() => setAddRoomOpen(false)}>
+          <label className="block text-xs font-semibold text-[#3f4941]">Name
+            <input aria-label="New room name" value={newRoom.name} onChange={(e) => setNewRoom({ ...newRoom, name: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+          </label>
+          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Code
+            <input aria-label="New room code" value={newRoom.code} onChange={(e) => setNewRoom({ ...newRoom, code: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
           <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Floor
-            <input aria-label="New location floor" value={newLocation.floor} onChange={(e) => setNewLocation({ ...newLocation, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
+            <input aria-label="New room floor" value={newRoom.floor} onChange={(e) => setNewRoom({ ...newRoom, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
-          <div className="mt-3 text-xs text-[#3f4941]">{temporary ? `Latitude: ${temporary[0].toFixed(6)} · Longitude: ${temporary[1].toFixed(6)}` : "This room will be added without a map position."}</div>
-          <div className="modal-actions"><Button variant="subtle" onClick={() => setAddLocationOpen(false)}>Cancel</Button><Button disabled={!newLocation.name.trim() || !newLocation.code.trim()} onClick={handleSaveNewLocation}>Add Location</Button></div>
+          <div className="modal-actions"><Button variant="subtle" onClick={() => setAddRoomOpen(false)}>Cancel</Button><Button disabled={!newRoom.name.trim() || !newRoom.code.trim()} onClick={handleSaveNewRoom}>Add Room</Button></div>
         </Modal>
       )}
 
