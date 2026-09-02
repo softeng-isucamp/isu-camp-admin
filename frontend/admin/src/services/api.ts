@@ -1607,7 +1607,46 @@ export const services: Services = {
 
       return wait(undefined);
     },
-    saveDraft: (command) => mapEditorApiClient.saveDraft(command),
+    saveDraft: async (command) => {
+      const result = await mapEditorApiClient.saveDraft(command);
+      if (result.success && !USE_HTTP_API) {
+        const flatOps = command.operations.flatMap((op) =>
+          op.type === "compound_batch" && op.nestedOperations ? op.nestedOperations : [op]
+        );
+        for (const op of flatOps) {
+          if (op.domain === "Locations" && op.type === "create_entity" && op.after) {
+            const loc = op.after as unknown as Location;
+            if (!locations.some((item) => item.id === loc.id)) {
+              locations.push(loc);
+            }
+            if (loc.type === "Building" && !buildings.some((item) => item.id === loc.id)) {
+              const featOp = flatOps.find(
+                (other) =>
+                  other.domain === "Local Map Data" &&
+                  other.type === "create_entity" &&
+                  (other.after as Record<string, unknown>)?.linkedBuildingId === loc.id
+              );
+              const footprintPoints = ((featOp?.after as Record<string, unknown>)?.coordinates as [number, number][]) ?? [];
+              buildings.push({
+                id: loc.id,
+                name: loc.name,
+                code: loc.code,
+                points: footprintPoints,
+                status: loc.status ?? "Active",
+              });
+            }
+          } else if (op.domain === "Local Map Data" && op.type === "link_feature" && op.after) {
+            const link = op.after as unknown as { featureId: string; targetEntityId: string };
+            const featOp = flatOps.find((other) => other.entityId === link.featureId);
+            const targetBuilding = buildings.find((b) => b.id === link.targetEntityId);
+            if (targetBuilding && featOp?.after) {
+              targetBuilding.points = ((featOp.after as Record<string, unknown>).coordinates as [number, number][]) ?? [];
+            }
+          }
+        }
+      }
+      return result;
+    },
   },
 
 

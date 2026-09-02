@@ -141,6 +141,31 @@ describe("map draft review", () => {
       campusBoundary: echagueCampusBoundary,
     });
     expect(result.errors.some((error) => /campus boundary/i.test(error.message))).toBe(true);
+    expect(result.errors.some((error) => /campus boundary/i.test(error.message))).toBe(true);
     expect(result.errors.filter((error) => /campus boundary/i.test(error.message))).toHaveLength(1);
   });
+
+  it("presents polygon overlap as an advisory review warning rather than a blocking failure", () => {
+    const bld1 = building({
+      id: "bld-1",
+      name: "Engineering Hall",
+      points: [[16.720, 121.689], [16.720, 121.691], [16.722, 121.691], [16.722, 121.689]],
+    });
+    const bld2 = building({
+      id: "bld-2",
+      name: "Science Annex",
+      points: [[16.721, 121.690], [16.721, 121.692], [16.723, 121.692], [16.723, 121.690]],
+    });
+    const result = reviewMapDraft({
+      original: { locations: [], nodes: [], pathways: [], buildings: [bld1] },
+      current: { locations: [], nodes: [], pathways: [], buildings: [bld1, bld2] },
+      deleted: [],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings?.some((w) => w.message.includes("overlaps with"))).toBe(true);
+  });
 });
+

@@ -103,6 +103,8 @@ export interface MapSnapshot {
   buildings: Building[];
 }
 
+import { polygonsOverlap } from "./buildingFootprint";
+
 export interface MapObjectReference {
   type: MapObjectType;
   id: string;
@@ -122,6 +124,7 @@ export interface MapChangeGroup {
 export interface MapDraftReview {
   valid: boolean;
   errors: MapValidationError[];
+  warnings?: MapValidationError[];
   groups: MapChangeGroup[];
 }
 
@@ -153,10 +156,12 @@ export function reviewMapDraft(input: {
 }): MapDraftReview {
   const { original, current, deleted, campusBoundary } = input;
   const errors: MapValidationError[] = [];
+  const warnings: MapValidationError[] = [];
   const groups = new Map<MapChangeKind, MapObjectReference[]>();
   const addChange = (kind: MapChangeKind, object: MapObjectReference) =>
     groups.set(kind, [...(groups.get(kind) ?? []), object]);
   const addError = (object: MapObjectReference, message: string) => errors.push({ object, message });
+  const addWarning = (object: MapObjectReference, message: string) => warnings.push({ object, message });
 
   const collections: Array<[MapObjectType, Array<Location | RouteNode | Pathway | Building>, Array<Location | RouteNode | Pathway | Building>]> = [
     ["location", original.locations, current.locations], ["node", original.nodes, current.nodes],
@@ -193,8 +198,9 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Location code is required.");
     if (!object.type) addError(reference, "Location type is required.");
     if (!object.status) addError(reference, "Location status is required.");
+    const hasAuthoritativeFootprint = object.type === "Building" && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
     const locationEvaluation = locationPolicy.evaluate(object, {
-      context: "map-readiness",
+      context: hasAuthoritativeFootprint ? "admin-draft" : "map-readiness",
       directory: current.locations,
     });
     locationEvaluation.issues.forEach((issue) => addError(reference, issue.message));
@@ -272,6 +278,37 @@ export function reviewMapDraft(input: {
     });
   }
 
+  // Check for building polygon overlaps (advisory review warnings for draft changes)
+  const modifiedBuildingIds = new Set(
+    current.buildings
+      .filter((bld) => {
+        const orig = original.buildings.find((o) => o.id === bld.id);
+        return !orig || JSON.stringify(orig.points) !== JSON.stringify(bld.points);
+      })
+      .map((bld) => bld.id)
+  );
+
+  for (let i = 0; i < current.buildings.length; i++) {
+    const bldA = current.buildings[i];
+    if (bldA.points.length < 3) continue;
+    for (let j = i + 1; j < current.buildings.length; j++) {
+      const bldB = current.buildings[j];
+      if (bldB.points.length < 3) continue;
+      if (!modifiedBuildingIds.has(bldA.id) && !modifiedBuildingIds.has(bldB.id)) continue;
+      if (polygonsOverlap(bldA.points, bldB.points)) {
+        addWarning(
+          { type: "building", id: bldA.id, label: label(bldA) },
+          `Building footprint overlaps with ${label(bldB)}.`,
+        );
+      }
+    }
+  }
+
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];
-  return { valid: errors.length === 0, errors, groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []) };
+  return {
+    valid: errors.length === 0,
+    errors,
+    ...(warnings.length > 0 ? { warnings } : {}),
+    groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []),
+  };
 }

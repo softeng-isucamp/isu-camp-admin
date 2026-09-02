@@ -232,7 +232,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
-    fireEvent.click(await screen.findByRole("button", { name: "Actions for Administration Building" }));
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Child Room" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Child Room" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
     expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
