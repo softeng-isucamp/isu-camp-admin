@@ -1,4 +1,5 @@
 import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
+import { locationPolicy } from "../lib/locationPolicy";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
@@ -54,6 +55,13 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
       save: (draft: LocationDraft): Location => {
         const location: Location = { ...draft, id: draft.id || `loc-${Date.now()}` };
+        const evaluation = locationPolicy.evaluate(location, {
+          context: "record",
+          directory: mapData.locations,
+          requireFloorLevel: !draft.id,
+          currentId: location.id,
+        });
+        if (!evaluation.valid) throw new Error(evaluation.issues[0].message);
         const index = mapData.locations.findIndex((item) => item.id === location.id);
         if (index >= 0) mapData.locations[index] = structuredClone(location);
         else mapData.locations.push(structuredClone(location));

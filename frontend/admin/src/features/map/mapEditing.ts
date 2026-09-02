@@ -202,8 +202,14 @@ export function reviewMapDraft(input: {
     const locationEvaluation = locationPolicy.evaluate(object, {
       context: hasAuthoritativeFootprint ? "record" : "map-readiness",
       directory: current.locations,
+      currentId: object.id,
     });
-    locationEvaluation.issues.forEach((issue) => addError(reference, issue.message));
+    const previous = original.locations.find((candidate) => candidate.id === object.id);
+    locationEvaluation.issues
+      // Existing imported directories may contain duplicate legacy codes. Keep
+      // unchanged records reviewable; enforce uniqueness for new or renamed codes.
+      .filter((issue) => issue.code !== "code_not_unique" || !previous || previous.code !== object.code)
+      .forEach((issue) => addError(reference, issue.message));
   });
   current.nodes.forEach((object) => {
     const reference = { type: "node" as const, id: object.id, label: label(object) };

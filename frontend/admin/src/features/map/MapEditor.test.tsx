@@ -87,9 +87,9 @@ describe("Map Editor preview", () => {
   });
   afterEach(cleanup);
 
-  const renderEditor = () => {
+  const renderEditor = (initialEntries = ["/map-editor"]) => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(<QueryClientProvider client={queryClient}><MemoryRouter><MapEditor /></MemoryRouter></QueryClientProvider>);
+    return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={initialEntries}><MapEditor /></MemoryRouter></QueryClientProvider>);
   };
 
   const clickMap = (lat: number, lng: number) => {
@@ -119,6 +119,11 @@ describe("Map Editor preview", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Local Feature" })).not.toBeInTheDocument();
+  });
+
+  it("opens the requested creation tool from a Locations handoff", async () => {
+    renderEditor(["/map-editor?create=building"]);
+    expect(await screen.findByRole("button", { name: "Building Polygon" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("retires a Building Footprint without deleting its Building from Locations", async () => {

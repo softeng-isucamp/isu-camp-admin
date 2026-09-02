@@ -967,6 +967,17 @@ export function MapEditor() {
   );
 
   useEffect(() => {
+    const create = new URLSearchParams(routeLocation.search).get("create");
+    if (create === "building") {
+      activateTool("polygon");
+      return;
+    }
+    if (create === "outdoor-point") {
+      activateTool("point");
+    }
+  }, [routeLocation.search]);
+
+  useEffect(() => {
     const locationId = new URLSearchParams(routeLocation.search).get(
       "location",
     );

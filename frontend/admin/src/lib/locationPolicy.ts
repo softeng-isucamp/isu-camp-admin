@@ -30,7 +30,9 @@ export type LocationPolicyIssueCode =
   | "coordinates_required"
   | "placement_mismatch"
   | "outdoor_position_forbidden"
-  | "floor_level_required";
+  | "floor_level_required"
+  | "unspecified_floor_forbidden"
+  | "code_not_unique";
 
 export interface LocationPolicyIssue {
   code: LocationPolicyIssueCode;
@@ -58,6 +60,8 @@ export interface LocationPolicyOptions {
   directory: readonly Location[];
   /** New indoor records require a floor; legacy records may omit it. */
   requireFloorLevel?: boolean;
+  /** The record being edited, which is allowed to retain its own code. */
+  currentId?: string;
 }
 
 export interface LocationNormalizationOptions {
@@ -182,11 +186,30 @@ const evaluate = (
     });
   }
 
+  const duplicateCode = options.currentId !== undefined && options.directory.some((location) =>
+    location.id !== options.currentId
+      && location.code.trim().toLowerCase() === draft.code.trim().toLowerCase(),
+  );
+  if (draft.code.trim() && duplicateCode) {
+    issues.push({
+      code: "code_not_unique",
+      field: "code",
+      message: "Location code must be unique.",
+    });
+  }
+
   if (options.requireFloorLevel && isIndoorLocationType(draft.type) && !draft.floor?.trim()) {
     issues.push({
       code: "floor_level_required",
       field: "floor",
       message: "Indoor Locations require a Floor Level.",
+    });
+  }
+  if (options.requireFloorLevel && isIndoorLocationType(draft.type) && draft.floor?.trim().toLowerCase() === "unspecified floor") {
+    issues.push({
+      code: "unspecified_floor_forbidden",
+      field: "floor",
+      message: "Unspecified Floor is only for legacy records and cannot be used for new records.",
     });
   }
 

@@ -26,7 +26,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("renders the campus locations heading and default hierarchy table with tree connectors", async () => {
     renderLocations();
     expect(await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.getByText("Manage buildings, floors, rooms, offices, laboratories, restrooms, and facilities.")).toBeInTheDocument();
+    expect(screen.getByText("Manage Buildings and Indoor Locations. Create outdoor records in Map Editor.")).toBeInTheDocument();
 
     // Check items in table
     const administrationBuildingMatches = await screen.findAllByText("Administration Building", {}, { timeout: 4000 });
@@ -171,7 +171,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(addLocationButton);
 
     expect(await screen.findByRole("heading", { name: /add location/i })).toBeInTheDocument();
-    expect(screen.getByText(/add a building, floor, room, office, laboratory, restroom, or facility/i)).toBeInTheDocument();
+    expect(screen.getByText(/add a room, office, laboratory, or restroom under an existing building/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location type/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/status/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location name/i)).toBeInTheDocument();
@@ -182,15 +182,25 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(cancelButton);
   });
 
+  it("offers dedicated Map Editor handoffs and no outdoor choices when adding", async () => {
+    renderLocations();
+    expect(await screen.findByRole("button", { name: "Create Building in Map Editor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Outdoor Point Location in Map Editor" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /add location/i }));
+    const options = Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.value);
+    expect(options).toEqual(["Laboratory", "Room", "Office", "Restroom"]);
+    expect(screen.queryByLabelText("LATITUDE (OPTIONAL)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("LONGITUDE (OPTIONAL)")).not.toBeInTheDocument();
+  });
+
+
   it("creates a child location with a parent building and standard floor level", async () => {
     const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
-    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
-    expect(screen.queryByLabelText("PARENT BUILDING")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("FLOOR LEVEL")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Floor" } });
-    // Floor is legacy compatibility data and is intentionally not offered for new records.
+    expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual([
+      "Laboratory", "Room", "Office", "Restroom",
+    ]);
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
     const parentBuilding = screen.getByLabelText("PARENT BUILDING");
     const floorLevel = screen.getByLabelText("FLOOR LEVEL");
@@ -205,7 +215,6 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       "4th Floor",
       "5th Floor",
       "Basement",
-      "Custom Floor Level",
     ]);
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Hierarchy Test Room" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "HIER-ROOM" } });
@@ -271,10 +280,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByText(/update existing/i)).toBeInTheDocument();
   });
 
+  it("rejects outdoor and legacy types during import before mutation", async () => {
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /bulk import/i }));
+    const importRows = JSON.stringify([{ id: "rejected-outdoor", name: "Rejected outdoor", code: "REJECTED-OUTDOOR", type: "Facility", parentId: null, status: "Active", lat: 16.72, lng: 121.69 }]);
+    const importFile = { name: "locations.json", text: () => Promise.resolve(importRows) } as File;
+    fireEvent.change(screen.getByLabelText(/choose location json file/i), { target: { files: [importFile] } });
+    expect(await screen.findByText("locations.json selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/only Room, Office, Laboratory, and Restroom/i);
+    expect((await services.locations.list("Rejected outdoor")).items).toHaveLength(0);
+  });
+
   it("reads a selected file, validates before commit, and clears validation when mode changes", async () => {
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /bulk import/i }));
-    const importRows = JSON.stringify([{ id: "file-import-test", name: "File import test", code: "FILE-TEST", type: "Facility", parentId: null, status: "Active", lat: null, lng: null }]);
+    const importRows = JSON.stringify([{ id: "file-import-test", name: "File import test", code: "FILE-TEST", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: "Active", lat: null, lng: null }]);
     const importFile = { name: "locations.json", text: () => Promise.resolve(importRows) } as File;
     fireEvent.change(screen.getByLabelText(/choose location json file/i), { target: { files: [importFile] } });
     expect(await screen.findByText("locations.json selected")).toBeInTheDocument();
@@ -297,11 +318,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("saves description and keywords to their independent directory columns", async () => {
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
-    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Saved fields test" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "SAVED-FIELDS" } });
     fireEvent.change(screen.getByLabelText("DESCRIPTION"), { target: { value: "Saved purpose" } });
     fireEvent.change(screen.getByLabelText(/keywords/i), { target: { value: "saved, keywords" } });
+    fireEvent.change(screen.getByLabelText("PARENT BUILDING"), { target: { value: "osm-location-c5fb7a267a8ca63d" } });
+    fireEvent.change(screen.getByLabelText("FLOOR LEVEL"), { target: { value: "Ground Floor" } });
     fireEvent.click(screen.getByRole("button", { name: /save location/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Saved fields test" } });
