@@ -103,7 +103,7 @@ export interface MapSnapshot {
   buildings: Building[];
 }
 
-import { polygonsOverlap } from "./buildingFootprint";
+import { findBuildingFootprintOverlaps } from "./buildingFootprint";
 
 export interface MapObjectReference {
   type: MapObjectType;
@@ -288,20 +288,15 @@ export function reviewMapDraft(input: {
       .map((bld) => bld.id)
   );
 
-  for (let i = 0; i < current.buildings.length; i++) {
-    const bldA = current.buildings[i];
-    if (bldA.points.length < 3) continue;
-    for (let j = i + 1; j < current.buildings.length; j++) {
-      const bldB = current.buildings[j];
-      if (bldB.points.length < 3) continue;
-      if (!modifiedBuildingIds.has(bldA.id) && !modifiedBuildingIds.has(bldB.id)) continue;
-      if (polygonsOverlap(bldA.points, bldB.points)) {
-        addWarning(
-          { type: "building", id: bldA.id, label: label(bldA) },
-          `Building footprint overlaps with ${label(bldB)}.`,
-        );
-      }
-    }
+  const overlaps = findBuildingFootprintOverlaps(
+    current.buildings,
+    (bldA, bldB) => modifiedBuildingIds.has(bldA.id) || modifiedBuildingIds.has(bldB.id),
+  );
+  for (const { bldA, bldB } of overlaps) {
+    addWarning(
+      { type: "building", id: bldA.id, label: label(bldA) },
+      `Building footprint overlaps with ${label(bldB)}.`,
+    );
   }
 
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];

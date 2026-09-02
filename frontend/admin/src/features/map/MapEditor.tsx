@@ -95,13 +95,34 @@ interface OperationProjection {
  */
 function projectWorkingSessionOperation(
   operation: WorkingOperation,
-  direction: "undo" | "redo"
+  direction: "undo" | "redo",
+  context?: {
+    featureLinks?: readonly FeatureLinkEntity[];
+    localFeatures?: readonly LocalMapFeatureEntity[];
+  },
 ): OperationProjection[] {
   if (operation.type === "compound_batch" && operation.nestedOperations) {
     const list = direction === "undo"
       ? [...operation.nestedOperations].reverse()
       : operation.nestedOperations;
-    return list.flatMap((nested) => projectWorkingSessionOperation(nested, direction));
+    const batchFeatures: LocalMapFeatureEntity[] = [];
+    const batchLinks: FeatureLinkEntity[] = [];
+    for (const nested of operation.nestedOperations) {
+      if (nested.domain === "Local Map Data") {
+        if (nested.type === "link_feature" || nested.type === "unlink_feature") {
+          const l = (nested.after ?? nested.before) as FeatureLinkEntity | null;
+          if (l) batchLinks.push(l);
+        } else if (nested.type === "create_entity" || nested.type === "update_geometry" || nested.type === "retire_entity") {
+          const f = (nested.after ?? nested.before) as LocalMapFeatureEntity | null;
+          if (f) batchFeatures.push(f);
+        }
+      }
+    }
+    const combinedContext = {
+      featureLinks: [...batchLinks, ...(context?.featureLinks ?? [])],
+      localFeatures: [...batchFeatures, ...(context?.localFeatures ?? [])],
+    };
+    return list.flatMap((nested) => projectWorkingSessionOperation(nested, direction, combinedContext));
   }
 
   const value = direction === "undo" ? operation.before : operation.after;
@@ -127,18 +148,42 @@ function projectWorkingSessionOperation(
     return [{ collection: "nodes", entityId: operation.entityId, value }];
   } else if (operation.domain === "Local Map Data") {
     if (operation.type === "link_feature" || operation.type === "unlink_feature") {
-      return [{ collection: "featureLinks", entityId: operation.entityId, value }];
+      const projections: OperationProjection[] = [{ collection: "featureLinks", entityId: operation.entityId, value }];
+      const link = (direction === "undo"
+        ? (operation.type === "link_feature" ? operation.after : operation.before)
+        : (operation.type === "link_feature" ? operation.after : operation.before)
+      ) as FeatureLinkEntity | null;
+      if (link && link.targetDomain === "Locations" && link.linkType === "building_footprint") {
+        const footprint = context?.localFeatures?.find((feat) => feat.id === link.featureId);
+        const shouldHaveFootprint = direction === "undo"
+          ? operation.type === "unlink_feature"
+          : operation.type === "link_feature";
+        projections.push({
+          collection: "buildings",
+          entityId: link.targetEntityId,
+          value: shouldHaveFootprint
+            ? { id: link.targetEntityId, points: footprint?.coordinates ?? [] }
+            : { id: link.targetEntityId, points: [] },
+        });
+      }
+      return projections;
     }
     const projections: OperationProjection[] = [{ collection: "localFeatures", entityId: operation.entityId, value }];
     const feat = (value ?? (direction === "undo" ? operation.before : operation.after)) as Partial<LocalMapFeatureEntity> | null;
-    if (feat && feat.family === "building_footprint" && feat.linkedBuildingId) {
-      projections.push({
-        collection: "buildings",
-        entityId: feat.linkedBuildingId,
-        value: direction === "undo"
-          ? null
-          : { id: feat.linkedBuildingId, points: feat.coordinates ?? [] },
-      });
+    if (feat && feat.family === "building_footprint") {
+      const link = context?.featureLinks?.find(
+        (item) => item.featureId === feat.id && item.targetDomain === "Locations" && item.linkType === "building_footprint",
+      );
+      const targetBuildingId = link?.targetEntityId ?? feat.linkedBuildingId;
+      if (targetBuildingId) {
+        projections.push({
+          collection: "buildings",
+          entityId: targetBuildingId,
+          value: direction === "undo"
+            ? { id: targetBuildingId, points: [] }
+            : { id: targetBuildingId, points: feat.coordinates ?? [] },
+        });
+      }
     }
     return projections;
   }
@@ -566,9 +611,9 @@ export function MapEditor() {
   const [points, setPoints] = useState<[number, number][]>([]);
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
-  const [buildingRecordMode, setBuildingRecordMode] = useState<"create" | "attach">("create");
-  const [buildingRecordSearch, setBuildingRecordSearch] = useState("");
-  const [selectedBuildingRecordId, setSelectedBuildingRecordId] = useState<string | null>(null);
+  const [buildingWorkflowMode, setBuildingWorkflowMode] = useState<"create" | "attach">("create");
+  const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
+  const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
   const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>({
     name: "",
@@ -625,47 +670,7 @@ export function MapEditor() {
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
 
-  const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
-    if (!operation) return;
-    const replaceProjection = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
-      value === null
-        ? items.filter((item) => item.id !== entityId)
-        : [...items.filter((item) => item.id !== entityId), value as unknown as T];
-    const handlers: Record<ProjectedCollection, (entityId: string, value: Record<string, unknown> | null) => void> = {
-      locations: (entityId, value) => setLocalLocations((items) => replaceProjection(items, entityId, value)),
-      nodes: (entityId, value) => setLocalNodes((items) => replaceProjection(items, entityId, value)),
-      pathways: (entityId, value) => {
-        setLocalPathways((items) => replaceProjection(items, entityId, value));
-        setDeletedPathwayIds((ids) => value === null
-          ? [...new Set([...ids, entityId])]
-          : ids.filter((id) => id !== entityId));
-      },
-      buildings: (entityId, value) => setLocalBuildings((items) => {
-        if (value === null) return items.filter((item) => item.id !== entityId);
-        const existing = items.find((item) => item.id === entityId)
-          ?? data?.buildings?.find((item) => item.id === entityId);
-        const merged = existing ? { ...existing, ...value } : value;
-        return [...items.filter((item) => item.id !== entityId), merged as unknown as Building];
-      }),
-      localFeatures: (entityId, value) => setLocalFeatureChanges((items) => replaceProjection(items, entityId, value)),
-      featureLinks: (entityId, value) => setLocalFeatureLinks((items) => replaceProjection(items, entityId, value)),
-    };
-    projectWorkingSessionOperation(operation, direction).forEach((projection) => {
-      handlers[projection.collection](projection.entityId, projection.value);
-    });
-    setDirty(workingSessionManager.getIsDirty());
-  }, [data?.buildings, workingSessionManager]);
 
-  useEffect(() => {
-    const onWorkingSessionShortcut = (event: KeyboardEvent) => {
-      handleWorkingSessionKeyboardShortcut(event, workingSessionManager, {
-        onUndo: (operation) => applyWorkingSessionOperation(operation, "undo"),
-        onRedo: (operation) => applyWorkingSessionOperation(operation, "redo"),
-      });
-    };
-    window.addEventListener("keydown", onWorkingSessionShortcut);
-    return () => window.removeEventListener("keydown", onWorkingSessionShortcut);
-  }, [applyWorkingSessionOperation, workingSessionManager]);
 
   const completeToolDraft = (toolType: Exclude<ToolType, "select">) => {
     const completionHandlers: Record<Exclude<ToolType, "select">, () => void> = {
@@ -710,15 +715,41 @@ export function MapEditor() {
   const sessionBuildings = useMemo(() => {
     return overlayChanges(data?.buildings || [], localBuildings);
   }, [data?.buildings, localBuildings]);
+  const allSessionBuildings = useMemo(() => {
+    const buildingMap = new Map<string, Building>();
+    for (const loc of currentLocations) {
+      if (loc.type === "Building") {
+        buildingMap.set(loc.id, {
+          id: loc.id,
+          name: loc.name,
+          code: loc.code,
+          status: loc.status ?? "Active",
+          points: [],
+        });
+      }
+    }
+    for (const bld of sessionBuildings) {
+      const existing = buildingMap.get(bld.id);
+      buildingMap.set(bld.id, {
+        ...existing,
+        ...bld,
+      });
+    }
+    return Array.from(buildingMap.values());
+  }, [currentLocations, sessionBuildings]);
   const buildingAttachmentEligibility = (building: Building) =>
     getBuildingAttachmentEligibility(building, currentFeatureLinks);
-  const selectedAttachBuilding = sessionBuildings.find((b) => b.id === selectedBuildingRecordId);
+  const selectedAttachBuilding = allSessionBuildings.find((b) => b.id === selectedAttachBuildingId);
   const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
-  const buildingRecordCandidates = sessionBuildings.filter((building) => {
-    if (building.id === "pending-building" || building.id === editingBuildingId) return false;
-    const query = buildingRecordSearch.trim().toLowerCase();
-    return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
-  });
+  const attachCandidateBuildings = useMemo(() => {
+    const query = attachBuildingSearch.trim().toLowerCase();
+    return allSessionBuildings.filter((building) => {
+      if (building.id === "pending-building" || building.id === editingBuildingId) return false;
+      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
+      if (!eligibility.eligible) return false;
+      return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
+    });
+  }, [allSessionBuildings, attachBuildingSearch, currentFeatureLinks, editingBuildingId]);
   const currentBuildings = useMemo(() => {
     const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
     if (mode !== "area" || points.length === 0) return validMerged;
@@ -760,6 +791,51 @@ export function MapEditor() {
     () => overlayChanges(normalizedLocalFeatures, localFeatureChanges),
     [localFeatureChanges, normalizedLocalFeatures],
   );
+
+  const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
+    if (!operation) return;
+    const replaceProjection = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
+      value === null
+        ? items.filter((item) => item.id !== entityId)
+        : [...items.filter((item) => item.id !== entityId), value as unknown as T];
+    const handlers: Record<ProjectedCollection, (entityId: string, value: Record<string, unknown> | null) => void> = {
+      locations: (entityId, value) => setLocalLocations((items) => replaceProjection(items, entityId, value)),
+      nodes: (entityId, value) => setLocalNodes((items) => replaceProjection(items, entityId, value)),
+      pathways: (entityId, value) => {
+        setLocalPathways((items) => replaceProjection(items, entityId, value));
+        setDeletedPathwayIds((ids) => value === null
+          ? [...new Set([...ids, entityId])]
+          : ids.filter((id) => id !== entityId));
+      },
+      buildings: (entityId, value) => setLocalBuildings((items) => {
+        if (value === null) return items.filter((item) => item.id !== entityId);
+        const existing = items.find((item) => item.id === entityId)
+          ?? data?.buildings?.find((item) => item.id === entityId);
+        const merged = existing ? { ...existing, ...value } : value;
+        return [...items.filter((item) => item.id !== entityId), merged as unknown as Building];
+      }),
+      localFeatures: (entityId, value) => setLocalFeatureChanges((items) => replaceProjection(items, entityId, value)),
+      featureLinks: (entityId, value) => setLocalFeatureLinks((items) => replaceProjection(items, entityId, value)),
+    };
+    projectWorkingSessionOperation(operation, direction, {
+      featureLinks: currentFeatureLinks,
+      localFeatures: currentLocalFeatures,
+    }).forEach((projection) => {
+      handlers[projection.collection](projection.entityId, projection.value);
+    });
+    setDirty(workingSessionManager.getIsDirty());
+  }, [currentFeatureLinks, currentLocalFeatures, data?.buildings, workingSessionManager]);
+
+  useEffect(() => {
+    const onWorkingSessionShortcut = (event: KeyboardEvent) => {
+      handleWorkingSessionKeyboardShortcut(event, workingSessionManager, {
+        onUndo: (operation) => applyWorkingSessionOperation(operation, "undo"),
+        onRedo: (operation) => applyWorkingSessionOperation(operation, "redo"),
+      });
+    };
+    window.addEventListener("keydown", onWorkingSessionShortcut);
+    return () => window.removeEventListener("keydown", onWorkingSessionShortcut);
+  }, [applyWorkingSessionOperation, workingSessionManager]);
   // Local map features are retained by the data/service layer for compatibility,
   // but are intentionally not rendered in this editor. The campus boundary is
   // still used below for validation and navigation bounds.
@@ -789,14 +865,14 @@ export function MapEditor() {
     [currentBuildings, editingBuildingId, mode, points],
   );
   const buildingIdentityIssues = useMemo(
-    () => mode === "area" && (polygonClosed || points.length >= 3) && buildingRecordMode === "create"
+    () => mode === "area" && (polygonClosed || points.length >= 3) && buildingWorkflowMode === "create"
       ? validateBuildingIdentityDetails(
           { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
           currentLocations,
           editingBuildingId,
         )
       : [],
-    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingRecordMode, currentLocations, editingBuildingId, mode, points.length, polygonClosed],
+    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingWorkflowMode, currentLocations, editingBuildingId, mode, points.length, polygonClosed],
   );
   const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
   const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
@@ -878,10 +954,17 @@ export function MapEditor() {
     ? currentNodes.filter((node) => node.nodeType === "Entrance" && (node.associatedPlaceId === selectedBuilding.id || node.associatedPlaceId === selectedBuildingAssociationId))
     : [];
   const selectedBuildingHasFootprint = Boolean(
-    selectedBuilding && currentFeatureLinks.some((link) => link.targetEntityId === selectedBuilding.id),
+    selectedBuilding && (
+      selectedBuilding.points.length >= 3 ||
+      currentFeatureLinks.some((link) => link.targetEntityId === selectedBuilding.id && link.linkType === "building_footprint")
+    ),
   );
-  const selectedBuildingRoutable = Boolean(selectedBuilding && selectedBuilding.points.length >= 3 &&
-    selectedBuildingLocation?.status === "Active" && selectedBuildingLocation.positioned && selectedBuildingEntrances.some((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng)));
+  const selectedBuildingRoutable = Boolean(
+    selectedBuilding &&
+    selectedBuildingHasFootprint &&
+    (selectedBuildingLocation ? selectedBuildingLocation.status === "Active" : (selectedBuilding.status ?? "Active") === "Active") &&
+    selectedBuildingEntrances.some((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng) && (node.status ? node.status === "Active" : true)),
+  );
 
   useEffect(() => {
     const locationId = new URLSearchParams(routeLocation.search).get(
@@ -1341,8 +1424,8 @@ export function MapEditor() {
     setPoints([]);
     resetBuildingForm();
     setEditingBuildingId(null);
-    setBuildingRecordSearch("");
-    setSelectedBuildingRecordId(null);
+    setAttachBuildingSearch("");
+    setSelectedAttachBuildingId(null);
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setMode("select");
@@ -1378,24 +1461,22 @@ export function MapEditor() {
       setSelected({ type: "building", id: building.id });
       setPlacingAssociatedBuildingId(building.id);
     } else {
-      handleCreateBuildingRecord();
+      handleCreateBuilding();
     }
   };
 
-  const completeBuildingRecordWorkflow = (buildingRecord: Building, intent: "create" | "attach") => {
+  const completeBuildingWorkflow = (building: Building, intent: "create" | "attach") => {
     const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
     if (geometryIssues.length > 0) {
       setError(geometryIssues[0].message);
       return;
     }
 
-    const featureId = `feat-poly-${buildingRecord.id}`;
-
     let compoundBatch: WorkingOperation;
     if (intent === "create") {
       const identityInput: BuildingIdentityInput = {
-        name: buildingRecord.name,
-        code: buildingRecord.code,
+        name: building.name,
+        code: building.code,
         function: buildingFunction,
         keywords: buildingKeywords,
         status: "Active",
@@ -1405,16 +1486,16 @@ export function MapEditor() {
         setError(identityIssues[0].message);
         return;
       }
-      compoundBatch = buildCreateBuildingCompoundOperation(identityInput, points, buildingRecord.id);
+      compoundBatch = buildCreateBuildingCompoundOperation(identityInput, points, building.id);
       const locRecord = compoundBatch.nestedOperations![0].after as unknown as Location;
       setLocalLocations((current) => [...current.filter((item) => item.id !== locRecord.id), locRecord]);
     } else {
-      const eligibility = getBuildingAttachmentEligibility(buildingRecord, currentFeatureLinks);
+      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
       if (!eligibility.eligible) {
         setError(eligibility.reason);
         return;
       }
-      compoundBatch = buildAttachBuildingCompoundOperation(buildingRecord, points);
+      compoundBatch = buildAttachBuildingCompoundOperation(building, points);
     }
 
     const footprintOp = compoundBatch.nestedOperations!.find(
@@ -1429,47 +1510,47 @@ export function MapEditor() {
     // The current renderer still consumes Building.points. Keep this local
     // compatibility projection separate from the geometry-free Building
     // record stored in the compound operation above.
-    const renderedBuilding = { ...buildingRecord, points: [...points] };
-    setLocalBuildings((current) => [...current.filter((item) => item.id !== buildingRecord.id), renderedBuilding]);
+    const renderedBuilding = { ...building, points: [...points] };
+    setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), renderedBuilding]);
     if (footprint) {
       setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== footprint.id), footprint]);
     }
     if (link) {
-      setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== buildingRecord.id), link]);
+      setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== building.id), link]);
     }
     workingSessionManager.executeBatch(
-      intent === "create" ? `Create ${buildingRecord.name} with footprint` : `Attach footprint to ${buildingRecord.name}`,
+      intent === "create" ? `Create ${building.name} with footprint` : `Attach footprint to ${building.name}`,
       "Local Map Data",
-      featureId,
+      footprint?.id ?? compoundBatch.entityId,
       compoundBatch.nestedOperations!,
     );
     setDirty(true);
     setPoints([]);
     resetBuildingForm();
-    setBuildingRecordSearch("");
-    setSelectedBuildingRecordId(null);
+    setAttachBuildingSearch("");
+    setSelectedAttachBuildingId(null);
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setMode("select");
-    setSelected({ type: "building", id: buildingRecord.id });
-    setPlacingAssociatedBuildingId(buildingRecord.id);
+    setSelected({ type: "building", id: building.id });
+    setPlacingAssociatedBuildingId(building.id);
     const hasActiveEntrance = currentNodes.some((node) =>
       node.nodeType === "Entrance"
-      && node.associatedPlaceId === buildingRecord.id
+      && node.associatedPlaceId === building.id
       && node.status !== "Inactive",
     );
-    setNonRoutableBuildingId(hasActiveEntrance ? null : buildingRecord.id);
+    setNonRoutableBuildingId(hasActiveEntrance ? null : building.id);
     completeToolDraft("polygon");
   };
 
-  const handleCreateBuildingRecord = () => {
+  const handleCreateBuilding = () => {
     if (!canSaveBuilding) return;
     const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
     if (geometryIssues.length > 0) {
       setError(geometryIssues[0].message);
       return;
     }
-    completeBuildingRecordWorkflow({
+    completeBuildingWorkflow({
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
       code: buildingCode.trim(),
@@ -1477,8 +1558,8 @@ export function MapEditor() {
     }, "create");
   };
 
-  const handleAttachBuildingRecord = () => {
-    const existing = sessionBuildings.find((building) => building.id === selectedBuildingRecordId);
+  const handleAttachBuilding = () => {
+    const existing = allSessionBuildings.find((building) => building.id === selectedAttachBuildingId);
     if (!existing) return;
     const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
     if (!eligibility.eligible) {
@@ -1490,7 +1571,7 @@ export function MapEditor() {
       setError(geometryIssues[0].message);
       return;
     }
-    completeBuildingRecordWorkflow(existing, "attach");
+    completeBuildingWorkflow(existing, "attach");
   };
 
   const startGuidedEntranceDraft = () => {
@@ -1526,9 +1607,9 @@ export function MapEditor() {
     setPointDraftDirty(false);
     setPoints([]);
     setPolygonClosed(false);
-    setBuildingRecordMode("create");
-    setBuildingRecordSearch("");
-    setSelectedBuildingRecordId(null);
+    setBuildingWorkflowMode("create");
+    setAttachBuildingSearch("");
+    setSelectedAttachBuildingId(null);
     setNonRoutableBuildingId(null);
     setPathPoints([]);
     setEditingPathId(null);
@@ -1767,9 +1848,12 @@ export function MapEditor() {
           editingBuildingId,
           polygonClosed,
           polygonInteraction,
-          buildingRecordMode,
-          selectedBuildingRecordId,
-          buildingRecordSearch,
+          buildingWorkflowMode,
+          buildingRecordMode: buildingWorkflowMode,
+          selectedAttachBuildingId,
+          selectedBuildingRecordId: selectedAttachBuildingId,
+          attachBuildingSearch,
+          buildingRecordSearch: attachBuildingSearch,
         },
       }) : null,
       pathway: () => pathStartNodeId || pathDraftDirty ? ({
@@ -1810,11 +1894,11 @@ export function MapEditor() {
     activeTool,
     addLocationOpen,
     buildingForm,
-    buildingRecordMode,
-    buildingRecordSearch,
+    buildingWorkflowMode,
+    attachBuildingSearch,
     editingBuildingId,
     polygonInteraction,
-    selectedBuildingRecordId,
+    selectedAttachBuildingId,
     editingPathId,
     localPathways,
     localFeatureName,
@@ -1869,9 +1953,9 @@ export function MapEditor() {
       polygon: () => {
         setPoints([]);
         setPolygonClosed(false);
-        setBuildingRecordMode("create");
-        setBuildingRecordSearch("");
-        setSelectedBuildingRecordId(null);
+        setBuildingWorkflowMode("create");
+        setAttachBuildingSearch("");
+        setSelectedAttachBuildingId(null);
         resetBuildingForm();
         setEditingBuildingId(null);
       },
@@ -2068,11 +2152,22 @@ export function MapEditor() {
         } else {
           setPolygonInteraction("draw");
         }
-        if (records.buildingRecordMode === "create" || records.buildingRecordMode === "attach") {
-          setBuildingRecordMode(records.buildingRecordMode);
+        const restoredWorkflowMode = records.buildingWorkflowMode ?? records.buildingRecordMode;
+        if (restoredWorkflowMode === "create" || restoredWorkflowMode === "attach") {
+          setBuildingWorkflowMode(restoredWorkflowMode);
         }
-        setSelectedBuildingRecordId(typeof records.selectedBuildingRecordId === "string" ? records.selectedBuildingRecordId : null);
-        setBuildingRecordSearch(typeof records.buildingRecordSearch === "string" ? records.buildingRecordSearch : "");
+        const restoredSelectedId = typeof records.selectedAttachBuildingId === "string"
+          ? records.selectedAttachBuildingId
+          : typeof records.selectedBuildingRecordId === "string"
+            ? records.selectedBuildingRecordId
+            : null;
+        setSelectedAttachBuildingId(restoredSelectedId);
+        const restoredSearch = typeof records.attachBuildingSearch === "string"
+          ? records.attachBuildingSearch
+          : typeof records.buildingRecordSearch === "string"
+            ? records.buildingRecordSearch
+            : "";
+        setAttachBuildingSearch(restoredSearch);
         setMode("area");
       },
       pathway: () => {
@@ -2215,36 +2310,32 @@ export function MapEditor() {
     positioned: true,
   } : null);
 
-  const startSelectedBuildingGeometryEdit = () => {
-    if (!selectedBuilding) return;
-    setEditingBuildingId(selectedBuilding.id);
+  const initializeBuildingFootprintEdit = (
+    building: Building,
+    interaction: "draw" | "reshape" | "move" = "draw",
+  ) => {
+    setEditingBuildingId(building.id);
     setBuildingForm({
-      name: selectedBuilding.name,
-      code: selectedBuilding.code,
+      name: building.name,
+      code: building.code,
       function: "",
       keywords: "",
-      status: selectedBuilding.status ?? "Active",
+      status: building.status ?? "Active",
     });
-    setPoints([...selectedBuilding.points]);
-    setPolygonInteraction("reshape");
+    setPoints([...building.points]);
+    setPolygonInteraction(interaction);
     setPolygonClosed(true);
     setMode("area");
   };
 
+  const startSelectedBuildingGeometryEdit = () => {
+    if (!selectedBuilding) return;
+    initializeBuildingFootprintEdit(selectedBuilding, "reshape");
+  };
+
   const startSelectedBuildingMove = () => {
     if (!selectedBuilding) return;
-    setEditingBuildingId(selectedBuilding.id);
-    setBuildingForm({
-      name: selectedBuilding.name,
-      code: selectedBuilding.code,
-      function: "",
-      keywords: "",
-      status: selectedBuilding.status ?? "Active",
-    });
-    setPoints([...selectedBuilding.points]);
-    setPolygonInteraction("move");
-    setPolygonClosed(true);
-    setMode("area");
+    initializeBuildingFootprintEdit(selectedBuilding, "move");
   };
 
   const retireLocalFeature = (feature: LocalMapFeatureEntity) => {
@@ -3247,34 +3338,34 @@ export function MapEditor() {
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
                 <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
                 {polygonClosed ? (
-                  <section aria-label="Create or attach building record" className="mt-3">
-                    <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building record it should represent.</p>
+                  <section aria-label="Create or attach Building" className="mt-3">
+                    <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building it should represent.</p>
                     {footprintOverlapWarning && (
                       <div className="my-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-semibold text-amber-800" role="status">
                         ⚠️ {footprintOverlapWarning.message}
                       </div>
                     )}
-                    <div role="tablist" aria-label="Building record workflow" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[#edf3ef] p-1">
+                    <div role="tablist" aria-label="Building workflow" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[#edf3ef] p-1">
                       <button
                         type="button"
                         role="tab"
-                        aria-selected={buildingRecordMode === "create"}
-                        onClick={() => setBuildingRecordMode("create")}
-                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingRecordMode === "create" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
+                        aria-selected={buildingWorkflowMode === "create"}
+                        onClick={() => setBuildingWorkflowMode("create")}
+                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "create" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
                       >
-                        ★ Create New Record
+                        ★ Create New Building
                       </button>
                       <button
                         type="button"
                         role="tab"
-                        aria-selected={buildingRecordMode === "attach"}
-                        onClick={() => setBuildingRecordMode("attach")}
-                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingRecordMode === "attach" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
+                        aria-selected={buildingWorkflowMode === "attach"}
+                        onClick={() => setBuildingWorkflowMode("attach")}
+                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "attach" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
                       >
-                        🔗 Attach Existing Record
+                        🔗 Attach Existing Building
                       </button>
                     </div>
-                    {buildingRecordMode === "create" ? (
+                    {buildingWorkflowMode === "create" ? (
                       <div className="mt-3 space-y-2">
                         <label className="block text-xs font-semibold text-[#3f4941]">Building name
                           <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
@@ -3302,36 +3393,32 @@ export function MapEditor() {
                         <input
                           type="search"
                           aria-label="Search existing Buildings"
-                          value={buildingRecordSearch}
-                          onChange={(event) => setBuildingRecordSearch(event.target.value)}
+                          value={attachBuildingSearch}
+                          onChange={(event) => setAttachBuildingSearch(event.target.value)}
                           placeholder="Search by name or code"
                           className="w-full rounded-lg border border-[#dbe0e2] px-2 py-2 text-sm"
                         />
                         <div className="space-y-2 max-h-52 overflow-y-auto">
-                          {buildingRecordCandidates.map((building) => {
-                            const eligibility = buildingAttachmentEligibility(building);
-                            return (
+                          {attachCandidateBuildings.length === 0 ? (
+                            <p className="p-3 text-center text-xs text-[#526359]">No eligible Buildings available to attach.</p>
+                          ) : (
+                            attachCandidateBuildings.map((building) => (
                               <button
                                 key={building.id}
                                 type="button"
-                                disabled={!eligibility.eligible}
-                                aria-pressed={selectedBuildingRecordId === building.id}
-                                onClick={() => setSelectedBuildingRecordId(building.id)}
+                                aria-pressed={selectedAttachBuildingId === building.id}
+                                onClick={() => setSelectedAttachBuildingId(building.id)}
                                 className={`w-full rounded-xl border p-2 text-left text-xs transition cursor-pointer ${
-                                  selectedBuildingRecordId === building.id
+                                  selectedAttachBuildingId === building.id
                                     ? "border-[#005931] bg-emerald-50 text-[#005931]"
                                     : "border-[#dbe0e2] hover:bg-[#f8f9fa]"
-                                } disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500`}
+                                }`}
                               >
                                 <span className="block font-bold">{building.name} · {building.code}</span>
-                                {eligibility.reason ? (
-                                  <span className="mt-1 block text-red-700">{eligibility.reason}</span>
-                                ) : (
-                                  <span className="mt-1 block text-emerald-700 font-medium">Eligible</span>
-                                )}
+                                <span className="mt-1 block text-emerald-700 font-medium">Eligible</span>
                               </button>
-                            );
-                          })}
+                            ))
+                          )}
                         </div>
                       </div>
                     )}
@@ -3448,15 +3535,15 @@ export function MapEditor() {
                   <button
                     type="button"
                     disabled={polygonClosed
-                      ? (buildingRecordMode === "attach" ? !selectedBuildingRecordId || !selectedAttachEligibility?.eligible : !canSaveBuilding)
+                      ? (buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)
                       : !canSaveBuilding}
                     onClick={polygonClosed
-                      ? (buildingRecordMode === "create" ? handleCreateBuildingRecord : handleAttachBuildingRecord)
+                      ? (buildingWorkflowMode === "create" ? handleCreateBuilding : handleAttachBuilding)
                       : handleSaveBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
                     {polygonClosed
-                      ? (buildingRecordMode === "create" ? "Create New Building" : "Attach Selected Building")
+                      ? (buildingWorkflowMode === "create" ? "Create New Building" : "Attach Selected Building")
                       : (polygonInteraction === "reshape" ? "✓ Confirm Shape" : "Save Building")}
                   </button>
                 </div>
@@ -3707,18 +3794,13 @@ export function MapEditor() {
                   <input aria-label="Building code" value={selectedBuilding.code} onChange={(event) => updateBuilding({ ...selectedBuilding, code: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
                 </label>
                 <div className="text-xs text-[#3f4941] mt-2">Building footprint</div>
-                <button type="button" className="mt-2 px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold" onClick={() => {
-                  setEditingBuildingId(selectedBuilding.id);
-                  setBuildingForm({
-                    name: selectedBuilding.name,
-                    code: selectedBuilding.code,
-                    function: "",
-                    keywords: "",
-                    status: selectedBuilding.status ?? "Active",
-                  });
-                  setPoints([...selectedBuilding.points]);
-                  setMode("area");
-                }}>Edit Footprint</button>
+                <button
+                  type="button"
+                  className="mt-2 px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold"
+                  onClick={() => initializeBuildingFootprintEdit(selectedBuilding, "reshape")}
+                >
+                  Edit Footprint
+                </button>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
                     <dt className="text-[#3f4941] font-medium">Object Type</dt>

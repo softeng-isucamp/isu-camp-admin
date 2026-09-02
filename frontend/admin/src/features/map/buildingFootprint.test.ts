@@ -6,6 +6,8 @@ import {
   buildAttachBuildingCompoundOperation,
   buildCreateBuildingCompoundOperation,
   detectBuildingFootprintOverlap,
+  findBuildingFootprintOverlaps,
+  findFirstOverlappingBuilding,
   getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
@@ -158,6 +160,25 @@ describe("detectBuildingFootprintOverlap", () => {
     const sameShape = [...validPoints];
     expect(detectBuildingFootprintOverlap(sameShape, existingBuildings, "bld-eng")).toBeNull();
   });
+
+  it("finds first overlapping building and detects all overlaps via shared helpers", () => {
+    const overlapping: MapPoint[] = [
+      [16.721, 121.690],
+      [16.721, 121.692],
+      [16.723, 121.692],
+      [16.723, 121.690],
+    ];
+    const first = findFirstOverlappingBuilding(overlapping, existingBuildings);
+    expect(first?.id).toBe("bld-eng");
+
+    const overlaps = findBuildingFootprintOverlaps([
+      existingBuildings[0],
+      { id: "bld-overlap", name: "Overlap Hall", code: "OVL", points: overlapping, status: "Active" },
+    ]);
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0].bldA.id).toBe("bld-eng");
+    expect(overlaps[0].bldB.id).toBe("bld-overlap");
+  });
 });
 
 describe("validateBuildingIdentityDetails", () => {
@@ -267,15 +288,16 @@ describe("buildCreateBuildingCompoundOperation", () => {
       status: "active",
     });
 
-    // 3. Feature Link
-    expect(createLink.type).toBe("link_feature");
-    expect(createLink.domain).toBe("Local Map Data");
-    expect(createLink.after).toMatchObject({
-      featureId: createFeat.entityId,
-      targetDomain: "Locations",
-      targetEntityId: createLoc.entityId,
-      linkType: "building_footprint",
-    });
+    // Decoupled Cartographic vs Domain Identity: featureId must NOT contain or couple to buildingId
+    expect(createFeat.entityId).not.toContain("bld-test-123");
+    expect(createFeat.entityId).toMatch(/^feat-poly-/);
+  });
+
+  it("respects overrideFeatureId when explicitly supplied", () => {
+    const input: BuildingIdentityInput = { name: "Lab", code: "L" };
+    const batch = buildCreateBuildingCompoundOperation(input, validPoints, "bld-1", "feat-custom-42");
+    const createFeat = batch.nestedOperations![1];
+    expect(createFeat.entityId).toBe("feat-custom-42");
   });
 });
 
@@ -312,5 +334,16 @@ describe("buildAttachBuildingCompoundOperation", () => {
 
     // Verify no Locations operation exists in the batch
     expect(batch.nestedOperations?.some((op) => op.domain === "Locations")).toBe(false);
+
+    // Decoupled Cartographic vs Domain Identity: featureId must NOT contain or couple to buildingId
+    expect(createFeat.entityId).not.toContain("bld-existing-123");
+    expect(createFeat.entityId).toMatch(/^feat-poly-/);
+  });
+
+  it("respects overrideFeatureId when explicitly supplied for attach", () => {
+    const existing: Building = { id: "bld-42", name: "Hall", code: "H", points: [] };
+    const batch = buildAttachBuildingCompoundOperation(existing, validPoints, "feat-attach-99");
+    const createFeat = batch.nestedOperations![0];
+    expect(createFeat.entityId).toBe("feat-attach-99");
   });
 });

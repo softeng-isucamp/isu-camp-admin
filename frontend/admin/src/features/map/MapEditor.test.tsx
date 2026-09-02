@@ -641,17 +641,17 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
 
-    expect(screen.getByRole("region", { name: "Create or attach building record" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "★ Create New Record" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "Create or attach Building" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "★ Create New Building" })).toHaveAttribute("aria-selected", "true");
     expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
 
-    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Record" }));
+    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Building" }));
 
-    expect(screen.getByRole("tab", { name: "🔗 Attach Existing Record" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "🔗 Attach Existing Building" })).toHaveAttribute("aria-selected", "true");
     expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
   });
 
-  it("shows attach eligibility reasons and attaches only an eligible Building", async () => {
+  it("exposes only eligible active Buildings without footprint in Attach Existing Building", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-open", name: "Science Hall", code: "SCI", points: [] },
       { id: "building-linked", name: "University Gym", code: "GYM", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
@@ -662,11 +662,11 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
-    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Record" }));
+    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Building" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search existing Buildings" }), { target: { value: "i" } });
 
-    expect(screen.getByRole("button", { name: /University Gym/ })).toBeDisabled();
-    expect(screen.getByText("Already linked to footprint feat-poly-building-linked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /University Gym/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Science Hall/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Science Hall/ }));
     fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
 
@@ -966,7 +966,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
-    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Record/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
 
     expect(screen.getByText("Eligible Building · ELIG-01")).toBeInTheDocument();
     expect(screen.getByText("Eligible")).toBeInTheDocument();
@@ -1084,5 +1084,141 @@ describe("Map Editor preview", () => {
     expect(createdBuilding?.lat).toBeNull();
     expect(createdBuilding?.lng).toBeNull();
     expect(createdBuilding?.positioned).toBe(false);
+  });
+
+  it("undoes and redoes compound Create New Building operation atomically as one action", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Atomic Lab" } });
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ATM-LAB" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create New Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    // Preview should show the added building
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    let preview = screen.getByRole("dialog", { name: "Preview Map" });
+    expect(preview).toHaveTextContent("Atomic Lab");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // Undo: compound batch is undone as ONE step
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+
+    // Building should be removed from preview
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    preview = screen.getByRole("dialog", { name: "Preview Map" });
+    expect(preview).not.toHaveTextContent("Atomic Lab");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // Redo: compound batch is reapplied as ONE step
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
+    preview = screen.getByRole("dialog", { name: "Preview Map" });
+    expect(preview).toHaveTextContent("Atomic Lab");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  });
+
+  it("undoes and redoes compound Attach Existing Building operation atomically as one action", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "bld-attachable", name: "Attachable Hall", code: "ATT-01", points: [] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Attachable Hall/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
+
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+
+    // Undo: footprint is detached as ONE step
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
+
+    // Redo: footprint is re-attached as ONE step
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("sources attach candidates from unpositioned Buildings in locations query", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue([
+      {
+        id: "bld-unpositioned",
+        name: "Unpositioned Annex",
+        code: "UNPOS-01",
+        type: "Building",
+        parentId: null,
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Footprint" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
+
+    // Unpositioned Building from locations is exposed as an attach candidate
+    expect(screen.getByRole("button", { name: /Unpositioned Annex/ })).toBeInTheDocument();
+  });
+
+  it("evaluates footprint-derived Building as routable when entrance is linked even with positioned false", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      {
+        id: "bld-routable",
+        name: "Routable Hall",
+        code: "ROUT-01",
+        points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]],
+        status: "Active",
+      },
+    ]);
+    vi.mocked(services.map.locations).mockResolvedValue([
+      {
+        id: "bld-routable",
+        name: "Routable Hall",
+        code: "ROUT-01",
+        type: "Building",
+        parentId: null,
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      },
+    ]);
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      {
+        id: "node-entrance-1",
+        name: "Main Entrance",
+        nodeType: "Entrance",
+        lat: 16.7205,
+        lng: 121.6895,
+        associatedPlaceId: "bld-routable",
+        status: "Active",
+      },
+    ]);
+
+    renderEditor();
+
+    const buildingPolygon = await screen.findByRole("button", { name: "building polygon" });
+    fireEvent.click(buildingPolygon);
+
+    expect(screen.getByRole("complementary", { name: "Routable Hall object details" })).toBeInTheDocument();
+    expect(screen.getByText("Linked & Routable")).toBeInTheDocument();
   });
 });
