@@ -60,6 +60,24 @@ export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
   return [latitude / (3 * twiceArea), longitude / (3 * twiceArea)];
 };
 
+/** Returns true when polygon vertices are not collinear (non-degenerate). */
+export const polygonIsNonDegenerate = (points: MapPoint[]): boolean => {
+  if (points.length < 3) return false;
+  // Check if all points are collinear using cross product
+  const [p0, p1] = [points[0], points[1]];
+  // Use first two points to define a line
+  for (let i = 2; i < points.length; i++) {
+    const p = points[i];
+    // Cross product: (p1 - p0) × (p - p0)
+    const cross = (p1[0] - p0[0]) * (p[1] - p0[1]) - (p1[1] - p0[1]) * (p[0] - p0[0]);
+    if (Math.abs(cross) > Number.EPSILON) {
+      // Found a non-collinear point
+      return true;
+    }
+  }
+  return false;
+};
+
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
 
