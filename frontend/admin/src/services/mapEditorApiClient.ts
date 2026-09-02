@@ -1092,7 +1092,7 @@ export function createMapEditorApiClient(options?: {
   // modes remain supported for isolated tests that construct their own client.
   const mode = options?.mode ?? "real";
   if (mode === "real" || mode === "mock") {
-    return new HttpMapEditorApiClient(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "");
+    return new HttpMapEditorApiClient(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000");
   }
   return new LocalMapEditorAdapter(options?.seedSources ? { seedSources: options.seedSources } : undefined);
 }
