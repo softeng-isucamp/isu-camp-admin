@@ -774,7 +774,6 @@ export const services: Services = {
     save: async (location) => {
 
       if (USE_HTTP_API) {
-        if (location.id) throw new Error("Updating locations is not available yet.");
         const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
         const body = uploadsNewPhoto
           ? (() => {
@@ -793,8 +792,8 @@ export const services: Services = {
               return form;
             })()
           : JSON.stringify(locationWritePayload(location));
-        const response = await apiJson<unknown>("/api/locations", {
-          method: "POST",
+        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}` : "/api/locations", {
+          method: location.id ? "PUT" : "POST",
           body,
         });
         const saved = normalizeBackendLocationMutation(response);

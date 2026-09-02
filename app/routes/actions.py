@@ -249,7 +249,12 @@ def edit_location(location_id):
         None
     )
 
-    if location is None:
+    building = next(
+        (item for item in buildings if item.building_id == location_id),
+        None
+    )
+
+    if location is None and building is None:
         return jsonify({
             "success": False,
             "message": "Location not found."
@@ -257,11 +262,11 @@ def edit_location(location_id):
 
     data = _request_payload()
 
-    values, error = _validate(
-        data,
-        [item for item in records if item.location_id != location_id],
-        buildings
-    )
+    validation_buildings = [item for item in buildings if item.building_id != location_id]
+    if building is not None:
+        data["type"] = "Building"
+        data["parentId"] = None
+    values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
     if error: return error
 
     photo, photo_mime_type, error = _photo_upload()
@@ -273,6 +278,14 @@ def edit_location(location_id):
         })
 
     try:
+        if building is not None:
+            building.building_code = values["code"]
+            building.building_name = values["name"]
+            building.description = values["description"]
+            db.session.flush()
+            db.session.commit()
+            return jsonify(building.to_location_dto()), 200
+
         location.building_id = values["building_id"]
         location.floor_level = values["floor_level"]
         location.type_id = values["type_id"]
@@ -355,17 +368,16 @@ def delete_location(location_id):
     if error: return error
 
     try:
-        location = Location.query.filter_by(
-            location_id=location_id
-        ).first()
+        location = Location.query.filter_by(location_id=location_id).first()
+        building = Building.query.filter_by(building_id=location_id).first()
 
-        if location is None:
+        if location is None and building is None:
             return jsonify({
                 "success": False,
                 "message": "Location not found."
             }), 404
 
-        db.session.delete(location)
+        db.session.delete(building or location)
         db.session.commit()
 
         return jsonify({
