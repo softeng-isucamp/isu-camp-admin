@@ -22,6 +22,8 @@ import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
+import { WalkingNetworkManagementPrototype } from "./WalkingNetworkManagementPrototype";
+import { PathPointSidecardPrototype } from "./PathPointSidecardPrototype";
 import {
   buildRestoreLocalFeatureOperation,
   buildRetireLocalFeatureOperation,
@@ -34,6 +36,7 @@ import {
   type FeatureLinkEntity,
   type LocalFeatureFamily,
   type LocalMapFeatureEntity,
+  type SaveDraftResult,
 } from "../../services/mapEditorApiClient";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
 import {
@@ -452,9 +455,17 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
 };
 
 export function MapEditor() {
+  if (new URLSearchParams(window.location.search).get("prototype") === "path-point-sidecard") {
+    return <PathPointSidecardPrototype />;
+  }
+  if (new URLSearchParams(window.location.search).get("prototype") === "walking-network") {
+    return <WalkingNetworkManagementPrototype />;
+  }
   const queryClient = useQueryClient();
   const routeLocation = useLocation();
   const [workingSessionManager] = useState(() => new WorkingSessionManager());
+  const [draftVersion, setDraftVersion] = useState(1);
+  const saveRequestId = useRef(`map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const [, setWorkingSessionRevision] = useState(0);
   const [pendingToolRequest, setPendingToolRequest] = useState<{
     toolType: ToolType;
@@ -488,6 +499,16 @@ export function MapEditor() {
       pathways: await services.map.pathways(),
     }),
   });
+  const { data: draftBootstrap } = useQuery({
+    queryKey: ["map-editor-bootstrap", "proj-echague"],
+    queryFn: () => services.map.getMapEditorBootstrap!("proj-echague"),
+    enabled: Boolean(services.map.getMapEditorBootstrap),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (draftBootstrap) setDraftVersion(draftBootstrap.adminDraft.draftVersion);
+  }, [draftBootstrap]);
 
   const [localLocations, setLocalLocations] = useState<Location[]>([]);
   const [localNodes, setLocalNodes] = useState<RouteNode[]>([]);
@@ -1223,7 +1244,18 @@ export function MapEditor() {
       code: buildingCode.trim(),
       points: [...points],
     };
+    const before = editingBuildingId
+      ? currentBuildings.find((item) => item.id === editingBuildingId) ?? null
+      : null;
     setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), building]);
+    workingSessionManager.executeOperation({
+      type: before ? "update_geometry" : "create_entity",
+      domain: "Locations",
+      entityId: building.id,
+      before: before as unknown as Record<string, unknown> | null,
+      after: building as unknown as Record<string, unknown>,
+      description: `${before ? "Reshape" : "Create"} ${building.name}`,
+    });
     setDirty(true);
     setPoints([]);
     setBuildingName("");
@@ -1456,19 +1488,40 @@ export function MapEditor() {
             routeNodePoint(currentNodes, pathway.destinationNodeId),
           ),
         }));
-      await services.map.save({
-        selected: selected ?? undefined,
-        areaPoints: points.length >= 3 ? points : undefined,
-        locations: localLocations,
-        nodes: localNodes,
-        buildings: localBuildings,
-        pathways: pathwaysToSave,
-      });
+      const operations = workingSessionManager.getUncommittedOperations();
+      let gatewayResult: SaveDraftResult | undefined;
+      if (services.map.saveDraft) {
+        gatewayResult = await services.map.saveDraft({
+          projectId: "proj-echague",
+          baseDraftVersion: draftVersion,
+          requestId: saveRequestId.current,
+          operations,
+        });
+        if (!gatewayResult.success) {
+          const detail = gatewayResult.errorType === "CONCURRENCY_CONFLICT"
+            ? `Admin Draft changed on the server (version ${gatewayResult.currentServerDraftVersion}). Refresh or rebase your ${workingSessionManager.getUncommittedCount()} pending change${workingSessionManager.getUncommittedCount() === 1 ? "" : "s"}, then retry.`
+            : gatewayResult.message;
+          setError(detail);
+          return;
+        }
+        setDraftVersion(gatewayResult.newDraftVersion);
+      } else {
+        await services.map.save({
+          selected: selected ?? undefined,
+          areaPoints: points.length >= 3 ? points : undefined,
+          locations: localLocations,
+          nodes: localNodes,
+          buildings: localBuildings,
+          pathways: pathwaysToSave,
+        });
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["map"] }),
         queryClient.invalidateQueries({ queryKey: ["routes"] }),
         queryClient.invalidateQueries({ queryKey: ["nodes"] }),
       ]);
+      workingSessionManager.markSaved();
+      saveRequestId.current = `map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       setDirty(false);
       setConfirm(null);
       setError("");
@@ -3682,7 +3735,7 @@ export function MapEditor() {
           }
           subtitle={
             confirm === "save"
-              ? "Persist local draft geometry to the central backend."
+              ? "Save this Working Session to the Admin Draft gateway."
               : "Discard uncommitted marker and shape drafts."
           }
           size="sm"
@@ -3691,7 +3744,7 @@ export function MapEditor() {
         >
           <p className="text-xs text-[#3f4941] my-2">
             {confirm === "save"
-              ? "This will save marker, node, and pathway geometry changes."
+              ? "This fixture-backed Admin Draft simulation saves the complete finalized session; it does not publish the map."
               : "Unsaved marker, node, and pathway edits will be lost."}
           </p>
           {error && (

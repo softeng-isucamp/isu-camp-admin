@@ -465,6 +465,31 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         expect(errRes.message).toContain("Self-intersecting polygon");
       }
     });
+
+    it("is idempotent for an accepted request and rejects an unowned update atomically", async () => {
+      const operation: WorkingOperation = {
+        id: "op-idempotent",
+        type: "update_geometry",
+        domain: "Routes & Paths",
+        entityId: "node-ent-01",
+        before: { lat: 16.721, lng: 121.689 },
+        after: { lat: 16.7212, lng: 121.6892 },
+      };
+      const command = { projectId: "proj-echague", baseDraftVersion: 1, requestId: "request-1", operations: [operation] };
+      const first = await adapter.saveDraft(command);
+      const second = await adapter.saveDraft(command);
+      expect(first).toEqual(second);
+      expect((await adapter.getMapEditorBootstrap("proj-echague")).adminDraft.draftVersion).toBe(2);
+
+      const rejected = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 2,
+        requestId: "request-2",
+        operations: [{ ...operation, id: "op-unowned", entityId: "missing-node" }],
+      });
+      expect(rejected).toMatchObject({ success: false, errorType: "FIELD_VALIDATION_ERROR" });
+      expect((await adapter.getMapEditorBootstrap("proj-echague")).adminDraft.draftVersion).toBe(2);
+    });
   });
 
   describe("publishDraft and discardDraft", () => {
