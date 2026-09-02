@@ -383,7 +383,7 @@ export function Locations() {
     setFieldErrors([]);
     const adding = dialog === "add";
     const normalized = normalizeDraft(draft);
-    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding });
+    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding, currentId: adding ? "__new__" : selected?.id });
     const requiredIssues = [
       ["name", "Location name is required."],
       ["code", "Location code is required."],
@@ -611,7 +611,7 @@ export function Locations() {
         <div>
           <h1 style={{ fontSize: "28px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Campus Locations</h1>
           <p style={{ color: "#525c57", marginTop: "4px", fontSize: "15px" }}>
-            Manage buildings, floors, rooms, offices, laboratories, restrooms, and facilities.
+            Manage Buildings and Indoor Locations. Create outdoor records in Map Editor.
           </p>
         </div>
       </div>
@@ -782,6 +782,22 @@ export function Locations() {
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
               </svg>
               Bulk Import
+            </Button>
+            <Button
+              variant="subtle"
+              aria-label="Create Building in Map Editor"
+              style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1.5px solid #0c7441", color: "#0c7441", background: "#fff", fontWeight: 600 }}
+              onClick={() => navigate("/map-editor?create=building")}
+            >
+              ＋ Create Building
+            </Button>
+            <Button
+              variant="subtle"
+              aria-label="Create Outdoor Point Location in Map Editor"
+              style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1.5px solid #0c7441", color: "#0c7441", background: "#fff", fontWeight: 600 }}
+              onClick={() => navigate("/map-editor?create=outdoor-point")}
+            >
+              ＋ Create Outdoor Point Location
             </Button>
             <Button
               style={{
@@ -1122,7 +1138,7 @@ export function Locations() {
                     {dialog === "add" ? "Add Location" : "Edit Location"}
                   </h2>
                   <p id="location-form-description" style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    Add a building, floor, room, office, laboratory, restroom, or facility.
+                    Add a Room, Office, Laboratory, or Restroom under an existing Building.
                   </p>
                 </div>
               </div>
@@ -1149,7 +1165,9 @@ export function Locations() {
               )}
               <LocationDetailsFields
                 draft={draft}
-                allowedTypes={["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor" as const] : [])]}
+                allowedTypes={dialog === "add"
+                  ? ["Laboratory", "Room", "Office", "Restroom"]
+                  : ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 statusEditable={API_MODE === "local"}
                 onChange={setDraft}
@@ -1193,7 +1211,7 @@ export function Locations() {
                       >
                         <option value="">None</option>
                         {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
-                        <option value="__custom__">Custom Floor Level</option>
+                        {dialog === "edit" && customFloorMode && <option value="__custom__">Custom Floor Level</option>}
                       </SelectField>
                       {customFloorMode && (
                         <Field label="CUSTOM FLOOR LEVEL" required value={draft.floor ?? ""} placeholder="Mezzanine" error={errorFor("floor")} onChange={(event) => setDraft({ ...draft, floor: event.target.value })} />
@@ -1203,17 +1221,11 @@ export function Locations() {
                 </div>
               )}
 
-              {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
-                <>
-                  <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                    <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
-                    <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
-                  </div>
-                  <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
-                </>
-              ) : (
-                <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>Indoor Locations inherit map position and routing from their selected Building.</p>
-              )}
+              <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
+                {locationPolicy.classify(draft.type).kind === "indoor"
+                  ? "Indoor Locations inherit map position and routing from their selected Building."
+                  : "Spatial position is managed in Map Editor."}
+              </p>
 
               {/* Upload Box */}
               <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>

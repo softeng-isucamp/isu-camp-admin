@@ -36,7 +36,7 @@ import {
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
-import { LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
+import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
 import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult } from "./mapEditorApiClient";
@@ -820,6 +820,7 @@ export const services: Services = {
         context: "record",
         directory: locations,
         requireFloorLevel: !location.id,
+        currentId: location.id,
       });
       if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
 
@@ -1715,8 +1716,8 @@ export const services: Services = {
       const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
 
       validRows.forEach(({ row, index }) => {
-        if (row.type === "Floor") {
-          errors.push(`Row ${index + 1}, type: Floor records are legacy compatibility data and cannot be imported.`);
+        if (!indoorLocationTypes.includes(row.type as typeof indoorLocationTypes[number])) {
+          errors.push(`Row ${index + 1}, type: only Room, Office, Laboratory, and Restroom records can be imported.`);
         }
         const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
         const matchedByCode = locations.findIndex((location) => location.code === row.code);
@@ -1739,6 +1740,7 @@ export const services: Services = {
         }
 
         const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
+        if (row.type && !indoorLocationTypes.includes(row.type as typeof indoorLocationTypes[number])) return;
         pending.push({
           existingIndex: existingIndex >= 0 ? existingIndex : null,
           rowIndex: index,
@@ -1759,9 +1761,10 @@ export const services: Services = {
       // reference the ID supplied in this file. Resolve that temporary ID to
       // the parent's durable curated ID before committing the batch.
       const effectiveIdsByImportedId = new Map(
-        validRows.flatMap(({ row }, pendingIndex) => row.id
-          ? [[row.id, pending[pendingIndex].location.id] as const]
-          : []),
+        validRows.flatMap(({ row, index }) => {
+          const entry = pending.find((candidate) => candidate.rowIndex === index);
+          return row.id && entry ? [[row.id, entry.location.id] as const] : [];
+        }),
       );
       pending.forEach(({ location }) => {
         if (location.parentId) {
@@ -1780,6 +1783,7 @@ export const services: Services = {
           context: "record",
           directory: batchDirectory,
           requireFloorLevel: true,
+          currentId: entry.location.id,
         });
         if (!evaluation.valid) {
           evaluation.issues.forEach((issue) => errors.push(`Row ${entry.rowIndex + 1}, ${issue.field}: ${issue.message}`));

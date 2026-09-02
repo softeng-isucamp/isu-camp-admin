@@ -82,6 +82,7 @@ export function LocationDetailsModal({
     const evaluation = locationPolicy.evaluate(normalized, {
       context: "record",
       directory,
+      currentId: location.id,
     });
     if (!normalized.name.trim() || !normalized.code.trim() || !String(normalized.function ?? "").trim()) {
       setError("Location name, code, and description are required.");
