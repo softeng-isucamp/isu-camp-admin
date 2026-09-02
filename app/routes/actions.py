@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
+from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
@@ -316,6 +317,13 @@ def edit_location(location_id):
 
 @actions_bp.route("/buildings/<int:building_id>/history", methods=["GET"])
 def view_building_history(building_id):
+    """Return a building's audit records, newest first.
+
+    A building with no recorded changes is a valid response and returns
+    ``{"success": true, "data": []}``.  Timestamps are serialized as ISO 8601
+    strings so the response is safe for JSON clients and stable across ORM
+    implementations.
+    """
 
     _, error = admin_required()
     if error: return error
@@ -348,7 +356,8 @@ def view_building_history(building_id):
                     "old_value": item.old_value,
                     "new_value": item.new_value,
                     "changed_by": item.changed_by,
-                    "created_at": item.created_at
+                    "created_at": item.created_at.isoformat()
+                    if item.created_at is not None else None
                 }
                 for item in history
             ]
@@ -356,6 +365,7 @@ def view_building_history(building_id):
 
     except Exception:
         logger.exception("Failed to get building history")
+        db.session.rollback()
         return jsonify({
             "success": False,
             "message": "Failed to get building history."
