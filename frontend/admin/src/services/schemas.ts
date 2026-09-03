@@ -51,21 +51,6 @@ export const locationSchema = locationImportFields.extend({
   positioned: z.boolean(),
   photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
 });
-export const routeImportSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1),
-  sourceNodeId: z.string(),
-  destinationNodeId: z.string(),
-  pathPoints: z.array(z.tuple([z.number(), z.number()])),
-});
-export const pathwaySchema = routeImportSchema.extend({
-  distance: z.string(),
-  time: z.string(),
-  shade: z.enum(["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded", "Unknown"]),
-  type: z.string().min(1),
-  direction: z.enum(["Two-way", "One-way", "Unknown"]),
-  status: z.enum(["Open", "Closed", "Unknown"]),
-});
 export const userAccountSchema = z.object({
   id: z.string().min(1),
   username: z.string().min(1, "Username is required."),

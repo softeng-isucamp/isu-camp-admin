@@ -15,7 +15,7 @@ import { buildings as mockBuildings, locations as mockLocations, routeNodes as m
 // 1. Spatial Domains & Core Operation Types
 // ============================================================================
 
-export type SpatialDomain = "Locations" | "Routes & Paths" | "Local Map Data";
+export type SpatialDomain = "Locations" | "Walking Network" | "Local Map Data";
 
 export type SpatialObjectType =
   | "building"
@@ -573,7 +573,7 @@ export function extractEntityFromLayers(
     if (building) return building as unknown as Record<string, unknown>;
     const loc = layers.outdoorLocations.find((l) => l.id === entityId);
     if (loc) return loc as unknown as Record<string, unknown>;
-  } else if (domain === "Routes & Paths") {
+  } else if (domain === "Walking Network") {
     const node = layers.routeNodes.find((n) => n.id === entityId);
     if (node) return node as unknown as Record<string, unknown>;
     const path = layers.pathways.find((p) => p.id === entityId);
@@ -667,7 +667,7 @@ function validateDraftOperations(layers: MapEditorLayers, operations: WorkingOpe
     }
     const collection = operation.domain === "Locations"
       ? [...layers.buildings, ...layers.outdoorLocations]
-      : operation.domain === "Routes & Paths"
+      : operation.domain === "Walking Network"
         ? [...layers.routeNodes, ...layers.pathways]
         : [...layers.localFeatures, ...layers.featureLinks];
     const existing = collection.find((item) => item.id === operation.entityId);
@@ -735,7 +735,7 @@ export function applyOperationToLayers(layers: MapEditorLayers, op: WorkingOpera
       }
       break;
     }
-    case "Routes & Paths": {
+    case "Walking Network": {
       if (op.type === "create_entity" && op.after) {
         if ("sourceNodeId" in op.after) {
           layers.pathways.push(op.after as unknown as PathwayEntity);

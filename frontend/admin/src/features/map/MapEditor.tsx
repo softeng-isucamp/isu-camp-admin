@@ -31,7 +31,6 @@ import {
   EDITABLE_LOCAL_FEATURE_FAMILIES,
 } from "./localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
-import { RouteDetailsModal } from "../routes/RouteDetailsModal";
 import {
   normalizeMapLayers,
   type FeatureLinkEntity,
@@ -138,7 +137,7 @@ function projectWorkingSessionOperation(
       projections.push({ collection: "buildings", entityId: operation.entityId, value });
     }
     return projections;
-  } else if (operation.domain === "Routes & Paths") {
+  } else if (operation.domain === "Walking Network") {
     // Pathways and nodes are in the same domain
     if (operation.type === "update_geometry" || operation.type === "create_entity" || operation.type === "retire_entity" || operation.type === "restore_entity" || operation.type === "update_properties") {
       // Determine if it's a pathway or node by checking the record structure
@@ -590,7 +589,7 @@ export function MapEditor() {
   const [selectedLocalFeatureFamily, setSelectedLocalFeatureFamily] = useState<Exclude<LocalFeatureFamily, "readonly_basemap">>("parking_area");
   const [localFeaturePoints, setLocalFeaturePoints] = useState<[number, number][]>([]);
   const [localFeatureName, setLocalFeatureName] = useState("New Parking Area");
-  const [ownerModal, setOwnerModal] = useState<"location" | "route" | "local_feature" | null>(null);
+  const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
   const [localFeatureActionNotice, setLocalFeatureActionNotice] = useState("");
 
   const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move" | "local_feature">(
@@ -1018,7 +1017,7 @@ export function MapEditor() {
     const pathway = localPathways.find((item) => item.id === pathwayId)
       ?? directoryPathways.find((item) => item.id === pathwayId);
     if (!pathway) {
-      setError("The requested Pathway is no longer available. Refresh the Routes list and try again.");
+      setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
       return;
     }
     setSelected({ type: "pathway", id: pathway.id });
@@ -1330,7 +1329,7 @@ export function MapEditor() {
         });
         workingSessionManager.executeOperation({
           type: "update_geometry",
-          domain: "Routes & Paths",
+          domain: "Walking Network",
           entityId: movingId,
           before: existing as unknown as Record<string, unknown>,
           after: updated as unknown as Record<string, unknown>,
@@ -1389,7 +1388,7 @@ export function MapEditor() {
       return;
     }
     setLocalNodes((current) => [...current, newNode]);
-    workingSessionManager.executeOperation({ type: "create_entity", domain: "Routes & Paths", entityId: newNode.id,
+    workingSessionManager.executeOperation({ type: "create_entity", domain: "Walking Network", entityId: newNode.id,
       before: null, after: newNode as unknown as Record<string, unknown>, description: `Place ${newNode.name}` });
     if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
       setNonRoutableBuildingId(null);
@@ -1483,7 +1482,7 @@ export function MapEditor() {
       setPathwayDraftOriginal({ ...updatedPath });
       workingSessionManager.executeOperation({
         type: provisionalPathwayId === target.id ? "create_entity" : "update_geometry",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: target.id,
         before: provisionalPathwayId === target.id ? null : target as unknown as Record<string, unknown>,
         after: updatedPath as unknown as Record<string, unknown>,
@@ -1730,7 +1729,6 @@ export function MapEditor() {
     setSelected({ type: object.type, id: object.id });
     if (fieldLabel) {
       if (object.type === "building" || object.type === "location") setOwnerModal("location");
-      if (object.type === "node" || object.type === "pathway") setOwnerModal("route");
       window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${fieldLabel}"]`)?.focus());
     }
     if (object.type === "pathway") {
@@ -1809,7 +1807,6 @@ export function MapEditor() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["map"] }),
         queryClient.invalidateQueries({ queryKey: ["locations"] }),
-        queryClient.invalidateQueries({ queryKey: ["routes"] }),
         queryClient.invalidateQueries({ queryKey: ["nodes"] }),
       ]);
       workingSessionManager.markSaved();
@@ -1883,7 +1880,7 @@ export function MapEditor() {
     } as Pathway));
     setLocalNodes((items) => [...items, ...nodes]);
     setLocalPathways((items) => [...items, ...pathways]);
-    workingSessionManager.executeBatch("Import Walking Network", "Routes & Paths", "walking-network-import", walkingNetworkImport.operations.map((operation) => ({
+    workingSessionManager.executeBatch("Import Walking Network", "Walking Network", "walking-network-import", walkingNetworkImport.operations.map((operation) => ({
       ...operation,
       after: (pathways.find((pathway) => pathway.id === operation.entityId) ?? nodes.find((node) => node.id === operation.entityId)) as unknown as Record<string, unknown>,
     })));
@@ -1926,7 +1923,7 @@ export function MapEditor() {
     ]);
     workingSessionManager.executeBatch(
       `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
-      "Routes & Paths",
+      "Walking Network",
       junctionId,
       crossingChange.operations,
     );
@@ -2506,7 +2503,7 @@ export function MapEditor() {
       operations.push({
         id: `pathway-properties-${after.id}`,
         type: "update_properties",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: after.id,
         before: before as unknown as Record<string, unknown>,
         after: after as unknown as Record<string, unknown>,
@@ -2517,14 +2514,14 @@ export function MapEditor() {
       operations.push({
         id: `pathway-geometry-${after.id}`,
         type: "update_geometry",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: after.id,
         before: before as unknown as Record<string, unknown>,
         after: after as unknown as Record<string, unknown>,
         description: `Reshape ${after.name}`,
       });
     }
-    if (operations.length > 1) workingSessionManager.executeBatch(`Edit ${after.name}`, "Routes & Paths", after.id, operations);
+    if (operations.length > 1) workingSessionManager.executeBatch(`Edit ${after.name}`, "Walking Network", after.id, operations);
     else if (operations[0]) workingSessionManager.executeOperation(operations[0]);
     setLocalPathways((items) => [...items.filter((item) => item.id !== after.id), after]);
     setPathwayDraftOriginal({ ...after });
@@ -2713,7 +2710,7 @@ export function MapEditor() {
         id: selectedNode.id,
         kind: selectedNode.nodeType === "Entrance" ? "entrance_route_node" : "route_node",
         title: selectedNode.name,
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         status: selectedNode.nodeType === "Entrance" ? "Entrance Route Node" : `${selectedNode.nodeType} Route Node`,
         summary: [
           { label: "Node Type", value: selectedNode.nodeType },
@@ -2726,14 +2723,13 @@ export function MapEditor() {
         ],
         primaryAction: { label: selectedNode.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: handleStartMoveNode },
         overflowActions: [
-          { label: "✎ Edit Details", onSelect: () => setOwnerModal("route") },
           ...(selectedNode.nodeType === "Entrance" ? [{
             label: "⎋ Convert to Standard Node",
             tone: "danger" as const,
             onSelect: () => {
               const updated = { ...selectedNode, nodeType: "Junction" as const, associatedPlaceId: null };
               updateNode(updated);
-              recordPropertyOperation("Routes & Paths", selectedNode.id, selectedNode, updated, `Convert ${selectedNode.name} to a standard Route Node`);
+              recordPropertyOperation("Walking Network", selectedNode.id, selectedNode, updated, `Convert ${selectedNode.name} to a standard Route Node`);
             },
           }] : []),
           {
@@ -2752,7 +2748,7 @@ export function MapEditor() {
         id: selectedPath.id,
         kind: "pathway",
         title: selectedPath.name || "Campus Pathway",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         status: `${selectedPath.direction} · ${selectedPath.status}${pathwayFrameDirty ? " · Unsaved draft" : ""}`,
         summary: [
           { label: "Source Route Node", value: currentNodes.find((node) => node.id === selectedPath.sourceNodeId)?.name ?? selectedPath.sourceNodeId },
@@ -2814,7 +2810,7 @@ export function MapEditor() {
         id: selected.id,
         kind: "path_point",
         title: `Path Point #${selectedPathPointIndex + 1}`,
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         status: `Nested geometry · ${selectedPathPointIndex + 1} of ${pathPoints.length}`,
         summary: [
           { label: "Source Route Node", value: currentNodes.find((node) => node.id === activePathway?.sourceNodeId)?.name ?? activePathway?.sourceNodeId ?? "—" },
@@ -4369,35 +4365,6 @@ export function MapEditor() {
             } else if (selectedLocation) {
               updateLocation(updated);
               recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, updated, `Edit ${selectedLocation.name} details`);
-            }
-            setOwnerModal(null);
-          }}
-        />
-      )}
-
-      {ownerModal === "route" && (selectedNode || selectedPath) && (
-        <RouteDetailsModal
-          entity={selectedNode ? { kind: "route_node", value: selectedNode } : { kind: "pathway", value: selectedPath! }}
-          nodes={currentNodes}
-          locations={currentLocations}
-          onClose={() => setOwnerModal(null)}
-          onSubmit={(updated) => {
-            if ("nodeType" in updated && selectedNode) {
-              const nodeIssues = validateRouteNodeDraft(updated, {
-                buildings: currentBuildings,
-                locations: currentLocations,
-                campusBoundary,
-              });
-              if (nodeIssues.length > 0) {
-                setError(nodeIssues[0].message);
-                return;
-              }
-              updateNode(updated);
-              recordPropertyOperation("Routes & Paths", selectedNode.id, selectedNode, updated, `Edit ${selectedNode.name} details`);
-            } else if ("pathPoints" in updated && selectedPath) {
-              if (updatePathway(updated)) {
-                recordPropertyOperation("Routes & Paths", selectedPath.id, selectedPath, updated, `Edit ${selectedPath.name} details`);
-              }
             }
             setOwnerModal(null);
           }}

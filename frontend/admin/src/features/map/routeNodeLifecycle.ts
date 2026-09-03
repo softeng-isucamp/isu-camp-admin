@@ -29,7 +29,7 @@ export function calculateLifecycleImpact(input: { action: LifecycleAction; objec
 export function buildLifecycleChange(action: LifecycleAction, record: Pathway | RouteNode): LifecycleChange {
   const status = action === "close_pathway" ? "Closed" : action === "deactivate_node" ? "Inactive" : action === "reopen_pathway" ? "Open" : "Active";
   const updated = { ...record, status } as Pathway | RouteNode;
-  return { action, record: updated, operation: { id: `${action}-${record.id}`, type: action === "reopen_pathway" || action === "reactivate_node" ? "restore_entity" : "retire_entity", domain: "Routes & Paths", entityId: record.id, before: record as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, description: `${lifecycleActionLabel(action)} ${record.name}` } };
+  return { action, record: updated, operation: { id: `${action}-${record.id}`, type: action === "reopen_pathway" || action === "reactivate_node" ? "restore_entity" : "retire_entity", domain: "Walking Network", entityId: record.id, before: record as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, description: `${lifecycleActionLabel(action)} ${record.name}` } };
 }
 
 export function lifecycleActionLabel(action: LifecycleAction): string {

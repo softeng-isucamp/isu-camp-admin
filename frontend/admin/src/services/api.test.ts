@@ -175,17 +175,6 @@ describe("mock service contracts", () => {
       imported: 0,
       errors: ["Invalid JSON file."],
     });
-    const result = await services.imports.routes(
-      JSON.stringify({
-        id: "r-import",
-        name: "Broken",
-        sourceNodeId: "missing",
-        destinationNodeId: "missing",
-        pathPoints: [],
-      }),
-    );
-    expect(result.imported).toBe(0);
-    expect(result.errors[0]).toContain("node reference");
   });
 
   it("supports deterministic injectable save failures", async () => {
@@ -548,19 +537,13 @@ describe("mock service contracts", () => {
     expect((await services.locations.list()).total).toBe(totalBefore);
   });
 
-  it("exposes injectable location and route save failures", async () => {
+  it("exposes injectable location save failures", async () => {
     const location = (await services.locations.list()).items[0];
-    const route = (await services.routes.list()).items[0];
     setMockFailure("locationSave", true);
     await expect(services.locations.save(location)).rejects.toThrow(
       "Mock locationSave failed",
     );
     setMockFailure("locationSave", false);
-    setMockFailure("routeSave", true);
-    await expect(services.routes.save(route)).rejects.toThrow(
-      "Mock routeSave failed",
-    );
-    setMockFailure("routeSave", false);
   });
 
   it("rejects malformed CRUD payloads before mutating mock data", async () => {
@@ -569,12 +552,6 @@ describe("mock service contracts", () => {
       services.locations.save({ id: "bad" } as never),
     ).rejects.toThrow();
     expect((await services.locations.list()).total).toBe(locationsBefore);
-
-    const routesBefore = (await services.routes.list()).total;
-    await expect(
-      services.routes.save({ id: "bad" } as never),
-    ).rejects.toThrow();
-    expect((await services.routes.list()).total).toBe(routesBefore);
 
     await expect(
       services.users.create({ id: "bad", username: "" } as never),
@@ -651,30 +628,9 @@ describe("mock service contracts", () => {
     expect(pathResult?.pathPoints).toEqual(newPoints);
   });
 
-  it("keeps Routes and Map Editor pathway drafts on the same canonical record", async () => {
-    const original = (await services.routes.list()).items.find((path) => path.id === "ccsict-junction");
+  it("leaves authoritative records unchanged when a map save fails", async () => {
+    const original = (await services.map.pathways())[0];
     expect(original).toBeDefined();
-    const renamed = `${original!.name} acceptance`;
-
-    await services.routes.save({ ...original!, name: renamed });
-    expect((await services.network.pathways()).find((path) => path.id === original!.id)?.name).toBe(renamed);
-
-    const points: [number, number][] = [[16.7205, 121.6895]];
-    await services.map.save({ updatedPath: { id: original!.id, pathPoints: points } });
-    expect((await services.network.pathways()).find((path) => path.id === original!.id)?.pathSequence.points).toEqual([
-      { latitude: points[0][0], longitude: points[0][1] },
-    ]);
-  });
-
-  it("leaves authoritative records unchanged when a cross-module save fails", async () => {
-    const original = (await services.routes.list()).items.find((path) => path.id === "junction-library");
-    expect(original).toBeDefined();
-    const before = structuredClone(original);
-    setMockFailure("routeSave", true);
-    await expect(services.routes.save({ ...original!, name: "Should not persist" })).rejects.toThrow("Mock routeSave failed");
-    setMockFailure("routeSave", false);
-    expect((await services.routes.list()).items.find((path) => path.id === original!.id)).toEqual(before);
-
     setMockFailure("mapSave", true);
     await expect(services.map.save({ updatedPath: { id: original!.id, pathPoints: [[16.72, 121.69]] } })).rejects.toThrow("Mock mapSave failed");
     setMockFailure("mapSave", false);

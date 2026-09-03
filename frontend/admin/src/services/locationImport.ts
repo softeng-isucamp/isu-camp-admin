@@ -8,7 +8,7 @@ export const createLocationsBulkImportTemplate = () => JSON.stringify([
 
 /** The import format intentionally contains indoor children only. */
 export const locationsBulkImportDescription =
-  "Import Room, Office, Laboratory, and Restroom records linked to an existing Building and specific Floor Level. Create Buildings and Outdoor Point Locations in Map Editor.";
+  "Validate campus location records before importing: Room, Office, Laboratory, and Restroom records linked to an existing Building and specific Floor Level. Create Buildings and Outdoor Point Locations in Map Editor.";
 
 export type LocationImportRequest = {
   json: string;

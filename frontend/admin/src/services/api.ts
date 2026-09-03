@@ -30,8 +30,6 @@ import {
 import {
   locationImportSchema,
   locationSchema,
-  pathwaySchema,
-  routeImportSchema,
   userAccountSchema,
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
@@ -195,7 +193,6 @@ export type FailureKey =
   | "locationSave"
   | "locationRemove"
   | "buildingRemove"
-  | "routeSave"
   | "userUpdate"
   | "mapSave";
 
@@ -203,7 +200,6 @@ export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
   locationRemove: false,
   buildingRemove: false,
-  routeSave: false,
   userUpdate: false,
   mapSave: false,
 };
@@ -278,16 +274,6 @@ export interface Services {
     remove(id: string): Promise<void>;
   };
 
-  routes: {
-    list(query?: string): Promise<Page<Pathway>>;
-
-    save(path: Pathway): Promise<Pathway>;
-
-    close(id: string): Promise<Pathway>;
-    reopen(id: string): Promise<Pathway>;
-    remove(id: string, confirmed?: boolean): Promise<void>;
-  };
-
   users: {
     list(query?: string): Promise<Page<UserAccount>>;
 
@@ -346,14 +332,6 @@ export interface Services {
       errors: string[];
     }>;
 
-    routes(
-      json: string,
-      commit?: boolean,
-      mode?: "add" | "update"
-    ): Promise<{
-      imported: number;
-      errors: string[];
-    }>;
   };
 }
 
@@ -871,140 +849,6 @@ export const services: Services = {
       });
       return wait(undefined);
 
-    },
-  },
-
-
-  // ========================================
-  // ROUTES
-  // ========================================
-
-  routes: {
-
-    list: async (q) => {
-
-      if (USE_HTTP_API) {
-        return apiJson<Page<Pathway>>(`/api/routes${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-      }
-
-      const filtered = q
-        ? pathways.filter((path) =>
-            matches(
-              path.name,
-              q
-            )
-          )
-        : pathways;
-
-      return wait({
-        items:
-          clone(filtered),
-
-        total:
-          filtered.length,
-
-        page: 1,
-
-        pageSize: 20,
-      });
-    },
-
-
-    save: async (path) => {
-
-      if (USE_HTTP_API) {
-        return apiJson<Pathway>(`/api/routes${path.id ? `/${encodeURIComponent(path.id)}` : ""}`, {
-          method: path.id ? "PUT" : "POST",
-          body: JSON.stringify(path),
-        });
-      }
-
-      failIfConfigured(
-        "routeSave"
-      );
-
-      pathwaySchema.parse(
-        path
-      );
-      canonicalNetwork.savePathway(normalizePathway(path));
-
-      const index =
-        pathways.findIndex(
-          (item) =>
-            item.id === path.id
-        );
-
-      if (index >= 0) {
-
-        pathways[index] =
-          clone(path);
-
-      } else {
-
-        pathways.push(
-          clone(path)
-        );
-      }
-
-      addAudit(
-        "Updated Route",
-        path.name
-      );
-
-      return wait(
-        clone(path)
-      );
-    },
-
-
-    close: async (id) => {
-      if (USE_HTTP_API) return apiJson<Pathway>(`/api/routes/${encodeURIComponent(id)}/close`, { method: "POST" });
-      canonicalNetwork.closePathway(id);
-      const pathway = pathways.find((candidate) => candidate.id === id);
-      if (!pathway) throw new Error("Pathway not found.");
-      pathway.status = "Closed";
-      return wait(clone(pathway));
-    },
-
-    reopen: async (id) => {
-      if (USE_HTTP_API) return apiJson<Pathway>(`/api/routes/${encodeURIComponent(id)}/reopen`, { method: "POST" });
-      canonicalNetwork.reopenPathway(id);
-      const pathway = pathways.find((candidate) => candidate.id === id);
-      if (!pathway) throw new Error("Pathway not found.");
-      pathway.status = "Open";
-      return wait(clone(pathway));
-    },
-
-    remove: async (id, confirmed = false) => {
-
-      if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/routes/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({ confirmed }) });
-        return;
-      }
-
-      canonicalNetwork.removePathway(id, confirmed);
-
-      const index =
-        pathways.findIndex(
-          (path) =>
-            path.id === id
-        );
-
-      if (index >= 0) {
-
-        const removed =
-          pathways.splice(
-            index,
-            1
-          )[0];
-
-        addAudit(
-          "Removed Route",
-          removed.name
-        );
-      }
-
-      return wait(undefined);
     },
   },
 
@@ -1814,112 +1658,5 @@ export const services: Services = {
     },
 
 
-    // --------------------------------------
-    // Routes Import
-    // --------------------------------------
-
-    routes: async (json, commit = false, mode = "add") => {
-
-      let parsed: unknown;
-
-      try {
-
-        parsed =
-          JSON.parse(json);
-
-      } catch {
-
-        return {
-          imported: 0,
-          errors: [
-            "Invalid JSON file.",
-          ],
-        };
-      }
-
-
-      const rows =
-        Array.isArray(parsed)
-          ? parsed
-          : [parsed];
-
-      const errors: string[] = [];
-      const current = canonicalNetwork.snapshot();
-      const pending: NetworkPathway[] = [];
-      const seenIds = new Set<string>();
-      const seenConnections = new Set<string>();
-      rows.forEach((row, index) => {
-        const detailed = pathwaySchema.safeParse(row);
-        const legacy = routeImportSchema.safeParse(row);
-        if (!detailed.success && !legacy.success) {
-          const result = detailed;
-          result.error.issues.forEach((issue) => errors.push(`Row ${index + 1}, ${issue.path.join(".") || "record"}: ${issue.message}`));
-          return;
-        }
-        const value = detailed.success ? detailed.data : {
-          ...legacy.data!, distance: "—", time: "—", shade: "Unknown" as const,
-          type: "Campus walkway", direction: "Two-way" as const, status: "Open" as const,
-        };
-        const id = value.id;
-        if (seenIds.has(id)) errors.push(`Row ${index + 1}, id: duplicates another row in this file.`);
-        seenIds.add(id);
-        const existing = current.pathways.find((pathway) => pathway.id === id);
-        if (mode === "add" && existing) errors.push(`Row ${index + 1}, id: already exists.`);
-        if (mode === "update" && !existing) errors.push(`Row ${index + 1}, id: no existing Pathway matches this row.`);
-        const candidate = {
-          id,
-          name: value.name,
-          sourceNodeId: value.sourceNodeId,
-          destinationNodeId: value.destinationNodeId,
-          pathSequence: { points: value.pathPoints.map(([latitude, longitude]) => ({ latitude, longitude })) },
-          distanceMeters: existing?.distanceMeters ?? null,
-          estimatedTimeSeconds: existing?.estimatedTimeSeconds ?? null,
-          type: value.type,
-          shade: value.shade === "Unknown" ? null : value.shade,
-          direction: value.direction === "Two-way" ? "two_way" as const : value.direction === "One-way" ? "one_way" as const : null,
-          status: value.status === "Open" ? "open" as const : value.status === "Closed" ? "closed" as const : "closed" as const,
-        } satisfies NetworkPathway;
-        try {
-          if (!current.routeNodes.some((node) => node.id === candidate.sourceNodeId) ||
-            !current.routeNodes.some((node) => node.id === candidate.destinationNodeId)) {
-            throw new Error("node reference not found.");
-          }
-          const connection = [candidate.sourceNodeId, candidate.destinationNodeId].sort().join("::");
-          if (seenConnections.has(connection)) throw new Error("duplicate physical connection in this file.");
-          seenConnections.add(connection);
-          validatePathway(candidate, current, { existingPathwayId: mode === "update" ? id : undefined });
-          pending.push(candidate);
-        } catch (cause) {
-          errors.push(`Row ${index + 1}: ${cause instanceof Error ? cause.message : "invalid Pathway."}`);
-        }
-      });
-      if (commit && errors.length === 0) {
-        const next = current;
-        pending.forEach((pathway) => {
-          const index = next.pathways.findIndex((candidate) => candidate.id === pathway.id);
-          if (index >= 0) next.pathways[index] = pathway;
-          else next.pathways.push(pathway);
-          const legacyIndex = pathways.findIndex((candidate) => candidate.id === pathway.id);
-          const legacy = {
-            id: pathway.id,
-            name: pathway.name,
-            sourceNodeId: pathway.sourceNodeId,
-            destinationNodeId: pathway.destinationNodeId,
-            pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
-            distance: "—",
-            time: "—",
-            shade: (pathway.shade ?? "Unknown") as Pathway["shade"],
-            type: pathway.type ?? "Campus walkway",
-            direction: pathway.direction === "one_way" ? "One-way" as const : "Two-way" as const,
-            status: pathway.status === "open" ? "Open" as const : "Closed" as const,
-          };
-          if (legacyIndex >= 0) pathways[legacyIndex] = legacy;
-          else pathways.push(legacy);
-        });
-        canonicalNetwork.save(next);
-        if (pending.length) addAudit("Imported Pathways", `${pending.length} pathways`);
-      }
-      return wait({ imported: errors.length === 0 ? pending.length : 0, errors });
-    },
   },
 };
