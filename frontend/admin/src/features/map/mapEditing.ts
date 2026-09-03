@@ -148,6 +148,46 @@ export const withoutEndpointPathPoints = (
   ),
 );
 
+export interface PathwayDraftIssue {
+  field: "name" | "type" | "direction" | "status" | "pathPoint" | "sequence";
+  message: string;
+}
+
+/** Local, synchronous checks used by the parent-frame Pathway editor. */
+export function validatePathwayDraft(
+  pathway: Pathway,
+  nodes: readonly RouteNode[],
+  campusBoundary?: MapPoint[],
+): PathwayDraftIssue[] {
+  const issues: PathwayDraftIssue[] = [];
+  if (!pathway.name.trim()) issues.push({ field: "name", message: "Pathway name is required." });
+  if (!pathway.type.trim()) issues.push({ field: "type", message: "Pathway type is required." });
+  if (!pathway.direction) issues.push({ field: "direction", message: "Pathway direction is required." });
+  if (!pathway.status) issues.push({ field: "status", message: "Pathway status is required." });
+  const source = nodes.find((node) => node.id === pathway.sourceNodeId);
+  const destination = nodes.find((node) => node.id === pathway.destinationNodeId);
+  if (!source || !destination) issues.push({ field: "sequence", message: "Pathway endpoints must reference existing Route Nodes." });
+  pathway.pathPoints.forEach(([latitude, longitude], index) => {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      issues.push({ field: "pathPoint", message: `Path Point #${index + 1} must use a valid latitude and longitude.` });
+    }
+  });
+  for (let index = 1; index < pathway.pathPoints.length; index += 1) {
+    if (pathway.pathPoints[index - 1][0] === pathway.pathPoints[index][0]
+      && pathway.pathPoints[index - 1][1] === pathway.pathPoints[index][1]) {
+      issues.push({ field: "sequence", message: `Path Sequence contains duplicate consecutive points at #${index} and #${index + 1}.` });
+      break;
+    }
+  }
+  if (campusBoundary && source && destination) {
+    const coordinates: MapPoint[] = [[source.lat, source.lng], ...pathway.pathPoints, [destination.lat, destination.lng]];
+    if (!geometryOnCampus(coordinates, campusBoundary)) {
+      issues.push({ field: "sequence", message: "The Path Sequence must stay inside the ISU Echague campus boundary." });
+    }
+  }
+  return issues;
+}
+
 export function reviewMapDraft(input: {
   original: MapSnapshot;
   current: MapSnapshot;
