@@ -17,7 +17,7 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -150,10 +150,7 @@ function projectWorkingSessionOperation(
   } else if (operation.domain === "Local Map Data") {
     if (operation.type === "link_feature" || operation.type === "unlink_feature") {
       const projections: OperationProjection[] = [{ collection: "featureLinks", entityId: operation.entityId, value }];
-      const link = (direction === "undo"
-        ? (operation.type === "link_feature" ? operation.after : operation.before)
-        : (operation.type === "link_feature" ? operation.after : operation.before)
-      ) as FeatureLinkEntity | null;
+      const link = (operation.type === "link_feature" ? operation.after : operation.before) as FeatureLinkEntity | null;
       if (link && link.targetDomain === "Locations" && link.linkType === "building_footprint") {
         const footprint = context?.localFeatures?.find((feat) => feat.id === link.featureId);
         const shouldHaveFootprint = direction === "undo"
@@ -607,7 +604,7 @@ export function MapEditor() {
   } | null>(null);
 
   const [search, setSearch] = useState("");
-  const [networkBrowserOpen, setNetworkBrowserOpen] = useState(true);
+  const [networkBrowserOpen, setNetworkBrowserOpen] = useState(false);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const [temporary, setTemporary] = useState<[number, number] | null>(null);
@@ -668,6 +665,8 @@ export function MapEditor() {
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
+  const [pathwayDraft, setPathwayDraft] = useState<Pathway | null>(null);
+  const [pathwayDraftOriginal, setPathwayDraftOriginal] = useState<Pathway | null>(null);
   const [provisionalPathwayId, setProvisionalPathwayId] = useState<string | null>(null);
   const [pathStartNodeId, setPathStartNodeId] = useState<string | null>(null);
   const [pathDraftDirty, setPathDraftDirty] = useState(false);
@@ -717,8 +716,10 @@ export function MapEditor() {
   const currentPathways = useMemo(() => {
     const merged = overlayChanges(directoryPathways, localPathways);
     const visible = merged.filter((item) => !deletedPathwayIds.includes(item.id));
-    return mode === "path" && editingPathId ? visible.map((item) => item.id === editingPathId ? { ...item, pathPoints } : item) : visible;
-  }, [deletedPathwayIds, directoryPathways, editingPathId, localPathways, mode, pathPoints]);
+    return editingPathId ? visible.map((item) => item.id === editingPathId
+      ? { ...item, ...(pathwayDraft?.id === editingPathId ? pathwayDraft : {}), pathPoints }
+      : item) : visible;
+  }, [deletedPathwayIds, directoryPathways, editingPathId, localPathways, pathwayDraft, mode, pathPoints]);
   const pathwayCrossings = useMemo(
     () => findPathwayCrossings(currentPathways, currentNodes),
     [currentNodes, currentPathways],
@@ -1016,6 +1017,8 @@ export function MapEditor() {
     }
     setSelected({ type: "pathway", id: pathway.id });
     setEditingPathId(pathway.id);
+    setPathwayDraft({ ...pathway });
+    setPathwayDraftOriginal({ ...pathway });
     setPathPoints([...pathway.pathPoints]);
     setMode("path");
     setError("");
@@ -1058,7 +1061,11 @@ export function MapEditor() {
         const path = currentPathways.find((p) => p.id === id);
         if (path) {
           setEditingPathId(path.id);
+          setPathwayDraft((current) => current?.id === path.id ? current : { ...path });
+          setPathwayDraftOriginal((current) => current?.id === path.id ? current : { ...path });
           setPathPoints(path.pathPoints || []);
+          setSelectedPathPointIndex(null);
+          setMode("path");
         }
       }
       setTemporary(null);
@@ -1443,7 +1450,7 @@ export function MapEditor() {
     const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
       const updatedPath: Pathway = {
-        ...target,
+        ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
         // A Pathway owns only intermediate geometry. Endpoint coordinates are
         // always read from the selected Route Nodes.
         pathPoints: withoutEndpointPathPoints(
@@ -1456,6 +1463,8 @@ export function MapEditor() {
         const filtered = current.filter((p) => p.id !== editingPathId);
         return [...filtered, updatedPath];
       });
+      setPathwayDraft({ ...updatedPath });
+      setPathwayDraftOriginal({ ...updatedPath });
       workingSessionManager.executeOperation({ type: "update_geometry", domain: "Routes & Paths", entityId: target.id,
         before: target as unknown as Record<string, unknown>, after: updatedPath as unknown as Record<string, unknown>, description: `Reshape ${target.name}` });
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
@@ -1660,6 +1669,8 @@ export function MapEditor() {
     setSelectedAttachBuildingId(null);
     setNonRoutableBuildingId(null);
     setPathPoints([]);
+    setPathwayDraft(null);
+    setPathwayDraftOriginal(null);
     setEditingPathId(null);
     setProvisionalPathwayId(null);
     setPathStartNodeId(null);
@@ -1790,10 +1801,12 @@ export function MapEditor() {
     }
   };
 
-  const activePathway = directoryPathways.find((p) => p.id === editingPathId) || localPathways.find((p) => p.id === editingPathId);
+  const activePathway = currentPathways.find((p) => p.id === editingPathId);
 
   const startNewPathway = () => {
     setEditingPathId(null);
+    setPathwayDraft(null);
+    setPathwayDraftOriginal(null);
     setProvisionalPathwayId(null);
     setPathStartNodeId(null);
     setPathPoints([]);
@@ -2101,11 +2114,15 @@ export function MapEditor() {
       },
       pathway: () => {
         setMode("path");
+        setNetworkBrowserOpen(true);
         if (!editingPathId && (directoryPathways.length || localPathways.length)) {
           const first = localPathways[0] || directoryPathways[0];
           if (first) {
             setEditingPathId(first.id);
+            setPathwayDraft({ ...first });
+            setPathwayDraftOriginal({ ...first });
             setPathPoints(first.pathPoints || []);
+            setSelected({ type: "pathway", id: first.id });
           }
         }
       },
@@ -2376,6 +2393,65 @@ export function MapEditor() {
     setMode("area");
   };
 
+  const pathwayFrame = selectedPath ?? activePathway;
+  const pathwayFrameIssues = pathwayFrame
+    ? validatePathwayDraft(pathwayFrame, currentNodes, campusBoundary)
+    : [];
+  const pathwayFrameDirty = Boolean(
+    pathwayFrame && pathwayDraftOriginal
+      && (JSON.stringify(pathwayFrame) !== JSON.stringify(pathwayDraftOriginal)),
+  );
+  const applyPathwayFrame = () => {
+    if (!pathwayFrame || !pathwayDraftOriginal || pathwayFrameIssues.length > 0) {
+      if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
+      return;
+    }
+    if (!pathwayFrameDirty) return;
+    const before = pathwayDraftOriginal;
+    const after = pathwayFrame;
+    const operations: WorkingOperation[] = [];
+    if (JSON.stringify({ ...before, pathPoints: undefined }) !== JSON.stringify({ ...after, pathPoints: undefined })) {
+      operations.push({
+        id: `pathway-properties-${after.id}`,
+        type: "update_properties",
+        domain: "Routes & Paths",
+        entityId: after.id,
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        description: `Edit ${after.name}`,
+      });
+    }
+    if (JSON.stringify(before.pathPoints) !== JSON.stringify(after.pathPoints)) {
+      operations.push({
+        id: `pathway-geometry-${after.id}`,
+        type: "update_geometry",
+        domain: "Routes & Paths",
+        entityId: after.id,
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+        description: `Reshape ${after.name}`,
+      });
+    }
+    if (operations.length > 1) workingSessionManager.executeBatch(`Edit ${after.name}`, "Routes & Paths", after.id, operations);
+    else if (operations[0]) workingSessionManager.executeOperation(operations[0]);
+    setLocalPathways((items) => [...items.filter((item) => item.id !== after.id), after]);
+    setPathwayDraftOriginal({ ...after });
+    setPathwayDraft({ ...after });
+    setPathPoints([...after.pathPoints]);
+    setPathDraftDirty(false);
+    setDirty(true);
+    setError("");
+  };
+  const cancelPathwayFrame = () => {
+    if (!pathwayDraftOriginal) return;
+    setPathwayDraft({ ...pathwayDraftOriginal });
+    setPathPoints([...pathwayDraftOriginal.pathPoints]);
+    setPathDraftDirty(false);
+    setSelectedPathPointIndex(null);
+    setSelected({ type: "pathway", id: pathwayDraftOriginal.id });
+    setError("");
+  };
+
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
     initializeBuildingFootprintEdit(selectedBuilding, "reshape");
@@ -2589,23 +2665,50 @@ export function MapEditor() {
         kind: "pathway",
         title: selectedPath.name || "Campus Pathway",
         domain: "Routes & Paths",
-        status: `${selectedPath.direction} · ${selectedPath.status}`,
+        status: `${selectedPath.direction} · ${selectedPath.status}${pathwayFrameDirty ? " · Unsaved draft" : ""}`,
         summary: [
-          { label: "Source", value: currentNodes.find((node) => node.id === selectedPath.sourceNodeId)?.name ?? selectedPath.sourceNodeId },
-          { label: "Destination", value: currentNodes.find((node) => node.id === selectedPath.destinationNodeId)?.name ?? selectedPath.destinationNodeId },
+          { label: "Source Route Node", value: currentNodes.find((node) => node.id === selectedPath.sourceNodeId)?.name ?? selectedPath.sourceNodeId },
+          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === selectedPath.destinationNodeId)?.name ?? selectedPath.destinationNodeId },
+          { label: "Path Sequence", value: `${selectedPath.pathPoints.length} intermediate point${selectedPath.pathPoints.length === 1 ? "" : "s"}` },
           { label: "Distance", value: selectedPath.distance },
-          { label: "Intermediate Path Points", value: String(selectedPath.pathPoints.length) },
         ],
+        details: (
+          <>
+            <section className="inspector-related-section" aria-label="Edit Pathway metadata">
+              <h3>Pathway metadata</h3>
+              <div className="inspector-edit-fields">
+                <label>Shade<select aria-label="Pathway shade" value={selectedPath.shade} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label>
+                <label>Path type<input aria-label="Pathway type" value={selectedPath.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value } : current)} /></label>
+                <label>Direction<select aria-label="Pathway direction" value={selectedPath.direction} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
+                <label>Status<select aria-label="Pathway status" value={selectedPath.status} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label>
+              </div>
+            </section>
+            <section className="inspector-related-section" aria-label="Path Sequence editor">
+              <h3>Path Sequence</h3>
+              <label className="inspector-point-selector">Select Path Point
+                <select aria-label="Select Path Point" value={selectedPathPointIndex ?? ""} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); setSelected({ type: "path_point", id: `${selectedPath.id}:point:${index}` }); }}>
+                  <option value="" disabled>Choose an ordered point</option>
+                  {selectedPath.pathPoints.map((point, index) => <option key={`${index}-${point.join(",")}`} value={index}>Path Point #{index + 1} · {point[0].toFixed(6)}, {point[1].toFixed(6)}</option>)}
+                </select>
+              </label>
+              {selectedPath.pathPoints.length === 0 && <p>No intermediate Path Points.</p>}
+              {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
+              <h3 className="inspector-subheading">Network findings</h3>
+              <p>{pathwayFrameIssues.length ? `${pathwayFrameIssues.length} local finding${pathwayFrameIssues.length === 1 ? "" : "s"} require attention.` : "No locally known blocking findings."}</p>
+              <button type="button" className="inspector-secondary-action" onClick={() => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); }}>⌁ Reshape Pathway</button>
+              <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button><button type="button" onClick={applyPathwayFrame} disabled={!pathwayFrameDirty || pathwayFrameIssues.length > 0}>Apply changes</button></div>
+            </section>
+          </>
+        ),
         primaryAction: {
-          label: "⌁ Reshape Pathway",
-          onSelect: () => {
-            setEditingPathId(selectedPath.id);
-            setPathPoints(selectedPath.pathPoints);
-            setMode("path");
-          },
+          label: "Apply changes",
+          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0,
+          disabledReason: pathwayFrameIssues[0]?.message,
+          onSelect: applyPathwayFrame,
         },
         overflowActions: [
-          { label: "✎ Edit Details", onSelect: () => setOwnerModal("route") },
+          { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
+          { label: "⌁ Reshape Pathway", onSelect: () => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); } },
           {
             label: "🗑 Close Pathway",
             tone: "danger" as const,
@@ -2625,15 +2728,23 @@ export function MapEditor() {
         kind: "path_point",
         title: `Path Point #${selectedPathPointIndex + 1}`,
         domain: "Routes & Paths",
-        status: "Intermediate Pathway geometry",
+        status: `Nested geometry · ${selectedPathPointIndex + 1} of ${pathPoints.length}`,
         summary: [
-          { label: "Parent Pathway", value: activePathway?.name ?? editingPathId },
+          { label: "Source Route Node", value: currentNodes.find((node) => node.id === activePathway?.sourceNodeId)?.name ?? activePathway?.sourceNodeId ?? "—" },
+          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === activePathway?.destinationNodeId)?.name ?? activePathway?.destinationNodeId ?? "—" },
+          { label: "Path Sequence", value: `${pathPoints.length} intermediate point${pathPoints.length === 1 ? "" : "s"}` },
           { label: "Latitude", value: point[0].toFixed(6) },
           { label: "Longitude", value: point[1].toFixed(6) },
         ],
         details: (
-          <div className="inspector-point-inputs">
-            <label>Latitude
+          <>
+            <section className="inspector-related-section" aria-label="Parent Pathway context"><h3>Parent Pathway</h3><p>{activePathway?.name ?? editingPathId}</p><p>{activePathway?.shade} · {activePathway?.type} · {activePathway?.direction} · {activePathway?.status}</p></section>
+            <label className="inspector-point-selector">Select Path Point
+              <select aria-label="Select Path Point" value={selectedPathPointIndex} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); setSelected({ type: "path_point", id: `${editingPathId}:point:${index}` }); }}>
+                {pathPoints.map((candidate, index) => <option key={`${index}-${candidate.join(",")}`} value={index}>Path Point #{index + 1} · {candidate[0].toFixed(6)}, {candidate[1].toFixed(6)}</option>)}
+              </select>
+            </label>
+            <div className="inspector-point-inputs"><label>Latitude
               <input aria-label="Path Point latitude" type="number" step="any" value={point[0]} onChange={(event) => {
                 setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [Number(event.target.value), item[1]] : item));
                 setPathDraftDirty(true);
@@ -2644,15 +2755,20 @@ export function MapEditor() {
                 setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [item[0], Number(event.target.value)] : item));
                 setPathDraftDirty(true);
               }} />
-            </label>
-          </div>
+            </label></div>
+            {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
+            <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Path type<input aria-label="Pathway type" value={activePathway?.type ?? ""} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value } : current)} /></label><label>Direction<select aria-label="Pathway direction" value={activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
+            <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button><button type="button" onClick={applyPathwayFrame} disabled={!pathwayFrameDirty || pathwayFrameIssues.length > 0}>Apply changes</button></div>
+          </>
         ),
         primaryAction: {
           label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point",
           onSelect: () => setManualPathPointDrag((enabled) => !enabled),
         },
         overflowActions: [
-          { label: "✓ Save Pathway", onSelect: handleSavePathShape },
+          { label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point", onSelect: () => setManualPathPointDrag((enabled) => !enabled) },
+          { label: "✓ Save Pathway", onSelect: applyPathwayFrame },
+          { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
           {
             label: "↩ Inspect Parent Pathway",
             onSelect: () => {
@@ -3290,14 +3406,6 @@ export function MapEditor() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>Satellite</span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={networkBrowserOpen}
-            onClick={() => setNetworkBrowserOpen((open) => !open)}
-            className={`tool flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition ${networkBrowserOpen ? "active bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
-          >
-            <span>Network</span>
           </button>
         </div>
 
@@ -4078,7 +4186,7 @@ export function MapEditor() {
           </aside>
         )}
 
-        {(mode === "select" || selected?.type === "path_point") && inspectorModel && (
+        {inspectorModel && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
           <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
         )}
 

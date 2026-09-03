@@ -1594,6 +1594,77 @@ td small {
   font-size: 11px;
 }
 
+.inspector-edit-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-edit-fields label,
+.inspector-point-selector {
+  display: grid;
+  gap: 4px;
+  color: #65756c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.inspector-edit-fields input,
+.inspector-edit-fields select,
+.inspector-point-selector select {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #d8e2dc;
+  border-radius: 9px;
+  background: white;
+  color: #1d2a23;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inspector-point-selector { margin: 10px 18px 12px; }
+.inspector-subheading { margin-top: 13px !important; }
+.inspector-validation {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #efb4ad;
+  border-radius: 10px;
+  background: #fff2f0;
+  color: #9b241b;
+  font-size: 11px;
+}
+
+.inspector-inline-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 18px 14px;
+}
+.inspector-secondary-action {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 10px 18px 0;
+  padding: 8px 10px;
+  border: 1px solid #005931;
+  border-radius: 999px;
+  background: #edf7f0;
+  color: #005931;
+  font-size: 11px;
+  font-weight: 800;
+}
+.inspector-inline-actions button {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #d8e2dc;
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #365047;
+  font-size: 11px;
+  font-weight: 800;
+}
+.inspector-inline-actions button:last-child { border-color: #005931; background: #005931; color: white; }
+.inspector-inline-actions button:disabled { opacity: 0.45; }
+
 .inspector-action-notice {
   margin: 10px 0 0;
   border-radius: 10px;

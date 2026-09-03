@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, withoutEndpointPathPoints } from "./mapEditing";
 import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -53,6 +53,22 @@ describe("map draft review", () => {
     expect(withoutEndpointPathPoints([
       [1, 1], [1.5, 1.5], [2, 2], [1, 1],
     ], [1, 1], [2, 2])).toEqual([[1.5, 1.5]]);
+  });
+
+  it("identifies the ordered Path Point and blocks invalid coordinates", () => {
+    const invalid = pathway({ pathPoints: [[91, 121.7311], [91, 121.7311]] });
+    const issues = validatePathwayDraft(invalid, [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })]);
+    expect(issues).toEqual(expect.arrayContaining([
+      { field: "pathPoint", message: "Path Point #1 must use a valid latitude and longitude." },
+      { field: "sequence", message: "Path Sequence contains duplicate consecutive points at #1 and #2." },
+    ]));
+  });
+
+  it("accepts a valid Pathway draft with distinct endpoints", () => {
+    expect(validatePathwayDraft(
+      pathway(),
+      [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })],
+    )).toEqual([]);
   });
 
   it("reports no pending changes for an unchanged map", () => {
@@ -168,4 +184,3 @@ describe("map draft review", () => {
     expect(result.warnings?.some((w) => w.message.includes("overlaps with"))).toBe(true);
   });
 });
-
