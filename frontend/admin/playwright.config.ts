@@ -9,9 +9,9 @@ export default defineConfig({
     deviceScaleFactor: 1,
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 5198",
+    command: "VITE_TEST_LOCAL_ADAPTER=true VITE_API_MODE=local VITE_MAP_FIXTURE=osm npm run dev -- --host 127.0.0.1 --port 5198",
     url: "http://127.0.0.1:5198",
-    env: { VITE_API_MODE: "local", VITE_MAP_FIXTURE: "osm" },
+    env: { VITE_TEST_LOCAL_ADAPTER: "true", VITE_API_MODE: "local", VITE_MAP_FIXTURE: "osm" },
     reuseExistingServer: false,
   },
 });
