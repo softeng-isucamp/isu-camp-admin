@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   MapContainer,
   Marker,
@@ -60,6 +60,8 @@ import {
   segmentMidpoints,
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
+import { previewWalkingNetworkImport, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
+import type { NetworkSnapshot } from "../../services/network";
 import { deactivateRouteNode } from "./routeNodeLifecycle";
 import { validateOutdoorPointLocation } from "./outdoorPointLocation";
 import {
@@ -679,6 +681,9 @@ export function MapEditor() {
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
+  const [walkingNetworkImport, setWalkingNetworkImport] = useState<WalkingNetworkImportPreview | null>(null);
+  const [importAdvisoriesAcknowledged, setImportAdvisoriesAcknowledged] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
 
 
@@ -1464,14 +1469,25 @@ export function MapEditor() {
           routeNodePoint(currentNodes, target.destinationNodeId),
         ),
       };
+      const pathwayIssues = validatePathwayDraft(updatedPath, currentNodes, campusBoundary);
+      if (pathwayIssues.length > 0) {
+        setError(pathwayIssues[0].message);
+        return;
+      }
       setLocalPathways((current) => {
         const filtered = current.filter((p) => p.id !== editingPathId);
         return [...filtered, updatedPath];
       });
       setPathwayDraft({ ...updatedPath });
       setPathwayDraftOriginal({ ...updatedPath });
-      workingSessionManager.executeOperation({ type: "update_geometry", domain: "Routes & Paths", entityId: target.id,
-        before: target as unknown as Record<string, unknown>, after: updatedPath as unknown as Record<string, unknown>, description: `Reshape ${target.name}` });
+      workingSessionManager.executeOperation({
+        type: provisionalPathwayId === target.id ? "create_entity" : "update_geometry",
+        domain: "Routes & Paths",
+        entityId: target.id,
+        before: provisionalPathwayId === target.id ? null : target as unknown as Record<string, unknown>,
+        after: updatedPath as unknown as Record<string, unknown>,
+        description: provisionalPathwayId === target.id ? `Create ${updatedPath.name}` : `Reshape ${target.name}`,
+      });
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
       const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
       if (src && !localNodes.some((n) => n.id === src.id)) setLocalNodes((c) => [...c, src]);
@@ -1818,6 +1834,60 @@ export function MapEditor() {
     setSelected(null);
     setPathDraftDirty(false);
     setMode("path");
+  };
+
+  const networkSnapshotForImport = (): NetworkSnapshot => ({
+    buildings: [],
+    routeNodes: currentNodes.map((node) => ({
+      id: node.id, name: node.name, latitude: node.lat, longitude: node.lng,
+      status: node.status === "Inactive" ? "inactive" : "active",
+      type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "junction",
+      buildingId: node.nodeType === "Entrance" ? node.associatedPlaceId ?? null : null,
+    } as NetworkSnapshot["routeNodes"][number])),
+    pathways: currentPathways.map((pathway) => ({
+      id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
+      pathSequence: { points: pathway.pathPoints.map(([latitude, longitude]) => ({ latitude, longitude })) },
+      distanceMeters: null, estimatedTimeSeconds: null, type: pathway.type, shade: pathway.shade,
+      direction: pathway.direction === "One-way" ? "one_way" : pathway.direction === "Two-way" ? "two_way" : null,
+      status: pathway.status === "Closed" ? "closed" : "open",
+    })),
+  });
+
+  const beginWalkingNetworkImport = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleWalkingNetworkFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const preview = previewWalkingNetworkImport(await file.text(), networkSnapshotForImport(), campusBoundary);
+    setWalkingNetworkImport(preview);
+    setImportAdvisoriesAcknowledged(false);
+  };
+
+  const applyWalkingNetworkImport = () => {
+    if (!walkingNetworkImport || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking")
+      || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)) return;
+    const nodes = walkingNetworkImport.routeNodes.map((node) => ({
+      id: node.id, name: node.name, nodeType: node.type === "entrance" ? "Entrance" : node.type === "access_point" ? "Access Point" : "Junction",
+      associatedPlaceId: node.buildingId, lat: node.latitude, lng: node.longitude,
+    } as RouteNode));
+    const pathways = walkingNetworkImport.pathways.map((pathway) => ({
+      id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
+      pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
+      distance: "Unknown", time: "Unknown", shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Campus walkway",
+      direction: pathway.direction === "one_way" ? "One-way" : "Two-way", status: pathway.status === "closed" ? "Closed" : "Open",
+    } as Pathway));
+    setLocalNodes((items) => [...items, ...nodes]);
+    setLocalPathways((items) => [...items, ...pathways]);
+    workingSessionManager.executeBatch("Import Walking Network", "Routes & Paths", "walking-network-import", walkingNetworkImport.operations.map((operation) => ({
+      ...operation,
+      after: (pathways.find((pathway) => pathway.id === operation.entityId) ?? nodes.find((node) => node.id === operation.entityId)) as unknown as Record<string, unknown>,
+    })));
+    setDirty(true);
+    setWalkingNetworkImport(null);
+    setNetworkBrowserOpen(true);
   };
 
   const insertPathPoint = (segmentIndex: number) => {
@@ -3152,6 +3222,8 @@ export function MapEditor() {
                       setEditingPathId(newPath.id);
                       setProvisionalPathwayId(newPath.id);
                       setPathPoints([]);
+                      setPathwayDraft({ ...newPath });
+                      setPathwayDraftOriginal(null);
                       setSelected({ type: "pathway", id: newPath.id });
                       setPathDraftDirty(true);
                       setError("");
@@ -3349,6 +3421,25 @@ export function MapEditor() {
           />
         )}
 
+        {walkingNetworkImport && (
+          <div className="absolute inset-0 z-[1200] grid place-items-center bg-[#14231b]/35 p-4" role="dialog" aria-modal="true" aria-label="Walking Network import preview">
+            <section className="max-h-[min(720px,calc(100%-2rem))] w-full max-w-xl overflow-y-auto rounded-3xl border border-[#dbe0e2] bg-white p-6 shadow-2xl">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#005931]">Walking Network import</p>
+              <h2 className="mt-1 text-xl font-extrabold text-[#191c1d]">Preview proposed changes</h2>
+              <p className="mt-2 text-sm text-[#526158]">{walkingNetworkImport.routeNodes.length} Route Nodes and {walkingNetworkImport.pathways.length} Pathways are ready for the Working Session.</p>
+              <div className="mt-4 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-3 text-xs">
+                <strong>Affected objects</strong>
+                <p className="mt-1 break-words text-[#526158]">{walkingNetworkImport.affectedEntityIds.join(", ") || "None"}</p>
+              </div>
+              {walkingNetworkImport.findings.length > 0 && <div className="mt-3 space-y-2" aria-label="Import findings">
+                {walkingNetworkImport.findings.map((finding, index) => <div key={`${finding.row}-${finding.entityId ?? "row"}-${index}`} className={`rounded-xl border p-3 text-xs ${finding.severity === "blocking" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · Row {finding.row}</strong><p className="mt-1">{finding.message}{finding.entityId ? ` (${finding.entityId})` : ""}</p></div>)}
+              </div>}
+              {walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") && <label className="mt-4 flex items-start gap-2 text-xs font-semibold text-[#3f4941]"><input type="checkbox" checked={importAdvisoriesAcknowledged} onChange={(event) => setImportAdvisoriesAcknowledged(event.target.checked)} /> I reviewed the advisory findings and acknowledge importing these objects.</label>}
+              <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setWalkingNetworkImport(null)} className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold text-[#3f4941]">Cancel</button><button type="button" disabled={walkingNetworkImport.operations.length === 0 || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)} onClick={applyWalkingNetworkImport} className="rounded-full bg-[#005931] px-5 py-2 text-xs font-bold text-white disabled:opacity-40">Apply import</button></div>
+            </section>
+          </div>
+        )}
+
         {selectionPopover && (
           <div
             role="dialog"
@@ -3432,7 +3523,9 @@ export function MapEditor() {
           suspendedDrafts={workingSessionState.suspendedDrafts}
           onResumeDraft={requestDraftResume}
           showGuidance={mode !== "move"}
+          onImportWalkingNetwork={beginWalkingNetworkImport}
         />
+        <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleWalkingNetworkFile} className="hidden" aria-label="Import Walking Network file" />
 
         {pendingToolRequest && workingSessionState.activeDraft && (
           <ToolInterruptionDialog
@@ -3897,6 +3990,23 @@ export function MapEditor() {
                 )}
                 {activePathway && (
                   <>
+                    <section aria-label="Pathway metadata" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-semibold text-[#3f4941]">Pathway name
+                          <input aria-label="New Pathway name" value={pathwayDraft?.name ?? activePathway.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-xs font-semibold text-[#3f4941]">Pathway type
+                          <input aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-xs font-semibold text-[#3f4941]">Shade
+                          <select aria-label="New Pathway shade" value={pathwayDraft?.shade ?? activePathway.shade} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select>
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-xs font-semibold text-[#3f4941]">Direction<select aria-label="New Pathway direction" value={pathwayDraft?.direction ?? activePathway.direction} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
+                          <label className="text-xs font-semibold text-[#3f4941]">Status<select aria-label="New Pathway status" value={pathwayDraft?.status ?? activePathway.status} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Open</option><option>Closed</option><option>Unknown</option></select></label>
+                        </div>
+                      </div>
+                    </section>
                     <div className="flex flex-col gap-1.5 my-3">
                       <label className="text-xs font-semibold text-[#3f4941]">Pathway</label>
                       <select
@@ -3972,7 +4082,7 @@ export function MapEditor() {
                         onClick={handleSavePathShape}
                         className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
                       >
-                        Save Path
+                        Apply Pathway
                       </button>
                     </div>
                   </>

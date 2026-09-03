@@ -50,9 +50,10 @@ type ToolRailDockProps = {
   suspendedDrafts: ActiveToolDraft[];
   onResumeDraft: (draftId: string) => void;
   showGuidance?: boolean;
+  onImportWalkingNetwork?: () => void;
 };
 
-export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResumeDraft, showGuidance = true }: ToolRailDockProps) {
+export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResumeDraft, showGuidance = true, onImportWalkingNetwork }: ToolRailDockProps) {
   const [minimized, setMinimized] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
   const activeDefinition = getToolDefinition(activeTool);
@@ -116,6 +117,11 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
             <strong className="block text-sm">{activeDefinition.instruction}</strong>
             <span className="block text-[11px] text-white/75">{activeDefinition.detail}</span>
           </div>
+          {onImportWalkingNetwork && (
+            <button type="button" onClick={onImportWalkingNetwork} className="shrink-0 rounded-full border border-white/40 px-3 py-1.5 text-[11px] font-extrabold text-white hover:bg-white/15">
+              Import Walking Network
+            </button>
+          )}
           <kbd className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold">Esc · Cancel</kbd>
         </div>
       )}

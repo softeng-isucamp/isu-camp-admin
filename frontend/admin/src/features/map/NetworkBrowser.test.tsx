@@ -27,6 +27,21 @@ describe("NetworkBrowser", () => {
     expect(onSelect).toHaveBeenCalledWith({ type: "pathway", id: "path-library" });
   });
 
+  it("keeps all Pathway filters visually available", () => {
+    render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} />);
+
+    for (const label of [
+      "Filter Pathways by lifecycle status",
+      "Filter Pathways by type",
+      "Filter Pathways by direction",
+      "Filter Pathways by shade",
+    ]) {
+      const control = screen.getByLabelText(label);
+      expect(control).toBeVisible();
+      expect(control.parentElement).toHaveClass("grid");
+    }
+  });
+
   it("reflects a map selection in the matching Route Node tab and result", () => {
     render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[{ id: "building-library", name: "Library", code: "LIB", points: [] }]} selected={{ type: "node", id: "node-library" }} onSelect={vi.fn()} onDismiss={vi.fn()} />);
 

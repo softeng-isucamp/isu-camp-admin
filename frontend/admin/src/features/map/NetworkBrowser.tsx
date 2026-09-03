@@ -94,5 +94,5 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
 }
 
 function Filter({ label, value, onChange, values, names = {} }: { label: string; value: string; onChange: (value: string) => void; values: readonly string[]; names?: Record<string, string> }) {
-  return <label className="sr-only">{label}<select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="not-sr-only w-full rounded-lg border border-[#cbd9d1] bg-white px-2 py-1.5 text-[11px] outline-none focus:ring-2 focus:ring-[#005931]"><option value="all">All</option>{uniqueValues(values).map((item) => <option key={item} value={item}>{names[item] ?? item}</option>)}</select></label>;
+  return <label className="grid min-w-0 gap-1 text-[10px] font-bold text-[#52655c]">{label}<select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-[#cbd9d1] bg-white px-2 py-1.5 text-[11px] font-normal text-[#191c1d] outline-none focus:ring-2 focus:ring-[#005931]"><option value="all">All</option>{uniqueValues(values).map((item) => <option key={item} value={item}>{names[item] ?? item}</option>)}</select></label>;
 }

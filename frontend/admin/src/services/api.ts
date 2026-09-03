@@ -13,7 +13,7 @@ import type {
   UserAccount,
 } from "../types";
 import { z } from "zod";
-export { createLocationsBulkImportTemplate } from "./locationImport";
+export { createLocationsBulkImportTemplate, locationsBulkImportDescription } from "./locationImport";
 import type { LocationImportRequest } from "./locationImport";
 
 import {
@@ -1699,6 +1699,16 @@ export const services: Services = {
       const validRows: Array<{ row: z.infer<typeof locationImportSchema>; index: number }> = [];
 
       rows.forEach((row, index) => {
+        // Give unsupported types a domain-level error even when the type is
+        // not part of the legacy schema (for example, Outdoor Point Location).
+        const importedType = row && typeof row === "object" && "type" in row
+          ? (row as { type?: unknown }).type
+          : undefined;
+        if (typeof importedType !== "string" ||
+            !indoorLocationTypes.includes(importedType as typeof indoorLocationTypes[number])) {
+          errors.push(`Row ${index + 1}, type: only Room, Office, Laboratory, and Restroom records can be imported.`);
+          return;
+        }
         const result = locationImportSchema.safeParse(row);
         if (!result.success) {
           result.error.issues.forEach((issue) => {
@@ -1710,17 +1720,13 @@ export const services: Services = {
         validRows.push({ row: result.data, index });
       });
 
-      const batchIds = new Set(validRows.flatMap(({ row }) => row.id ? [row.id] : []));
       const seenIds = new Set<string>();
       const seenCodes = new Set<string>();
       const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
 
       validRows.forEach(({ row, index }) => {
-        if (!indoorLocationTypes.includes(row.type as typeof indoorLocationTypes[number])) {
-          errors.push(`Row ${index + 1}, type: only Room, Office, Laboratory, and Restroom records can be imported.`);
-        }
         const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
-        const matchedByCode = locations.findIndex((location) => location.code === row.code);
+        const matchedByCode = locations.findIndex((location) => location.code.trim().toLowerCase() === row.code.trim().toLowerCase());
         const existingIndex = matchedById >= 0 ? matchedById : matchedByCode;
         const id = row.id || `loc-import-${Date.now()}-${index}`;
 
@@ -1735,12 +1741,7 @@ export const services: Services = {
         if (mode === "update" && existingIndex < 0) {
           errors.push(`Row ${index + 1}, id/code: no existing location matches this row.`);
         }
-        if (row.parentId && !locations.some((location) => location.id === row.parentId) && !batchIds.has(row.parentId)) {
-          errors.push(`Row ${index + 1}, parentId: parent location reference not found.`);
-        }
-
         const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
-        if (row.type && !indoorLocationTypes.includes(row.type as typeof indoorLocationTypes[number])) return;
         pending.push({
           existingIndex: existingIndex >= 0 ? existingIndex : null,
           rowIndex: index,
@@ -1757,21 +1758,6 @@ export const services: Services = {
         });
       });
 
-      // A row can identify an existing parent by code while its children still
-      // reference the ID supplied in this file. Resolve that temporary ID to
-      // the parent's durable curated ID before committing the batch.
-      const effectiveIdsByImportedId = new Map(
-        validRows.flatMap(({ row, index }) => {
-          const entry = pending.find((candidate) => candidate.rowIndex === index);
-          return row.id && entry ? [[row.id, entry.location.id] as const] : [];
-        }),
-      );
-      pending.forEach(({ location }) => {
-        if (location.parentId) {
-          location.parentId = effectiveIdsByImportedId.get(location.parentId) ?? location.parentId;
-        }
-      });
-
       const batchDirectory = [...locations, ...pending.map(({ location }) => location)];
       pending.forEach((entry) => {
         const existing = entry.existingIndex === null ? undefined : locations[entry.existingIndex];
@@ -1783,6 +1769,7 @@ export const services: Services = {
           context: "record",
           directory: batchDirectory,
           requireFloorLevel: true,
+          requireKnownFloorLevel: true,
           currentId: entry.location.id,
         });
         if (!evaluation.valid) {
