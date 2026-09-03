@@ -1097,51 +1097,6 @@ td small {
   color: #64716a;
   padding: 40px;
 }
-.routes-layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 24px;
-}
-.route-summary {
-  background: #fff;
-}
-.route-summary h2 {
-  font-size: 18px;
-  margin: 12px 0;
-}
-.route-summary p {
-  color: #64716a;
-  font-size: 12px;
-}
-.route-summary hr {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 24px 0;
-}
-.mini-route {
-  height: 140px;
-  margin-top: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: white;
-}
-.mini-route span {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--green);
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-}
-.mini-route i {
-  height: 4px;
-  background: var(--green);
-  flex: 1;
-  margin: 0 8px;
-  border-top: 4px dashed #8fc5a2;
-}
 .inline-fields {
   display: flex;
   align-items: end;
@@ -2349,9 +2304,6 @@ td small {
   }
   .metric-grid {
     margin-top: 24px;
-  }
-  .routes-layout {
-    grid-template-columns: 1fr;
   }
   .inline-fields {
     flex-wrap: wrap;

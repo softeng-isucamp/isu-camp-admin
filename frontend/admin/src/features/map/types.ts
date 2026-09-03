@@ -1,5 +1,5 @@
 // Canonical Spatial Domains & Object Types
-export type SpatialDomain = "Locations" | "Routes & Paths" | "Local Map Data";
+export type SpatialDomain = "Locations" | "Walking Network" | "Local Map Data";
 
 export type SpatialObjectType =
   | "building"

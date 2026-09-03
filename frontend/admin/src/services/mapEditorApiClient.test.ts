@@ -285,7 +285,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         {
           id: "op-update-node-1",
           type: "update_geometry",
-          domain: "Routes & Paths",
+          domain: "Walking Network",
           entityId: "node-junc-02",
           before: { lat: 16.7215, lng: 121.6895 },
           after: { lat: 16.7218, lng: 121.6898 },
@@ -401,7 +401,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         {
           id: "op-stale-node",
           type: "update_geometry",
-          domain: "Routes & Paths",
+          domain: "Walking Network",
           entityId: "node-ent-01",
           before: { lat: 16.7205, lng: 121.6885 }, // Diverged from server's 16.721, 121.689
           after: { lat: 16.722, lng: 121.69 },
@@ -470,7 +470,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
       const operation: WorkingOperation = {
         id: "op-idempotent",
         type: "update_geometry",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: "node-ent-01",
         before: { lat: 16.721, lng: 121.689 },
         after: { lat: 16.7212, lng: 121.6892 },
@@ -537,7 +537,7 @@ describe("Conflict Resolution & Session State Helpers", () => {
       {
         id: "op-1",
         type: "update_geometry",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: "node-ent-01",
         before: { lat: 16.72 },
         after: { lat: 16.721 },
@@ -564,7 +564,7 @@ describe("Conflict Resolution & Session State Helpers", () => {
     const bld = extractEntityFromLayers(layers, "Locations", "bld-eng-01");
     expect(bld?.name).toBe("Engineering Complex");
 
-    const node = extractEntityFromLayers(layers, "Routes & Paths", "node-ent-01");
+    const node = extractEntityFromLayers(layers, "Walking Network", "node-ent-01");
     expect(node?.name).toBe("Engineering Main Entrance");
 
     const feat = extractEntityFromLayers(layers, "Local Map Data", "feat-poly-bld-eng-01");

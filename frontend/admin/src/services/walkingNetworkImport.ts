@@ -113,7 +113,7 @@ export function previewWalkingNetworkImport(json: string, snapshot: NetworkSnaps
   const operations: WorkingOperation[] = [...importedNodes, ...importedPathways].map((entity) => ({
     id: `import-${entity.id}`,
     type: "create_entity",
-    domain: "Routes & Paths",
+    domain: "Walking Network",
     entityId: entity.id,
     before: null,
     after: entity as unknown as Record<string, unknown>,

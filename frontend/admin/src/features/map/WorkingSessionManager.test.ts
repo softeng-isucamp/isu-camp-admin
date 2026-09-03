@@ -163,13 +163,13 @@ describe("WorkingSessionManager", () => {
 
     it("creates update_properties operation via factory", () => {
       const op = updatePropertiesOperation(
-        "Routes & Paths",
+        "Walking Network",
         "pw-1",
         { surfaceType: "concrete" },
         { surfaceType: "asphalt" }
       );
       expect(op.type).toBe("update_properties");
-      expect(op.domain).toBe("Routes & Paths");
+      expect(op.domain).toBe("Walking Network");
       expect(op.before).toEqual({ surfaceType: "concrete" });
       expect(op.after).toEqual({ surfaceType: "asphalt" });
     });

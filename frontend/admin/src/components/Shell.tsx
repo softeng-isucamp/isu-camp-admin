@@ -8,7 +8,6 @@ import logo from "../assets/figma/brand/isu-camp-logo.png";
 import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
 import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
 import locationsIcon from "../assets/figma/navigation/locations.svg";
-import routesIcon from "../assets/figma/navigation/routes.svg";
 import usersIcon from "../assets/figma/navigation/users.svg";
 import logsIcon from "../assets/figma/navigation/logs.svg";
 import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
@@ -34,12 +33,6 @@ export const links = [
     icon: locationsIcon,
     label: "Locations",
     description: "Manage buildings, offices, and landmarks",
-  },
-  {
-    to: "/routes",
-    icon: routesIcon,
-    label: "Routes & Paths",
-    description: "Geospatial routing configurations",
   },
   {
     to: "/users",
