@@ -27,7 +27,7 @@ vi.mock("react-leaflet", () => ({
     : eventHandlers?.drag ? <button aria-label={`Move point at ${position.join(",")}`} data-testid="move-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers.click} onDragStart={eventHandlers.dragstart} onDrag={() => movingPointDragPosition && eventHandlers.drag?.({ target: { getLatLng: () => movingPointDragPosition! } })} onDragEnd={() => movingPointDragPosition && eventHandlers.dragend?.({ target: { getLatLng: () => movingPointDragPosition! } })} />
     : typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <button aria-label={`Map marker at ${position.join(",")}`} data-testid="saved-map-marker" data-icon-class={icon?.className} data-position={position.join(",")} onClick={eventHandlers.click} /> : null,
   Polygon: ({ eventHandlers, pathOptions }: { eventHandlers?: { click?: () => void }; pathOptions?: { className?: string } }) => <button aria-label={pathOptions?.className ?? "building polygon"} onClick={eventHandlers?.click} />,
-  Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : pathOptions?.className?.startsWith("local-feature-") ? "local-feature-line" : "path-geometry"} data-positions={JSON.stringify(positions)} onClick={eventHandlers?.click}>{children}</output>,
+  Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string; color?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : pathOptions?.className?.startsWith("local-feature-") ? "local-feature-line" : "path-geometry"} data-positions={JSON.stringify(positions)} data-color={pathOptions?.color} onClick={eventHandlers?.click}>{children}</output>,
   Popup: () => null,
   TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useMap: () => ({
@@ -124,6 +124,30 @@ describe("Map Editor preview", () => {
   it("opens the requested creation tool from a Locations handoff", async () => {
     renderEditor(["/map-editor?create=building"]);
     expect(await screen.findByRole("button", { name: "Building Polygon" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps Walking Network browser selection synchronized with the map", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    const pathwayResult = await screen.findByRole("button", { name: /Library Walk/ });
+    fireEvent.click(pathwayResult);
+    expect(pathwayResult).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-color", "#e67e22");
+
+    const nodeMarker = screen.getAllByTestId("saved-map-marker").find((marker) =>
+      marker.getAttribute("data-icon-class")?.includes("route-node-icon") && marker.getAttribute("data-position") === "16.7205,121.6895",
+    );
+    fireEvent.click(nodeMarker!);
+    const overlapChoice = await screen.findByRole("button", { name: "Select North Entrance Route Node" });
+    fireEvent.click(overlapChoice);
+
+    expect(screen.getByRole("tab", { name: "Route Nodes" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("button", { name: /North Entrance/ }).find((button) =>
+      button.hasAttribute("aria-pressed"),
+    )).toHaveAttribute("aria-pressed", "true");
   });
 
   it("retires a Building Footprint without deleting its Building from Locations", async () => {

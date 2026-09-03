@@ -23,6 +23,7 @@ import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./W
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
 import { WalkingNetworkManagementPrototype } from "./WalkingNetworkManagementPrototype";
+import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { PathPointSidecardPrototype } from "./PathPointSidecardPrototype";
 import {
   buildRestoreLocalFeatureOperation,
@@ -416,6 +417,7 @@ function PointCoordinateInputs({ position, onChange }: PointCoordinateInputsProp
 interface MapControllerProps {
   onMapClick: (latlng: [number, number]) => void;
   flyTarget: [number, number] | null;
+  frameBounds: [[number, number], [number, number]] | null;
   navigationBounds: [[number, number], [number, number]];
   onViewportChange?: (bounds: L.LatLngBounds | null, zoom: number) => void;
 }
@@ -447,6 +449,7 @@ const routeNodePoint = (nodes: RouteNode[], id: string): [number, number] => {
 function MapController({
   onMapClick,
   flyTarget,
+  frameBounds,
   navigationBounds,
   onViewportChange,
 }: MapControllerProps) {
@@ -482,6 +485,12 @@ function MapController({
       map.flyTo(flyTarget, 19, { duration: 0.8 });
     }
   }, [flyTarget, map]);
+
+  useEffect(() => {
+    if (frameBounds && typeof map.fitBounds === "function") {
+      map.fitBounds(frameBounds, { padding: [48, 48], maxZoom: 19 });
+    }
+  }, [frameBounds, map]);
 
   useEffect(() => {
     if (typeof map.getBoundsZoom !== "function" || typeof map.setMinZoom !== "function") return;
@@ -598,7 +607,9 @@ export function MapEditor() {
   } | null>(null);
 
   const [search, setSearch] = useState("");
+  const [networkBrowserOpen, setNetworkBrowserOpen] = useState(true);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
+  const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const [temporary, setTemporary] = useState<[number, number] | null>(null);
   const [pointDraftDirty, setPointDraftDirty] = useState(false);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
@@ -1040,6 +1051,7 @@ export function MapEditor() {
   const selectObject = useCallback(
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
       setSelected({ type, id });
+      if (type === "node" || type === "pathway") setNetworkBrowserOpen(true);
       setSelectionPopover(null);
       setLocalFeatureActionNotice("");
       if (type === "pathway") {
@@ -1101,6 +1113,31 @@ export function MapEditor() {
     }
     setSearch("");
   };
+
+  const handleNetworkBrowserSelection = (networkSelection: NonNullable<NetworkBrowserSelection>) => {
+    selectObject(networkSelection.type, networkSelection.id);
+    if (networkSelection.type === "node") {
+      const node = currentNodes.find((item) => item.id === networkSelection.id);
+      if (node) {
+        setFrameBounds(null);
+        setFlyTarget([node.lat, node.lng]);
+      }
+      return;
+    }
+    const pathway = currentPathways.find((item) => item.id === networkSelection.id);
+    const source = pathway && currentNodes.find((node) => node.id === pathway.sourceNodeId);
+    const destination = pathway && currentNodes.find((node) => node.id === pathway.destinationNodeId);
+    if (pathway && source && destination) {
+      const points = [[source.lat, source.lng], ...pathway.pathPoints, [destination.lat, destination.lng]] as [number, number][];
+      setFrameBounds([
+        [Math.min(...points.map(([lat]) => lat)), Math.min(...points.map(([, lng]) => lng))],
+        [Math.max(...points.map(([lat]) => lat)), Math.max(...points.map(([, lng]) => lng))],
+      ]);
+    }
+  };
+  const networkBrowserSelection: NetworkBrowserSelection = selected && (selected.type === "node" || selected.type === "pathway")
+    ? { type: selected.type, id: selected.id }
+    : null;
 
   const onMapClick = (point: [number, number]) => {
     if (mode === "select") {
@@ -2777,6 +2814,7 @@ export function MapEditor() {
           <MapController
             onMapClick={onMapClick}
             flyTarget={flyTarget}
+            frameBounds={frameBounds}
             navigationBounds={navigationBounds}
             onViewportChange={handleViewportChange}
           />
@@ -3167,6 +3205,17 @@ export function MapEditor() {
           )}
         </MapContainer>
 
+        {networkBrowserOpen && (
+          <NetworkBrowser
+            pathways={currentPathways}
+            nodes={currentNodes}
+            buildings={allSessionBuildings}
+            selected={networkBrowserSelection}
+            onSelect={handleNetworkBrowserSelection}
+            onDismiss={() => setNetworkBrowserOpen(false)}
+          />
+        )}
+
         {selectionPopover && (
           <div
             role="dialog"
@@ -3241,6 +3290,14 @@ export function MapEditor() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>Satellite</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={networkBrowserOpen}
+            onClick={() => setNetworkBrowserOpen((open) => !open)}
+            className={`tool flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition ${networkBrowserOpen ? "active bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
+          >
+            <span>Network</span>
           </button>
         </div>
 
