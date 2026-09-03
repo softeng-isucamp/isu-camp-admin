@@ -62,7 +62,7 @@ import {
 import { createRoutableCrossing } from "./pathwayCommands";
 import { previewWalkingNetworkImport, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
 import type { NetworkSnapshot } from "../../services/network";
-import { deactivateRouteNode } from "./routeNodeLifecycle";
+import { buildLifecycleChange, calculateLifecycleImpact, lifecycleActionLabel, type LifecycleAction, type LifecycleImpact } from "./routeNodeLifecycle";
 import { validateOutdoorPointLocation } from "./outdoorPointLocation";
 import {
   findSelectionCandidates,
@@ -140,7 +140,7 @@ function projectWorkingSessionOperation(
     return projections;
   } else if (operation.domain === "Routes & Paths") {
     // Pathways and nodes are in the same domain
-    if (operation.type === "update_geometry" || operation.type === "create_entity" || operation.type === "retire_entity") {
+    if (operation.type === "update_geometry" || operation.type === "create_entity" || operation.type === "retire_entity" || operation.type === "restore_entity" || operation.type === "update_properties") {
       // Determine if it's a pathway or node by checking the record structure
       if (value && typeof value === "object" && ("sourceNodeId" in value || "destinationNodeId" in value)) {
         return [{ collection: "pathways", entityId: operation.entityId, value }];
@@ -677,6 +677,7 @@ export function MapEditor() {
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
+  const [lifecycleConfirmation, setLifecycleConfirmation] = useState<{ action: LifecycleAction; impact: LifecycleImpact } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
@@ -1698,6 +1699,7 @@ export function MapEditor() {
     setPathDraftDirty(false);
     setEditingBuildingId(null);
     setConfirm(null);
+    setLifecycleConfirmation(null);
     setPreviewOpen(false);
     setError("");
     setMode("select");
@@ -2436,6 +2438,21 @@ export function MapEditor() {
     setDirty(true);
   };
 
+  const confirmLifecycleAction = () => {
+    if (!lifecycleConfirmation) return;
+    const { action, impact } = lifecycleConfirmation;
+    const change = buildLifecycleChange(action, impact.object);
+    if (action === "close_pathway" || action === "reopen_pathway") {
+      updatePathway(change.record as Pathway);
+    } else {
+      updateNode(change.record as RouteNode);
+    }
+    workingSessionManager.executeOperation(change.operation);
+    setDirty(true);
+    setLifecycleConfirmation(null);
+    setError("");
+  };
+
   const locationModalEntity: Location | null = selectedLocation ?? (selectedBuilding ? {
     id: selectedBuildingLocation?.id ?? selectedBuilding.id,
     name: selectedBuilding.name,
@@ -2720,27 +2737,11 @@ export function MapEditor() {
             },
           }] : []),
           {
-            label: "🗑 Deactivate Route Node",
+            label: selectedNode.status === "Inactive" ? "↻ Reactivate Route Node" : "⏸ Deactivate Route Node",
             tone: "danger" as const,
             onSelect: () => {
-              const deactivation = deactivateRouteNode(selectedNode, connectedPathways);
-              updateNode(deactivation.node);
-              if (deactivation.pathways.length > 0) {
-                setLocalPathways((items) => items.filter((item) =>
-                  !deactivation.pathways.some((pathway) => pathway.id === item.id),
-                ));
-                setDeletedPathwayIds((ids) => [...new Set([
-                  ...ids,
-                  ...deactivation.pathways.map((pathway) => pathway.id),
-                ])]);
-              }
-              workingSessionManager.executeBatch(
-                `Deactivate ${selectedNode.name} and remove connected Pathways`,
-                "Routes & Paths",
-                selectedNode.id,
-                deactivation.operations,
-              );
-              setDirty(true);
+              const action: LifecycleAction = selectedNode.status === "Inactive" ? "reactivate_node" : "deactivate_node";
+              setLifecycleConfirmation({ action, impact: calculateLifecycleImpact({ action, object: selectedNode, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
             },
           },
         ],
@@ -2797,12 +2798,11 @@ export function MapEditor() {
           { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
           { label: "⌁ Reshape Pathway", onSelect: () => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); } },
           {
-            label: "🗑 Close Pathway",
+            label: selectedPath.status === "Closed" ? "↻ Reopen Pathway" : "⏸ Close Pathway",
             tone: "danger" as const,
             onSelect: () => {
-              const updated = { ...selectedPath, status: "Closed" as const };
-              updatePathway(updated);
-              recordPropertyOperation("Routes & Paths", selectedPath.id, selectedPath, updated, `Close ${selectedPath.name}`);
+              const action: LifecycleAction = selectedPath.status === "Closed" ? "reopen_pathway" : "close_pathway";
+              setLifecycleConfirmation({ action, impact: calculateLifecycleImpact({ action, object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
             },
           },
         ],
@@ -4491,6 +4491,28 @@ export function MapEditor() {
             >
               {confirm === "save" ? "Save Changes" : "Discard"}
             </Button>
+          </div>
+        </Modal>
+      )}
+      {lifecycleConfirmation && (
+        <Modal
+          title={`${lifecycleActionLabel(lifecycleConfirmation.action)}?`}
+          subtitle="Review the Walking Network impact before confirming."
+          size="sm"
+          variant="danger"
+          onClose={() => setLifecycleConfirmation(null)}
+        >
+          <div className="space-y-2 text-xs text-[#3f4941]" role="document">
+            <p><strong>{lifecycleConfirmation.impact.object.name}</strong> keeps its identity, geometry, metadata, associations, and history. Related records will not be deleted or changed.</p>
+            <p><strong>Connected Pathways:</strong> {lifecycleConfirmation.impact.connectedPathways.length ? lifecycleConfirmation.impact.connectedPathways.map((pathway) => pathway.name).join(", ") : "None"}</p>
+            <p><strong>Affected Entrance Route Nodes:</strong> {lifecycleConfirmation.impact.affectedEntrances.length ? lifecycleConfirmation.impact.affectedEntrances.map((node) => node.name).join(", ") : "None"}</p>
+            {lifecycleConfirmation.impact.affectedBuildings.length > 0 && <p><strong>Buildings reviewed:</strong> {lifecycleConfirmation.impact.affectedBuildings.map((building) => building.name).join(", ")}</p>}
+            {lifecycleConfirmation.impact.buildingsLosingRoutability.length > 0 && <p className="text-red-700"><strong>Will lose routability:</strong> {lifecycleConfirmation.impact.buildingsLosingRoutability.map((building) => building.name).join(", ")}. Add another active Entrance Route Node or keep this network object active.</p>}
+            {lifecycleConfirmation.impact.buildingsRegainingRoutability.length > 0 && <p className="text-green-700"><strong>Will regain routability:</strong> {lifecycleConfirmation.impact.buildingsRegainingRoutability.map((building) => building.name).join(", ")}.</p>}
+          </div>
+          <div className="modal-actions">
+            <Button variant="subtle" onClick={() => setLifecycleConfirmation(null)}>Cancel</Button>
+            <Button variant="danger" onClick={confirmLifecycleAction}>Confirm {lifecycleActionLabel(lifecycleConfirmation.action)}</Button>
           </div>
         </Modal>
       )}
