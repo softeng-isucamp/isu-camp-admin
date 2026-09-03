@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, withoutEndpointPathPoints } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints } from "./mapEditing";
 import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -23,6 +23,22 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("validates Route Node metadata, campus placement, and Entrance associations", () => {
+    const campus = [[0, 0], [0, 10], [10, 10], [10, 0]] as [number, number][];
+    const buildings = [building({ id: "building-1" })];
+    const validNode = { ...node(), lat: 5, lng: 5 };
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: "building-1" }, { buildings, campusBoundary: campus })).toEqual([]);
+    expect(validateRouteNodeDraft({ ...validNode, nodeType: "Junction", associatedPlaceId: "building-1" }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "association", message: "Only Entrance Route Nodes may have a Building association." },
+    ]);
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: null, lat: Number.NaN }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "coordinate", message: "Route Node latitude and longitude must be valid finite coordinates." },
+    ]);
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: "missing" }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "association", message: "Associated Building does not exist." },
+    ]);
+  });
+
   it("detects a bow-tie polygon while allowing a normal footprint", () => {
     expect(polygonSelfIntersects([[0, 0], [1, 1], [0, 1], [1, 0]])).toBe(true);
     expect(polygonSelfIntersects([[0, 0], [1, 0], [1, 1], [0, 1]])).toBe(false);

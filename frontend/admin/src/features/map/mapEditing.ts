@@ -153,6 +153,42 @@ export interface PathwayDraftIssue {
   message: string;
 }
 
+export interface RouteNodeDraftIssue {
+  field: "name" | "nodeType" | "coordinate" | "association";
+  message: string;
+}
+
+const routeNodeTypes: RouteNode["nodeType"][] = ["Entrance", "Junction", "Access Point"];
+
+/** Local checks shared by placement, editing, and the final draft review. */
+export function validateRouteNodeDraft(
+  node: RouteNode,
+  input: {
+    buildings: readonly Building[];
+    locations?: readonly Location[];
+    campusBoundary?: MapPoint[];
+  },
+): RouteNodeDraftIssue[] {
+  const issues: RouteNodeDraftIssue[] = [];
+  if (!node.name.trim()) issues.push({ field: "name", message: "Route Node name is required." });
+  if (!routeNodeTypes.includes(node.nodeType)) issues.push({ field: "nodeType", message: "Route Node type is required." });
+  if (!Number.isFinite(node.lat) || !Number.isFinite(node.lng) || node.lat < -90 || node.lat > 90 || node.lng < -180 || node.lng > 180) {
+    issues.push({ field: "coordinate", message: "Route Node latitude and longitude must be valid finite coordinates." });
+  } else if (input.campusBoundary && !pointOnCampus([node.lat, node.lng], input.campusBoundary)) {
+    issues.push({ field: "coordinate", message: "The Route Node must be inside the ISU Echague campus boundary." });
+  }
+  if (node.associatedPlaceId && node.nodeType !== "Entrance") {
+    issues.push({ field: "association", message: "Only Entrance Route Nodes may have a Building association." });
+  } else if (node.associatedPlaceId) {
+    const buildingIds = new Set(input.buildings.map((building) => building.id));
+    input.locations?.filter((location) => location.type === "Building").forEach((location) => buildingIds.add(location.id));
+    if (!buildingIds.has(node.associatedPlaceId)) {
+      issues.push({ field: "association", message: "Associated Building does not exist." });
+    }
+  }
+  return issues;
+}
+
 /** Local, synchronous checks used by the parent-frame Pathway editor. */
 export function validatePathwayDraft(
   pathway: Pathway,
@@ -230,7 +266,6 @@ export function reviewMapDraft(input: {
   }
   deleted.forEach((object) => addChange("deleted", object));
 
-  const locationIds = new Set(current.locations.map((object) => object.id));
   const nodeIds = new Set(current.nodes.map((object) => object.id));
   current.locations.forEach((object) => {
     const reference = { type: "location" as const, id: object.id, label: label(object) };
@@ -253,17 +288,19 @@ export function reviewMapDraft(input: {
   });
   current.nodes.forEach((object) => {
     const reference = { type: "node" as const, id: object.id, label: label(object) };
-    if (!object.name.trim()) addError(reference, "Route Node name is required.");
-    if (!object.nodeType) addError(reference, "Route Node type is required.");
-    if (!validCoordinate([object.lat, object.lng])) addError(reference, "Route Node latitude and longitude must be valid coordinates.");
-    if (object.associatedPlaceId && !locationIds.has(object.associatedPlaceId)) addError(reference, "Associated Building does not exist.");
-    if (object.associatedPlaceId) {
-      const associated = current.locations.find((location) => location.id === object.associatedPlaceId);
-      // Legacy map fixtures may use a Facility-shaped association. Enforce the
-      // canonical Building boundary once the associated network Building exists.
-      if (associated && associated.type !== "Building" && current.buildings.some((building) => building.id === associated.id)) addError(reference, "Entrance Route Nodes may only be associated with a Building.");
-      if (object.nodeType !== "Entrance") addError(reference, "Only Entrance Route Nodes may have a Building association.");
-    }
+    const previous = original.nodes.find((candidate) => candidate.id === object.id);
+    validateRouteNodeDraft(object, {
+      buildings: current.buildings,
+      locations: current.locations,
+    }).forEach((issue) => {
+      // Preserve reviewability of unchanged imported legacy associations; any
+      // new or edited association must satisfy the canonical Building rule.
+      const unchangedLegacyAssociation = issue.field === "association"
+        && previous?.associatedPlaceId === object.associatedPlaceId
+        && current.locations.some((location) => location.id === object.associatedPlaceId && location.type !== "Building");
+      if (unchangedLegacyAssociation) return;
+      addError(reference, issue.message);
+    });
   });
 
   const connections = new Map<string, string>();
