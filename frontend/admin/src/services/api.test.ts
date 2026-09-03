@@ -399,6 +399,57 @@ describe("mock service contracts", () => {
     ]));
   });
 
+  it("restricts imports to existing Buildings and supported Floor Levels", async () => {
+    const before = (await services.locations.list()).total;
+    const building = (await services.locations.list("computer lab")).items.find((item) => item.type === "Building");
+    expect(building).toBeDefined();
+
+    const base = {
+      name: "Import validation row",
+      parentId: building!.id,
+      status: "Active" as const,
+      lat: null,
+      lng: null,
+    };
+    const rows = [
+      { ...base, id: "reject-building", code: "REJECT-BUILDING", type: "Building", parentId: null },
+      { ...base, id: "reject-outdoor", code: "REJECT-OUTDOOR", type: "Outdoor Point Location" },
+      { ...base, id: "reject-facility", code: "REJECT-FACILITY", type: "Facility" },
+      { ...base, id: "reject-floor", code: "REJECT-FLOOR", type: "Floor" },
+      { ...base, id: "reject-unknown", code: "REJECT-UNKNOWN", type: "Unknown" },
+      { ...base, id: "reject-building-ref", code: "REJECT-BUILDING-REF", type: "Room", parentId: "missing-building", floor: "Ground Floor" },
+      { ...base, id: "reject-missing-floor", code: "REJECT-MISSING-FLOOR", type: "Room" },
+      { ...base, id: "reject-unspecified-floor", code: "REJECT-UNSPECIFIED-FLOOR", type: "Room", floor: "Unspecified Floor" },
+      { ...base, id: "reject-invalid-floor", code: "REJECT-INVALID-FLOOR", type: "Room", floor: "Mezzanine" },
+    ];
+
+    const result = await services.imports.locations({ json: JSON.stringify(rows), commit: true });
+    expect(result.imported).toBe(0);
+    expect(result.errors).toHaveLength(9);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining("Row 1, type: only Room, Office, Laboratory, and Restroom"),
+      expect.stringContaining("Row 2, type: only Room, Office, Laboratory, and Restroom"),
+      expect.stringContaining("Row 6, parentId: The selected parent Location does not exist."),
+      expect.stringContaining("Row 7, floor: Indoor Locations require a Floor Level."),
+      expect.stringContaining("Row 8, floor: Unspecified Floor is only for legacy records"),
+      expect.stringContaining("Row 9, floor: Floor Level must be one of"),
+    ]));
+    expect((await services.locations.list()).total).toBe(before);
+  });
+
+  it("keeps legacy indoor records without a floor under Unspecified Floor", async () => {
+    const legacy = await services.locations.save({
+      id: "legacy-unspecified-floor", name: "Legacy Unspecified Room", code: "LEGACY-UNSPECIFIED",
+      type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", status: "Active",
+      lat: null, lng: null, positioned: false,
+    });
+    expect(legacy.floor).toBeUndefined();
+    expect((await services.locations.list("Legacy Unspecified Room")).items[0]).toMatchObject({
+      id: legacy.id,
+      parentId: "osm-location-c5fb7a267a8ca63d",
+    });
+  });
+
   it("permanently deletes a building, its connected children, and audits each record", async () => {
     const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "deleted-room", name: "Deleted Room", code: "DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });

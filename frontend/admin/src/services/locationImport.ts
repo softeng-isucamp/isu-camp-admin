@@ -6,6 +6,10 @@ export const createLocationsBulkImportTemplate = () => JSON.stringify([
   { id: "restroom-library-ground", name: "Library Ground Floor Restroom", code: "LIB-RR-G", type: "Restroom", parentId: "building-library", floor: "Ground Floor", status: "Active", lat: null, lng: null },
 ], null, 2);
 
+/** The import format intentionally contains indoor children only. */
+export const locationsBulkImportDescription =
+  "Import Room, Office, Laboratory, and Restroom records linked to an existing Building and specific Floor Level. Create Buildings and Outdoor Point Locations in Map Editor.";
+
 export type LocationImportRequest = {
   json: string;
   commit?: boolean;

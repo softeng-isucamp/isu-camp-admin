@@ -32,6 +32,10 @@ export interface BuildingOverlapWarning {
   advisory: true;
 }
 
+function generateBuildingFootprintFeatureId(): string {
+  return `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 /** Check if two line segments (p1-p2 and p3-p4) intersect. */
 function segmentsIntersect(
   p1: MapPoint,
@@ -227,7 +231,7 @@ export function buildCreateBuildingCompoundOperation(
   overrideFeatureId?: string,
 ): WorkingOperation {
   const buildingId = overrideBuildingId ?? `building-${Date.now()}`;
-  const featureId = overrideFeatureId ?? `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const featureId = overrideFeatureId ?? generateBuildingFootprintFeatureId();
   const linkId = `link-${featureId}-${buildingId}`;
 
   // The Building Campus Location record stores NO copied outdoor coordinate.
@@ -312,7 +316,7 @@ export function buildAttachBuildingCompoundOperation(
   footprintPoints: MapPoint[],
   overrideFeatureId?: string,
 ): WorkingOperation {
-  const featureId = overrideFeatureId ?? `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const featureId = overrideFeatureId ?? generateBuildingFootprintFeatureId();
   const linkId = `link-${featureId}-${targetBuilding.id}`;
 
   const footprintFeature: LocalMapFeatureEntity = {

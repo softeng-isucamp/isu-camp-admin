@@ -198,11 +198,12 @@ export function validatePathwayDraft(
   const issues: PathwayDraftIssue[] = [];
   if (!pathway.name.trim()) issues.push({ field: "name", message: "Pathway name is required." });
   if (!pathway.type.trim()) issues.push({ field: "type", message: "Pathway type is required." });
-  if (!pathway.direction) issues.push({ field: "direction", message: "Pathway direction is required." });
-  if (!pathway.status) issues.push({ field: "status", message: "Pathway status is required." });
+  if (pathway.direction !== "Two-way" && pathway.direction !== "One-way") issues.push({ field: "direction", message: "Pathway direction must be Two-way or One-way." });
+  if (pathway.status !== "Open" && pathway.status !== "Closed") issues.push({ field: "status", message: "Pathway status must be Open or Closed." });
   const source = nodes.find((node) => node.id === pathway.sourceNodeId);
   const destination = nodes.find((node) => node.id === pathway.destinationNodeId);
   if (!source || !destination) issues.push({ field: "sequence", message: "Pathway endpoints must reference existing Route Nodes." });
+  if (source && destination && source.id === destination.id) issues.push({ field: "sequence", message: "Pathway endpoints must be distinct; self-links are not allowed." });
   pathway.pathPoints.forEach(([latitude, longitude], index) => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
       issues.push({ field: "pathPoint", message: `Path Point #${index + 1} must use a valid latitude and longitude.` });

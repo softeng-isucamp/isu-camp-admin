@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { API_MODE, createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
+import { API_MODE, createLocationsBulkImportTemplate, locationsBulkImportDescription, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -1345,7 +1345,7 @@ export function Locations() {
                 <div>
                   <h2 id="location-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
                   <p id="location-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    Validate campus location records before importing.
+                    {locationsBulkImportDescription}
                   </p>
                 </div>
               </div>
@@ -1379,7 +1379,7 @@ export function Locations() {
                   </div>
                   <div>
                     <strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
-                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing campus location records.</p>
+                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing indoor location records.</p>
                     {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{importFileName} selected</p>}
                   </div>
                 </div>

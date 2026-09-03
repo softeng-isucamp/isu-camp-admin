@@ -132,11 +132,13 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
     const pathwayResult = await screen.findByRole("button", { name: /Library Walk/ });
     fireEvent.click(pathwayResult);
     expect(pathwayResult).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-color", "#e67e22");
 
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
     const nodeMarker = screen.getAllByTestId("saved-map-marker").find((marker) =>
       marker.getAttribute("data-icon-class")?.includes("route-node-icon") && marker.getAttribute("data-position") === "16.7205,121.6895",
     );
