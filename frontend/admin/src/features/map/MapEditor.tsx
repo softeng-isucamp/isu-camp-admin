@@ -17,7 +17,7 @@ import { services, setMockFailure } from "../../services/api";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -1364,19 +1364,24 @@ export function MapEditor() {
 
   const handleSavePlacedNode = () => {
     if (!temporary || !placingNodeName.trim()) return;
-    if (!pointOnCampus(temporary, campusBoundary)) {
-      setError("The new position must stay inside the ISU Echague campus boundary.");
-      return;
-    }
     const newNodeId = `node-${Date.now()}`;
     const newNode: RouteNode = {
       id: newNodeId,
       name: placingNodeName.trim(),
       nodeType: placingNodeType,
-      associatedPlaceId: placingAssociatedBuildingId || null,
+      associatedPlaceId: placingNodeType === "Entrance" ? placingAssociatedBuildingId || null : null,
       lat: temporary[0],
       lng: temporary[1],
     };
+    const issues = validateRouteNodeDraft(newNode, {
+      buildings: currentBuildings,
+      locations: currentLocations,
+      campusBoundary,
+    });
+    if (issues.length > 0) {
+      setError(issues[0].message);
+      return;
+    }
     setLocalNodes((current) => [...current, newNode]);
     workingSessionManager.executeOperation({ type: "create_entity", domain: "Routes & Paths", entityId: newNode.id,
       before: null, after: newNode as unknown as Record<string, unknown>, description: `Place ${newNode.name}` });
@@ -2608,6 +2613,15 @@ export function MapEditor() {
     if (selectedNode) {
       const connectedPathways = currentPathways.filter((pathway) => pathway.sourceNodeId === selectedNode.id || pathway.destinationNodeId === selectedNode.id);
       const connectedPaths = connectedPathways.length;
+      const nodeFindings = validateRouteNodeDraft(selectedNode, {
+        buildings: currentBuildings,
+        locations: currentLocations,
+        campusBoundary,
+      });
+      const associatedBuilding = selectedNode.associatedPlaceId
+        ? currentBuildings.find((building) => building.id === selectedNode.associatedPlaceId)
+          ?? currentLocations.find((location) => location.id === selectedNode.associatedPlaceId && location.type === "Building")
+        : null;
       return {
         id: selectedNode.id,
         kind: selectedNode.nodeType === "Entrance" ? "entrance_route_node" : "route_node",
@@ -2616,7 +2630,10 @@ export function MapEditor() {
         status: selectedNode.nodeType === "Entrance" ? "Entrance Route Node" : `${selectedNode.nodeType} Route Node`,
         summary: [
           { label: "Node Type", value: selectedNode.nodeType },
+          { label: "Lifecycle", value: selectedNode.status ?? "Active" },
+          { label: "Associated Building", value: associatedBuilding?.name ?? (selectedNode.associatedPlaceId ? "Missing" : "None") },
           { label: "Connected Pathways", value: String(connectedPaths) },
+          { label: "Network Findings", value: nodeFindings.length ? nodeFindings[0].message : "No blocking findings" },
           { label: "Latitude", value: selectedNode.lat.toFixed(6) },
           { label: "Longitude", value: selectedNode.lng.toFixed(6) },
         ],
@@ -3824,6 +3841,7 @@ export function MapEditor() {
                       <select
                         value={placingAssociatedBuildingId ?? ""}
                         onChange={(e) => setPlacingAssociatedBuildingId(e.target.value || null)}
+                        disabled={placingNodeType !== "Entrance"}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
                         <option value="">None</option>
@@ -4255,6 +4273,15 @@ export function MapEditor() {
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
             if ("nodeType" in updated && selectedNode) {
+              const nodeIssues = validateRouteNodeDraft(updated, {
+                buildings: currentBuildings,
+                locations: currentLocations,
+                campusBoundary,
+              });
+              if (nodeIssues.length > 0) {
+                setError(nodeIssues[0].message);
+                return;
+              }
               updateNode(updated);
               recordPropertyOperation("Routes & Paths", selectedNode.id, selectedNode, updated, `Edit ${selectedNode.name} details`);
             } else if ("pathPoints" in updated && selectedPath) {
