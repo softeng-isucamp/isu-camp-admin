@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 
 async function signIn(page: Page) {
   await page.goto("/login");
+  await page.getByLabel("USERNAME").fill("admin_justine");
+  await page.getByLabel(/PASSWORD/).fill("password123");
   await page.getByRole("button", { name: /login/i }).click();
   await expect(page).toHaveURL(/dashboard/);
 }
@@ -22,6 +24,8 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "ISU-CAMP" })).toBeVisible();
   await expect(page).toHaveScreenshot("login.png", { animations: "disabled" });
+  await page.getByLabel("USERNAME").fill("admin_justine");
+  await page.getByLabel(/PASSWORD/).fill("password123");
   await page.getByRole("button", { name: /login/i }).click();
   await expect(page).toHaveURL(/dashboard/);
   await expect(
@@ -214,17 +218,8 @@ test("locations, users, logs, and map expose their key state transitions", async
       '{"id":"loc-imported","name":"Imported Facility","code":"IMP-01","type":"Facility","parentId":null,"status":"Active","lat":16.72,"lng":121.69}',
     );
   await page.getByRole("button", { name: "Validate" }).click();
-  await expect(
-    page.getByText(/Validation passed for 1 locations/),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Import", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Locations Imported" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("location-import-success.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByText(/only Room, Office, Laboratory, and Restroom records can be imported/)).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByTitle("Locate on map").first().click();
   await expect(page).toHaveURL(/\/map-editor\?location=/);
   await expect(page.getByText("SELECTED LOCATION")).toBeVisible();

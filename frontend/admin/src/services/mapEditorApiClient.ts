@@ -1149,9 +1149,9 @@ export function createMapEditorApiClient(options?: {
   baseUrl?: string;
   seedSources?: RawSeedSources;
 }): MapEditorApiClient {
-  // The global application client is always backed by the real API. Explicit
-  // modes remain supported for isolated tests that construct their own client.
-  const mode = options?.mode ?? "real";
+  // Runtime always uses the real API. The dedicated test adapter flag is the
+  // only supported way for a browser or unit-test harness to select fixtures.
+  const mode = options?.mode ?? (import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true" ? "local" : "real");
   if (mode === "real" || mode === "mock") {
     return new HttpMapEditorApiClient(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000");
   }

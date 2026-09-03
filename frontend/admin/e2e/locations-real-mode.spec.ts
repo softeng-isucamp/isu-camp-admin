@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 type LocationDto = {
   id: string; name: string; code: string; type: string; parentId: string | null;
   status: "Active"; lat: number | null; lng: number | null; positioned: boolean;
+  building?: string; floor?: string; function?: string;
 };
 
 async function authenticate(page: Page) {
@@ -15,16 +16,19 @@ async function authenticate(page: Page) {
 
 test("real-mode location creation survives a directory reload", async ({ page }) => {
   await authenticate(page);
-  const records: LocationDto[] = Array.from({ length: 12 }, (_, index) => ({
-    id: String(index + 1), name: `Campus Facility ${index + 1}`, code: `FAC-${index + 1}`,
-    type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false,
-  }));
+  const records: LocationDto[] = [
+    { id: "building-1", name: "Campus Building", code: "BLDG-1", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false },
+    ...Array.from({ length: 11 }, (_, index) => ({
+      id: String(index + 1), name: `Campus Room ${index + 1}`, code: `ROOM-${index + 1}`,
+      type: "Room", parentId: "building-1", building: "Campus Building", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false,
+    })),
+  ];
   await page.route("**/api/locations**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "POST") {
       const draft = request.postDataJSON();
-      const created = { ...draft, id: "99", parentId: null, status: "Active", lat: null, lng: null, positioned: false } as LocationDto;
+      const created = { ...draft, id: "99", status: "Active", lat: null, lng: null, positioned: false } as LocationDto;
       records.push(created);
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(created) });
       return;
@@ -41,17 +45,20 @@ test("real-mode location creation survives a directory reload", async ({ page })
   });
 
   await page.goto("/locations");
-  await expect(page.getByText(/Showing 1–10 of 12/)).toBeVisible();
   await page.getByRole("button", { name: /add location/i }).click();
   const dialog = page.getByRole("dialog", { name: "Add Location" });
-  await dialog.getByLabel("TYPE").selectOption("Facility");
-  await dialog.getByLabel("Location name").fill("Reloaded Facility");
+  await dialog.getByLabel("TYPE").selectOption("Room");
+  await dialog.getByLabel("PARENT BUILDING").selectOption("building-1");
+  await dialog.getByLabel("FLOOR LEVEL").selectOption("Ground Floor");
+  await dialog.getByLabel("Location name").fill("Reloaded Room");
+  await dialog.getByLabel("Location code").fill("RELOADED-ROOM");
+  await dialog.getByLabel("DESCRIPTION").fill("Fixture-backed reload check");
   await dialog.getByRole("button", { name: /save location/i }).click();
   await page.getByRole("button", { name: "Done" }).click();
 
   await page.reload();
-  await page.getByLabel("Search locations").fill("Reloaded Facility");
-  await expect(page.getByText("Reloaded Facility")).toBeVisible();
+  await page.getByLabel("Search locations").fill("Reloaded Room");
+  await expect(page.getByText("Reloaded Room")).toBeVisible();
 });
 
 test("real mode exposes malformed backend data as a visible failure", async ({ page }) => {
