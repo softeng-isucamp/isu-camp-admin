@@ -693,6 +693,12 @@ describe("HttpMapEditorApiClient", () => {
 });
 
 describe("createMapEditorApiClient factory", () => {
+  it("uses the local adapter when the dedicated test adapter is enabled", () => {
+    const client = createMapEditorApiClient();
+
+    expect(client).toBeInstanceOf(LocalMapEditorAdapter);
+  });
+
   it("creates a local adapter in local mode and http adapter in mock/real mode", () => {
     const local = createMapEditorApiClient({ mode: "local" });
     expect(local).toBeInstanceOf(LocalMapEditorAdapter);

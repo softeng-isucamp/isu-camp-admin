@@ -10,5 +10,6 @@ import { Users } from './features/users/Users'
 import { Logs } from './features/logs/Logs'
 
 function Guard() { const { session, loading } = useAuth(); if (loading) return null; return session ? <Shell><Outlet /></Shell> : <Navigate to="/login" replace /> }
-function AppRoutes() { return <Routes><Route path="/login" element={<Login />} /><Route path="/reset-password" element={<PasswordReset />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<Navigate to="/dashboard" replace />} /></Routes> }
+function MissingRoute() { return <main><h1>Page not found</h1><p>The requested administration page is unavailable.</p></main> }
+function AppRoutes() { return <Routes><Route path="/login" element={<Login />} /><Route path="/reset-password" element={<PasswordReset />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
 export function App() { return <AuthProvider><AppRoutes /></AuthProvider> }

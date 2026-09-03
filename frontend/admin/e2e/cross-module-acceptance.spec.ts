@@ -19,10 +19,10 @@ test("Map Editor remains usable at a narrow viewport", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Save Changes" })).toBeVisible();
 });
 
-test("the removed Routes & Paths URL follows unknown-route behavior", async ({ page }) => {
+test("the removed Routes & Paths URL remains unavailable without a redirect", async ({ page }) => {
   await signIn(page);
   await page.goto("/routes");
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "Campus Overview" })).toBeVisible();
+  await expect(page).toHaveURL(/\/routes$/);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
   await expect(page.getByText("Routes & Paths", { exact: true })).toHaveCount(0);
 });
