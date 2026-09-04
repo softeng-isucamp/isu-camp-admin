@@ -34,6 +34,10 @@ const blankLocation = (): LocationDraft => ({
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
+type LocationsRouteState = {
+  indoorLocationParent?: Location;
+};
+
 export function Locations() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -111,6 +115,7 @@ export function Locations() {
   const [validating, setValidating] = useState(false);
   const [importing, setImporting] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
+  const processedIndoorHandoffRef = useRef<string | null>(null);
   const pendingRef = useRef(false);
   pendingRef.current = saving || validating || importing || deleting;
 
@@ -194,7 +199,13 @@ export function Locations() {
     enabled: dialog === "history" && selected !== null,
   });
 
-  const allLocations = directory ?? (API_MODE === "local" ? initialLocations : []);
+  const routeState = routeLocation.state as LocationsRouteState | null;
+  const handoffParent = routeState?.indoorLocationParent;
+  const allLocations = useMemo(() => {
+    const locations = directory ?? (API_MODE === "local" ? initialLocations : []);
+    if (!handoffParent || locations.some((item) => item.id === handoffParent.id)) return locations;
+    return [...locations, handoffParent];
+  }, [directory, handoffParent]);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
     directory: allLocations,
@@ -203,13 +214,19 @@ export function Locations() {
 
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
-    if (params.get("add") !== "indoor") return;
+    if (params.get("add") !== "indoor") {
+      processedIndoorHandoffRef.current = null;
+      return;
+    }
     const parentId = params.get("parentId") ?? params.get("buildingId");
+    const handoffKey = `${parentId ?? ""}:${params.get("floor") ?? ""}`;
+    if (processedIndoorHandoffRef.current === handoffKey) return;
     const parent = parentId ? allLocations.find((item) => item.id === parentId && item.type === "Building") : undefined;
     if (!parent) {
       if (allLocations.length) setError("The selected Building is unavailable for an Indoor Location handoff.");
       return;
     }
+    processedIndoorHandoffRef.current = handoffKey;
     const floor = params.get("floor") ?? "";
     setSelected(parent);
     setDraft({ ...blankLocation(), type: "Room", parentId: parent.id, building: parent.name, floor: floor || undefined });
@@ -419,6 +436,12 @@ export function Locations() {
     }
     setSaving(true);
     try {
+      // A Map Editor Building can be handed off before its directory query has
+      // refreshed. Register that local draft in the same fixture store before
+      // saving its child so the parent relationship remains valid end to end.
+      if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
+        await services.locations.save(handoffParent);
+      }
       const saved = await services.locations.save(normalized);
       await refresh();
       setDialog(null);

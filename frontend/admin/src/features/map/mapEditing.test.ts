@@ -87,6 +87,14 @@ describe("map draft review", () => {
     )).toEqual([]);
   });
 
+  it("keeps Walkways walking-only while allowing Roads to opt into Vehicle mode", () => {
+    const nodes = [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })];
+    expect(validatePathwayDraft(pathway({ allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([
+      { field: "allowedModes", message: "Walkways cannot allow Vehicle mode." },
+    ]);
+    expect(validatePathwayDraft(pathway({ type: "Road", allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([]);
+  });
+
   it("reports no pending changes for an unchanged map", () => {
     const result = reviewMapDraft({
       original: { locations: [location()], nodes: [node(), node({ id: "node-2" })], pathways: [pathway()], buildings: [building()] },

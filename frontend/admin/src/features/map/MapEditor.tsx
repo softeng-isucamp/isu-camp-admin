@@ -3580,7 +3580,7 @@ export function MapEditor() {
             onSelect={handleNetworkBrowserSelection}
             onDismiss={() => setNetworkBrowserOpen(false)}
             onImportWalkingNetwork={beginWalkingNetworkImport}
-            className={mode === "path" ? "opacity-0 pointer-events-none" : ""}
+            className=""
           />
         )}
 
@@ -3657,7 +3657,7 @@ export function MapEditor() {
           </div>
         )}
 
-        <div className="absolute top-4 left-4 z-[900] bg-white/95 backdrop-blur-md p-1.5 rounded-full shadow-lg border border-[#e1e3e4] flex items-center gap-1">
+        <div className="map-glass-panel absolute left-4 top-4 z-[900] flex items-center gap-1 rounded-full p-1.5">
           <button
             type="button"
             className={`tool flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition ${basemap === "street" ? "active bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
@@ -3698,7 +3698,7 @@ export function MapEditor() {
           />
         )}
 
-        <div className={`${mode === "local_feature" ? "hidden " : ""}absolute top-4 right-4 z-[900] w-72 bg-white/95 backdrop-blur-md p-2 rounded-[20px] shadow-lg border border-[#e1e3e4]`}>
+        <div className={`${mode === "local_feature" ? "hidden " : ""}map-glass-panel absolute right-4 top-4 z-[900] w-72 rounded-[20px] p-2`}>
           <div className="relative flex items-center">
             <svg className="w-4 h-4 absolute left-3 text-[#3f4941]/60 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -3778,7 +3778,7 @@ export function MapEditor() {
             || activePathway?.status === "Closed"
             || (!activePathway && currentPathways.some((pathway) => pathway.status !== "Open"))
           )) && (
-          <aside className="absolute top-20 right-4 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto bg-white/98 backdrop-blur-md p-5 rounded-[28px] shadow-2xl border border-[#e1e3e4]">
+          <aside className="map-glass-panel absolute right-4 top-20 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto rounded-[28px] p-5">
             {error && (
               <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
                 {error}
@@ -4415,7 +4415,7 @@ export function MapEditor() {
           <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
         )}
 
-        <div className="absolute bottom-4 left-4 z-[900] bg-white/95 backdrop-blur-md p-4 rounded-[24px] shadow-lg border border-[#e1e3e4] w-52 pointer-events-auto">
+        <div className="map-glass-panel absolute bottom-4 left-4 z-[900] w-52 rounded-[24px] p-4 pointer-events-auto">
           <div className="flex items-center justify-between text-xs font-extrabold text-[#191c1d] mb-2">
             <span>Map Legend</span>
             <svg className="w-4 h-4 text-[#3f4941]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

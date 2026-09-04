@@ -63,7 +63,7 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
 
   return (
     <aside
-      className="inspector-card-hud"
+      className="inspector-card-hud map-glass-panel"
       aria-label={`${object.title} object details`}
     >
       <header className="inspector-card-header">

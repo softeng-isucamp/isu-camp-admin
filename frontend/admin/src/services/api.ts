@@ -13,6 +13,7 @@ import type {
   Session,
   UserAccount,
 } from "../types";
+import { normalizePathwayWayType } from "../types";
 import { z } from "zod";
 export { createLocationsBulkImportTemplate, locationsBulkImportDescription } from "./locationImport";
 import type { LocationImportRequest } from "./locationImport";
@@ -229,6 +230,14 @@ const mapLocations = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations :
 const mapBuildings = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings;
 const mapNodes = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes;
 const mapPathways = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways;
+const normalizeMapPathway = (pathway: Pathway): Pathway => {
+  const normalizedType = normalizePathwayWayType(pathway.type);
+  return {
+    ...pathway,
+    type: normalizedType === "Unknown" ? "Walkway" : normalizedType,
+    allowedModes: normalizedType === "Walkway" ? ["Walking"] : pathway.allowedModes,
+  };
+};
 const canonicalNetwork = createCanonicalNetworkStore(
   USE_GENERATED_MAP_FIXTURE
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
@@ -1242,8 +1251,8 @@ export const services: Services = {
 
 
     pathways: async () => USE_HTTP_API
-      ? apiJson<Pathway[]>("/api/map/pathways")
-      : wait(clone(mapPathways)),
+      ? apiJson<Pathway[]>("/api/map/pathways").then((items) => items.map(normalizeMapPathway))
+      : wait(clone(mapPathways).map(normalizeMapPathway)),
 
 
     save: async (edit) => {

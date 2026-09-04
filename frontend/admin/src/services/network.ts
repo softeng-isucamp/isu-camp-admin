@@ -1,5 +1,5 @@
 import type { Building as LegacyBuilding, Pathway as LegacyPathway, RouteNode as LegacyRouteNode } from "../types";
-import { normalizePathwayLifecycleStatus, normalizePathwayWayType, PATHWAY_WAY_TYPES, type AllowedMode } from "../types";
+import { normalizePathwayLifecycleStatus, normalizePathwayWayType, PATHWAY_WAY_TYPES } from "../types";
 import { geometryOnCampus, type MapPoint } from "../features/map/campusBoundary";
 
 export type NetworkStatus = "active" | "inactive";
@@ -133,8 +133,9 @@ export const validatePathway = (
   if (pathway.direction !== "two_way" && pathway.direction !== "one_way") throw new Error("Pathway direction must be two_way or one_way.");
   if (pathway.status !== "active" && pathway.status !== "closed") throw new Error("Pathway lifecycle status must be active or closed.");
   if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error("At least one valid Allowed mode is required.");
+  if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error("Walkways cannot allow Vehicle mode.");
   if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) {
-    throw new Error("Pathway Way type must use the fixed vocabulary: Walkway, Road, Ramp, Stairs, or Service path.");
+    throw new Error("Pathway Way type must use the fixed vocabulary: Walkway or Road.");
   }
   const source = snapshot.routeNodes.find((node) => node.id === pathway.sourceNodeId);
   const destination = snapshot.routeNodes.find((node) => node.id === pathway.destinationNodeId);
@@ -228,9 +229,7 @@ export const normalizePathway = (value: LegacyPathway): Pathway => ({
   shade: value.shade === "Unknown" ? null : value.shade,
   direction: value.direction === "Two-way" ? "two_way" : value.direction === "One-way" ? "one_way" : null,
   status: normalizePathwayLifecycleStatus(value.status) === "Active" ? "active" : "closed",
-  allowedModes: (value.allowedModes ?? ["Walking"])
-    .filter((mode): mode is AllowedMode => mode === "Walking" || mode === "Vehicle")
-    .map((mode) => mode === "Walking" ? "walking" : "vehicle"),
+  allowedModes: normalizeAllowedModes(value.type, value.allowedModes),
 });
 
 export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
@@ -251,6 +250,7 @@ export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
     if (!pathway.direction) throw new Error(`Pathway ${pathway.id} must have a direction.`);
     if (pathway.status !== "active" && pathway.status !== "closed") throw new Error(`Pathway ${pathway.id} must have an active or closed lifecycle status.`);
     if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error(`Pathway ${pathway.id} must allow at least one valid travel mode.`);
+    if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error(`Pathway ${pathway.id} cannot allow Vehicle mode because it is a Walkway.`);
     if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) throw new Error(`Pathway ${pathway.id} has an unsupported Way type.`);
     if (!nodeIds.has(pathway.sourceNodeId) || !nodeIds.has(pathway.destinationNodeId)) throw new Error(`Pathway ${pathway.id} references a missing Route Node.`);
     if (pathway.sourceNodeId === pathway.destinationNodeId) throw new Error(`Pathway endpoints must be distinct.`);
@@ -273,6 +273,12 @@ export type LegacyNetworkData = {
 
 const NETWORK_KEY = "isucamp_canonical_network";
 const copy = <T>(value: T): T => structuredClone(value);
+const normalizeAllowedModes = (type: string | null | undefined, modes: readonly string[] | undefined): TravelMode[] => {
+  const normalizedModes = (modes ?? ["walking"])
+    .map((mode) => mode.toLowerCase() === "vehicle" ? "vehicle" : mode.toLowerCase() === "walking" ? "walking" : null)
+    .filter((mode): mode is TravelMode => mode !== null);
+  return normalizePathwayWayType(type ?? undefined) === "Walkway" ? ["walking"] : normalizedModes.length ? [...new Set(normalizedModes)] : ["walking"];
+};
 
 export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: Storage | null) => {
   let snapshot = (() => {
@@ -286,7 +292,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
               ...pathway,
               type: normalizePathwayWayType(pathway.type ?? undefined) === "Unknown" ? "Walkway" : normalizePathwayWayType(pathway.type ?? undefined),
               status: normalizePathwayLifecycleStatus(pathway.status) === "Active" ? "active" : "closed",
-              allowedModes: (pathway.allowedModes ?? ["walking"]).map((mode) => String(mode).toLowerCase() === "vehicle" ? "vehicle" : "walking"),
+              allowedModes: normalizeAllowedModes(pathway.type, pathway.allowedModes),
             })),
           };
           validateNetworkSnapshot(normalized);
@@ -307,7 +313,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
         ...pathway,
         type: normalizePathwayWayType(pathway.type ?? undefined) === "Unknown" ? "Walkway" : pathway.type,
         direction: pathway.direction ?? "two_way",
-        allowedModes: pathway.allowedModes?.length ? pathway.allowedModes : ["walking"],
+        allowedModes: normalizeAllowedModes(pathway.type, pathway.allowedModes),
       })),
     };
     // Keep the local contract useful when the seed predates explicit entrance
@@ -367,7 +373,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
       ...pathway,
       id: pathway.id ?? `pathway-${Date.now()}`,
       type: normalizedType === "Unknown" ? pathway.type : normalizedType,
-      allowedModes: pathway.allowedModes?.length ? pathway.allowedModes : ["walking"],
+      allowedModes: normalizeAllowedModes(pathway.type, pathway.allowedModes),
     };
     validatePathway(next, current, { ...options, existingPathwayId: next.id });
     const index = current.pathways.findIndex((candidate) => candidate.id === next.id);

@@ -19,10 +19,10 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     id: "point",
-    label: "Point Location",
+    label: "Route Node",
     icon: "●",
-    instruction: "Place a point on the campus map",
-    detail: "Choose a record, then click the map to preview its position.",
+    instruction: "Place a Route Node on the campus map",
+    detail: "Choose the node type and required metadata, then apply the draft.",
   },
   {
     id: "polygon",
@@ -49,11 +49,9 @@ type ToolRailDockProps = {
   onSelectTool: (toolType: ToolType) => void;
   suspendedDrafts: ActiveToolDraft[];
   onResumeDraft: (draftId: string) => void;
-  showGuidance?: boolean;
-  onImportWalkingNetwork?: () => void;
 };
 
-export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResumeDraft, showGuidance = true, onImportWalkingNetwork }: ToolRailDockProps) {
+export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResumeDraft }: ToolRailDockProps) {
   const [minimized, setMinimized] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
   const activeDefinition = getToolDefinition(activeTool);
@@ -67,7 +65,7 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
             aria-label="Expand map command dock"
             aria-expanded="false"
             onClick={() => setMinimized(false)}
-            className="flex items-center gap-2 rounded-full border border-[#e1e3e4] bg-white/95 p-1.5 pr-3 text-[#3f4941] shadow-lg backdrop-blur-md"
+            className="map-glass-panel flex items-center gap-2 rounded-full p-1.5 pr-3 text-[#3f4941]"
           >
             <span className={`grid h-8 w-8 place-items-center rounded-full text-base ${activeTool === "select" ? "bg-[#edf3ef] text-[#005931]" : "bg-[#005931] text-white"}`} aria-hidden="true">
               {activeDefinition.icon}
@@ -76,7 +74,7 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
             <span aria-hidden="true">›</span>
           </button>
         ) : (
-          <div role="toolbar" aria-label="Map command dock" className="flex items-center gap-1 overflow-x-auto rounded-full border border-[#e1e3e4] bg-white/95 p-1.5 shadow-lg backdrop-blur-md">
+          <div role="toolbar" aria-label="Map command dock" className="map-glass-panel flex items-center gap-1 overflow-x-auto rounded-full p-1.5">
             {toolDefinitions.map((tool) => {
               const active = activeTool === tool.id;
               return (
@@ -106,25 +104,6 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
           </div>
         )}
       </div>
-
-      {activeTool !== "select" && showGuidance && (
-        <div
-          role="status"
-          aria-label={`${activeDefinition.label} guidance`}
-          className="absolute left-1/2 top-32 z-[901] flex w-[min(620px,calc(100%-2rem))] -translate-x-1/2 items-center justify-between gap-4 rounded-2xl border border-[#005931]/20 bg-[#083f2d]/95 px-5 py-3 text-white shadow-2xl backdrop-blur"
-        >
-          <div className="min-w-0">
-            <strong className="block text-sm">{activeDefinition.instruction}</strong>
-            <span className="block text-[11px] text-white/75">{activeDefinition.detail}</span>
-          </div>
-          {onImportWalkingNetwork && (
-            <button type="button" onClick={onImportWalkingNetwork} className="shrink-0 rounded-full border border-white/40 px-3 py-1.5 text-[11px] font-extrabold text-white hover:bg-white/15">
-              Import Walking Network
-            </button>
-          )}
-          <kbd className="shrink-0 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold">Esc · Cancel</kbd>
-        </div>
-      )}
 
       {suspendedDrafts.length > 0 && (
         <button

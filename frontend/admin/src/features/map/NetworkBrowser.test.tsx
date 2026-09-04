@@ -18,6 +18,7 @@ describe("NetworkBrowser", () => {
     const onSelect = vi.fn();
     render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[{ id: "building-library", name: "Library", code: "LIB", points: [] }]} selected={null} onSelect={onSelect} onDismiss={vi.fn()} />);
 
+    expect(screen.getByRole("complementary", { name: "Walking Network browser" })).toHaveClass("map-glass-panel");
     expect(screen.getByRole("status", { name: "Pathway results" })).toHaveTextContent("2 Pathways");
     fireEvent.change(screen.getByLabelText("Shade"), { target: { value: "Mostly Shaded" } });
     expect(screen.getByRole("button", { name: /Library Walk/ })).toBeInTheDocument();
