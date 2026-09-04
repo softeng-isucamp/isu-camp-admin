@@ -9,6 +9,25 @@ export type LocationType =
 export type RecordStatus = "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
 export type Shade =
   "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded" | "Unknown";
+export const PATHWAY_WAY_TYPES = ["Walkway", "Road", "Ramp", "Stairs", "Service path"] as const;
+export type PathwayType = typeof PATHWAY_WAY_TYPES[number];
+export const PATHWAY_ALLOWED_MODES = ["Walking", "Vehicle"] as const;
+export type AllowedMode = typeof PATHWAY_ALLOWED_MODES[number];
+export type PathwayLifecycleStatus = "Active" | "Closed" | "Open" | "Unknown";
+
+/** Normalize compatibility values at the application boundary. */
+export const normalizePathwayLifecycleStatus = (status: string | undefined): PathwayLifecycleStatus =>
+  status === "Open" || status === "open" || status === "Active" || status === "active" ? "Active" : status === "Closed" || status === "closed" ? "Closed" : "Unknown";
+
+/** Convert historical labels into the controlled Way type vocabulary. */
+export const normalizePathwayWayType = (type: string | undefined): PathwayType | "Unknown" => {
+  const normalized = type?.trim().toLowerCase() ?? "";
+  const fixedType = PATHWAY_WAY_TYPES.find((candidate) => candidate.toLowerCase() === normalized);
+  if (fixedType) return fixedType;
+  if (/^(campus )?walkway$|^pedestrian path$|^walk$|^path$/.test(normalized)) return "Walkway";
+  if (/^service road$/.test(normalized)) return "Service path";
+  return "Unknown";
+};
 export interface SourceProvenance {
   provider: string;
   sourceType: string;
@@ -74,9 +93,11 @@ export interface Pathway {
   distance: string;
   time: string;
   shade: Shade;
-  type: string;
+  type: PathwayType | string;
   direction: "Two-way" | "One-way" | "Unknown";
-  status: "Open" | "Closed" | "Unknown";
+  status: PathwayLifecycleStatus;
+  /** Independent travel-mode permissions for the shared routing graph. */
+  allowedModes?: AllowedMode[];
   pathPoints: [number, number][];
   sourceOsmNodeIds?: number[];
   sourceWayId?: number;

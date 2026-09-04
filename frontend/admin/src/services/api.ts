@@ -1,5 +1,6 @@
 import type {
   AuditEntry,
+  Building,
   DashboardSummary,
   Location,
   LocationDraft,
@@ -37,7 +38,93 @@ import { createLocalAdapter } from "./localAdapter";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
-import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult } from "./mapEditorApiClient";
+import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult, type WorkingOperation } from "./mapEditorApiClient";
+
+const flattenWorkingOperations = (operations: WorkingOperation[]): WorkingOperation[] => operations.flatMap((operation) =>
+  operation.type === "compound_batch" && operation.nestedOperations
+    ? flattenWorkingOperations(operation.nestedOperations)
+    : [operation],
+);
+
+type LegacyMapReadCollections = {
+  locations: Location[];
+  buildings: Building[];
+  nodes: RouteNode[];
+  pathways: Pathway[];
+};
+
+const mirrorMapEditorOperationsToLegacyReads = (
+  operations: WorkingOperation[],
+  collectionSets: LegacyMapReadCollections[] = [{ locations, buildings, nodes: routeNodes, pathways }],
+) => {
+  const flatOperations = flattenWorkingOperations(operations);
+  const findOperation = (predicate: (operation: WorkingOperation) => boolean) => flatOperations.find(predicate);
+
+  for (const collections of collectionSets) {
+    const { locations: legacyLocations, buildings: legacyBuildings, nodes: legacyNodes, pathways: legacyPathways } = collections;
+    const upsert = <T extends { id: string }>(collection: T[], value: T) => {
+      const index = collection.findIndex((item) => item.id === value.id);
+      if (index === -1) collection.push(value);
+      else collection[index] = { ...collection[index], ...value };
+    };
+
+    for (const operation of flatOperations) {
+      const after = operation.after;
+      if (!after) continue;
+
+      if (operation.domain === "Locations") {
+        const location = after as unknown as Location;
+        if (operation.type === "create_entity" || operation.type === "update_properties" || operation.type === "update_geometry" || operation.type === "restore_entity" || operation.type === "retire_entity") {
+          upsert(legacyLocations, location);
+          if (location.type === "Building" || location.type === "Facility") {
+            const link = findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "link_feature" && candidate.after?.targetEntityId === location.id);
+            const featureId = typeof link?.after?.featureId === "string" ? link.after.featureId : undefined;
+            const feature = featureId
+              ? findOperation((candidate) => candidate.entityId === featureId)
+              : findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "create_entity" && candidate.after?.linkedBuildingId === location.id);
+            const previousBuilding = legacyBuildings.find((candidate) => candidate.id === location.id);
+            const points = Array.isArray(feature?.after?.coordinates)
+              ? feature.after.coordinates as [number, number][]
+              : previousBuilding?.points ?? [];
+            upsert(legacyBuildings, {
+              id: location.id,
+              name: location.name,
+              code: location.code,
+              points,
+              status: location.status,
+              type: location.type,
+            });
+          }
+        }
+        continue;
+      }
+
+      if (operation.domain === "Walking Network") {
+        if (operation.entityId.startsWith("node-") || "nodeType" in after || "associatedPlaceId" in after) {
+          upsert(legacyNodes, after as unknown as RouteNode);
+        } else if ("sourceNodeId" in after || "destinationNodeId" in after || "pathPoints" in after) {
+          upsert(legacyPathways, after as unknown as Pathway);
+        }
+        continue;
+      }
+
+      if (operation.domain === "Local Map Data" && (after.family === "building_footprint" || typeof after.linkedBuildingId === "string")) {
+        const buildingId = typeof after.linkedBuildingId === "string" ? after.linkedBuildingId : undefined;
+        const points = Array.isArray(after.coordinates) ? after.coordinates as [number, number][] : [];
+        if (buildingId) {
+          const building = legacyBuildings.find((candidate) => candidate.id === buildingId);
+          if (building) building.points = points;
+        }
+      }
+
+      if (operation.domain === "Local Map Data" && operation.type === "link_feature" && typeof after.targetEntityId === "string") {
+        const feature = findOperation((candidate) => candidate.entityId === after.featureId);
+        const building = legacyBuildings.find((candidate) => candidate.id === after.targetEntityId);
+        if (building && Array.isArray(feature?.after?.coordinates)) building.points = feature.after.coordinates as [number, number][];
+      }
+    }
+  }
+};
 
 
 // ==========================================
@@ -138,6 +225,10 @@ const localAdapter = createLocalAdapter(
     : { buildings, locations, nodes: routeNodes, pathways },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
+const mapLocations = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations : locations;
+const mapBuildings = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings;
+const mapNodes = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes;
+const mapPathways = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways;
 const canonicalNetwork = createCanonicalNetworkStore(
   USE_GENERATED_MAP_FIXTURE
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
@@ -619,6 +710,9 @@ export const services: Services = {
     },
 
     requestReset: async (username) => {
+      if (API_MODE === "local") {
+        try { return await localAdapter.auth.requestReset(username); } catch { /* fall through to the HTTP-compatible mock seam */ }
+      }
       const response = await fetch(`${API_URL}/api/reset/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -646,6 +740,9 @@ export const services: Services = {
       code,
       password
     ) => {
+      if (API_MODE === "local") {
+        try { return await localAdapter.auth.reset(username, code, password); } catch { /* fall through to the HTTP-compatible mock seam */ }
+      }
       const response = await fetch(`${API_URL}/api/reset-password`, {
         method: "POST",
         credentials: "include",
@@ -1118,7 +1215,7 @@ export const services: Services = {
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
-    : wait(clone(localAdapter.map.buildings())),
+      : wait(clone(mapBuildings)),
 
     removeBuilding: async (id) => {
       if (USE_HTTP_API) {
@@ -1127,7 +1224,8 @@ export const services: Services = {
       }
 
       failIfConfigured("buildingRemove");
-      const removed = localAdapter.map.removeBuilding(id);
+      const removed = buildings.find((item) => item.id === id);
+      if (removed) removed.status = "Inactive";
       if (removed) addAudit("Removed Building", removed.name, "Admin", removed.id);
       return wait(undefined);
     },
@@ -1135,17 +1233,17 @@ export const services: Services = {
 
     locations: async () => USE_HTTP_API
       ? apiJson<Location[]>("/api/map/locations")
-      : wait(clone(localAdapter.map.locations())),
+      : wait(clone(mapLocations)),
 
 
     nodes: async () => USE_HTTP_API
       ? apiJson<RouteNode[]>("/api/map/nodes")
-      : wait(clone(localAdapter.map.nodes())),
+      : wait(clone(mapNodes)),
 
 
     pathways: async () => USE_HTTP_API
       ? apiJson<Pathway[]>("/api/map/pathways")
-      : wait(clone(localAdapter.map.pathways())),
+      : wait(clone(mapPathways)),
 
 
     save: async (edit) => {
@@ -1398,9 +1496,9 @@ export const services: Services = {
         });
       }
 
-      // Keep the legacy-shaped Map Editor payload and the canonical network
-      // store in sync. Routes and Map Editor share these records, so a draft
-      // saved by one module must be visible to the other module immediately.
+      // Keep the legacy-shaped Map Editor payload and the canonical Walking
+      // Network store in sync so a draft saved by Map Editor is immediately
+      // visible through the shared network seam.
       const canonical = canonicalNetwork.snapshot();
       const mergeById = <T extends { id: string }>(original: T[], changed: T[]) => {
         const changes = new Map(changed.map((item) => [item.id, item]));
@@ -1411,7 +1509,7 @@ export const services: Services = {
       const changedNodes = (edit?.nodes ?? []).map(normalizeRouteNode);
       const toCanonicalPathway = (pathway: Pathway): NetworkPathway => {
         const normalized = normalizePathway(pathway);
-        return { ...normalized, type: normalized.type ?? "Campus walkway", direction: normalized.direction ?? "two_way" };
+        return { ...normalized, type: normalized.type ?? "Walkway", direction: normalized.direction ?? "two_way", allowedModes: normalized.allowedModes?.length ? normalized.allowedModes : ["walking"] };
       };
       const changedPathways: NetworkPathway[] = (edit?.pathways ?? []).map(toCanonicalPathway);
       const changedBuildings = (edit?.buildings ?? []).map((building) => normalizeBuilding(building));
@@ -1437,8 +1535,9 @@ export const services: Services = {
           routeNodes: mergeById(canonical.routeNodes, changedNodes),
           pathways: mergeById(canonical.pathways, changedPathways).map((pathway) => ({
             ...pathway,
-            type: pathway.type ?? "Campus walkway",
+            type: pathway.type ?? "Walkway",
             direction: pathway.direction ?? "two_way",
+            allowedModes: pathway.allowedModes?.length ? pathway.allowedModes : ["walking"],
           })),
           buildings: mergeById(canonical.buildings, changedBuildings),
         });
@@ -1455,49 +1554,15 @@ export const services: Services = {
     saveDraft: async (command) => {
       const result = await mapEditorApiClient.saveDraft(command);
       if (result.success && !USE_HTTP_API) {
-        const flatOps = command.operations.flatMap((op) =>
-          op.type === "compound_batch" && op.nestedOperations ? op.nestedOperations : [op]
-        );
-        for (const op of flatOps) {
-          if (op.domain === "Locations" && op.type === "create_entity" && op.after) {
-            const loc = op.after as unknown as Location;
-            if (!locations.some((item) => item.id === loc.id)) {
-              locations.push(loc);
-            }
-            if (loc.type === "Building" && !buildings.some((item) => item.id === loc.id)) {
-              const linkOp = flatOps.find(
-                (other) =>
-                  other.domain === "Local Map Data" &&
-                  other.type === "link_feature" &&
-                  (other.after as Record<string, unknown>)?.targetEntityId === loc.id
-              );
-              const featId = (linkOp?.after as Record<string, unknown>)?.featureId;
-              const featOp = featId
-                ? flatOps.find((other) => other.entityId === featId)
-                : flatOps.find(
-                    (other) =>
-                      other.domain === "Local Map Data" &&
-                      other.type === "create_entity" &&
-                      (other.after as Record<string, unknown>)?.linkedBuildingId === loc.id
-                  );
-              const footprintPoints = ((featOp?.after as Record<string, unknown>)?.coordinates as [number, number][]) ?? [];
-              buildings.push({
-                id: loc.id,
-                name: loc.name,
-                code: loc.code,
-                points: footprintPoints,
-                status: loc.status ?? "Active",
-              });
-            }
-          } else if (op.domain === "Local Map Data" && op.type === "link_feature" && op.after) {
-            const link = op.after as unknown as { featureId: string; targetEntityId: string };
-            const featOp = flatOps.find((other) => other.entityId === link.featureId);
-            const targetBuilding = buildings.find((b) => b.id === link.targetEntityId);
-            if (targetBuilding && featOp?.after) {
-              targetBuilding.points = ((featOp.after as Record<string, unknown>).coordinates as [number, number][]) ?? [];
-            }
-          }
-        }
+        mirrorMapEditorOperationsToLegacyReads(command.operations, [
+          { locations, buildings, nodes: routeNodes, pathways },
+          {
+            locations,
+            buildings,
+            nodes: routeNodes,
+            pathways,
+          },
+        ]);
       }
       return result;
     },
@@ -1544,7 +1609,7 @@ export const services: Services = {
 
       rows.forEach((row, index) => {
         // Give unsupported types a domain-level error even when the type is
-        // not part of the legacy schema (for example, Outdoor Point Location).
+        // not part of the legacy schema.
         const importedType = row && typeof row === "object" && "type" in row
           ? (row as { type?: unknown }).type
           : undefined;

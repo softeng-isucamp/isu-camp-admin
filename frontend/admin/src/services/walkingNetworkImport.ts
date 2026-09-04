@@ -1,6 +1,7 @@
 import type { WorkingOperation } from "../features/map/types";
 import type { NetworkSnapshot, Pathway, RouteNode } from "./network";
 import { validatePathway } from "./network";
+import { normalizePathwayWayType } from "../types";
 import type { MapPoint } from "../features/map/campusBoundary";
 
 export type ImportFindingSeverity = "blocking" | "advisory";
@@ -66,16 +67,22 @@ function parsePathway(record: Record<string, unknown>): Pathway | null {
   const points = rawPoints.map(coordinate);
   if (points.some((point) => !point)) return null;
   const direction = record.direction === "One-way" || record.direction === "one_way" ? "one_way" : record.direction === "Two-way" || record.direction === "two_way" ? "two_way" : null;
-  const status = record.status === "Closed" || record.status === "closed" ? "closed" : record.status === "Open" || record.status === "open" ? "open" : null;
+  const status = record.status === "Closed" || record.status === "closed" ? "closed" : record.status === "Active" || record.status === "active" || record.status === "Open" || record.status === "open" ? "active" : null;
+  const rawAllowedModes = Array.isArray(record.allowedModes) ? record.allowedModes : ["Walking"];
+  const allowedModes = rawAllowedModes
+    .filter((mode): mode is string => typeof mode === "string")
+    .map((mode) => mode.toLowerCase())
+    .filter((mode): mode is "walking" | "vehicle" => mode === "walking" || mode === "vehicle");
   return {
     id, name, sourceNodeId, destinationNodeId,
     pathSequence: { points: points.map((point) => point!) },
     distanceMeters: typeof record.distanceMeters === "number" ? record.distanceMeters : null,
     estimatedTimeSeconds: typeof record.estimatedTimeSeconds === "number" ? record.estimatedTimeSeconds : null,
-    type: text(record.type),
+    type: normalizePathwayWayType(text(record.type) ?? undefined),
     shade: text(record.shade),
     direction,
     status: status ?? "closed",
+    allowedModes,
   };
 }
 
@@ -138,7 +145,7 @@ export function previewWalkingNetworkImport(json: string, snapshot: NetworkSnaps
         return;
       }
     } else {
-      try { validatePathway(entity, working, { campusBoundary }); if (!record.status || !["open", "closed", "Open", "Closed"].includes(String(record.status))) throw new Error("Pathway lifecycle status is required."); } catch (error) { findings.push({ severity: "blocking", row, entityId: entity.id, message: error instanceof Error ? error.message : "Invalid Pathway." }); return; }
+      try { validatePathway(entity, working, { campusBoundary }); if (!record.status || !["active", "closed", "open", "Active", "Closed", "Open"].includes(String(record.status))) throw new Error("Pathway lifecycle status is required."); } catch (error) { findings.push({ severity: "blocking", row, entityId: entity.id, message: error instanceof Error ? error.message : "Invalid Pathway." }); return; }
       if (!entity.shade || entity.distanceMeters == null || entity.estimatedTimeSeconds == null) findings.push({ severity: "advisory", row, entityId: entity.id, message: "Pathway quality metadata is incomplete; review before importing." });
       importedPathways.push(entity); working.pathways.push(entity);
     }

@@ -1,4 +1,5 @@
 import fixture from "./generated-map-fixture.json";
+import { normalizePathwayWayType } from "../types";
 import type { Building, Location, Pathway, RouteNode } from "../types";
 
 type GeneratedFixture = typeof fixture;
@@ -48,9 +49,10 @@ const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]
   distance: value.distance,
   time: value.time,
   shade: value.shade as Pathway["shade"],
-  type: value.type,
-  direction: value.direction as Pathway["direction"],
-  status: value.status as Pathway["status"],
+  type: normalizePathwayWayType(value.type) === "Unknown" ? "Walkway" : normalizePathwayWayType(value.type),
+  direction: value.direction === "One-way" ? "One-way" : "Two-way",
+  status: value.status === "Closed" ? "Closed" : "Active",
+  allowedModes: ["Walking"],
 });
 
 export const generatedMapFixture = {
