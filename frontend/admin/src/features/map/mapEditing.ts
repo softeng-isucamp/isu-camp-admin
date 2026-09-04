@@ -274,7 +274,8 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Location code is required.");
     if (!object.type) addError(reference, "Location type is required.");
     if (!object.status) addError(reference, "Location status is required.");
-    const hasAuthoritativeFootprint = object.type === "Building" && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
+    const hasAuthoritativeFootprint = (object.type === "Building" || object.type === "Facility")
+      && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
     const locationEvaluation = locationPolicy.evaluate(object, {
       context: hasAuthoritativeFootprint ? "record" : "map-readiness",
       directory: current.locations,
@@ -293,7 +294,13 @@ export function reviewMapDraft(input: {
     validateRouteNodeDraft(object, {
       buildings: current.buildings,
       locations: current.locations,
+      campusBoundary,
     }).forEach((issue) => {
+      const unchangedLegacyPosition = issue.field === "coordinate"
+        && previous
+        && previous.lat === object.lat
+        && previous.lng === object.lng;
+      if (unchangedLegacyPosition) return;
       // Preserve reviewability of unchanged imported legacy associations; any
       // new or edited association must satisfy the canonical Building rule.
       const unchangedLegacyAssociation = issue.field === "association"

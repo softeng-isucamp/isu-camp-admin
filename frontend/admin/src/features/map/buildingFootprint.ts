@@ -14,6 +14,7 @@ import {
 export interface BuildingIdentityInput {
   name: string;
   code: string;
+  type?: "Building" | "Facility";
   function?: string;
   keywords?: string;
   status?: RecordStatus;
@@ -240,12 +241,13 @@ export function buildCreateBuildingCompoundOperation(
     id: buildingId,
     name: input.name.trim(),
     code: input.code.trim(),
-    type: "Building",
+    type: input.type ?? "Building",
     parentId: null,
     status: input.status ?? "Active",
     lat: null,
     lng: null,
     positioned: false,
+    spatialRole: "building_footprint_owner",
     function: input.function?.trim() || undefined,
     keywords: input.keywords?.trim() || undefined,
   };
