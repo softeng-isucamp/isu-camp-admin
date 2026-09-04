@@ -9,33 +9,30 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/dashboard/);
 }
 
-test("administrator can hand a Pathway from Routes & Paths to Map Editor", async ({ page }) => {
-  await signIn(page);
-  await page.goto("/routes");
-
-  const firstRow = page.locator("tbody tr").first();
-  await expect(firstRow).toBeVisible();
-  const pathwayName = (await firstRow.locator("strong").first().textContent())?.trim();
-  expect(pathwayName).toBeTruthy();
-  await firstRow.click();
-  await page.getByRole("button", { name: "Open in Map Editor" }).click();
-
-  await expect(page).toHaveURL(/\/map-editor\?pathway=/);
-  await expect(page.getByText("SELECTED CONNECTION")).toBeVisible();
-  await expect(page.getByRole("heading", { name: pathwayName!, exact: true })).toBeVisible();
-});
-
-test("Routes & Paths and Map Editor remain usable at a narrow viewport", async ({ page }) => {
+test("Map Editor remains usable at a narrow viewport", async ({ page }) => {
   await signIn(page);
   await page.setViewportSize({ width: 390, height: 844 });
-
-  await page.goto("/routes");
-  await expect(page.getByRole("heading", { name: "Manage Routes & Paths" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /add route/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /import/i })).toBeVisible();
 
   await page.goto("/map-editor");
   await expect(page.getByRole("heading", { name: "Interactive Map Editor" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Preview Map" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save Changes" })).toBeVisible();
+});
+
+test("Locations keeps outdoor creation guidance passive", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/locations");
+
+  await expect(page.getByText("Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Building in Map Editor" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create Outdoor Point Location in Map Editor" })).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\?create=/);
+});
+
+test("the removed Routes & Paths URL remains unavailable without a redirect", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/routes");
+  await expect(page).toHaveURL(/\/routes$/);
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  await expect(page.getByText("Routes & Paths", { exact: true })).toHaveCount(0);
 });

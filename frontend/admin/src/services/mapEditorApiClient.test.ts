@@ -262,15 +262,17 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
 
   describe("saveDraft", () => {
     it("successfully applies operations, increments version, and updates layers", async () => {
-      const newOutdoorLocation: OutdoorLocationEntity = {
+      const newOutdoorLocation: OutdoorLocationEntity & { spatialRole: "building_footprint_owner" } = {
         id: "loc-outdoor-new",
         name: "New Student Plaza",
         code: "PLAZA-01",
         type: "Facility",
         status: "Active",
-        lat: 16.722,
-        lng: 121.691,
-        positioned: true,
+        parentId: null,
+        lat: null,
+        lng: null,
+        positioned: false,
+        spatialRole: "building_footprint_owner",
       };
 
       const operations: WorkingOperation[] = [
@@ -285,7 +287,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         {
           id: "op-update-node-1",
           type: "update_geometry",
-          domain: "Routes & Paths",
+          domain: "Walking Network",
           entityId: "node-junc-02",
           before: { lat: 16.7215, lng: 121.6895 },
           after: { lat: 16.7218, lng: 121.6898 },
@@ -302,7 +304,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
       // Verify layer state was updated
       const bootstrap = await adapter.getMapEditorBootstrap("proj-echague");
       expect(bootstrap.adminDraft.draftVersion).toBe(2);
-      expect(bootstrap.layers.outdoorLocations.some((l) => l.id === "loc-outdoor-new")).toBe(true);
+      expect(bootstrap.layers.buildings.some((l) => l.id === "loc-outdoor-new")).toBe(true);
       const updatedNode = bootstrap.layers.routeNodes.find((n) => n.id === "node-junc-02");
       expect(updatedNode?.lat).toBe(16.7218);
       expect(updatedNode?.lng).toBe(121.6898);
@@ -401,7 +403,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         {
           id: "op-stale-node",
           type: "update_geometry",
-          domain: "Routes & Paths",
+          domain: "Walking Network",
           entityId: "node-ent-01",
           before: { lat: 16.7205, lng: 121.6885 }, // Diverged from server's 16.721, 121.689
           after: { lat: 16.722, lng: 121.69 },
@@ -465,6 +467,112 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
         expect(errRes.message).toContain("Self-intersecting polygon");
       }
     });
+
+    it("is idempotent for an accepted request and rejects an unowned update atomically", async () => {
+      const operation: WorkingOperation = {
+        id: "op-idempotent",
+        type: "update_geometry",
+        domain: "Walking Network",
+        entityId: "node-ent-01",
+        before: { lat: 16.721, lng: 121.689 },
+        after: { lat: 16.7212, lng: 121.6892 },
+      };
+      const command = { projectId: "proj-echague", baseDraftVersion: 1, requestId: "request-1", operations: [operation] };
+      const first = await adapter.saveDraft(command);
+      const second = await adapter.saveDraft(command);
+      expect(first).toEqual(second);
+      expect((await adapter.getMapEditorBootstrap("proj-echague")).adminDraft.draftVersion).toBe(2);
+
+      const rejected = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 2,
+        requestId: "request-2",
+        operations: [{ ...operation, id: "op-unowned", entityId: "missing-node" }],
+      });
+      expect(rejected).toMatchObject({ success: false, errorType: "FIELD_VALIDATION_ERROR" });
+      expect((await adapter.getMapEditorBootstrap("proj-echague")).adminDraft.draftVersion).toBe(2);
+    });
+
+    it("applies a canonical Building create once and keeps it out of outdoor locations", async () => {
+      const result = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 1,
+        requestId: "request-building-once",
+        operations: [{
+          id: "op-create-building-once",
+          type: "create_entity",
+          domain: "Locations",
+          entityId: "bld-new-once",
+          before: null,
+          after: {
+            id: "bld-new-once",
+            name: "New Building",
+            code: "NEW-BLDG",
+            type: "Building",
+            status: "Active",
+            parentId: null,
+            lat: null,
+            lng: null,
+            positioned: false,
+            spatialRole: "building_footprint_owner",
+          },
+        }],
+      });
+
+      expect(result.success).toBe(true);
+      const layers = await adapter.getMapEditorBootstrap("proj-echague");
+      expect(layers.layers.buildings.filter((building) => building.id === "bld-new-once")).toHaveLength(1);
+      expect(layers.layers.outdoorLocations.some((location) => location.id === "bld-new-once")).toBe(false);
+    });
+
+    it("does not partially apply a compound command when a later nested operation fails", async () => {
+      const result = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 1,
+        requestId: "request-atomic-validation",
+        operations: [{
+          id: "op-atomic-validation",
+          type: "compound_batch",
+          domain: "Locations",
+          entityId: "loc-atomic-validation",
+          before: null,
+          after: null,
+          nestedOperations: [
+            {
+              id: "op-create-before-failure",
+              type: "create_entity",
+              domain: "Locations",
+              entityId: "loc-created-before-failure",
+              before: null,
+              after: {
+                id: "loc-created-before-failure",
+                name: "Should Not Persist",
+                code: "NO-PERSIST",
+                type: "Facility",
+                status: "Active",
+                parentId: null,
+                lat: 16.72,
+                lng: 121.69,
+                positioned: true,
+              },
+            },
+            {
+              id: "op-update-missing-after-create",
+              type: "update_properties",
+              domain: "Locations",
+              entityId: "missing-location",
+              before: { name: "Missing" },
+              after: { name: "Still Missing" },
+            },
+          ],
+        }],
+      });
+
+      expect(result).toMatchObject({ success: false, errorType: "FIELD_VALIDATION_ERROR" });
+      const layers = await adapter.getMapEditorBootstrap("proj-echague");
+      expect(layers.layers.outdoorLocations.some((location) => location.id === "loc-created-before-failure")).toBe(false);
+      expect(layers.adminDraft.draftVersion).toBe(1);
+    });
   });
 
   describe("publishDraft and discardDraft", () => {
@@ -512,7 +620,7 @@ describe("Conflict Resolution & Session State Helpers", () => {
       {
         id: "op-1",
         type: "update_geometry",
-        domain: "Routes & Paths",
+        domain: "Walking Network",
         entityId: "node-ent-01",
         before: { lat: 16.72 },
         after: { lat: 16.721 },
@@ -539,7 +647,7 @@ describe("Conflict Resolution & Session State Helpers", () => {
     const bld = extractEntityFromLayers(layers, "Locations", "bld-eng-01");
     expect(bld?.name).toBe("Engineering Complex");
 
-    const node = extractEntityFromLayers(layers, "Routes & Paths", "node-ent-01");
+    const node = extractEntityFromLayers(layers, "Walking Network", "node-ent-01");
     expect(node?.name).toBe("Engineering Main Entrance");
 
     const feat = extractEntityFromLayers(layers, "Local Map Data", "feat-poly-bld-eng-01");
@@ -668,6 +776,12 @@ describe("HttpMapEditorApiClient", () => {
 });
 
 describe("createMapEditorApiClient factory", () => {
+  it("uses the local adapter when the dedicated test adapter is enabled", () => {
+    const client = createMapEditorApiClient();
+
+    expect(client).toBeInstanceOf(LocalMapEditorAdapter);
+  });
+
   it("creates a local adapter in local mode and http adapter in mock/real mode", () => {
     const local = createMapEditorApiClient({ mode: "local" });
     expect(local).toBeInstanceOf(LocalMapEditorAdapter);

@@ -36,7 +36,9 @@ describe("InspectorCardHUD", () => {
     const object = baseObject();
     render(<InspectorCardHUD object={object} onClose={vi.fn()} />);
 
-    expect(screen.getByRole("complementary", { name: "Engineering West Parking Lot object details" })).toBeInTheDocument();
+    const card = screen.getByRole("complementary", { name: "Engineering West Parking Lot object details" });
+    expect(card).toBeInTheDocument();
+    expect(card).toHaveClass("map-glass-panel");
     expect(screen.getByText("[Local Map Data]")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "✎ Edit Details" })).not.toBeInTheDocument();

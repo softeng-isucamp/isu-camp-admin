@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { API_MODE, createLocationsBulkImportTemplate, services, setMockFailure } from "../../services/api";
+import { API_MODE, createLocationsBulkImportTemplate, locationsBulkImportDescription, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -33,6 +33,10 @@ const blankLocation = (): LocationDraft => ({
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+type LocationsRouteState = {
+  indoorLocationParent?: Location;
+};
 
 export function Locations() {
   const queryClient = useQueryClient();
@@ -111,6 +115,7 @@ export function Locations() {
   const [validating, setValidating] = useState(false);
   const [importing, setImporting] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
+  const processedIndoorHandoffRef = useRef<string | null>(null);
   const pendingRef = useRef(false);
   pendingRef.current = saving || validating || importing || deleting;
 
@@ -194,12 +199,43 @@ export function Locations() {
     enabled: dialog === "history" && selected !== null,
   });
 
-  const allLocations = directory ?? (API_MODE === "local" ? initialLocations : []);
+  const routeState = routeLocation.state as LocationsRouteState | null;
+  const handoffParent = routeState?.indoorLocationParent;
+  const allLocations = useMemo(() => {
+    const locations = directory ?? (API_MODE === "local" ? initialLocations : []);
+    if (!handoffParent || locations.some((item) => item.id === handoffParent.id)) return locations;
+    return [...locations, handoffParent];
+  }, [directory, handoffParent]);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
     directory: allLocations,
     previous: draft,
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(routeLocation.search);
+    if (params.get("add") !== "indoor") {
+      processedIndoorHandoffRef.current = null;
+      return;
+    }
+    const parentId = params.get("parentId") ?? params.get("buildingId");
+    const handoffKey = `${parentId ?? ""}:${params.get("floor") ?? ""}`;
+    if (processedIndoorHandoffRef.current === handoffKey) return;
+    const parent = parentId ? allLocations.find((item) => item.id === parentId && item.type === "Building") : undefined;
+    if (!parent) {
+      if (allLocations.length) setError("The selected Building is unavailable for an Indoor Location handoff.");
+      return;
+    }
+    processedIndoorHandoffRef.current = handoffKey;
+    const floor = params.get("floor") ?? "";
+    setSelected(parent);
+    setDraft({ ...blankLocation(), type: "Room", parentId: parent.id, building: parent.name, floor: floor || undefined });
+    setLockedParentId(parent.id);
+    setCustomFloorMode(Boolean(floor && !standardFloorLevels.includes(floor as typeof standardFloorLevels[number])));
+    setFieldErrors([]);
+    setError("");
+    openDialog("add");
+  }, [allLocations, routeLocation.search]);
   const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
   const floors = useMemo(() => {
@@ -383,7 +419,7 @@ export function Locations() {
     setFieldErrors([]);
     const adding = dialog === "add";
     const normalized = normalizeDraft(draft);
-    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding });
+    const evaluation = locationPolicy.evaluate(normalized, { context: "record", directory: allLocations, requireFloorLevel: adding, currentId: adding ? "__new__" : selected?.id });
     const requiredIssues = [
       ["name", "Location name is required."],
       ["code", "Location code is required."],
@@ -400,6 +436,12 @@ export function Locations() {
     }
     setSaving(true);
     try {
+      // A Map Editor Building can be handed off before its directory query has
+      // refreshed. Register that local draft in the same fixture store before
+      // saving its child so the parent relationship remains valid end to end.
+      if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
+        await services.locations.save(handoffParent);
+      }
       const saved = await services.locations.save(normalized);
       await refresh();
       setDialog(null);
@@ -611,7 +653,7 @@ export function Locations() {
         <div>
           <h1 style={{ fontSize: "28px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Campus Locations</h1>
           <p style={{ color: "#525c57", marginTop: "4px", fontSize: "15px" }}>
-            Manage buildings, floors, rooms, offices, laboratories, restrooms, and facilities.
+            Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.
           </p>
         </div>
       </div>
@@ -994,7 +1036,7 @@ export function Locations() {
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative" }}>
+                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === item.id ? 50 : 0 }}>
                     {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
@@ -1009,6 +1051,7 @@ export function Locations() {
                         <div
                           className="row-action-menu"
                           role="menu"
+                          onMouseDown={(event) => event.stopPropagation()}
                           style={{
                             position: "absolute",
                             right: "20px",
@@ -1121,7 +1164,7 @@ export function Locations() {
                     {dialog === "add" ? "Add Location" : "Edit Location"}
                   </h2>
                   <p id="location-form-description" style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    Add a building, floor, room, office, laboratory, restroom, or facility.
+                    Add a Room, Office, Laboratory, or Restroom under an existing Building.
                   </p>
                 </div>
               </div>
@@ -1148,7 +1191,9 @@ export function Locations() {
               )}
               <LocationDetailsFields
                 draft={draft}
-                allowedTypes={["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(dialog === "edit" && draft.type === "Floor" ? ["Floor" as const] : [])]}
+                allowedTypes={dialog === "add"
+                  ? ["Laboratory", "Room", "Office", "Restroom"]
+                  : ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 statusEditable={API_MODE === "local"}
                 onChange={setDraft}
@@ -1192,7 +1237,7 @@ export function Locations() {
                       >
                         <option value="">None</option>
                         {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
-                        <option value="__custom__">Custom Floor Level</option>
+                        {dialog === "edit" && customFloorMode && <option value="__custom__">Custom Floor Level</option>}
                       </SelectField>
                       {customFloorMode && (
                         <Field label="CUSTOM FLOOR LEVEL" required value={draft.floor ?? ""} placeholder="Mezzanine" error={errorFor("floor")} onChange={(event) => setDraft({ ...draft, floor: event.target.value })} />
@@ -1202,17 +1247,11 @@ export function Locations() {
                 </div>
               )}
 
-              {locationPolicy.classify(draft.type).allowsOutdoorPosition ? (
-                <>
-                  <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                    <Field label="LATITUDE (OPTIONAL)" type="number" value={draft.lat ?? ""} placeholder="16.721020" onChange={(event) => setDraft(normalizeDraft({ ...draft, lat: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lng !== null }))} />
-                    <Field label="LONGITUDE (OPTIONAL)" type="number" value={draft.lng ?? ""} placeholder="121.689290" onChange={(event) => setDraft(normalizeDraft({ ...draft, lng: event.target.value === "" ? null : Number(event.target.value), positioned: event.target.value !== "" && draft.lat !== null }))} />
-                  </div>
-                  <p style={{ margin: "-8px 0 0", color: "#6b7280", fontSize: "12px" }}>Leave both blank to place this location later on the map.</p>
-                </>
-              ) : (
-                <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>Indoor Locations inherit map position and routing from their selected Building.</p>
-              )}
+              <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
+                {locationPolicy.classify(draft.type).kind === "indoor"
+                  ? "Indoor Locations inherit map position and routing from their selected Building."
+                  : "Spatial position is managed in Map Editor."}
+              </p>
 
               {/* Upload Box */}
               <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
@@ -1332,7 +1371,7 @@ export function Locations() {
                 <div>
                   <h2 id="location-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
                   <p id="location-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    Validate campus location records before importing.
+                    {locationsBulkImportDescription}
                   </p>
                 </div>
               </div>
@@ -1366,7 +1405,7 @@ export function Locations() {
                   </div>
                   <div>
                     <strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
-                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing campus location records.</p>
+                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing indoor location records.</p>
                     {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{importFileName} selected</p>}
                   </div>
                 </div>

@@ -7,7 +7,6 @@ import campusMap from "../../assets/figma/dashboard/campus-map.png";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import actionMap from "../../assets/figma/dashboard/action-map.svg";
-import actionRouting from "../../assets/figma/dashboard/action-routing.svg";
 import mapLayersIcon from "../../assets/figma/dashboard/map-layers-icon.svg";
 import mapZoomIcon from "../../assets/figma/dashboard/map-zoom-icon.svg";
 
@@ -193,16 +192,6 @@ export function Dashboard() {
                 <div>
                   <strong>Edit Campus Map</strong>
                   <small>Modify structural layouts and markers.</small>
-                </div>
-                →
-              </Link>
-              <Link to="/routes">
-                <span>
-                  <img src={actionRouting} alt="" />
-                </span>
-                <div>
-                  <strong>Configure Routing</strong>
-                  <small>Manage pedestrian pathways and shade.</small>
                 </div>
                 →
               </Link>

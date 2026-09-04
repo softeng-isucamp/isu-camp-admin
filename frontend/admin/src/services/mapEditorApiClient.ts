@@ -8,14 +8,15 @@ import type {
   Shade,
   SourceProvenance,
 } from "../types";
-import { echagueCampusBoundary } from "../features/map/campusBoundary";
+import { echagueCampusBoundary, geometryOnCampus } from "../features/map/campusBoundary";
+import { polygonIsNonDegenerate, polygonSelfIntersects, validatePathwayDraft, validateRouteNodeDraft } from "../features/map/mapEditing";
 import { buildings as mockBuildings, locations as mockLocations, routeNodes as mockRouteNodes, pathways as mockPathways } from "./mockData";
 
 // ============================================================================
 // 1. Spatial Domains & Core Operation Types
 // ============================================================================
 
-export type SpatialDomain = "Locations" | "Routes & Paths" | "Local Map Data";
+export type SpatialDomain = "Locations" | "Walking Network" | "Local Map Data";
 
 export type SpatialObjectType =
   | "building"
@@ -52,6 +53,7 @@ export interface WorkingOperation {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   nestedOperations?: WorkingOperation[];
+  description?: string;
 }
 
 export interface ActiveToolDraft {
@@ -77,6 +79,7 @@ export interface BuildingEntity {
   code: string;
   status: "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
   category?: string;
+  type?: "Building" | "Facility";
   linkedFeatureId?: string | null;
   entranceNodeIds: string[];
   source?: SourceProvenance;
@@ -92,6 +95,8 @@ export interface OutdoorLocationEntity {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  parentId?: string | null;
+  spatialRole?: "building_footprint_owner";
   photo?: Location["photo"];
   source?: SourceProvenance;
 }
@@ -121,7 +126,8 @@ export interface PathwayEntity {
   shade?: Shade;
   type: string;
   direction?: "Two-way" | "One-way" | "Unknown";
-  status: "Open" | "Closed" | "Unknown";
+  status: "Active" | "Open" | "Closed" | "Unknown";
+  allowedModes?: Array<"Walking" | "Vehicle">;
   pathPoints: [number, number][];
   surface?: string;
   wheelchair?: boolean | string;
@@ -207,6 +213,13 @@ export interface ConflictingEntityDiff {
   conflictType: string;
 }
 
+export interface SaveDraftCommand {
+  projectId: string;
+  baseDraftVersion: number;
+  requestId: string;
+  operations: WorkingOperation[];
+}
+
 export type SaveDraftResult =
   | {
       success: true;
@@ -225,6 +238,11 @@ export type SaveDraftResult =
       errorType: "FIELD_VALIDATION_ERROR" | "FEATURE_GEOMETRY_ERROR" | "TOPOLOGY_CONSTRAINT_ERROR";
       message: string;
       details?: Record<string, unknown>;
+    }
+  | {
+      success: false;
+      errorType: "SERVICE_UNAVAILABLE";
+      message: string;
     };
 
 export interface PublishDraftResult {
@@ -249,11 +267,8 @@ export interface MapEditorApiClient {
     domain: "buildings" | "locations",
     searchQuery?: string
   ): Promise<EligibleUnattachedRecord[]>;
-  saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
-  ): Promise<SaveDraftResult>;
+  saveDraft(command: SaveDraftCommand): Promise<SaveDraftResult>;
+  saveDraft(projectId: string, baseDraftVersion: number, operations: WorkingOperation[]): Promise<SaveDraftResult>;
   publishDraft(
     projectId: string,
     draftVersion: number
@@ -482,7 +497,7 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
           n.nodeType === "Entrance" &&
           (n.buildingId === bld.id ||
             n.associatedPlaceId === bld.id ||
-            n.name.toLowerCase().includes(bld.name.toLowerCase()))
+            n.name.toLowerCase().includes((bld.name || "").toLowerCase()))
       )
       .map((n) => n.id);
 
@@ -492,15 +507,22 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
       code: bld.code,
       status: bld.status ?? "Active",
       category: "Academic / University Building",
+      type: sources.locations.find((location) => location.id === bld.id)?.type === "Facility" ? "Facility" : "Building",
       linkedFeatureId: featureId,
       entranceNodeIds,
       source: bld.source,
     });
   }
 
-  // Normalize Outdoor Locations (non-building locations)
+  // Keep footprint-backed Building/Facility Campus Locations in the building
+  // layer. Legacy standalone Facilities remain readable as location records;
+  // the Map Editor no longer offers a workflow that creates another one.
   for (const loc of sources.locations) {
     if (loc.type === "Building") continue;
+    if (loc.type === "Facility" && (
+      loc.spatialRole === "building_footprint_owner"
+      || sources.buildings.some((building) => building.id === loc.id)
+    )) continue;
     outdoorLocations.push({
       id: loc.id,
       name: loc.name,
@@ -526,9 +548,10 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
       distance: p.distance ?? "—",
       time: p.time ?? "—",
       shade: p.shade ?? "Unknown",
-      type: p.type ?? "Campus Walkway",
+      type: p.type ?? "Walkway",
       direction: p.direction ?? "Two-way",
       status: p.status ?? "Open",
+      allowedModes: p.allowedModes ?? ["Walking"],
       pathPoints: p.pathPoints.map(([lat, lng]) => [lat, lng]),
       surface: "Concrete / Paved",
       wheelchair: true,
@@ -563,7 +586,7 @@ export function extractEntityFromLayers(
     if (building) return building as unknown as Record<string, unknown>;
     const loc = layers.outdoorLocations.find((l) => l.id === entityId);
     if (loc) return loc as unknown as Record<string, unknown>;
-  } else if (domain === "Routes & Paths") {
+  } else if (domain === "Walking Network") {
     const node = layers.routeNodes.find((n) => n.id === entityId);
     if (node) return node as unknown as Record<string, unknown>;
     const path = layers.pathways.find((p) => p.id === entityId);
@@ -648,6 +671,100 @@ export function filterNonConflictingOperations(
   });
 }
 
+function validateDraftOperations(layers: MapEditorLayers, operations: WorkingOperation[]): SaveDraftResult | null {
+  for (const operation of operations) {
+    if (operation.type === "compound_batch" && operation.nestedOperations) {
+      const nestedResult = validateDraftOperations(layers, operation.nestedOperations);
+      if (nestedResult) return nestedResult;
+      continue;
+    }
+    const collection = operation.domain === "Locations"
+      ? [...layers.buildings, ...layers.outdoorLocations]
+      : operation.domain === "Walking Network"
+        ? [...layers.routeNodes, ...layers.pathways]
+        : [...layers.localFeatures, ...layers.featureLinks];
+    const existing = collection.find((item) => item.id === operation.entityId);
+    if (operation.type === "create_entity" && existing) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Entity ${operation.entityId} already exists.` };
+    }
+    if (operation.after && operation.domain === "Walking Network" && (operation.type === "create_entity" || operation.type === "update_properties" || operation.type === "update_geometry")) {
+      const record = operation.after;
+      if ("nodeType" in record && typeof record.name === "string") {
+        const issues = validateRouteNodeDraft(record as unknown as RouteNode, {
+          buildings: layers.buildings as unknown as readonly Building[],
+          locations: layers.outdoorLocations as unknown as readonly Location[],
+          campusBoundary: echagueCampusBoundary,
+        });
+        if (issues.length) return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: issues[0].message };
+      } else if ("pathPoints" in record && typeof record.name === "string") {
+        const issues = validatePathwayDraft(record as unknown as Pathway, layers.routeNodes as unknown as readonly RouteNode[], echagueCampusBoundary, {
+          existingPathways: layers.pathways as unknown as readonly Pathway[],
+          requireActiveEndpoints: true,
+        });
+        if (issues.length) return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: issues[0].message };
+      }
+    }
+    if (operation.type === "create_entity" && operation.after && operation.domain === "Locations") {
+      const record = operation.after;
+      if (typeof record.name !== "string" || !record.name.trim() || typeof record.code !== "string" || !record.code.trim()) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Location ${operation.entityId} requires a name and unique code.` };
+      }
+      const code = typeof record.code === "string" ? record.code : null;
+      const existingCode = code
+        ? [...layers.buildings, ...layers.outdoorLocations].find((location) =>
+          location.code.trim().toLowerCase() === code.trim().toLowerCase(),
+        )
+        : undefined;
+      if (existingCode) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Location code ${record.code} must be unique.` };
+      }
+      if (record.type === "Building" || record.type === "Facility") {
+        if (record.spatialRole !== "building_footprint_owner") {
+          return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `${record.type} Campus Locations must be created with a linked Building Footprint.` };
+        }
+        if (record.parentId !== null || record.lat !== null || record.lng !== null || record.positioned !== false) {
+          return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `${record.type} Campus Locations derive their map anchor from the Building Footprint and cannot store an outdoor coordinate.` };
+        }
+      }
+    }
+    if (operation.type === "create_entity" && operation.after && operation.domain === "Local Map Data" && operation.after.family === "building_footprint") {
+      const coordinates = operation.after.coordinates;
+      const points = Array.isArray(coordinates) ? coordinates as [number, number][] : [];
+      if (points.length < 3 || points.some(([latitude, longitude]) => !Number.isFinite(latitude) || !Number.isFinite(longitude)) || !geometryOnCampus(points, echagueCampusBoundary) || polygonSelfIntersects(points) || !polygonIsNonDegenerate(points)) {
+        return { success: false, errorType: "FEATURE_GEOMETRY_ERROR", message: `Building Footprint ${operation.entityId} has invalid geometry or leaves the campus boundary.` };
+      }
+    }
+    if (operation.type !== "create_entity" && operation.type !== "compound_batch" && operation.type !== "link_feature" && !existing) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Entity ${operation.entityId} is not owned by this Admin Draft.` };
+    }
+    if (operation.type === "unlink_feature" && !layers.featureLinks.some((link) => link.id === operation.entityId)) {
+      return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Feature link ${operation.entityId} is not owned by this Admin Draft.` };
+    }
+    if (operation.type === "link_feature") {
+      const link = operation.after as Partial<FeatureLinkEntity> | null;
+      if (!link || typeof link.featureId !== "string" || typeof link.targetEntityId !== "string"
+        || !layers.localFeatures.some((feature) => feature.id === link.featureId)
+        || !layers.buildings.some((building) => building.id === link.targetEntityId)
+        || link.targetDomain !== "Locations"
+        || link.linkType !== "building_footprint") {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Feature link ${operation.entityId} references an unowned feature or Building.` };
+      }
+      const feature = layers.localFeatures.find((candidate) => candidate.id === link.featureId);
+      if (!feature || feature.family !== "building_footprint" || feature.status === "retired" || feature.isEditable !== true) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Feature link ${operation.entityId} must reference an active editable Building Footprint.` };
+      }
+      if (layers.featureLinks.some((existingLink) =>
+        existingLink.targetEntityId === link.targetEntityId
+        && existingLink.linkType === "building_footprint",
+      )) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Building ${link.targetEntityId} already has an active footprint link.` };
+      }
+    }
+    applyOperationToLayers(layers, operation);
+  }
+  return null;
+}
+
 // ============================================================================
 // 6. Applying Operations to In-Memory Layers
 // ============================================================================
@@ -663,8 +780,18 @@ export function applyOperationToLayers(layers: MapEditorLayers, op: WorkingOpera
   switch (op.domain) {
     case "Locations": {
       if (op.type === "create_entity" && op.after) {
-        if ("points" in op.after || "linkedFeatureId" in op.after) {
-          layers.buildings.push(op.after as unknown as BuildingEntity);
+        if (op.after.type === "Building" || (op.after.type === "Facility" && op.after.spatialRole === "building_footprint_owner") || "points" in op.after || "linkedFeatureId" in op.after) {
+          const record = op.after as Record<string, unknown>;
+          layers.buildings.push({
+            id: String(record.id ?? op.entityId),
+            name: String(record.name ?? ""),
+            code: String(record.code ?? ""),
+            status: (record.status as BuildingEntity["status"]) ?? "Unknown",
+            category: typeof record.function === "string" ? record.function : undefined,
+            type: record.type === "Facility" ? "Facility" : "Building",
+            linkedFeatureId: null,
+            entranceNodeIds: [],
+          });
         } else {
           layers.outdoorLocations.push(op.after as unknown as OutdoorLocationEntity);
         }
@@ -690,7 +817,7 @@ export function applyOperationToLayers(layers: MapEditorLayers, op: WorkingOpera
       }
       break;
     }
-    case "Routes & Paths": {
+    case "Walking Network": {
       if (op.type === "create_entity" && op.after) {
         if ("sourceNodeId" in op.after) {
           layers.pathways.push(op.after as unknown as PathwayEntity);
@@ -789,6 +916,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
         conflictingEntities?: ConflictingEntityDiff[];
       } = null;
   private simulatedError: SaveDraftResult | null = null;
+  private acceptedRequests = new Map<string, SaveDraftResult>();
 
   constructor(options?: LocalMapEditorAdapterOptions) {
     const rawSources: RawSeedSources = options?.seedSources ?? {
@@ -844,6 +972,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
     };
     this.simulatedConflict = null;
     this.simulatedError = null;
+    this.acceptedRequests.clear();
   }
 
   public async getMapEditorBootstrap(projectId: string): Promise<MapEditorBootstrap> {
@@ -912,11 +1041,17 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
   }
 
   public async saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
+    commandOrProjectId: SaveDraftCommand | string,
+    legacyBaseDraftVersion?: number,
+    legacyOperations?: WorkingOperation[],
   ): Promise<SaveDraftResult> {
-    void projectId;
+    const command: SaveDraftCommand = typeof commandOrProjectId === "string"
+      ? { projectId: commandOrProjectId, baseDraftVersion: legacyBaseDraftVersion ?? this.adminDraft.draftVersion, requestId: `legacy-${Date.now()}-${Math.random()}`, operations: legacyOperations ?? [] }
+      : commandOrProjectId;
+    void command.projectId;
+
+    const prior = this.acceptedRequests.get(command.requestId);
+    if (prior) return structuredClone(prior);
 
     if (this.simulatedError) {
       return structuredClone(this.simulatedError);
@@ -924,7 +1059,7 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
 
     if (this.simulatedConflict) {
       const { conflictingEntities, nonConflictingCount } = extractConcurrencyConflicts(
-        operations,
+        command.operations,
         this.currentLayers
       );
       return {
@@ -936,9 +1071,9 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
       };
     }
 
-    if (baseDraftVersion !== this.adminDraft.draftVersion) {
+    if (command.baseDraftVersion !== this.adminDraft.draftVersion) {
       const { conflictingEntities, nonConflictingCount } = extractConcurrencyConflicts(
-        operations,
+        command.operations,
         this.currentLayers
       );
       return {
@@ -950,19 +1085,21 @@ export class LocalMapEditorAdapter implements MapEditorApiClient {
       };
     }
 
-    // Apply operations atomically
-    for (const op of operations) {
-      applyOperationToLayers(this.currentLayers, op);
-    }
+    const nextLayers = structuredClone(this.currentLayers);
+    const validation = validateDraftOperations(nextLayers, command.operations);
+    if (validation) return validation;
+    this.currentLayers = nextLayers;
 
     this.adminDraft.draftVersion += 1;
     this.adminDraft.updatedAt = new Date().toISOString();
 
-    return {
+    const result: SaveDraftResult = {
       success: true,
       newDraftVersion: this.adminDraft.draftVersion,
       updatedAt: this.adminDraft.updatedAt,
     };
+    this.acceptedRequests.set(command.requestId, result);
+    return structuredClone(result);
   }
 
   public async publishDraft(
@@ -1020,7 +1157,7 @@ export class HttpMapEditorApiClient implements MapEditorApiClient {
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 409 && data?.errorType === "CONCURRENCY_CONFLICT") {
+      if (data?.success === false && typeof data?.errorType === "string") {
         return data as T;
       }
       throw new Error(data?.message ?? `Request failed (${response.status})`);
@@ -1047,14 +1184,19 @@ export class HttpMapEditorApiClient implements MapEditorApiClient {
     );
   }
 
+  public async saveDraft(command: SaveDraftCommand): Promise<SaveDraftResult>;
+  public async saveDraft(projectId: string, baseDraftVersion: number, operations: WorkingOperation[]): Promise<SaveDraftResult>;
   public async saveDraft(
-    projectId: string,
-    baseDraftVersion: number,
-    operations: WorkingOperation[]
+    commandOrProjectId: SaveDraftCommand | string,
+    baseDraftVersion?: number,
+    operations?: WorkingOperation[],
   ): Promise<SaveDraftResult> {
+    const command: SaveDraftCommand = typeof commandOrProjectId === "string"
+      ? { projectId: commandOrProjectId, baseDraftVersion: baseDraftVersion ?? 0, requestId: `legacy-${Date.now()}-${Math.random()}`, operations: operations ?? [] }
+      : commandOrProjectId;
     return this.fetchJson<SaveDraftResult>("/api/map-editor/drafts/save", {
       method: "POST",
-      body: JSON.stringify({ projectId, baseDraftVersion, operations }),
+      body: JSON.stringify(command),
     });
   }
 
@@ -1088,9 +1230,9 @@ export function createMapEditorApiClient(options?: {
   baseUrl?: string;
   seedSources?: RawSeedSources;
 }): MapEditorApiClient {
-  // The global application client is always backed by the real API. Explicit
-  // modes remain supported for isolated tests that construct their own client.
-  const mode = options?.mode ?? "real";
+  // Runtime always uses the real API. The dedicated test adapter flag is the
+  // only supported way for a browser or unit-test harness to select fixtures.
+  const mode = options?.mode ?? (import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true" ? "local" : "real");
   if (mode === "real" || mode === "mock") {
     return new HttpMapEditorApiClient(options?.baseUrl ?? import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000");
   }

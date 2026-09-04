@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, withoutEndpointPathPoints } from "./mapEditing";
+import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints } from "./mapEditing";
 import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -23,6 +23,22 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("validates Route Node metadata, campus placement, and Entrance associations", () => {
+    const campus = [[0, 0], [0, 10], [10, 10], [10, 0]] as [number, number][];
+    const buildings = [building({ id: "building-1" })];
+    const validNode = { ...node(), lat: 5, lng: 5 };
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: "building-1" }, { buildings, campusBoundary: campus })).toEqual([]);
+    expect(validateRouteNodeDraft({ ...validNode, nodeType: "Junction", associatedPlaceId: "building-1" }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "association", message: "Only Entrance Route Nodes may have a Building association." },
+    ]);
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: null, lat: Number.NaN }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "coordinate", message: "Route Node latitude and longitude must be valid finite coordinates." },
+    ]);
+    expect(validateRouteNodeDraft({ ...validNode, associatedPlaceId: "missing" }, { buildings, campusBoundary: campus })).toEqual([
+      { field: "association", message: "Associated Building does not exist." },
+    ]);
+  });
+
   it("detects a bow-tie polygon while allowing a normal footprint", () => {
     expect(polygonSelfIntersects([[0, 0], [1, 1], [0, 1], [1, 0]])).toBe(true);
     expect(polygonSelfIntersects([[0, 0], [1, 0], [1, 1], [0, 1]])).toBe(false);
@@ -53,6 +69,30 @@ describe("map draft review", () => {
     expect(withoutEndpointPathPoints([
       [1, 1], [1.5, 1.5], [2, 2], [1, 1],
     ], [1, 1], [2, 2])).toEqual([[1.5, 1.5]]);
+  });
+
+  it("identifies the ordered Path Point and blocks invalid coordinates", () => {
+    const invalid = pathway({ pathPoints: [[91, 121.7311], [91, 121.7311]] });
+    const issues = validatePathwayDraft(invalid, [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })]);
+    expect(issues).toEqual(expect.arrayContaining([
+      { field: "pathPoint", message: "Path Point #1 must use a valid latitude and longitude." },
+      { field: "sequence", message: "Path Sequence contains duplicate consecutive points at #1 and #2." },
+    ]));
+  });
+
+  it("accepts a valid Pathway draft with distinct endpoints", () => {
+    expect(validatePathwayDraft(
+      pathway(),
+      [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })],
+    )).toEqual([]);
+  });
+
+  it("keeps Walkways walking-only while allowing Roads to opt into Vehicle mode", () => {
+    const nodes = [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })];
+    expect(validatePathwayDraft(pathway({ allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([
+      { field: "allowedModes", message: "Walkways cannot allow Vehicle mode." },
+    ]);
+    expect(validatePathwayDraft(pathway({ type: "Road", allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([]);
   });
 
   it("reports no pending changes for an unchanged map", () => {
@@ -141,6 +181,30 @@ describe("map draft review", () => {
       campusBoundary: echagueCampusBoundary,
     });
     expect(result.errors.some((error) => /campus boundary/i.test(error.message))).toBe(true);
+    expect(result.errors.some((error) => /campus boundary/i.test(error.message))).toBe(true);
     expect(result.errors.filter((error) => /campus boundary/i.test(error.message))).toHaveLength(1);
+  });
+
+  it("presents polygon overlap as an advisory review warning rather than a blocking failure", () => {
+    const bld1 = building({
+      id: "bld-1",
+      name: "Engineering Hall",
+      points: [[16.720, 121.689], [16.720, 121.691], [16.722, 121.691], [16.722, 121.689]],
+    });
+    const bld2 = building({
+      id: "bld-2",
+      name: "Science Annex",
+      points: [[16.721, 121.690], [16.721, 121.692], [16.723, 121.692], [16.723, 121.690]],
+    });
+    const result = reviewMapDraft({
+      original: { locations: [], nodes: [], pathways: [], buildings: [bld1] },
+      current: { locations: [], nodes: [], pathways: [], buildings: [bld1, bld2] },
+      deleted: [],
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings?.some((w) => w.message.includes("overlaps with"))).toBe(true);
   });
 });

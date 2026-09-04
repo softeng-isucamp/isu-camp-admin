@@ -280,6 +280,24 @@ def test_mutations_validate_relationship_floor_and_duplicate_without_partial_wri
     client, records, session = make_mutation_client(monkeypatch)
     building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
     assert building.status_code == 201
+    listed = client.get("/api/locations")
+    assert listed.status_code == 200
+    assert next(item for item in listed.json["items"] if item["id"] == building.json["id"]) == {
+        "id": building.json["id"],
+        "name": "Engineering Hall",
+        "code": "ENG",
+        "type": "Building",
+        "parentId": None,
+        "building": None,
+        "floor": None,
+        "function": None,
+        "keywords": None,
+        "status": "Active",
+        "lat": None,
+        "lng": None,
+        "positioned": False,
+        "hasPhoto": False,
+    }
     before = len(records)
 
     missing_floor = client.post("/api/locations", json={"name": "Room", "code": "ROOM", "type": "Room", "parentId": building.json["id"]})

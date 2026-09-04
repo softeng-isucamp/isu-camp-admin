@@ -8,6 +8,8 @@ import {
   evaluateBuildingRoutability,
   parseDistanceMeters,
   parseEstimatedTimeSeconds,
+  filterPathwaysByMode,
+  pathwayAllowsMode,
 } from "./network";
 
 describe("canonical walking-network contract", () => {
@@ -43,6 +45,26 @@ describe("canonical walking-network contract", () => {
       distanceMeters: 1200, estimatedTimeSeconds: 120, shade: null, type: null,
       direction: null, status: "closed",
     });
+    expect(normalizePathway({
+      id: "legacy-open", name: "Legacy", sourceNodeId: "a", destinationNodeId: "b",
+      pathPoints: [], distance: "—", time: "—", shade: "Unknown", type: "Campus walkway", direction: "Two-way", status: "Open",
+    })).toMatchObject({ type: "Walkway", status: "active", allowedModes: ["walking"] });
+  });
+
+  it("filters the shared graph independently for walking and vehicle travel", () => {
+    const pathway = (id: string, status: "active" | "closed", allowedModes: ("walking" | "vehicle")[]) => ({
+      id, name: id, sourceNodeId: "a", destinationNodeId: "b", pathSequence: { points: [] },
+      distanceMeters: null, estimatedTimeSeconds: null, type: "Walkway", shade: null,
+      direction: "two_way" as const, status, allowedModes,
+    });
+    const pathways = [
+      pathway("walk", "active", ["walking"]),
+      pathway("road", "active", ["vehicle"]),
+      pathway("shared", "active", ["walking", "vehicle"]),
+    ];
+    expect(filterPathwaysByMode(pathways, "walking").map((pathway) => pathway.id)).toEqual(["walk", "shared"]);
+    expect(filterPathwaysByMode(pathways, "vehicle").map((pathway) => pathway.id)).toEqual(["road", "shared"]);
+    expect(pathwayAllowsMode({ status: "closed", allowedModes: ["walking"] }, "walking")).toBe(false);
   });
 
   it("uses named numeric transport values and a display-only formatter", () => {

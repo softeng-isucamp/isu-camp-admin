@@ -29,7 +29,7 @@ export function createRoutableCrossing(
     {
       id: `create-${junctionId}`,
       type: "create_entity",
-      domain: "Routes & Paths",
+      domain: "Walking Network",
       entityId: junctionId,
       before: null,
       after: junction as unknown as Record<string, unknown>,
@@ -42,7 +42,7 @@ export function createRoutableCrossing(
         {
           id: `close-${original.id}`,
           type: "retire_entity" as const,
-          domain: "Routes & Paths" as const,
+          domain: "Walking Network" as const,
           entityId: original.id,
           before: original as unknown as Record<string, unknown>,
           after: closedPathway as unknown as Record<string, unknown>,
@@ -51,7 +51,7 @@ export function createRoutableCrossing(
         ...replacements.map((replacement) => ({
           id: `create-${replacement.id}`,
           type: "create_entity" as const,
-          domain: "Routes & Paths" as const,
+          domain: "Walking Network" as const,
           entityId: replacement.id,
           before: null,
           after: replacement as unknown as Record<string, unknown>,
