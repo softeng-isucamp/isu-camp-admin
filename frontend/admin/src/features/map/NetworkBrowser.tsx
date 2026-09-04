@@ -14,6 +14,16 @@ type NetworkBrowserProps = {
 };
 
 const uniqueValues = (values: readonly string[]) => [...new Set(values.filter(Boolean))].sort();
+const pathwayFilterOptions = {
+  status: ["Active", "Closed"],
+  type: ["Walkway", "Road"],
+  direction: ["Two-way", "One-way"],
+  shade: ["Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded", "Unknown"],
+} as const;
+const knownAndObservedValues = (known: readonly string[], observed: readonly string[]) => [
+  ...known,
+  ...uniqueValues(observed.filter((value) => !known.includes(value))),
+];
 const nodeStatus = (node: RouteNode) => node.status ?? "Active";
 
 export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect, onDismiss, onImportWalkingNetwork }: NetworkBrowserProps) {
@@ -76,10 +86,10 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
       <input id="network-browser-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "pathways" ? "Search Pathways" : "Search Route Nodes"} className="w-full rounded-xl border border-[#cbd9d1] bg-white/90 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#005931]" />
       {tab === "pathways" && onImportWalkingNetwork && <button type="button" onClick={onImportWalkingNetwork} className="w-full rounded-xl border border-[#005931] bg-[#005931] px-3 py-2 text-left text-xs font-extrabold text-white outline-none hover:bg-[#004727] focus-visible:ring-2 focus-visible:ring-[#005931]">Import Walking Network</button>}
       {tab === "pathways" ? <div className="grid grid-cols-2 gap-2">
-        <Filter label="Status" value={pathStatus} onChange={setPathStatus} values={uniqueValues(pathways.map((pathway) => pathway.status))} />
-        <Filter label="Type" value={pathType} onChange={setPathType} values={uniqueValues(pathways.map((pathway) => pathway.type))} />
-        <Filter label="Direction" value={pathDirection} onChange={setPathDirection} values={uniqueValues(pathways.map((pathway) => pathway.direction))} />
-        <Filter label="Shade" value={pathShade} onChange={setPathShade} values={uniqueValues(pathways.map((pathway) => pathway.shade))} />
+        <Filter label="Status" value={pathStatus} onChange={setPathStatus} values={knownAndObservedValues(pathwayFilterOptions.status, pathways.map((pathway) => pathway.status))} />
+        <Filter label="Type" value={pathType} onChange={setPathType} values={knownAndObservedValues(pathwayFilterOptions.type, pathways.map((pathway) => pathway.type))} />
+        <Filter label="Direction" value={pathDirection} onChange={setPathDirection} values={knownAndObservedValues(pathwayFilterOptions.direction, pathways.map((pathway) => pathway.direction))} />
+        <Filter label="Shade" value={pathShade} onChange={setPathShade} values={knownAndObservedValues(pathwayFilterOptions.shade, pathways.map((pathway) => pathway.shade))} />
       </div> : <div className="grid grid-cols-2 gap-2">
         <Filter label="Filter Route Nodes by lifecycle status" value={nodeStatusFilter} onChange={setNodeStatusFilter} values={uniqueValues(nodes.map(nodeStatus))} />
         <Filter label="Filter Route Nodes by type" value={nodeType} onChange={setNodeType} values={uniqueValues(nodes.map((node) => node.nodeType))} />
