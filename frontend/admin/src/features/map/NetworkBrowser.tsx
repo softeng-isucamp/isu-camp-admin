@@ -11,6 +11,7 @@ type NetworkBrowserProps = {
   onSelect: (selection: NonNullable<NetworkBrowserSelection>) => void;
   onDismiss: () => void;
   onImportWalkingNetwork?: () => void;
+  className?: string;
 };
 
 const uniqueValues = (values: readonly string[]) => [...new Set(values.filter(Boolean))].sort();
@@ -26,7 +27,7 @@ const knownAndObservedValues = (known: readonly string[], observed: readonly str
 ];
 const nodeStatus = (node: RouteNode) => node.status ?? "Active";
 
-export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect, onDismiss, onImportWalkingNetwork }: NetworkBrowserProps) {
+export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect, onDismiss, onImportWalkingNetwork, className = "" }: NetworkBrowserProps) {
   const [tab, setTab] = useState<"pathways" | "nodes">("pathways");
   const [query, setQuery] = useState("");
   const [pathStatus, setPathStatus] = useState("all");
@@ -72,7 +73,7 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
       && (buildingId === "all" || association === buildingId);
   }), [buildingById, buildingId, nodeStatusFilter, nodeType, nodes, normalizedQuery]);
 
-  return <aside className="absolute left-4 top-4 bottom-4 z-[1000] flex w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-2xl backdrop-blur-xl" aria-label="Walking Network browser">
+  return <aside className={`absolute left-4 top-4 bottom-4 z-[1000] flex w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-[22px] border border-white/70 bg-white/85 shadow-2xl backdrop-blur-xl ${className}`} aria-label="Walking Network browser">
     <div className="flex items-start justify-between border-b border-[#dbe6df] px-4 pb-3 pt-4">
       <div><p className="text-[10px] font-extrabold tracking-[0.14em] text-[#426257]">WALKING NETWORK</p><h2 className="text-sm font-extrabold text-[#191c1d]">Browse walking network</h2></div>
       <button type="button" onClick={onDismiss} aria-label="Dismiss Walking Network browser" className="rounded-lg px-2 py-1 text-lg leading-none text-[#365047] outline-none hover:bg-[#edf3ef] focus-visible:ring-2 focus-visible:ring-[#005931]">×</button>
