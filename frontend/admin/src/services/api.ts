@@ -1575,9 +1575,10 @@ export const services: Services = {
         const id = row.id || `loc-import-${Date.now()}-${index}`;
 
         if (seenIds.has(id)) errors.push(`Row ${index + 1}, id: duplicates another row in this file.`);
-        if (seenCodes.has(row.code)) errors.push(`Row ${index + 1}, code: duplicates another row in this file.`);
+        const normalizedCode = row.code.trim().toLowerCase();
+        if (seenCodes.has(normalizedCode)) errors.push(`Row ${index + 1}, code: duplicates another row in this file.`);
         seenIds.add(id);
-        seenCodes.add(row.code);
+        seenCodes.add(normalizedCode);
 
         if (mode === "add" && existingIndex >= 0) {
           errors.push(`Row ${index + 1}, ${matchedById >= 0 ? "id" : "code"}: already exists.`);
@@ -1602,16 +1603,17 @@ export const services: Services = {
         });
       });
 
-      const batchDirectory = [...locations, ...pending.map(({ location }) => location)];
       pending.forEach((entry) => {
         const existing = entry.existingIndex === null ? undefined : locations[entry.existingIndex];
-        const parent = batchDirectory.find((candidate) => candidate.id === entry.location.parentId);
+        const parent = locations.find((candidate) => candidate.id === entry.location.parentId);
         const candidate = parent?.type === "Building"
           ? { ...entry.location, building: parent.name }
           : entry.location;
         const evaluation = locationPolicy.evaluate(candidate, {
           context: "record",
-          directory: batchDirectory,
+          // File-local duplicates are reported above. Keeping pending rows
+          // out of this directory avoids reporting the same violation twice.
+          directory: locations,
           requireFloorLevel: true,
           requireKnownFloorLevel: true,
           currentId: entry.location.id,
@@ -1621,7 +1623,7 @@ export const services: Services = {
           return;
         }
         entry.location = locationPolicy.normalize(candidate, {
-          directory: batchDirectory,
+          directory: locations,
           previous: existing ?? candidate,
         }) as Location;
       });

@@ -426,6 +426,24 @@ describe("mock service contracts", () => {
     expect((await services.locations.list()).total).toBe(before);
   });
 
+  it("treats mixed-case duplicate import codes as one code", async () => {
+    const before = (await services.locations.list()).total;
+    const building = (await services.locations.list("computer lab")).items.find((item) => item.type === "Building");
+    expect(building).toBeDefined();
+
+    const result = await services.imports.locations({
+      json: JSON.stringify([
+        { id: "case-code-one", name: "Case Code One", code: "CASE-CODE", type: "Room", parentId: building!.id, floor: "Ground Floor", status: "Active", lat: null, lng: null },
+        { id: "case-code-two", name: "Case Code Two", code: "case-code", type: "Office", parentId: building!.id, floor: "1st Floor", status: "Active", lat: null, lng: null },
+      ]),
+      commit: true,
+    });
+
+    expect(result.imported).toBe(0);
+    expect(result.errors).toEqual(["Row 2, code: duplicates another row in this file."]);
+    expect((await services.locations.list()).total).toBe(before);
+  });
+
   it("keeps legacy indoor records without a floor under Unspecified Floor", async () => {
     const legacy = await services.locations.save({
       id: "legacy-unspecified-floor", name: "Legacy Unspecified Room", code: "LEGACY-UNSPECIFIED",
