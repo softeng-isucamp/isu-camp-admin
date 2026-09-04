@@ -3580,6 +3580,7 @@ export function MapEditor() {
             onSelect={handleNetworkBrowserSelection}
             onDismiss={() => setNetworkBrowserOpen(false)}
             onImportWalkingNetwork={beginWalkingNetworkImport}
+            className={mode === "path" ? "opacity-0 pointer-events-none" : ""}
           />
         )}
 
@@ -4076,7 +4077,14 @@ export function MapEditor() {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Path Shape Points</div>
                 <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Calibrate Path Points</h2>
-                <button type="button" className="mt-3 px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 border border-[#005931] bg-white text-[#005931] rounded-full text-xs font-bold"
+                    onClick={() => { setMode("select"); setNetworkBrowserOpen(true); }}
+                  >Browse Walking Network</button>
+                </div>
                 {!activePathway && (
                   <div className="mt-3 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-3 text-xs text-[#3f4941]">
                     <p>Select two existing active Route Nodes on the map to create a new Pathway. The endpoints are kept as nodes; only intermediate clicks become Path Points.</p>
