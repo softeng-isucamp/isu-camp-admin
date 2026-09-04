@@ -197,6 +197,30 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.queryByLabelText("LONGITUDE (OPTIONAL)")).not.toBeInTheDocument();
   });
 
+  it("opens an indoor-location handoff with the Building parent locked and floor preselected", async () => {
+    const building = await services.locations.save({
+      id: "handoff-building",
+      name: "Handoff Building",
+      code: "HANDOFF",
+      type: "Building",
+      parentId: null,
+      status: "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+    });
+
+    renderLocations([`/locations?add=indoor&parentId=${building.id}&floor=${encodeURIComponent("2nd Floor")}`]);
+
+    const dialog = await screen.findByRole("dialog", { name: "Add Location" });
+    expect(screen.getByLabelText(/location type/i)).toHaveValue("Room");
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
+    expect(screen.getByLabelText("PARENT BUILDING")).toBeDisabled();
+    expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("2nd Floor");
+    expect(screen.getByLabelText("FLOOR LEVEL")).toBeRequired();
+    expect(dialog).toHaveTextContent("locked to preserve that context");
+  });
+
 
   it("creates a child location with a parent building and standard floor level", async () => {
     const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });

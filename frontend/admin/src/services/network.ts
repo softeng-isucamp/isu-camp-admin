@@ -1,8 +1,10 @@
 import type { Building as LegacyBuilding, Pathway as LegacyPathway, RouteNode as LegacyRouteNode } from "../types";
+import { normalizePathwayLifecycleStatus, normalizePathwayWayType, PATHWAY_WAY_TYPES, type AllowedMode } from "../types";
 import { geometryOnCampus, type MapPoint } from "../features/map/campusBoundary";
 
 export type NetworkStatus = "active" | "inactive";
-export type PathwayStatus = "open" | "closed";
+export type PathwayStatus = "active" | "closed";
+export type TravelMode = "walking" | "vehicle";
 export type Coordinate = { latitude: number; longitude: number };
 export type PathPoint = Coordinate;
 export type PathSequence = { points: PathPoint[] };
@@ -55,6 +57,7 @@ export interface Pathway {
   shade: string | null;
   direction: "two_way" | "one_way" | null;
   status: PathwayStatus;
+  allowedModes?: TravelMode[];
 }
 
 export type PathwayWriteRequest = Omit<Pathway, "id"> & { id?: string };
@@ -107,6 +110,13 @@ export interface PathwayValidationOptions {
   existingPathwayId?: string;
 }
 
+/** A shared graph edge may be used by one or both supported travel modes. */
+export const pathwayAllowsMode = (pathway: Pick<Pathway, "status" | "allowedModes">, mode: TravelMode): boolean =>
+  pathway.status === "active" && (pathway.allowedModes ?? ["walking"]).includes(mode);
+
+export const filterPathwaysByMode = (pathways: readonly Pathway[], mode: TravelMode): Pathway[] =>
+  pathways.filter((pathway) => pathwayAllowsMode(pathway, mode));
+
 const pathwayKey = (sourceNodeId: string, destinationNodeId: string) =>
   [sourceNodeId, destinationNodeId].sort().join("::");
 
@@ -120,6 +130,12 @@ export const validatePathway = (
   if (!pathway.type?.trim()) throw new Error("Pathway type is required.");
   if (!pathway.direction) throw new Error("Pathway direction is required.");
   if (!pathway.status) throw new Error("Pathway lifecycle status is required.");
+  if (pathway.direction !== "two_way" && pathway.direction !== "one_way") throw new Error("Pathway direction must be two_way or one_way.");
+  if (pathway.status !== "active" && pathway.status !== "closed") throw new Error("Pathway lifecycle status must be active or closed.");
+  if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error("At least one valid Allowed mode is required.");
+  if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) {
+    throw new Error("Pathway Way type must use the fixed vocabulary: Walkway, Road, Ramp, Stairs, or Service path.");
+  }
   const source = snapshot.routeNodes.find((node) => node.id === pathway.sourceNodeId);
   const destination = snapshot.routeNodes.find((node) => node.id === pathway.destinationNodeId);
   if (!source || !destination) throw new Error("Pathway endpoints must reference existing Route Nodes.");
@@ -208,10 +224,13 @@ export const normalizePathway = (value: LegacyPathway): Pathway => ({
   pathSequence: { points: value.pathPoints.map(legacyCoordinate) },
   distanceMeters: parseDistanceMeters(value.distance),
   estimatedTimeSeconds: parseEstimatedTimeSeconds(value.time),
-  type: value.type || null,
+  type: value.type ? normalizePathwayWayType(value.type) : null,
   shade: value.shade === "Unknown" ? null : value.shade,
   direction: value.direction === "Two-way" ? "two_way" : value.direction === "One-way" ? "one_way" : null,
-  status: value.status === "Open" ? "open" : "closed",
+  status: normalizePathwayLifecycleStatus(value.status) === "Active" ? "active" : "closed",
+  allowedModes: (value.allowedModes ?? ["Walking"])
+    .filter((mode): mode is AllowedMode => mode === "Walking" || mode === "Vehicle")
+    .map((mode) => mode === "Walking" ? "walking" : "vehicle"),
 });
 
 export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
@@ -230,7 +249,9 @@ export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
     if (!pathway.name.trim()) throw new Error(`Pathway ${pathway.id} must have a name.`);
     if (!pathway.type?.trim()) throw new Error(`Pathway ${pathway.id} must have a type.`);
     if (!pathway.direction) throw new Error(`Pathway ${pathway.id} must have a direction.`);
-    if (!pathway.status) throw new Error(`Pathway ${pathway.id} must have a lifecycle status.`);
+    if (pathway.status !== "active" && pathway.status !== "closed") throw new Error(`Pathway ${pathway.id} must have an active or closed lifecycle status.`);
+    if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error(`Pathway ${pathway.id} must allow at least one valid travel mode.`);
+    if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) throw new Error(`Pathway ${pathway.id} has an unsupported Way type.`);
     if (!nodeIds.has(pathway.sourceNodeId) || !nodeIds.has(pathway.destinationNodeId)) throw new Error(`Pathway ${pathway.id} references a missing Route Node.`);
     if (pathway.sourceNodeId === pathway.destinationNodeId) throw new Error(`Pathway endpoints must be distinct.`);
     const key = pathwayKey(pathway.sourceNodeId, pathway.destinationNodeId);
@@ -258,7 +279,19 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
     if (storage) {
       try {
         const saved = JSON.parse(storage.getItem(NETWORK_KEY) ?? "null") as NetworkSnapshot | null;
-        if (saved) { validateNetworkSnapshot(saved); return saved; }
+        if (saved) {
+          const normalized: NetworkSnapshot = {
+            ...saved,
+            pathways: saved.pathways.map((pathway) => ({
+              ...pathway,
+              type: normalizePathwayWayType(pathway.type ?? undefined) === "Unknown" ? "Walkway" : normalizePathwayWayType(pathway.type ?? undefined),
+              status: normalizePathwayLifecycleStatus(pathway.status) === "Active" ? "active" : "closed",
+              allowedModes: (pathway.allowedModes ?? ["walking"]).map((mode) => String(mode).toLowerCase() === "vehicle" ? "vehicle" : "walking"),
+            })),
+          };
+          validateNetworkSnapshot(normalized);
+          return normalized;
+        }
       } catch { /* A corrupt draft must not prevent the app from loading fixtures. */ }
     }
     const initial: NetworkSnapshot = {
@@ -272,13 +305,14 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
       // an unknown direction or blank type.
       pathways: seed.pathways.map(normalizePathway).map((pathway) => ({
         ...pathway,
-        type: pathway.type ?? "Campus walkway",
+        type: normalizePathwayWayType(pathway.type ?? undefined) === "Unknown" ? "Walkway" : pathway.type,
         direction: pathway.direction ?? "two_way",
+        allowedModes: pathway.allowedModes?.length ? pathway.allowedModes : ["walking"],
       })),
     };
-    // Keep the local contract useful even when the legacy seed predates explicit
-    // entrance associations. These records are deterministic and live only in
-    // the canonical store; the legacy map adapter remains unchanged.
+    // Keep the local contract useful when the seed predates explicit entrance
+    // associations. These records are deterministic and live only in the
+    // canonical store.
     const firstBuilding = initial.buildings[0];
     const entranceNodes = initial.routeNodes.filter((node): node is EntranceRouteNode => node.type === "entrance");
     if (firstBuilding && entranceNodes.length >= 2) {
@@ -306,10 +340,11 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
         pathSequence: { points: [] },
         distanceMeters: null,
         estimatedTimeSeconds: null,
-        type: "Campus walkway",
+        type: "Walkway",
         shade: null,
         direction: "two_way",
-        status: "open",
+        status: "active",
+        allowedModes: ["walking"],
       });
     }
     validateNetworkSnapshot(initial);
@@ -327,7 +362,13 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
 
   const savePathway = (pathway: PathwayWriteRequest, options?: PathwayValidationOptions): Pathway => {
     const current = read();
-    const next: Pathway = { ...pathway, id: pathway.id ?? `pathway-${Date.now()}` };
+    const normalizedType = normalizePathwayWayType(pathway.type ?? undefined);
+    const next: Pathway = {
+      ...pathway,
+      id: pathway.id ?? `pathway-${Date.now()}`,
+      type: normalizedType === "Unknown" ? pathway.type : normalizedType,
+      allowedModes: pathway.allowedModes?.length ? pathway.allowedModes : ["walking"],
+    };
     validatePathway(next, current, { ...options, existingPathwayId: next.id });
     const index = current.pathways.findIndex((candidate) => candidate.id === next.id);
     if (index >= 0) current.pathways[index] = next;
@@ -339,7 +380,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
     const current = read();
     const pathway = current.pathways.find((candidate) => candidate.id === id);
     if (!pathway) throw new Error("Pathway not found.");
-    if (status === "open") validatePathway({ ...pathway, status }, current, { existingPathwayId: id });
+    if (status === "active") validatePathway({ ...pathway, status }, current, { existingPathwayId: id });
     pathway.status = status;
     return write(current).pathways.find((candidate) => candidate.id === id)!;
   };
@@ -379,7 +420,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
     save: write,
     savePathway,
     closePathway: (id: string) => setPathwayStatus(id, "closed"),
-    reopenPathway: (id: string) => setPathwayStatus(id, "open"),
+    reopenPathway: (id: string) => setPathwayStatus(id, "active"),
     removePathway,
     associateEntrance,
     clearEntranceAssociation,

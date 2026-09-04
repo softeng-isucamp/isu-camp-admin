@@ -1,4 +1,4 @@
-import type { Building, Location, Pathway, RouteNode } from "../../types";
+import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
 import { locationPolicy } from "../../lib/locationPolicy";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
 
@@ -149,7 +149,7 @@ export const withoutEndpointPathPoints = (
 );
 
 export interface PathwayDraftIssue {
-  field: "name" | "type" | "direction" | "status" | "pathPoint" | "sequence";
+  field: "name" | "type" | "direction" | "status" | "allowedModes" | "pathPoint" | "sequence";
   message: string;
 }
 
@@ -181,7 +181,7 @@ export function validateRouteNodeDraft(
     issues.push({ field: "association", message: "Only Entrance Route Nodes may have a Building association." });
   } else if (node.associatedPlaceId) {
     const buildingIds = new Set(input.buildings.map((building) => building.id));
-    input.locations?.filter((location) => location.type === "Building").forEach((location) => buildingIds.add(location.id));
+    input.locations?.filter((location) => location.type === "Building" || location.type === "Facility").forEach((location) => buildingIds.add(location.id));
     if (!buildingIds.has(node.associatedPlaceId)) {
       issues.push({ field: "association", message: "Associated Building does not exist." });
     }
@@ -189,21 +189,50 @@ export function validateRouteNodeDraft(
   return issues;
 }
 
+export interface PathwayDraftValidationOptions {
+  /** Existing pathways are used to prevent a second physical connection. */
+  existingPathways?: readonly Pathway[];
+  /** New and edited Pathways must connect active Route Nodes. */
+  requireActiveEndpoints?: boolean;
+}
+
 /** Local, synchronous checks used by the parent-frame Pathway editor. */
 export function validatePathwayDraft(
   pathway: Pathway,
   nodes: readonly RouteNode[],
   campusBoundary?: MapPoint[],
+  options: PathwayDraftValidationOptions = {},
 ): PathwayDraftIssue[] {
   const issues: PathwayDraftIssue[] = [];
   if (!pathway.name.trim()) issues.push({ field: "name", message: "Pathway name is required." });
-  if (!pathway.type.trim()) issues.push({ field: "type", message: "Pathway type is required." });
+  if (!pathway.type.trim()) issues.push({ field: "type", message: "Way type is required." });
+  else if (!PATHWAY_WAY_TYPES.includes(normalizePathwayWayType(pathway.type) as typeof PATHWAY_WAY_TYPES[number])) {
+    issues.push({ field: "type", message: "Way type must be Walkway, Road, Ramp, Stairs, or Service path." });
+  }
   if (pathway.direction !== "Two-way" && pathway.direction !== "One-way") issues.push({ field: "direction", message: "Pathway direction must be Two-way or One-way." });
-  if (pathway.status !== "Open" && pathway.status !== "Closed") issues.push({ field: "status", message: "Pathway status must be Open or Closed." });
+  if (pathway.status !== "Active" && pathway.status !== "Open" && pathway.status !== "Closed") issues.push({ field: "status", message: "Pathway status must be Active or Closed." });
+  const allowedModes = pathway.allowedModes ?? ["Walking"];
+  if (!allowedModes.length || allowedModes.some((mode) => !PATHWAY_ALLOWED_MODES.includes(mode))) {
+    issues.push({ field: "allowedModes", message: "Choose Walking, Vehicle, or both Allowed modes." });
+  }
   const source = nodes.find((node) => node.id === pathway.sourceNodeId);
   const destination = nodes.find((node) => node.id === pathway.destinationNodeId);
   if (!source || !destination) issues.push({ field: "sequence", message: "Pathway endpoints must reference existing Route Nodes." });
   if (source && destination && source.id === destination.id) issues.push({ field: "sequence", message: "Pathway endpoints must be distinct; self-links are not allowed." });
+  if (options.requireActiveEndpoints && source && destination
+    && (source.status !== undefined && source.status !== "Active" || destination.status !== undefined && destination.status !== "Active")) {
+    issues.push({ field: "sequence", message: "Pathway endpoints must reference active Route Nodes." });
+  }
+  const duplicate = options.existingPathways?.find((candidate) =>
+    candidate.id !== pathway.id
+      && candidate.sourceNodeId !== candidate.destinationNodeId
+      && pathway.sourceNodeId !== pathway.destinationNodeId
+      && [candidate.sourceNodeId, candidate.destinationNodeId].sort().join("::")
+        === [pathway.sourceNodeId, pathway.destinationNodeId].sort().join("::"),
+  );
+  if (duplicate) {
+    issues.push({ field: "sequence", message: `Pathway duplicates the physical connection already used by ${duplicate.name}.` });
+  }
   pathway.pathPoints.forEach(([latitude, longitude], index) => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
       issues.push({ field: "pathPoint", message: `Path Point #${index + 1} must use a valid latitude and longitude.` });
@@ -305,7 +334,7 @@ export function reviewMapDraft(input: {
       // new or edited association must satisfy the canonical Building rule.
       const unchangedLegacyAssociation = issue.field === "association"
         && previous?.associatedPlaceId === object.associatedPlaceId
-        && current.locations.some((location) => location.id === object.associatedPlaceId && location.type !== "Building");
+        && current.locations.some((location) => location.id === object.associatedPlaceId && location.type !== "Building" && location.type !== "Facility");
       if (unchangedLegacyAssociation) return;
       addError(reference, issue.message);
     });

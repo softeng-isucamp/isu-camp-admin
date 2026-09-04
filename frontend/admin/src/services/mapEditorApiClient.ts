@@ -95,6 +95,8 @@ export interface OutdoorLocationEntity {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  parentId?: string | null;
+  spatialRole?: "building_footprint_owner";
   photo?: Location["photo"];
   source?: SourceProvenance;
 }
@@ -124,7 +126,8 @@ export interface PathwayEntity {
   shade?: Shade;
   type: string;
   direction?: "Two-way" | "One-way" | "Unknown";
-  status: "Open" | "Closed" | "Unknown";
+  status: "Active" | "Open" | "Closed" | "Unknown";
+  allowedModes?: Array<"Walking" | "Vehicle">;
   pathPoints: [number, number][];
   surface?: string;
   wheelchair?: boolean | string;
@@ -511,9 +514,15 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
     });
   }
 
-  // Normalize Outdoor Locations (non-building locations)
+  // Keep footprint-backed Building/Facility Campus Locations in the building
+  // layer. Legacy standalone Facilities remain readable as location records;
+  // the Map Editor no longer offers a workflow that creates another one.
   for (const loc of sources.locations) {
     if (loc.type === "Building") continue;
+    if (loc.type === "Facility" && (
+      loc.spatialRole === "building_footprint_owner"
+      || sources.buildings.some((building) => building.id === loc.id)
+    )) continue;
     outdoorLocations.push({
       id: loc.id,
       name: loc.name,
@@ -539,9 +548,10 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
       distance: p.distance ?? "—",
       time: p.time ?? "—",
       shade: p.shade ?? "Unknown",
-      type: p.type ?? "Campus Walkway",
+      type: p.type ?? "Walkway",
       direction: p.direction ?? "Two-way",
       status: p.status ?? "Open",
+      allowedModes: p.allowedModes ?? ["Walking"],
       pathPoints: p.pathPoints.map(([lat, lng]) => [lat, lng]),
       surface: "Concrete / Paved",
       wheelchair: true,
@@ -687,7 +697,10 @@ function validateDraftOperations(layers: MapEditorLayers, operations: WorkingOpe
         });
         if (issues.length) return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: issues[0].message };
       } else if ("pathPoints" in record && typeof record.name === "string") {
-        const issues = validatePathwayDraft(record as unknown as Pathway, layers.routeNodes, echagueCampusBoundary);
+        const issues = validatePathwayDraft(record as unknown as Pathway, layers.routeNodes as unknown as readonly RouteNode[], echagueCampusBoundary, {
+          existingPathways: layers.pathways as unknown as readonly Pathway[],
+          requireActiveEndpoints: true,
+        });
         if (issues.length) return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: issues[0].message };
       }
     }
@@ -696,11 +709,21 @@ function validateDraftOperations(layers: MapEditorLayers, operations: WorkingOpe
       if (typeof record.name !== "string" || !record.name.trim() || typeof record.code !== "string" || !record.code.trim()) {
         return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Location ${operation.entityId} requires a name and unique code.` };
       }
-      if (record.type === "Facility" && record.spatialRole !== "building_footprint_owner") {
-        const latitude = record.lat;
-        const longitude = record.lng;
-        if (typeof latitude !== "number" || typeof longitude !== "number" || !Number.isFinite(latitude) || !Number.isFinite(longitude) || !geometryOnCampus([[latitude, longitude]], echagueCampusBoundary)) {
-          return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Outdoor Point Location ${operation.entityId} requires a finite coordinate inside the campus boundary.` };
+      const code = typeof record.code === "string" ? record.code : null;
+      const existingCode = code
+        ? [...layers.buildings, ...layers.outdoorLocations].find((location) =>
+          location.code.trim().toLowerCase() === code.trim().toLowerCase(),
+        )
+        : undefined;
+      if (existingCode) {
+        return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `Location code ${record.code} must be unique.` };
+      }
+      if (record.type === "Building" || record.type === "Facility") {
+        if (record.spatialRole !== "building_footprint_owner") {
+          return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `${record.type} Campus Locations must be created with a linked Building Footprint.` };
+        }
+        if (record.parentId !== null || record.lat !== null || record.lng !== null || record.positioned !== false) {
+          return { success: false, errorType: "FIELD_VALIDATION_ERROR", message: `${record.type} Campus Locations derive their map anchor from the Building Footprint and cannot store an outdoor coordinate.` };
         }
       }
     }

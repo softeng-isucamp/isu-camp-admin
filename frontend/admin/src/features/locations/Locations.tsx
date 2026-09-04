@@ -200,6 +200,25 @@ export function Locations() {
     directory: allLocations,
     previous: draft,
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(routeLocation.search);
+    if (params.get("add") !== "indoor") return;
+    const parentId = params.get("parentId") ?? params.get("buildingId");
+    const parent = parentId ? allLocations.find((item) => item.id === parentId && item.type === "Building") : undefined;
+    if (!parent) {
+      if (allLocations.length) setError("The selected Building is unavailable for an Indoor Location handoff.");
+      return;
+    }
+    const floor = params.get("floor") ?? "";
+    setSelected(parent);
+    setDraft({ ...blankLocation(), type: "Room", parentId: parent.id, building: parent.name, floor: floor || undefined });
+    setLockedParentId(parent.id);
+    setCustomFloorMode(Boolean(floor && !standardFloorLevels.includes(floor as typeof standardFloorLevels[number])));
+    setFieldErrors([]);
+    setError("");
+    openDialog("add");
+  }, [allLocations, routeLocation.search]);
   const buildingOptions = allLocations.filter((item) => item.type === "Building");
   const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
   const floors = useMemo(() => {
