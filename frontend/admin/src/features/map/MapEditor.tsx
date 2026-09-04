@@ -666,7 +666,6 @@ export function MapEditor() {
   >(null);
   const [addRoomOpen, setAddRoomOpen] = useState(false);
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
-  const [buildingIndoorFloor, setBuildingIndoorFloor] = useState<string>(standardFloorLevels[0]);
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
   const [editingPathId, setEditingPathId] = useState<string | null>(null);
@@ -1405,11 +1404,10 @@ export function MapEditor() {
     setDirty(true);
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
-    setBuildingIndoorFloor(standardFloorLevels[0]);
     setNewRoom({ name: "", code: "", floor: "" });
   };
 
-  const openIndoorLocationHandoff = (building: Building, floor: string) => {
+  const openIndoorLocationHandoff = (building: Building) => {
     const parent = currentLocations.find((location) => location.id === building.id && location.type === "Building") ?? {
       id: building.id,
       name: building.name,
@@ -1421,7 +1419,7 @@ export function MapEditor() {
       lng: null,
       positioned: false,
     };
-    navigate(`/locations?add=indoor&parentId=${encodeURIComponent(building.id)}&floor=${encodeURIComponent(floor)}`, {
+    navigate(`/locations?add=indoor&parentId=${encodeURIComponent(building.id)}`, {
       state: { indoorLocationParent: parent },
     });
   };
@@ -1732,7 +1730,6 @@ export function MapEditor() {
     setOwnerModal(null);
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
-    setBuildingIndoorFloor(standardFloorLevels[0]);
     setNewRoom({ name: "", code: "", floor: "" });
     setDirty(false);
     setTemporary(null);
@@ -2714,13 +2711,10 @@ export function MapEditor() {
               <p>{selectedBuildingHasFootprint ? "Linked Building Footprint" : "Footprint not linked"} · {selectedBuildingRoutable ? "Routable" : "Not routable"}</p>
             </section>
             <section aria-label="Building content" className="inspector-related-section">
-              <h3>Building content</h3>
-              <label className="inspector-point-selector">Floor Level for new Indoor Location
-                <select aria-label="Floor Level for new Indoor Location" value={buildingIndoorFloor} onChange={(event) => setBuildingIndoorFloor(event.target.value)}>
-                  {standardFloorLevels.map((floor) => <option key={floor}>{floor}</option>)}
-                </select>
-              </label>
-              {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" && <button type="button" className="inspector-secondary-action" onClick={() => openIndoorLocationHandoff(selectedBuilding, buildingIndoorFloor)}>＋ Add indoor location</button>}
+              <div className="flex items-center justify-between gap-2">
+                <h3>Building content</h3>
+                {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" && <button type="button" className="inspector-secondary-action" onClick={() => openIndoorLocationHandoff(selectedBuilding)}>＋ Add indoor location</button>}
+              </div>
               <section aria-label="Building room directory">
                 <h4>Indoor Locations by Floor Level</h4>
                 {(() => {
@@ -2767,7 +2761,7 @@ export function MapEditor() {
         },
         overflowActions: [
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
-          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding, buildingIndoorFloor) }] : []),
+          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
           { label: "＋ Add entrance", onSelect: () => { setPlacingNodeType("Entrance"); setPlacingNodeName(`${selectedBuilding.name} Entrance`); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setTemporary(null); setMode("place"); } },
           { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
           {
