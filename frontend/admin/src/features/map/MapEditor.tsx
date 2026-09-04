@@ -22,6 +22,7 @@ import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
+import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import {
   buildRestoreLocalFeatureOperation,
@@ -566,6 +567,11 @@ export function MapEditor() {
     enabled: Boolean(services.map.getMapEditorBootstrap),
     retry: false,
   });
+  const { data: buildingDirectory } = useQuery({
+    queryKey: ["locations", "building-options"],
+    queryFn: async () => (await services.locations.list("", 1, 100, { type: "Building" })).items,
+    retry: false,
+  });
 
   useEffect(() => {
     if (draftBootstrap) setDraftVersion(draftBootstrap.adminDraft.draftVersion);
@@ -614,6 +620,7 @@ export function MapEditor() {
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
   const [buildingWorkflowMode, setBuildingWorkflowMode] = useState<"create" | "attach">("create");
+  const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
   const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
   const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
   const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
@@ -731,6 +738,7 @@ export function MapEditor() {
           id: loc.id,
           name: loc.name,
           code: loc.code,
+          type: loc.type === "Facility" ? "Facility" : "Building",
           status: loc.status ?? "Active",
           points: [],
         });
@@ -745,19 +753,39 @@ export function MapEditor() {
     }
     return Array.from(buildingMap.values());
   }, [currentLocations, sessionBuildings]);
+  const buildingAssociationOptions = useMemo(() => {
+    const buildingMap = new Map<string, Building>();
+    for (const location of buildingDirectory ?? []) {
+      if (location.type !== "Building") continue;
+      buildingMap.set(location.id, {
+        id: location.id,
+        name: location.name,
+        code: location.code,
+        type: "Building",
+        status: location.status,
+        points: [],
+      });
+    }
+    for (const building of allSessionBuildings) {
+      if (building.type === "Facility") continue;
+      const existing = buildingMap.get(building.id);
+      buildingMap.set(building.id, { ...existing, ...building, type: "Building" });
+    }
+    return Array.from(buildingMap.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }, [allSessionBuildings, buildingDirectory]);
   const buildingAttachmentEligibility = (building: Building) =>
     getBuildingAttachmentEligibility(building, currentFeatureLinks);
-  const selectedAttachBuilding = allSessionBuildings.find((b) => b.id === selectedAttachBuildingId);
+  const selectedAttachBuilding = buildingAssociationOptions.find((b) => b.id === selectedAttachBuildingId);
   const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
   const attachCandidateBuildings = useMemo(() => {
     const query = attachBuildingSearch.trim().toLowerCase();
-    return allSessionBuildings.filter((building) => {
+    return buildingAssociationOptions.filter((building) => {
       if (building.id === "pending-building" || building.id === editingBuildingId) return false;
       const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
       if (!eligibility.eligible) return false;
       return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
     });
-  }, [allSessionBuildings, attachBuildingSearch, currentFeatureLinks, editingBuildingId]);
+  }, [attachBuildingSearch, buildingAssociationOptions, currentFeatureLinks, editingBuildingId]);
   const currentBuildings = useMemo(() => {
     const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
     if (mode !== "area" || points.length === 0) return validMerged;
@@ -1187,8 +1215,9 @@ export function MapEditor() {
     }
     setPolygonClosed(true);
     setPolygonInteraction("draw");
+    if (buildingWorkflowMode === "create") setBuildingDetailsModalOpen(true);
     setError("");
-  }, [campusBoundary, mode, points]);
+  }, [buildingWorkflowMode, campusBoundary, mode, points]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1368,7 +1397,20 @@ export function MapEditor() {
   };
 
   const openIndoorLocationHandoff = (building: Building, floor: string) => {
-    navigate(`/locations?add=indoor&parentId=${encodeURIComponent(building.id)}&floor=${encodeURIComponent(floor)}`);
+    const parent = currentLocations.find((location) => location.id === building.id && location.type === "Building") ?? {
+      id: building.id,
+      name: building.name,
+      code: building.code,
+      type: "Building" as const,
+      parentId: null,
+      status: building.status ?? "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+    };
+    navigate(`/locations?add=indoor&parentId=${encodeURIComponent(building.id)}&floor=${encodeURIComponent(floor)}`, {
+      state: { indoorLocationParent: parent },
+    });
   };
 
   const linkExistingEntrance = (building: Building, node: RouteNode) => {
@@ -1435,7 +1477,13 @@ export function MapEditor() {
     setPolygonInteraction("draw");
     setMode("select");
     setError("");
+    setBuildingDetailsModalOpen(false);
     completeToolDraft("polygon");
+  };
+
+  const closeBuildingDetailsModal = () => {
+    setBuildingDetailsModalOpen(false);
+    setError("");
   };
 
   const handleSaveBuilding = () => {
@@ -1564,13 +1612,64 @@ export function MapEditor() {
     completeToolDraft("polygon");
   };
 
-  const handleCreateBuilding = () => {
-    if (!canSaveBuilding) return;
+  const handleCreateBuilding = async () => {
+    if (!canSaveBuilding) {
+      setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
+      return;
+    }
     const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
     if (geometryIssues.length > 0) {
       setError(geometryIssues[0].message);
       return;
     }
+
+    if (typeof services.locations.save === "function") {
+      setError("");
+      try {
+        const saved = await services.locations.save({
+          name: buildingName.trim(),
+          code: buildingCode.trim(),
+          type: "Building",
+          parentId: null,
+          function: buildingFunction.trim(),
+          keywords: buildingKeywords.trim() || undefined,
+          status: "Active",
+          lat: null,
+          lng: null,
+          positioned: false,
+        });
+        const renderedBuilding: Building = {
+          id: saved.id,
+          name: saved.name,
+          code: saved.code,
+          type: saved.type === "Facility" ? "Facility" : "Building",
+          status: saved.status,
+          points: [...points],
+        };
+        setLocalLocations((current) => [...current.filter((item) => item.id !== saved.id), saved]);
+        setLocalBuildings((current) => [...current.filter((item) => item.id !== saved.id), renderedBuilding]);
+        setBuildingDetailsModalOpen(false);
+        setPoints([]);
+        resetBuildingForm();
+        setPolygonClosed(false);
+        setPolygonInteraction("draw");
+        setMode("select");
+        setSelected({ type: "building", id: saved.id });
+        setPlacingAssociatedBuildingId(saved.id);
+        const hasActiveEntrance = currentNodes.some((node) =>
+          node.nodeType === "Entrance"
+          && node.associatedPlaceId === saved.id
+          && node.status !== "Inactive",
+        );
+        setNonRoutableBuildingId(hasActiveEntrance ? null : saved.id);
+        void queryClient.invalidateQueries({ queryKey: ["locations"] });
+        completeToolDraft("polygon");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Unable to create Building.");
+      }
+      return;
+    }
+
     completeBuildingWorkflow({
       id: `building-${Date.now()}`,
       name: buildingName.trim(),
@@ -1580,7 +1679,7 @@ export function MapEditor() {
   };
 
   const handleAttachBuilding = () => {
-    const existing = allSessionBuildings.find((building) => building.id === selectedAttachBuildingId);
+    const existing = buildingAssociationOptions.find((building) => building.id === selectedAttachBuildingId);
     if (!existing) return;
     const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
     if (!eligibility.eligible) {
@@ -1628,6 +1727,7 @@ export function MapEditor() {
     setPoints([]);
     setPolygonClosed(false);
     setBuildingWorkflowMode("create");
+    setBuildingDetailsModalOpen(false);
     setAttachBuildingSearch("");
     setSelectedAttachBuildingId(null);
     setNonRoutableBuildingId(null);
@@ -1929,6 +2029,7 @@ export function MapEditor() {
           buildingClassification,
           editingBuildingId,
           polygonClosed,
+          buildingDetailsModalOpen,
           polygonInteraction,
           buildingWorkflowMode,
           buildingRecordMode: buildingWorkflowMode,
@@ -1990,6 +2091,7 @@ export function MapEditor() {
     pathDraftDirty,
     pathPoints,
     polygonClosed,
+    buildingDetailsModalOpen,
     pathStartNodeId,
     pointDraftDirty,
     placingAssociatedBuildingId,
@@ -2030,6 +2132,7 @@ export function MapEditor() {
         setPoints([]);
         setPolygonClosed(false);
         setBuildingWorkflowMode("create");
+        setBuildingDetailsModalOpen(false);
         setAttachBuildingSearch("");
         setSelectedAttachBuildingId(null);
         resetBuildingForm();
@@ -2215,6 +2318,7 @@ export function MapEditor() {
         setBuildingClassification(records.buildingClassification === "Facility" ? "Facility" : "Building");
         setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
         setPolygonClosed(records.polygonClosed === true);
+        setBuildingDetailsModalOpen(records.buildingDetailsModalOpen === true);
         if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
           setPolygonInteraction(records.polygonInteraction);
         } else {
@@ -2750,9 +2854,9 @@ export function MapEditor() {
                     stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), associatedPlaceId });
                   }}>
                     <option value="">No Building association</option>
-                    {currentLocations.filter((location) => location.type === "Building" || location.type === "Facility").map((location) => <option key={location.id} value={location.id}>{location.name} ({location.type})</option>)}
-                    {currentBuildings.filter((building) => !currentLocations.some((location) => location.id === building.id)).map((building) => <option key={building.id} value={building.id}>{building.name}</option>)}
+                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
                   </select>
+                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
                 </label>
               )}
             </div>
@@ -2799,16 +2903,16 @@ export function MapEditor() {
         ],
         details: (
           <>
-            <section className="inspector-related-section" aria-label="Edit Pathway metadata">
+            <section className="inspector-related-section" aria-label="Pathway metadata">
               <h3>Pathway metadata</h3>
               <div className="inspector-edit-fields">
-                <label>Pathway name<input aria-label="Pathway name" value={pathwayFrame?.name ?? selectedPath.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label>
+                <label>Pathway name<input aria-label="Pathway name" placeholder="e.g. Science Walk" value={pathwayFrame?.name ?? selectedPath.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label>
                 <label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label>
-                <label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"] } : current)}><option>Walkway</option><option>Road</option><option>Ramp</option><option>Stairs</option><option>Service path</option></select></label>
+                <label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label>
                 <label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
                 <label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? "Active"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}>{pathwayFrame?.status === "Open" && <option>Open</option>}<option>Active</option><option>Closed</option></select></label>
               </div>
-              <fieldset className="mt-2 rounded-xl border border-[#dbe0e2] p-2.5"><legend className="px-1 text-xs font-semibold text-[#3f4941]">Allowed modes</legend><div className="grid grid-cols-2 gap-2 text-xs">{["Walking", "Vehicle"].map((mode) => { const allowedModes = pathwayFrame?.allowedModes ?? ["Walking"]; return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>; })}</div></fieldset>
+              <fieldset className="mt-2 rounded-xl border border-[#dbe0e2] p-2.5"><legend className="px-1 text-xs font-semibold text-[#3f4941]">Allowed modes</legend><div className="grid grid-cols-2 gap-2 text-xs">{["Walking", "Vehicle"].map((mode) => { const allowedModes = pathwayFrame?.allowedModes ?? ["Walking"]; const vehicleBlocked = pathwayFrame?.type === "Walkway" && mode === "Vehicle"; return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>; })}</div></fieldset>
             </section>
             <section className="inspector-related-section" aria-label="Path Sequence editor">
               <h3>Path Sequence</h3>
@@ -2822,9 +2926,8 @@ export function MapEditor() {
               {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
               <h3 className="inspector-subheading">Network findings</h3>
               <p>{pathwayFrameIssues.length ? `${pathwayFrameIssues.length} local finding${pathwayFrameIssues.length === 1 ? "" : "s"} require attention.` : "No locally known blocking findings."}</p>
-              <button type="button" className="inspector-secondary-action" onClick={() => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); }}>✎ Edit Pathway</button>
               <button type="button" className="inspector-secondary-action" onClick={() => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); }}>⌁ Reshape Pathway</button>
-              <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button><button type="button" onClick={applyPathwayFrame} disabled={!pathwayFrameDirty || pathwayFrameIssues.length > 0}>Apply changes</button></div>
+              <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button></div>
             </section>
           </>
         ),
@@ -2884,8 +2987,8 @@ export function MapEditor() {
               }} />
             </label></div>
             {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
-            <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Path type<input aria-label="Pathway type" value={activePathway?.type ?? ""} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value } : current)} /></label><label>Direction<select aria-label="Pathway direction" value={activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
-            <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button><button type="button" onClick={applyPathwayFrame} disabled={!pathwayFrameDirty || pathwayFrameIssues.length > 0}>Apply changes</button></div>
+            <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? activePathway?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label><label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
+            <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button></div>
           </>
         ),
         primaryAction: {
@@ -3249,7 +3352,7 @@ export function MapEditor() {
                       }
                       const newPath: Pathway = {
                         id: `pathway-${Date.now()}`,
-                        name: "New Campus Pathway",
+                        name: "",
                         sourceNodeId: source.id,
                         destinationNodeId: node.id,
                         distance: "Unknown",
@@ -3719,39 +3822,11 @@ export function MapEditor() {
                     </div>
                     {buildingWorkflowMode === "create" ? (
                       <div className="mt-3 space-y-2">
-                        <label className="block text-xs font-semibold text-[#3f4941]">Building name
-                          <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                        </label>
-                        <fieldset className="rounded-xl border border-[#dbe0e2] p-2.5">
-                          <legend className="px-1 text-xs font-semibold text-[#3f4941]">Campus place classification</legend>
-                          <div className="mt-1 grid grid-cols-2 gap-2">
-                            {(["Building", "Facility"] as const).map((classification) => (
-                              <label key={classification} className={`cursor-pointer rounded-lg border px-2 py-2 text-xs font-bold ${buildingClassification === classification ? "border-[#005931] bg-emerald-50 text-[#005931]" : "border-[#dbe0e2] text-[#526359]"}`}>
-                                <input type="radio" name="building-classification" value={classification} checked={buildingClassification === classification} onChange={() => setBuildingClassification(classification)} className="sr-only" />
-                                {classification}
-                                <span className="mt-1 block text-[10px] font-medium">{classification === "Building" ? "Supports Indoor Locations" : "No Indoor Locations"}</span>
-                              </label>
-                            ))}
-                          </div>
-                          {buildingClassification === "Building" && <p role="status" className="mt-2 text-[11px] text-amber-800">Advisory: this Building can be saved without Indoor Locations; add them later from the Locations directory.</p>}
-                        </fieldset>
-                        <label className="block text-xs font-semibold text-[#3f4941]">Building code
-                          <input aria-label="Building code" value={buildingCode} onChange={(event) => updateBuildingField("code", event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                        </label>
-                        <label className="block text-xs font-semibold text-[#3f4941]">Function / Category
-                          <input aria-label="Building function" value={buildingFunction} onChange={(event) => updateBuildingField("function", event.target.value)} placeholder="e.g. Academic and Laboratories" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                        </label>
-                        <label className="block text-xs font-semibold text-[#3f4941]">Keywords
-                          <input aria-label="Building keywords" value={buildingKeywords} onChange={(event) => updateBuildingField("keywords", event.target.value)} placeholder="e.g. science, lab, chemistry" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                        </label>
-                        {points.length >= 3 && (
-                          <p className="mt-2 text-[11px] text-[#526359]">
-                            Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")} (no copied outdoor coordinate stored on Building)
-                          </p>
-                        )}
-                        {buildingIdentityIssues.length > 0 && (
-                          <div className="mt-2 text-xs font-semibold text-red-700">{buildingIdentityIssues[0].message}</div>
-                        )}
+                        <p className="text-xs text-[#3f4941]">Add the Building identity and descriptive details before committing this footprint.</p>
+                        <button type="button" className="w-full rounded-xl border border-[#005931] bg-emerald-50 px-3 py-2 text-xs font-bold text-[#005931]" onClick={() => setBuildingDetailsModalOpen(true)}>
+                          {buildingName.trim() || buildingCode.trim() ? "Open Building details" : "Add Building details"}
+                        </button>
+                        {(buildingName.trim() || buildingCode.trim()) && <p className="text-[11px] text-[#526359]">{buildingName || "Unnamed Building"} {buildingCode ? `· ${buildingCode}` : ""}</p>}
                       </div>
                     ) : (
                       <div className="mt-3 space-y-2">
@@ -3818,12 +3893,6 @@ export function MapEditor() {
                         Move
                       </button>
                     </div>
-                    <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building name
-                      <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                    </label>
-                    <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Building code
-                      <input aria-label="Building code" value={buildingCode} onChange={(event) => updateBuildingField("code", event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-                    </label>
                   </div>
                 )}
                 <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
@@ -3876,7 +3945,7 @@ export function MapEditor() {
                       onClick={closePolygon}
                       className="px-3 py-1.5 bg-emerald-50 border border-[#005931] text-[#005931] rounded-full text-xs font-bold hover:bg-emerald-100 disabled:opacity-40 transition cursor-pointer"
                     >
-                      Finish Footprint
+                      Save shape
                     </button>
                   </div>
                 )}
@@ -3897,26 +3966,20 @@ export function MapEditor() {
                       ▱ Edit Shape
                     </button>
                   )}
-                  <button
+                  {(editingBuildingId || (polygonClosed && buildingWorkflowMode === "attach")) && <button
                     type="button"
                     disabled={editingBuildingId
                       ? !canFinishFootprint
-                      : polygonClosed
-                      ? (buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)
-                      : !canSaveBuilding}
+                      : buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding}
                     onClick={editingBuildingId
                       ? handleSaveBuilding
-                      : polygonClosed
-                      ? (buildingWorkflowMode === "create" ? handleCreateBuilding : handleAttachBuilding)
-                      : handleSaveBuilding}
+                        : buildingWorkflowMode === "create" ? () => setBuildingDetailsModalOpen(true) : handleAttachBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
                     {editingBuildingId
                       ? "Apply footprint change"
-                      : polygonClosed
-                      ? (buildingWorkflowMode === "create" ? "Create New Building" : "Attach Selected Building")
-                      : (polygonInteraction === "reshape" ? "✓ Confirm Shape" : "Save Building")}
-                  </button>
+                      : buildingWorkflowMode === "create" ? "Open Building details" : "Attach Selected Building"}
+                  </button>}
                 </div>
               </div>
             ) : mode === "place" ? (
@@ -3957,17 +4020,11 @@ export function MapEditor() {
                     className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                   >
                     <option value="">No Building association</option>
-                    {currentBuildings.map((building) => {
-                      const location = currentLocations.find((item) =>
-                        (item.type === "Building" || item.type === "Facility")
-                          && (item.id === building.id || item.name === building.name),
-                      );
-                      const classification = location?.type ?? building.type ?? "Building";
-                      return <option key={building.id} value={location?.id ?? building.id}>
-                        {building.name} ({classification})
-                      </option>;
-                    })}
+                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>
+                      {building.name} ({building.code})
+                    </option>)}
                   </select>
+                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
                 </div>
                 <div className="my-2 text-xs text-[#3f4941]">
                   {temporary
@@ -4014,11 +4071,11 @@ export function MapEditor() {
                     <section aria-label="Pathway metadata" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-[#3f4941]">Pathway name
-                          <input aria-label="New Pathway name" value={pathwayDraft?.name ?? activePathway.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                          <input aria-label="New Pathway name" placeholder="e.g. Science Walk" value={pathwayDraft?.name ?? activePathway.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
                         </label>
                         <label className="text-xs font-semibold text-[#3f4941]">Way type
-                          <select aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
-                            {["Walkway", "Road", "Ramp", "Stairs", "Service path"].map((wayType) => <option key={wayType}>{wayType}</option>)}
+                          <select aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
+                            {["Walkway", "Road"].map((wayType) => <option key={wayType}>{wayType}</option>)}
                           </select>
                         </label>
                         <label className="text-xs font-semibold text-[#3f4941]">Shade
@@ -4033,7 +4090,8 @@ export function MapEditor() {
                           <div className="grid grid-cols-2 gap-2 text-xs">
                             {["Walking", "Vehicle"].map((mode) => {
                               const allowedModes = pathwayDraft?.allowedModes ?? activePathway.allowedModes ?? ["Walking"];
-                              return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>;
+                              const vehicleBlocked = (pathwayDraft?.type ?? activePathway.type) === "Walkway" && mode === "Vehicle";
+                              return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>;
                             })}
                           </div>
                         </fieldset>
@@ -4227,8 +4285,9 @@ export function MapEditor() {
                     {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
                       <option value={selectedNode.associatedPlaceId}>Missing Building ({selectedNode.associatedPlaceId})</option>
                     )}
-                    {currentLocations.filter((location) => location.type === "Building" || location.type === "Facility").map((location) => <option key={location.id} value={location.id}>{location.name} ({location.type})</option>)}
+                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
                   </select>
+                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
                 </label>
                 <div className="text-xs text-[#3f4941]">{selectedNode.nodeType}</div>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
@@ -4362,6 +4421,16 @@ export function MapEditor() {
           </div>
         </div>
       </div>
+
+      {buildingDetailsModalOpen && polygonClosed && buildingWorkflowMode === "create" && !editingBuildingId && (
+        <BuildingDetailsModal
+          draft={buildingForm}
+          error={error}
+          onChange={setBuildingForm}
+          onClose={closeBuildingDetailsModal}
+          onSubmit={handleCreateBuilding}
+        />
+      )}
 
       {ownerModal === "location" && locationModalEntity && (
         <LocationDetailsModal

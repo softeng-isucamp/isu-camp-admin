@@ -9,6 +9,7 @@ import { auditEntries } from "./mockData";
 import { resetPasswordSchema, resetSchema } from "./schemas";
 import { reviewMapDraft } from "../features/map/mapEditing";
 import { indoorLocationTypes } from "../lib/locationPolicy";
+import { createLocalAdapter } from "./localAdapter";
 
 describe("mock service contracts", () => {
   afterEach(() => {
@@ -347,6 +348,52 @@ describe("mock service contracts", () => {
     expect(
       (await services.locations.list("Preview Facility")).items,
     ).toHaveLength(1);
+  });
+
+  it("enforces unique codes when the local adapter creates a new location", () => {
+    const adapter = createLocalAdapter({
+      locations: [{
+        id: "building-1",
+        name: "Building One",
+        code: "BUILDING-ONE",
+        type: "Building",
+        parentId: null,
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      }, {
+        id: "existing-room",
+        name: "Existing Room",
+        code: "DUPLICATE-CODE",
+        type: "Room",
+        parentId: "building-1",
+        building: "Building One",
+        floor: "Ground Floor",
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      }],
+      buildings: [],
+      nodes: [],
+      pathways: [],
+    }, null);
+
+    expect("map" in adapter).toBe(false);
+
+    expect(() => adapter.locations.save({
+      name: "New Room",
+      code: "duplicate-code",
+      type: "Room",
+      parentId: "building-1",
+      building: "Building One",
+      floor: "Ground Floor",
+      status: "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+    })).toThrow("Location code must be unique.");
   });
 
   it("validates bulk imports transactionally with batch parents and field-level errors", async () => {
@@ -746,6 +793,25 @@ describe("real locations service boundary", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, building: saved.building, floor: saved.floor, function: saved.function, keywords: saved.keywords, status: saved.status }) }));
   });
 
+  it("creates a Building through the canonical locations endpoint without a client id", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const saved = { id: "42", name: "Engineering Hall", code: "ENG-01", type: "Building", parentId: null, function: "Academic building", keywords: "engineering", status: "Active", lat: null, lng: null, positioned: false } as const;
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }));
+
+    await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/locations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: null, function: saved.function, keywords: saved.keywords, status: saved.status }),
+      }),
+    );
+    vi.unstubAllEnvs();
+  });
+
   it("updates existing locations through the actions endpoint", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
@@ -788,10 +854,10 @@ describe("real locations service boundary", () => {
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Room 204", code: "ROOM-204", type: "Room", parentId: "1", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }));
 
     const saved = await httpServices.locations.save({
-      name: "Library", code: "LIB", type: "Building", parentId: null,
+      name: "Room 204", code: "ROOM-204", type: "Room", parentId: "1", floor: "2nd Floor",
       status: "Active", lat: null, lng: null, positioned: false,
       photo: { name: "library.png", type: "image/png", dataUrl: "data:image/png;base64,cGhvdG8=" },
     });
