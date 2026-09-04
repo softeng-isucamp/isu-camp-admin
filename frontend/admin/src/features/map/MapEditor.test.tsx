@@ -939,7 +939,10 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("2nd Floor");
     expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
+    expect(screen.getByRole("region", { name: "2nd Floor indoor locations" })).toHaveTextContent("Room · 204");
+    expect(screen.getByRole("region", { name: "2nd Floor indoor locations" })).toHaveClass("inspector-floor-group");
     expect(screen.getByRole("region", { name: "Building entrances" })).toHaveTextContent("Main Entrance");
+    expect(screen.getByRole("region", { name: "Building entrances" })).toHaveTextContent("16.72050, 121.68950");
     const buildingContent = screen.getByRole("region", { name: "Building content" });
     expect(within(buildingContent).getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Floor Level for new Indoor Location")).not.toBeInTheDocument();

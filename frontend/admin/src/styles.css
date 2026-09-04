@@ -1530,6 +1530,29 @@ td small {
 .inspector-related-section p { margin: 0; color: #68776f; }
 .inspector-related-group { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
 .inspector-related-group strong { color: #005931; font-size: 10px; text-transform: uppercase; }
+.inspector-related-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.inspector-related-heading h3,
+.inspector-related-heading h4 { margin: 0; color: #18261e; font-size: 11px; }
+.inspector-related-heading > div > span { display: block; margin-top: 2px; color: #789083; font-size: 10px; }
+.inspector-floor-group { margin-top: 8px; padding: 8px 10px 4px; border: 1px solid #e1ebe3; border-radius: 11px; background: #fff; }
+.inspector-floor-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid #edf2ee; }
+.inspector-floor-heading strong { display: flex; align-items: center; gap: 5px; color: #0c7441; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.inspector-floor-heading > span { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: #eef6f0; color: #17613b; font-size: 9px; font-weight: 800; text-align: center; }
+.inspector-location-row,
+.inspector-node-row { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-bottom: 1px solid #edf2ee; }
+.inspector-location-row:last-child,
+.inspector-node-row:last-child { border-bottom: 0; }
+.inspector-location-row > div,
+.inspector-node-row > div { min-width: 0; flex: 1; }
+.inspector-location-row strong,
+.inspector-node-row strong { display: block; color: #263d30; font-size: 11px; font-weight: 800; }
+.inspector-location-row > div > span,
+.inspector-node-row > div > span { display: block; margin-top: 2px; color: #789083; font-size: 10px; overflow-wrap: anywhere; }
+.inspector-content-icon,
+.inspector-node-icon { display: grid; width: 25px; height: 25px; flex: 0 0 25px; place-items: center; border-radius: 8px; background: #e7f3ea; color: #17613b; font-size: 10px; font-weight: 900; }
+.inspector-node-icon { border-radius: 999px; background: #e7eef5; color: #1769aa; font-size: 13px; }
+.inspector-node-row em { flex: 0 0 auto; color: #17613b; font-size: 9px; font-style: normal; font-weight: 900; }
+.inspector-node-list { padding: 0 10px; border: 1px solid #e1ebe3; border-radius: 11px; background: #fff; }
 
 .inspector-point-inputs {
   display: grid;
