@@ -89,21 +89,54 @@ export function previewWalkingNetworkImport(json: string, snapshot: NetworkSnaps
   const importedPathways: Pathway[] = [];
   const ids = new Set<string>();
   const working = { ...snapshot, routeNodes: [...snapshot.routeNodes], pathways: [...snapshot.pathways] };
-  rows.forEach((value, index) => {
+
+  // Parse all rows before validating relationships. Import files are a set,
+  // not an ordered transaction log: a Pathway may reference a Route Node
+  // declared later in the same file.
+  const parsedRows = rows.map((value, index) => {
     const row = index + 1;
     const record = asRecord(value);
-    if (!record) { findings.push({ severity: "blocking", row, message: "Each row must be an object." }); return; }
-    if (isRouteRecord(record)) { findings.push({ severity: "blocking", row, message: "Route records are calculated output and cannot be imported as administrable entities." }); return; }
+    if (!record) {
+      findings.push({ severity: "blocking", row, message: "Each row must be an object." });
+      return null;
+    }
+    if (isRouteRecord(record)) {
+      findings.push({ severity: "blocking", row, message: "Route records are calculated output and cannot be imported as administrable entities." });
+      return null;
+    }
     const explicitNode = record.entityType === "RouteNode" || record.recordType === "RouteNode" || record.kind === "Route Node" || record.nodeType !== undefined || record.latitude !== undefined || record.lat !== undefined;
     const entity = explicitNode ? parseNode(record) : parsePathway(record);
-    if (!entity) { findings.push({ severity: "blocking", row, entityId: text(record.id) ?? undefined, message: `Row ${row} is not a valid Pathway or Route Node.` }); return; }
+    if (!entity) {
+      findings.push({ severity: "blocking", row, entityId: text(record.id) ?? undefined, message: `Row ${row} is not a valid Pathway or Route Node.` });
+      return null;
+    }
     if (ids.has(entity.id) || working.routeNodes.some((node) => node.id === entity.id) || working.pathways.some((pathway) => pathway.id === entity.id)) {
-      findings.push({ severity: "blocking", row, entityId: entity.id, message: `Entity ${entity.id} is duplicated or already exists.` }); return;
+      findings.push({ severity: "blocking", row, entityId: entity.id, message: `Entity ${entity.id} is duplicated or already exists.` });
+      return null;
     }
     ids.add(entity.id);
+    return { row, record, entity };
+  });
+
+  // Make all valid imported nodes visible to pathway validation, regardless
+  // of their row position. Invalid rows still produce findings and never
+  // become part of the proposed change set.
+  parsedRows.forEach((parsed) => {
+    if (parsed?.entity && "latitude" in parsed.entity) {
+      importedNodes.push(parsed.entity);
+      working.routeNodes.push(parsed.entity);
+    }
+  });
+
+  parsedRows.forEach((parsed) => {
+    if (!parsed) return;
+    const { row, record, entity } = parsed;
     if ("latitude" in entity) {
       if (entity.type === "entrance" && entity.buildingId == null) findings.push({ severity: "advisory", row, entityId: entity.id, message: "Entrance Route Node has no Building association." });
-      importedNodes.push(entity); working.routeNodes.push(entity);
+      if (entity.type === "entrance" && entity.buildingId !== null && !snapshot.buildings.some((building) => building.id === entity.buildingId)) {
+        findings.push({ severity: "blocking", row, entityId: entity.id, message: `Entrance Route Node references missing Building ${entity.buildingId}. Correct the Building association before importing.` });
+        return;
+      }
     } else {
       try { validatePathway(entity, working, { campusBoundary }); if (!record.status || !["open", "closed", "Open", "Closed"].includes(String(record.status))) throw new Error("Pathway lifecycle status is required."); } catch (error) { findings.push({ severity: "blocking", row, entityId: entity.id, message: error instanceof Error ? error.message : "Invalid Pathway." }); return; }
       if (!entity.shade || entity.distanceMeters == null || entity.estimatedTimeSeconds == null) findings.push({ severity: "advisory", row, entityId: entity.id, message: "Pathway quality metadata is incomplete; review before importing." });
