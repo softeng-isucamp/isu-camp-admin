@@ -190,8 +190,10 @@ const evaluate = (
   }
 
   const duplicateCode = options.currentId !== undefined && options.directory.some((location) =>
-    location.id !== options.currentId
-      && location.code.trim().toLowerCase() === draft.code.trim().toLowerCase(),
+    options.currentId === "__new__"
+      ? location.code.trim().toLowerCase() === draft.code.trim().toLowerCase()
+      : location.id !== options.currentId
+        && location.code.trim().toLowerCase() === draft.code.trim().toLowerCase(),
   );
   if (draft.code.trim() && duplicateCode) {
     issues.push({

@@ -26,7 +26,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("renders the campus locations heading and default hierarchy table with tree connectors", async () => {
     renderLocations();
     expect(await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.getByText("Manage Buildings and Indoor Locations. Create outdoor records in Map Editor.")).toBeInTheDocument();
+    expect(screen.getByText("Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.")).toBeInTheDocument();
 
     // Check items in table
     const administrationBuildingMatches = await screen.findAllByText("Administration Building", {}, { timeout: 4000 });
@@ -182,10 +182,14 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(cancelButton);
   });
 
-  it("offers dedicated Map Editor handoffs and no outdoor choices when adding", async () => {
+  it("shows passive Map Editor guidance and no outdoor choices when adding", async () => {
     renderLocations();
-    expect(await screen.findByRole("button", { name: "Create Building in Map Editor" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Outdoor Point Location in Map Editor" })).toBeInTheDocument();
+    expect(await screen.findByText("Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Prototype variants" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Outdoor records are created in Map Editor.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Create Buildings|Outdoor Point Locations in Map Editor/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Building in Map Editor" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Outdoor Point Location in Map Editor" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /add location/i }));
     const options = Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.value);
     expect(options).toEqual(["Laboratory", "Room", "Office", "Restroom"]);

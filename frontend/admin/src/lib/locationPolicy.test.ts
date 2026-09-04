@@ -71,6 +71,24 @@ describe("Location policy", () => {
     })).toEqual({ valid: true, issues: [] });
   });
 
+  it("rejects a duplicate code when creating a new indoor record", () => {
+    const result = locationPolicy.evaluate(draft({
+      parentId: building.id,
+      building: building.name,
+      floor: "Ground Floor",
+      code: "sci",
+    }), {
+      context: "record",
+      directory: [building],
+      requireFloorLevel: true,
+      currentId: "__new__",
+    });
+
+    expect(result.issues).toEqual([
+      expect.objectContaining({ code: "code_not_unique", field: "code" }),
+    ]);
+  });
+
   it.each(locationTypes.map((type) => [
     type,
     type === "Building" || type === "Facility"

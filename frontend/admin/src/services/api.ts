@@ -798,7 +798,7 @@ export const services: Services = {
         context: "record",
         directory: locations,
         requireFloorLevel: !location.id,
-        currentId: location.id,
+        currentId: location.id ?? "__new__",
       });
       if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
 

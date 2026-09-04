@@ -59,7 +59,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
           context: "record",
           directory: mapData.locations,
           requireFloorLevel: !draft.id,
-          currentId: location.id,
+          currentId: draft.id ?? "__new__",
         });
         if (!evaluation.valid) throw new Error(evaluation.issues[0].message);
         const index = mapData.locations.findIndex((item) => item.id === location.id);
