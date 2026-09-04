@@ -299,6 +299,21 @@ describe("buildCreateBuildingCompoundOperation", () => {
     const createFeat = batch.nestedOperations![1];
     expect(createFeat.entityId).toBe("feat-custom-42");
   });
+
+  it("creates a footprint-backed Facility without copied outdoor coordinates", () => {
+    const batch = buildCreateBuildingCompoundOperation(
+      { name: "Health Center", code: "HC-01", type: "Facility" },
+      validPoints,
+      "facility-1",
+    );
+    expect(batch.nestedOperations?.[0].after).toMatchObject({
+      type: "Facility",
+      lat: null,
+      lng: null,
+      positioned: false,
+      spatialRole: "building_footprint_owner",
+    });
+  });
 });
 
 describe("buildAttachBuildingCompoundOperation", () => {

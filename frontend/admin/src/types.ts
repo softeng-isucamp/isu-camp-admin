@@ -20,6 +20,7 @@ export interface Building {
   id: string;
   name: string;
   code: string;
+  type?: "Building" | "Facility";
   points: [number, number][];
   status?: RecordStatus;
   source?: SourceProvenance;
@@ -38,6 +39,8 @@ export interface Location {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  /** Internal Admin Draft marker for footprint-backed Facilities. */
+  spatialRole?: "building_footprint_owner";
   hasPhoto?: boolean;
   /** Frontend-only mock-session photo metadata; never implies server upload. */
   photo?: {

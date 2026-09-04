@@ -22,9 +22,10 @@ import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
-import { WalkingNetworkManagementPrototype } from "./WalkingNetworkManagementPrototype";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { PathPointSidecardPrototype } from "./PathPointSidecardPrototype";
+import { BuildingFootprintSidecardPrototype } from "./BuildingFootprintSidecardPrototype";
+import { WalkingNetworkImportPlacementPrototype } from "./WalkingNetworkImportPlacementPrototype";
 import {
   buildRestoreLocalFeatureOperation,
   buildRetireLocalFeatureOperation,
@@ -523,11 +524,14 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
 };
 
 export function MapEditor() {
+  if (new URLSearchParams(window.location.search).get("prototype") === "walking-network-import") {
+    return <WalkingNetworkImportPlacementPrototype />;
+  }
+  if (new URLSearchParams(window.location.search).get("prototype") === "building-footprint-sidecard") {
+    return <BuildingFootprintSidecardPrototype />;
+  }
   if (new URLSearchParams(window.location.search).get("prototype") === "path-point-sidecard") {
     return <PathPointSidecardPrototype />;
-  }
-  if (new URLSearchParams(window.location.search).get("prototype") === "walking-network") {
-    return <WalkingNetworkManagementPrototype />;
   }
   const queryClient = useQueryClient();
   const routeLocation = useLocation();
@@ -621,6 +625,7 @@ export function MapEditor() {
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
   const [buildingWorkflowMode, setBuildingWorkflowMode] = useState<"create" | "attach">("create");
+  const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
   const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
   const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
@@ -640,6 +645,7 @@ export function MapEditor() {
   };
   const resetBuildingForm = () => {
     setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
+    setBuildingClassification("Building");
   };
   const [movingType, setMovingType] = useState<"location" | "node">("location");
   const [movingId, setMovingId] = useState<string | null>(null);
@@ -671,6 +677,8 @@ export function MapEditor() {
   const [provisionalPathwayId, setProvisionalPathwayId] = useState<string | null>(null);
   const [pathStartNodeId, setPathStartNodeId] = useState<string | null>(null);
   const [pathDraftDirty, setPathDraftDirty] = useState(false);
+  const [routeNodeDraft, setRouteNodeDraft] = useState<RouteNode | null>(null);
+  const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
@@ -1073,9 +1081,16 @@ export function MapEditor() {
           setMode("path");
         }
       }
+      if (type === "node") {
+        const node = currentNodes.find((candidate) => candidate.id === id);
+        if (node) {
+          setRouteNodeDraft({ ...node });
+          setRouteNodeDraftOriginal({ ...node });
+        }
+      }
       setTemporary(null);
     },
-    [currentPathways],
+    [currentNodes, currentPathways],
   );
 
   const selectCanvasObject = (
@@ -1431,8 +1446,16 @@ export function MapEditor() {
     completeToolDraft("point");
   };
 
+  const cancelOutdoorPointDraft = () => {
+    setAddLocationOpen(false);
+    setNewLocationError("");
+    setTemporary(null);
+    setPointDraftDirty(false);
+    setNewLocation({ name: "", code: "", function: "", keywords: "" });
+  };
+
   const handleSaveNewRoom = () => {
-    if (!selectedBuilding || !newRoom.name.trim() || !newRoom.code.trim()) return;
+    if (!selectedBuilding || (selectedBuilding.type ?? selectedBuildingLocation?.type) !== "Building" || !newRoom.name.trim() || !newRoom.code.trim()) return;
     const location: Location = {
       id: `location-${Date.now()}`,
       name: newRoom.name.trim(),
@@ -1512,33 +1535,48 @@ export function MapEditor() {
   };
 
   const handleSaveBuilding = () => {
-    if (!canSaveBuilding) return;
     if (editingBuildingId) {
+      if (!canFinishFootprint) return;
       if (!geometryOnCampus(points, campusBoundary)) {
         setError("The building footprint must stay inside the ISU Echague campus boundary.");
         return;
       }
-      const building: Building = {
-        id: editingBuildingId,
-        name: buildingName.trim(),
-        code: buildingCode.trim(),
-        points: [...points],
+      const footprintLink = currentFeatureLinks.find((link) =>
+        link.targetDomain === "Locations"
+        && link.targetEntityId === editingBuildingId
+        && link.linkType === "building_footprint",
+      );
+      const footprint = currentLocalFeatures.find((feature) =>
+        feature.id === footprintLink?.featureId
+        || (feature.family === "building_footprint"
+          && (feature.linkedBuildingId === editingBuildingId || feature.id === `feat-poly-${editingBuildingId}`)),
+      );
+      if (!footprintLink || !footprint) {
+        setError("This Building has no linked footprint to reshape. Open Building details to review its ownership.");
+        return;
+      }
+      const updatedFootprint: LocalMapFeatureEntity = {
+        ...footprint,
+        coordinates: [...points],
+        linkedBuildingId: editingBuildingId,
       };
-      const before = currentBuildings.find((item) => item.id === editingBuildingId) ?? null;
-      setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), building]);
+      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== updatedFootprint.id), updatedFootprint]);
+      setLocalBuildings((current) => current.map((building) =>
+        building.id === editingBuildingId ? { ...building, points: [...points] } : building,
+      ));
       workingSessionManager.executeOperation({
         type: "update_geometry",
-        domain: "Locations",
-        entityId: building.id,
-        before: before as unknown as Record<string, unknown> | null,
-        after: building as unknown as Record<string, unknown>,
-        description: `Reshape ${building.name}`,
+        domain: "Local Map Data",
+        entityId: updatedFootprint.id,
+        before: footprint as unknown as Record<string, unknown>,
+        after: updatedFootprint as unknown as Record<string, unknown>,
+        description: `Reshape linked footprint for ${buildingName.trim() || editingBuildingId}`,
       });
       setDirty(true);
       cancelBuildingDraft();
-      setSelected({ type: "building", id: building.id });
-      setPlacingAssociatedBuildingId(building.id);
+      setSelected({ type: "building", id: editingBuildingId });
     } else {
+      if (!canSaveBuilding) return;
       handleCreateBuilding();
     }
   };
@@ -1555,6 +1593,7 @@ export function MapEditor() {
       const identityInput: BuildingIdentityInput = {
         name: building.name,
         code: building.code,
+        type: buildingClassification,
         function: buildingFunction,
         keywords: buildingKeywords,
         status: "Active",
@@ -1588,7 +1627,7 @@ export function MapEditor() {
     // The current renderer still consumes Building.points. Keep this local
     // compatibility projection separate from the geometry-free Building
     // record stored in the compound operation above.
-    const renderedBuilding = { ...building, points: [...points] };
+    const renderedBuilding = { ...building, type: buildingClassification, points: [...points] };
     setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), renderedBuilding]);
     if (footprint) {
       setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== footprint.id), footprint]);
@@ -1692,6 +1731,8 @@ export function MapEditor() {
     setPathPoints([]);
     setPathwayDraft(null);
     setPathwayDraftOriginal(null);
+    setRouteNodeDraft(null);
+    setRouteNodeDraftOriginal(null);
     setEditingPathId(null);
     setProvisionalPathwayId(null);
     setPathStartNodeId(null);
@@ -1836,7 +1877,13 @@ export function MapEditor() {
   };
 
   const networkSnapshotForImport = (): NetworkSnapshot => ({
-    buildings: [],
+    buildings: currentBuildings.map((building) => ({
+      id: building.id,
+      name: building.name,
+      code: building.code,
+      geometry: building.points.map(([latitude, longitude]) => ({ latitude, longitude })),
+      status: building.status === "Inactive" ? "inactive" : "active",
+    })),
     routeNodes: currentNodes.map((node) => ({
       id: node.id, name: node.name, latitude: node.lat, longitude: node.lng,
       status: node.status === "Inactive" ? "inactive" : "active",
@@ -1949,7 +1996,7 @@ export function MapEditor() {
       select: () => null,
       point: () => temporary && pointDraftDirty ? ({
         toolType: "point",
-        label: "Point Location draft",
+        label: "Outdoor Point Location draft",
         provisionalGeometry: {
           points: [{ x: temporary[1], y: temporary[0], lat: temporary[0], lng: temporary[1] }],
         },
@@ -1980,6 +2027,7 @@ export function MapEditor() {
           buildingCode,
           buildingFunction,
           buildingKeywords,
+          buildingClassification,
           editingBuildingId,
           polygonClosed,
           polygonInteraction,
@@ -2284,6 +2332,7 @@ export function MapEditor() {
             status: "Active",
           });
         }
+        setBuildingClassification(records.buildingClassification === "Facility" ? "Facility" : "Building");
         setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
         setPolygonClosed(records.polygonClosed === true);
         if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
@@ -2433,6 +2482,30 @@ export function MapEditor() {
       description,
     });
     setDirty(true);
+  };
+  const updateNodeWithOperation = (before: RouteNode, after: RouteNode, description: string) => {
+    updateNode(after);
+    recordPropertyOperation("Walking Network", before.id, before, after, description);
+  };
+  const routeNodeFrame = selectedNode && routeNodeDraft?.id === selectedNode.id ? routeNodeDraft : selectedNode;
+  const routeNodeFrameDirty = Boolean(routeNodeDraft && routeNodeDraftOriginal
+    && JSON.stringify(routeNodeDraft) !== JSON.stringify(routeNodeDraftOriginal));
+  const applyRouteNodeFrame = () => {
+    if (!routeNodeDraft || !routeNodeDraftOriginal || !routeNodeFrameDirty) return;
+    const issues = validateRouteNodeDraft(routeNodeDraft, { buildings: currentBuildings, locations: currentLocations, campusBoundary });
+    if (issues.length) {
+      setError(issues[0].message);
+      window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issues[0].field === "name" ? "Route Node name" : issues[0].field === "nodeType" ? "Route Node type" : issues[0].field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
+      return;
+    }
+    updateNodeWithOperation(routeNodeDraftOriginal, routeNodeDraft, `Edit ${routeNodeDraft.name}`);
+    setRouteNodeDraftOriginal({ ...routeNodeDraft });
+    setError("");
+  };
+  const cancelRouteNodeFrame = () => {
+    if (!routeNodeDraftOriginal) return;
+    setRouteNodeDraft({ ...routeNodeDraftOriginal });
+    setError("");
   };
 
   const confirmLifecycleAction = () => {
@@ -2695,6 +2768,9 @@ export function MapEditor() {
       } satisfies InspectorCardModel;
     }
     if (selectedNode) {
+      const stageRouteNodeEdit = (updated: RouteNode) => {
+        setRouteNodeDraft(updated);
+      };
       const connectedPathways = currentPathways.filter((pathway) => pathway.sourceNodeId === selectedNode.id || pathway.destinationNodeId === selectedNode.id);
       const connectedPaths = connectedPathways.length;
       const nodeFindings = validateRouteNodeDraft(selectedNode, {
@@ -2721,6 +2797,43 @@ export function MapEditor() {
           { label: "Latitude", value: selectedNode.lat.toFixed(6) },
           { label: "Longitude", value: selectedNode.lng.toFixed(6) },
         ],
+        details: (
+          <section className="inspector-related-section" aria-label="Edit Route Node metadata">
+            <h3>Route Node metadata</h3>
+            <div className="inspector-edit-fields">
+              <label> Name
+                <input aria-label="Route Node name" value={routeNodeFrame?.name ?? selectedNode.name} onChange={(event) => {
+                  const name = event.target.value;
+                  stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), name });
+                }} />
+              </label>
+              <label> Node type
+                <select aria-label="Route Node type" value={routeNodeFrame?.nodeType ?? selectedNode.nodeType} onChange={(event) => {
+                  const nodeType = event.target.value as RouteNode["nodeType"];
+                  stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? routeNodeFrame?.associatedPlaceId ?? null : null });
+                }}>
+                  <option>Entrance</option><option>Junction</option><option>Access Point</option>
+                </select>
+              </label>
+              {(routeNodeFrame?.nodeType ?? selectedNode.nodeType) === "Entrance" && (
+                <label> Building association
+                  <select aria-label="Route Node association" value={routeNodeFrame?.associatedPlaceId ?? ""} onChange={(event) => {
+                    const associatedPlaceId = event.target.value || null;
+                    stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), associatedPlaceId });
+                  }}>
+                    <option value="">No Building association</option>
+                    {currentLocations.filter((location) => location.type === "Building").map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                    {currentBuildings.filter((building) => !currentLocations.some((location) => location.id === building.id)).map((building) => <option key={building.id} value={building.id}>{building.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="inspector-inline-actions">
+              <button type="button" onClick={cancelRouteNodeFrame} disabled={!routeNodeFrameDirty}>Cancel</button>
+              <button type="button" onClick={applyRouteNodeFrame} disabled={!routeNodeFrameDirty}>Apply changes</button>
+            </div>
+          </section>
+        ),
         primaryAction: { label: selectedNode.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: handleStartMoveNode },
         overflowActions: [
           ...(selectedNode.nodeType === "Entrance" ? [{
@@ -2764,7 +2877,7 @@ export function MapEditor() {
                 <label>Shade<select aria-label="Pathway shade" value={selectedPath.shade} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label>
                 <label>Path type<input aria-label="Pathway type" value={selectedPath.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value } : current)} /></label>
                 <label>Direction<select aria-label="Pathway direction" value={selectedPath.direction} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
-                <label>Status<select aria-label="Pathway status" value={selectedPath.status} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label>
+                <label>Status<select aria-label="Pathway status" value={selectedPath.status} disabled><option>Open</option><option>Closed</option><option>Unknown</option></select><span className="text-[10px] font-normal text-[#52655c]">Use Close/Reopen Pathway after reviewing impact.</span></label>
               </div>
             </section>
             <section className="inspector-related-section" aria-label="Path Sequence editor">
@@ -3414,6 +3527,7 @@ export function MapEditor() {
             selected={networkBrowserSelection}
             onSelect={handleNetworkBrowserSelection}
             onDismiss={() => setNetworkBrowserOpen(false)}
+            onImportWalkingNetwork={beginWalkingNetworkImport}
           />
         )}
 
@@ -3519,7 +3633,6 @@ export function MapEditor() {
           suspendedDrafts={workingSessionState.suspendedDrafts}
           onResumeDraft={requestDraftResume}
           showGuidance={mode !== "move"}
-          onImportWalkingNetwork={beginWalkingNetworkImport}
         />
         <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleWalkingNetworkFile} className="hidden" aria-label="Import Walking Network file" />
 
@@ -3618,8 +3731,29 @@ export function MapEditor() {
             {mode === "area" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
-                {polygonClosed ? (
+                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{editingBuildingId ? "Change Building Footprint" : polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
+                {editingBuildingId ? (
+                  <section aria-label="Change scope" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <h3 className="text-xs font-extrabold text-[#005931]">Change scope</h3>
+                    <p className="mt-1 text-xs leading-5 text-[#3f4941]">
+                      This action edits only the linked Building Footprint geometry. The Building Campus Location and its details are unchanged.
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-full border border-[#005931] bg-white px-3 py-1.5 text-xs font-bold text-[#005931]"
+                      onClick={() => {
+                        const buildingId = editingBuildingId;
+                        cancelBuildingDraft();
+                        if (buildingId) {
+                          setSelected({ type: "building", id: buildingId });
+                          setOwnerModal("location");
+                        }
+                      }}
+                    >
+                      Open Building details ↗
+                    </button>
+                  </section>
+                ) : polygonClosed ? (
                   <section aria-label="Create or attach Building" className="mt-3">
                     <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building it should represent.</p>
                     {footprintOverlapWarning && (
@@ -3652,6 +3786,19 @@ export function MapEditor() {
                         <label className="block text-xs font-semibold text-[#3f4941]">Building name
                           <input aria-label="Building name" value={buildingName} onChange={(event) => updateBuildingField("name", event.target.value)} placeholder="e.g. Science Annex" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
+                        <fieldset className="rounded-xl border border-[#dbe0e2] p-2.5">
+                          <legend className="px-1 text-xs font-semibold text-[#3f4941]">Campus place classification</legend>
+                          <div className="mt-1 grid grid-cols-2 gap-2">
+                            {(["Building", "Facility"] as const).map((classification) => (
+                              <label key={classification} className={`cursor-pointer rounded-lg border px-2 py-2 text-xs font-bold ${buildingClassification === classification ? "border-[#005931] bg-emerald-50 text-[#005931]" : "border-[#dbe0e2] text-[#526359]"}`}>
+                                <input type="radio" name="building-classification" value={classification} checked={buildingClassification === classification} onChange={() => setBuildingClassification(classification)} className="sr-only" />
+                                {classification}
+                                <span className="mt-1 block text-[10px] font-medium">{classification === "Building" ? "Supports Indoor Locations" : "No Indoor Locations"}</span>
+                              </label>
+                            ))}
+                          </div>
+                          {buildingClassification === "Building" && <p role="status" className="mt-2 text-[11px] text-amber-800">Advisory: this Building can be saved without Indoor Locations; add them later from the Locations directory.</p>}
+                        </fieldset>
                         <label className="block text-xs font-semibold text-[#3f4941]">Building code
                           <input aria-label="Building code" value={buildingCode} onChange={(event) => updateBuildingField("code", event.target.value)} placeholder="e.g. SCI-ANNEX" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
                         </label>
@@ -3805,7 +3952,7 @@ export function MapEditor() {
                   >
                     Cancel
                   </button>
-                  {polygonClosed && (
+                  {!editingBuildingId && polygonClosed && (
                     <button
                       type="button"
                       className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
@@ -3816,15 +3963,21 @@ export function MapEditor() {
                   )}
                   <button
                     type="button"
-                    disabled={polygonClosed
+                    disabled={editingBuildingId
+                      ? !canFinishFootprint
+                      : polygonClosed
                       ? (buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)
                       : !canSaveBuilding}
-                    onClick={polygonClosed
+                    onClick={editingBuildingId
+                      ? handleSaveBuilding
+                      : polygonClosed
                       ? (buildingWorkflowMode === "create" ? handleCreateBuilding : handleAttachBuilding)
                       : handleSaveBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
-                    {polygonClosed
+                    {editingBuildingId
+                      ? "Apply footprint change"
+                      : polygonClosed
                       ? (buildingWorkflowMode === "create" ? "Create New Building" : "Attach Selected Building")
                       : (polygonInteraction === "reshape" ? "✓ Confirm Shape" : "Save Building")}
                   </button>
@@ -3834,12 +3987,13 @@ export function MapEditor() {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Place on Map</div>
                 <h2 className="text-base font-extrabold text-[#191c1d] mt-1">
-                  {placingObjectType === "location" ? "Place Location Marker" : "Place Route Node"}
+                  {placingObjectType === "location" ? "Place Outdoor Point Location" : "Place Route Node"}
                 </h2>
                 <div className="flex flex-col gap-1.5 my-3">
                   <label className="text-xs font-semibold text-[#3f4941]">Object Type</label>
                   <select
-                    value={placingObjectType === "location" ? "Location Marker" : "Route Node"}
+                    aria-label="Object Type"
+                    value={placingObjectType === "location" ? "Outdoor Point Location" : "Route Node"}
                     onChange={(e) => {
                       const val = e.target.value === "Route Node" ? "node" : "location";
                       setPlacingObjectType(val);
@@ -3848,32 +4002,17 @@ export function MapEditor() {
                     }}
                     className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                   >
-                    <option>Location Marker</option>
+                    <option>Outdoor Point Location</option>
                     <option>Route Node</option>
                   </select>
                 </div>
 
                 {placingObjectType === "location" ? (
                   <>
-                    <div className="flex flex-col gap-1.5 my-3">
-                      <label className="text-xs font-semibold text-[#3f4941]">Select Existing Record</label>
-                      <select
-                        value={placingId}
-                        onChange={(e) => setPlacingId(e.target.value)}
-                        className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-                      >
-                        <option value="__new__">＋ Add New Location Record (Click Map)</option>
-                        {directoryLocations.map((l) => (
-                          <option key={l.id} value={l.id}>
-                            {l.name} ({l.type})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                     <div className="my-2 text-xs text-[#3f4941]">
                       {temporary
                         ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
-                        : "Click the map to preview a new position."}
+                        : "Click the map to preview a new Outdoor Point Location."}
                     </div>
                     {temporary && (
                       <div className="text-xs text-[#3f4941]">Latitude {temporary[0].toFixed(6)} · Longitude {temporary[1].toFixed(6)}</div>
@@ -3882,7 +4021,7 @@ export function MapEditor() {
                       <button
                         type="button"
                         className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                        onClick={() => selectTool("select")}
+                        onClick={cancelOutdoorPointDraft}
                       >
                         Cancel
                       </button>
@@ -4120,7 +4259,7 @@ export function MapEditor() {
                 <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
-                    <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => setAddRoomOpen(true)}>＋ Add Room</button>
+                    {(selectedBuilding.type ?? selectedBuildingLocation?.type) === "Building" && <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => setAddRoomOpen(true)}>＋ Add Room</button>}
                   </div>
                   {(() => {
                     const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
@@ -4177,6 +4316,10 @@ export function MapEditor() {
                   </div>
                 </dl>
                 <div className="flex flex-wrap gap-2 mt-4">
+                  <button type="button" onClick={cancelRouteNodeFrame} disabled={!routeNodeFrameDirty} className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold disabled:opacity-40">Cancel</button>
+                  <button type="button" onClick={applyRouteNodeFrame} disabled={!routeNodeFrameDirty} className="px-4 py-2 bg-[#005931] text-white rounded-full text-xs font-bold disabled:opacity-40">Apply changes</button>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-4">
                   <button
                     type="button"
                     onClick={handleStartMoveMarker}
@@ -4197,15 +4340,15 @@ export function MapEditor() {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Route Node</div>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node name
-                  <input aria-label="Route Node name" value={selectedNode.name} onChange={(event) => updateNode({ ...selectedNode, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                  <input aria-label="Route Node name" value={routeNodeFrame?.name ?? selectedNode.name} onChange={(event) => setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
                 </label>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node type
-                  <select aria-label="Route Node type" value={selectedNode.nodeType} onChange={(event) => { const nodeType = event.target.value as RouteNode["nodeType"]; updateNode({ ...selectedNode, nodeType, associatedPlaceId: nodeType === "Entrance" ? selectedNode.associatedPlaceId : null }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
+                  <select aria-label="Route Node type" value={routeNodeFrame?.nodeType ?? selectedNode.nodeType} onChange={(event) => { const nodeType = event.target.value as RouteNode["nodeType"]; setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? routeNodeFrame?.associatedPlaceId ?? null : null }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
                     <option>Entrance</option><option>Junction</option><option>Access Point</option>
                   </select>
                 </label>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Associated Building
-                  <select aria-label="Associated Building" value={selectedNode.associatedPlaceId ?? ""} onChange={(event) => updateNode({ ...selectedNode, associatedPlaceId: event.target.value || null })} disabled={selectedNode.nodeType !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
+                  <select aria-label="Associated Building" value={routeNodeFrame?.associatedPlaceId ?? ""} onChange={(event) => setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), associatedPlaceId: event.target.value || null })} disabled={(routeNodeFrame?.nodeType ?? selectedNode.nodeType) !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
                     <option value="">None</option>
                     {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
                       <option value={selectedNode.associatedPlaceId}>Missing Building ({selectedNode.associatedPlaceId})</option>
@@ -4384,7 +4527,7 @@ export function MapEditor() {
       )}
 
       {addLocationOpen && (
-        <Modal title="Create Outdoor Point Location" subtitle="Complete the canonical owner details for this provisional map point." size="sm" variant="green" onClose={() => { setAddLocationOpen(false); setNewLocationError(""); }}>
+        <Modal title="Create Outdoor Point Location" subtitle="Complete the canonical owner details for this provisional map point." size="sm" variant="green" onClose={cancelOutdoorPointDraft}>
           {newLocationError && <div role="alert" className="mb-2 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">{newLocationError}</div>}
           <div className="mb-2 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-2 text-xs text-[#3f4941]">
             <strong>Type</strong><div>Outdoor Point Location</div>
@@ -4402,7 +4545,7 @@ export function MapEditor() {
             <input aria-label="New location keywords" value={newLocation.keywords} onChange={(e) => setNewLocation({ ...newLocation, keywords: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
           <div className="mt-3 text-xs text-[#3f4941]">{temporary ? `Candidate position: ${temporary[0].toFixed(6)} · ${temporary[1].toFixed(6)}` : "Place a point on the map before completing this record."}</div>
-          <div className="modal-actions"><Button variant="subtle" onClick={() => { setAddLocationOpen(false); setNewLocationError(""); }}>Cancel</Button><Button disabled={!temporary || !newLocation.name.trim() || !newLocation.code.trim() || !newLocation.function.trim()} onClick={handleSaveNewLocation}>Create Outdoor Point Location</Button></div>
+          <div className="modal-actions"><Button variant="subtle" onClick={cancelOutdoorPointDraft}>Cancel</Button><Button disabled={!temporary || !newLocation.name.trim() || !newLocation.code.trim() || !newLocation.function.trim()} onClick={handleSaveNewLocation}>Create Outdoor Point Location</Button></div>
         </Modal>
       )}
 
@@ -4476,6 +4619,7 @@ export function MapEditor() {
             {lifecycleConfirmation.impact.affectedBuildings.length > 0 && <p><strong>Buildings reviewed:</strong> {lifecycleConfirmation.impact.affectedBuildings.map((building) => building.name).join(", ")}</p>}
             {lifecycleConfirmation.impact.buildingsLosingRoutability.length > 0 && <p className="text-red-700"><strong>Will lose routability:</strong> {lifecycleConfirmation.impact.buildingsLosingRoutability.map((building) => building.name).join(", ")}. Add another active Entrance Route Node or keep this network object active.</p>}
             {lifecycleConfirmation.impact.buildingsRegainingRoutability.length > 0 && <p className="text-green-700"><strong>Will regain routability:</strong> {lifecycleConfirmation.impact.buildingsRegainingRoutability.map((building) => building.name).join(", ")}.</p>}
+            {lifecycleConfirmation.impact.findings.length > 0 && <div aria-label="Lifecycle findings" className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">{lifecycleConfirmation.impact.findings.map((finding) => <p key={`${finding.objectId}-${finding.message}`}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · {finding.objectId}:</strong> {finding.message} Corrective action: {finding.correctiveAction}</p>)}</div>}
           </div>
           <div className="modal-actions">
             <Button variant="subtle" onClick={() => setLifecycleConfirmation(null)}>Cancel</Button>
