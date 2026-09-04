@@ -924,9 +924,12 @@ describe("Map Editor preview", () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-room-test", name: "Engineering Hall", code: "ENG-HALL", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
-    vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "room-204", name: "Room 204", code: "204", type: "Room", parentId: "building-room-test", building: "Engineering Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false },
-    ]);
+    vi.mocked(services.locations.list).mockResolvedValue({
+      items: [{ id: "room-204", name: "Room 204", code: "204", type: "Room", parentId: "building-room-test", building: "Engineering Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false }],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "entrance-eng", name: "Main Entrance", nodeType: "Entrance", associatedPlaceId: "building-room-test", lat: 16.7205, lng: 121.6895 },
     ]);
