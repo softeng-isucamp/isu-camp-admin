@@ -9,7 +9,7 @@ export type LocationType =
 export type RecordStatus = "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
 export type Shade =
   "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded" | "Unknown";
-export const PATHWAY_WAY_TYPES = ["Walkway", "Road", "Ramp", "Stairs", "Service path"] as const;
+export const PATHWAY_WAY_TYPES = ["Walkway", "Road"] as const;
 export type PathwayType = typeof PATHWAY_WAY_TYPES[number];
 export const PATHWAY_ALLOWED_MODES = ["Walking", "Vehicle"] as const;
 export type AllowedMode = typeof PATHWAY_ALLOWED_MODES[number];
@@ -25,7 +25,7 @@ export const normalizePathwayWayType = (type: string | undefined): PathwayType |
   const fixedType = PATHWAY_WAY_TYPES.find((candidate) => candidate.toLowerCase() === normalized);
   if (fixedType) return fixedType;
   if (/^(campus )?walkway$|^pedestrian path$|^walk$|^path$/.test(normalized)) return "Walkway";
-  if (/^service road$/.test(normalized)) return "Service path";
+  if (/^(service road|vehicle path|ramp|stairs|service path)$/.test(normalized)) return "Road";
   return "Unknown";
 };
 export interface SourceProvenance {

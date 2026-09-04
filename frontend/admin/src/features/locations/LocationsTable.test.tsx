@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 
-function renderLocations(initialEntries = ["/locations"]) {
+function renderLocations(initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -219,6 +219,33 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("2nd Floor");
     expect(screen.getByLabelText("FLOOR LEVEL")).toBeRequired();
     expect(dialog).toHaveTextContent("locked to preserve that context");
+  });
+
+  it("opens an indoor-location handoff for a newly created Building before directory refresh", async () => {
+    const pendingBuilding = {
+      id: "pending-map-building",
+      name: "Pending Map Building",
+      code: "PENDING-MAP",
+      type: "Building" as const,
+      parentId: null,
+      status: "Active" as const,
+      lat: null,
+      lng: null,
+      positioned: true,
+    };
+
+    renderLocations([{
+      pathname: "/locations",
+      search: "?add=indoor&parentId=pending-map-building&floor=Ground%20Floor",
+      state: { indoorLocationParent: pendingBuilding },
+    }]);
+
+    const dialog = await screen.findByRole("dialog", { name: "Add Location" });
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(pendingBuilding.id);
+    expect(screen.getByLabelText("PARENT BUILDING")).toBeDisabled();
+    expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Ground Floor");
+    expect(dialog).toHaveTextContent("Pending Map Building");
+    expect(screen.queryByText("The selected Building is unavailable for an Indoor Location handoff.")).not.toBeInTheDocument();
   });
 
 

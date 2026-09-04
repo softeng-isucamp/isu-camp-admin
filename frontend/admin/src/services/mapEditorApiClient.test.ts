@@ -262,15 +262,17 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
 
   describe("saveDraft", () => {
     it("successfully applies operations, increments version, and updates layers", async () => {
-      const newOutdoorLocation: OutdoorLocationEntity = {
+      const newOutdoorLocation: OutdoorLocationEntity & { spatialRole: "building_footprint_owner" } = {
         id: "loc-outdoor-new",
         name: "New Student Plaza",
         code: "PLAZA-01",
         type: "Facility",
         status: "Active",
-        lat: 16.722,
-        lng: 121.691,
-        positioned: true,
+        parentId: null,
+        lat: null,
+        lng: null,
+        positioned: false,
+        spatialRole: "building_footprint_owner",
       };
 
       const operations: WorkingOperation[] = [
@@ -302,7 +304,7 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
       // Verify layer state was updated
       const bootstrap = await adapter.getMapEditorBootstrap("proj-echague");
       expect(bootstrap.adminDraft.draftVersion).toBe(2);
-      expect(bootstrap.layers.outdoorLocations.some((l) => l.id === "loc-outdoor-new")).toBe(true);
+      expect(bootstrap.layers.buildings.some((l) => l.id === "loc-outdoor-new")).toBe(true);
       const updatedNode = bootstrap.layers.routeNodes.find((n) => n.id === "node-junc-02");
       expect(updatedNode?.lat).toBe(16.7218);
       expect(updatedNode?.lng).toBe(121.6898);
@@ -489,6 +491,87 @@ describe("LocalMapEditorAdapter - Queries and Commands", () => {
       });
       expect(rejected).toMatchObject({ success: false, errorType: "FIELD_VALIDATION_ERROR" });
       expect((await adapter.getMapEditorBootstrap("proj-echague")).adminDraft.draftVersion).toBe(2);
+    });
+
+    it("applies a canonical Building create once and keeps it out of outdoor locations", async () => {
+      const result = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 1,
+        requestId: "request-building-once",
+        operations: [{
+          id: "op-create-building-once",
+          type: "create_entity",
+          domain: "Locations",
+          entityId: "bld-new-once",
+          before: null,
+          after: {
+            id: "bld-new-once",
+            name: "New Building",
+            code: "NEW-BLDG",
+            type: "Building",
+            status: "Active",
+            parentId: null,
+            lat: null,
+            lng: null,
+            positioned: false,
+            spatialRole: "building_footprint_owner",
+          },
+        }],
+      });
+
+      expect(result.success).toBe(true);
+      const layers = await adapter.getMapEditorBootstrap("proj-echague");
+      expect(layers.layers.buildings.filter((building) => building.id === "bld-new-once")).toHaveLength(1);
+      expect(layers.layers.outdoorLocations.some((location) => location.id === "bld-new-once")).toBe(false);
+    });
+
+    it("does not partially apply a compound command when a later nested operation fails", async () => {
+      const result = await adapter.saveDraft({
+        projectId: "proj-echague",
+        baseDraftVersion: 1,
+        requestId: "request-atomic-validation",
+        operations: [{
+          id: "op-atomic-validation",
+          type: "compound_batch",
+          domain: "Locations",
+          entityId: "loc-atomic-validation",
+          before: null,
+          after: null,
+          nestedOperations: [
+            {
+              id: "op-create-before-failure",
+              type: "create_entity",
+              domain: "Locations",
+              entityId: "loc-created-before-failure",
+              before: null,
+              after: {
+                id: "loc-created-before-failure",
+                name: "Should Not Persist",
+                code: "NO-PERSIST",
+                type: "Facility",
+                status: "Active",
+                parentId: null,
+                lat: 16.72,
+                lng: 121.69,
+                positioned: true,
+              },
+            },
+            {
+              id: "op-update-missing-after-create",
+              type: "update_properties",
+              domain: "Locations",
+              entityId: "missing-location",
+              before: { name: "Missing" },
+              after: { name: "Still Missing" },
+            },
+          ],
+        }],
+      });
+
+      expect(result).toMatchObject({ success: false, errorType: "FIELD_VALIDATION_ERROR" });
+      const layers = await adapter.getMapEditorBootstrap("proj-echague");
+      expect(layers.layers.outdoorLocations.some((location) => location.id === "loc-created-before-failure")).toBe(false);
+      expect(layers.adminDraft.draftVersion).toBe(1);
     });
   });
 

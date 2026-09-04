@@ -5,10 +5,13 @@ const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
 
 type LocalMapData = {
-  buildings: Building[];
   locations: Location[];
-  nodes: RouteNode[];
-  pathways: Pathway[];
+  // Accepted for compatibility with callers that construct the local seed
+  // as one object. Network records are owned by the canonical network seam;
+  // this adapter must not expose a second mutable map collection.
+  buildings?: Building[];
+  nodes?: RouteNode[];
+  pathways?: Pathway[];
 };
 
 const parseSession = (storage: Storage | null): Session | null => {
@@ -23,6 +26,7 @@ const parseSession = (storage: Storage | null): Session | null => {
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
   let session = parseSession(storage);
+  let resetUsername: string | null = null;
 
   return {
     auth: {
@@ -39,12 +43,20 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         storage?.removeItem(LOCAL_SESSION_KEY);
       },
       me: async (): Promise<Session | null> => session,
+      requestReset: async (username: string): Promise<void> => {
+        if (username.trim() !== LOCAL_ADMIN.username) throw new Error("Admin username not found.");
+        resetUsername = username.trim();
+      },
+      reset: async (username: string, code: string, _password: string): Promise<void> => {
+        if (resetUsername !== username.trim() || code !== "000000") throw new Error("Invalid verification code.");
+        resetUsername = null;
+      },
     },
     locations: {
       savePosition: (id: string, lat: number | null, lng: number | null): Location => {
         const location = mapData.locations.find((item) => item.id === id);
         if (!location) throw new Error("Location not found.");
-        if (location.type !== "Facility" || location.parentId !== null) throw new Error("Only standalone Outdoor Point Locations can own an outdoor position.");
+        if (location.type !== "Facility" || location.parentId !== null) throw new Error("Only standalone legacy Facility records can own an outdoor position.");
         if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
         if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
         if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
@@ -73,17 +85,6 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const [location] = mapData.locations.splice(index, 1);
         return location;
       },
-    },
-    map: {
-      buildings: () => mapData.buildings,
-      removeBuilding: (id: string): Building | undefined => {
-        const building = mapData.buildings.find((item) => item.id === id);
-        if (building) building.status = "Inactive";
-        return building;
-      },
-      locations: () => mapData.locations,
-      nodes: () => mapData.nodes,
-      pathways: () => mapData.pathways,
     },
   };
 };

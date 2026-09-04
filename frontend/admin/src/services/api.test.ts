@@ -431,7 +431,7 @@ describe("mock service contracts", () => {
     const importContractFields = ["id", "name", "code", "type", "parentId", "status", "lat", "lng"];
     expect(templateRows.every((row) => importContractFields.every((field) => field in row))).toBe(true);
     expect(templateRows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "Room", parentId: "building-library", floor: "Ground Floor" }),
+      expect.objectContaining({ type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor" }),
     ]));
   });
 

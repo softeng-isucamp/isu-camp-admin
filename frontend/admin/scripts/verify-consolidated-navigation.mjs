@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const sourceRoot = new URL("../src/", import.meta.url);
@@ -14,10 +14,19 @@ async function collect(directory) {
 
 await collect(sourceRoot.pathname);
 const findings = [];
+for (const obsolete of ["features/map/WalkingNetworkManagementPrototype.tsx"]) {
+  try {
+    await access(join(sourceRoot.pathname, obsolete));
+    findings.push(`${obsolete}: obsolete feature-flagged Walking Network duplicate remains`);
+  } catch {
+    // Expected: the obsolete compatibility surface must not exist.
+  }
+}
 for (const path of files) {
   const content = await readFile(path, "utf8");
   if (/Routes\s*&\s*Paths/i.test(content)) findings.push(`${path}: legacy Routes & Paths terminology`);
   if (/['"`]\/routes(?:[/?'"`]|$)/.test(content)) findings.push(`${path}: legacy /routes navigation`);
+  if (/WalkingNetworkManagementPrototype|prototype=walking-network/.test(content)) findings.push(`${path}: feature-flagged Walking Network duplicate import or entry point`);
 }
 
 if (findings.length) {
