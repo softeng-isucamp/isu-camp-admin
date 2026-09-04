@@ -2716,7 +2716,12 @@ export function MapEditor() {
                 {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" && <button type="button" className="inspector-secondary-action" onClick={() => openIndoorLocationHandoff(selectedBuilding)}>＋ Add indoor location</button>}
               </div>
               <section aria-label="Building room directory">
-                <h4>Indoor Locations by Floor Level</h4>
+                <div className="inspector-related-heading">
+                  <div>
+                    <h4>Indoor locations by floor</h4>
+                    <span>{buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name).length} places</span>
+                  </div>
+                </div>
                 {(() => {
                   const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
                   const grouped = new Map<string, Location[]>();
@@ -2725,20 +2730,25 @@ export function MapEditor() {
                     grouped.set(floor, [...(grouped.get(floor) ?? []), child]);
                   });
                   return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => (
-                    <div key={floor} className="inspector-related-group">
-                      <strong>{floor}</strong>
-                      {rooms.map((room) => <span key={room.id}>{room.name} · {room.code}</span>)}
+                    <div key={floor} role="region" className="inspector-floor-group" aria-label={`${floor} indoor locations`}>
+                      <div className="inspector-floor-heading"><strong><span aria-hidden="true">⌄</span>{floor}</strong><span>{rooms.length}</span></div>
+                      {rooms.map((room) => <div key={room.id} className="inspector-location-row"><span className="inspector-content-icon" aria-hidden="true">{room.type === "Laboratory" ? "L" : "R"}</span><div><strong>{room.name}</strong><span>{room.type} · {room.code}</span></div></div>)}
                     </div>
                   )) : <p>No Indoor Locations recorded.</p>;
                 })()}
               </section>
             </section>
             <section aria-label="Walking access" className="inspector-related-section">
-              <h3>Walking access</h3>
+              <div className="inspector-related-heading">
+                <div>
+                  <h3>Walking access</h3>
+                  <span>{selectedBuildingEntrances.length} linked {selectedBuildingEntrances.length === 1 ? "entrance" : "entrances"}</span>
+                </div>
+              </div>
               <section aria-label="Building entrances">
-                <h4>Entrance Route Nodes</h4>
+                <h4>Entrance route nodes</h4>
                 {selectedBuildingEntrances.length
-                  ? selectedBuildingEntrances.map((node) => <span key={node.id}>{node.name}</span>)
+                  ? <div className="inspector-node-list">{selectedBuildingEntrances.map((node) => <div key={node.id} className="inspector-node-row"><span className="inspector-node-icon" aria-hidden="true">⌖</span><div><strong>{node.name}</strong><span>{node.lat.toFixed(5)}, {node.lng.toFixed(5)}</span></div><em>{node.status === "Inactive" ? "Inactive" : "Active"}</em></div>)}</div>
                   : <p>No active Entrance Route Node.</p>}
               </section>
               <div className="inspector-inline-actions">
