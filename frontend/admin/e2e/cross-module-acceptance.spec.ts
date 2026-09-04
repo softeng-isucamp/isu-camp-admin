@@ -19,6 +19,16 @@ test("Map Editor remains usable at a narrow viewport", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Save Changes" })).toBeVisible();
 });
 
+test("Locations keeps outdoor creation guidance passive", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/locations");
+
+  await expect(page.getByText("Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Building in Map Editor" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create Outdoor Point Location in Map Editor" })).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\?create=/);
+});
+
 test("the removed Routes & Paths URL remains unavailable without a redirect", async ({ page }) => {
   await signIn(page);
   await page.goto("/routes");

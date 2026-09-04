@@ -611,7 +611,7 @@ export function Locations() {
         <div>
           <h1 style={{ fontSize: "28px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Campus Locations</h1>
           <p style={{ color: "#525c57", marginTop: "4px", fontSize: "15px" }}>
-            Manage Buildings and Indoor Locations. Create outdoor records in Map Editor.
+            Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.
           </p>
         </div>
       </div>
@@ -782,22 +782,6 @@ export function Locations() {
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
               </svg>
               Bulk Import
-            </Button>
-            <Button
-              variant="subtle"
-              aria-label="Create Building in Map Editor"
-              style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1.5px solid #0c7441", color: "#0c7441", background: "#fff", fontWeight: 600 }}
-              onClick={() => navigate("/map-editor?create=building")}
-            >
-              ＋ Create Building
-            </Button>
-            <Button
-              variant="subtle"
-              aria-label="Create Outdoor Point Location in Map Editor"
-              style={{ height: "46px", borderRadius: "999px", padding: "0 18px", border: "1.5px solid #0c7441", color: "#0c7441", background: "#fff", fontWeight: 600 }}
-              onClick={() => navigate("/map-editor?create=outdoor-point")}
-            >
-              ＋ Create Outdoor Point Location
             </Button>
             <Button
               style={{
