@@ -19,7 +19,7 @@ describe("NetworkBrowser", () => {
     render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[{ id: "building-library", name: "Library", code: "LIB", points: [] }]} selected={null} onSelect={onSelect} onDismiss={vi.fn()} />);
 
     expect(screen.getByRole("status", { name: "Pathway results" })).toHaveTextContent("2 Pathways");
-    fireEvent.change(screen.getByLabelText("Filter Pathways by shade"), { target: { value: "Mostly Shaded" } });
+    fireEvent.change(screen.getByLabelText("Shade"), { target: { value: "Mostly Shaded" } });
     expect(screen.getByRole("button", { name: /Library Walk/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Service Link/ })).not.toBeInTheDocument();
 
@@ -31,10 +31,10 @@ describe("NetworkBrowser", () => {
     render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} />);
 
     for (const label of [
-      "Filter Pathways by lifecycle status",
-      "Filter Pathways by type",
-      "Filter Pathways by direction",
-      "Filter Pathways by shade",
+      "Status",
+      "Type",
+      "Direction",
+      "Shade",
     ]) {
       const control = screen.getByLabelText(label);
       expect(control).toBeVisible();
@@ -47,5 +47,19 @@ describe("NetworkBrowser", () => {
 
     expect(screen.getByRole("tab", { name: "Route Nodes" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("button", { name: /Library Entrance/ })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("places Import Walking Network immediately below Pathways search", () => {
+    const onImport = vi.fn();
+    render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} onImportWalkingNetwork={onImport} />);
+
+    const search = screen.getByPlaceholderText("Search Pathways");
+    const importButton = screen.getByRole("button", { name: "Import Walking Network" });
+    const filters = screen.getByLabelText("Status");
+
+    expect(search.compareDocumentPosition(importButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(importButton.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(importButton);
+    expect(onImport).toHaveBeenCalledTimes(1);
   });
 });
