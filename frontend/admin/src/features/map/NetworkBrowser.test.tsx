@@ -42,6 +42,15 @@ describe("NetworkBrowser", () => {
     }
   });
 
+  it("keeps the controlled Pathway metadata options available before records load", () => {
+    render(<NetworkBrowser pathways={[]} nodes={[]} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} />);
+
+    expect([...screen.getByLabelText("Status").querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All", "Active", "Closed"]);
+    expect([...screen.getByLabelText("Type").querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All", "Road", "Walkway"]);
+    expect([...screen.getByLabelText("Direction").querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All", "One-way", "Two-way"]);
+    expect([...screen.getByLabelText("Shade").querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All", "Fully Shaded", "Mostly Shaded", "Partial Shade", "Unknown", "Unshaded"]);
+  });
+
   it("reflects a map selection in the matching Route Node tab and result", () => {
     render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[{ id: "building-library", name: "Library", code: "LIB", points: [] }]} selected={{ type: "node", id: "node-library" }} onSelect={vi.fn()} onDismiss={vi.fn()} />);
 
