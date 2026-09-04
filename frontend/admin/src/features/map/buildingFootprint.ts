@@ -191,6 +191,9 @@ export function validateBuildingIdentityDetails(
   if (!input.code.trim()) {
     issues.push({ field: "code", message: "Building code is required." });
   }
+  if (!String(input.function ?? "").trim()) {
+    issues.push({ field: "function", message: "Building description is required." });
+  }
 
   const trimmedCode = input.code.trim().toLowerCase();
   if (trimmedCode) {
