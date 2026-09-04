@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { Shell } from './components/Shell'
 import { AuthProvider, useAuth } from './features/auth/AuthContext'
 import { Login, PasswordReset } from './features/auth/AuthPages'
