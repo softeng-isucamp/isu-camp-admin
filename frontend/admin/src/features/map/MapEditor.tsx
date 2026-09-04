@@ -2513,7 +2513,15 @@ export function MapEditor() {
     const { action, impact } = lifecycleConfirmation;
     const change = buildLifecycleChange(action, impact.object);
     if (action === "close_pathway" || action === "reopen_pathway") {
-      updatePathway(change.record as Pathway);
+      const updatedPathway = change.record as Pathway;
+      if (!updatePathway(updatedPathway)) return;
+      // The inspector keeps an editable frame over the collection. Update the
+      // frame as well so it cannot mask the confirmed lifecycle status.
+      if (pathwayDraft?.id === updatedPathway.id) {
+        setPathwayDraft({ ...updatedPathway });
+        setPathwayDraftOriginal({ ...updatedPathway });
+        setPathDraftDirty(false);
+      }
     } else {
       updateNode(change.record as RouteNode);
     }

@@ -55,6 +55,36 @@ describe("Walking Network lifecycle", () => {
 
     expect(result.operation.type).toBe("restore_entity");
     expect(result.record).toEqual({ ...closed, status: "Open" });
-    expect(result.record.pathPoints).toEqual(closed.pathPoints);
+    expect((result.record as Pathway).pathPoints).toEqual(closed.pathPoints);
+  });
+
+  it("identifies the affected network object and corrective action when routability is lost", () => {
+    const building: Building = { id: "building-a", name: "Library", code: "LIB", points: [] };
+    const entrance = { ...node("node-a"), nodeType: "Entrance" as const, associatedPlaceId: building.id };
+    const path = pathway("path-a", "node-a", "node-b");
+    const impact = calculateLifecycleImpact({ action: "deactivate_node", object: entrance, pathways: [path], nodes: [entrance, node("node-b")], buildings: [building] });
+
+    expect(impact.findings).toEqual([expect.objectContaining({
+      severity: "advisory",
+      objectId: entrance.id,
+      correctiveAction: expect.stringContaining("another active Entrance Route Node"),
+    })]);
+  });
+
+  it("blocks a lifecycle transition that does not match the current status", () => {
+    const closed = pathway("path-a", "node-a", "node-b");
+    const impact = calculateLifecycleImpact({
+      action: "close_pathway",
+      object: { ...closed, status: "Closed" },
+      pathways: [{ ...closed, status: "Closed" }],
+      nodes: [node("node-a"), node("node-b")],
+      buildings: [],
+    });
+
+    expect(impact.findings).toEqual([expect.objectContaining({
+      severity: "blocking",
+      objectId: "path-a",
+      correctiveAction: expect.stringContaining("current status (Closed)"),
+    })]);
   });
 });
