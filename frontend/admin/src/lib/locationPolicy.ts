@@ -30,7 +30,10 @@ export type LocationPolicyIssueCode =
   | "coordinates_required"
   | "placement_mismatch"
   | "outdoor_position_forbidden"
-  | "floor_level_required";
+  | "floor_level_required"
+  | "invalid_floor_level"
+  | "unspecified_floor_forbidden"
+  | "code_not_unique";
 
 export interface LocationPolicyIssue {
   code: LocationPolicyIssueCode;
@@ -58,6 +61,10 @@ export interface LocationPolicyOptions {
   directory: readonly Location[];
   /** New indoor records require a floor; legacy records may omit it. */
   requireFloorLevel?: boolean;
+  /** Bulk imports use the controlled Floor Level vocabulary. */
+  requireKnownFloorLevel?: boolean;
+  /** The record being edited, which is allowed to retain its own code. */
+  currentId?: string;
 }
 
 export interface LocationNormalizationOptions {
@@ -182,11 +189,41 @@ const evaluate = (
     });
   }
 
+  const duplicateCode = options.currentId !== undefined && options.directory.some((location) =>
+    options.currentId === "__new__"
+      ? location.code.trim().toLowerCase() === draft.code.trim().toLowerCase()
+      : location.id !== options.currentId
+        && location.code.trim().toLowerCase() === draft.code.trim().toLowerCase(),
+  );
+  if (draft.code.trim() && duplicateCode) {
+    issues.push({
+      code: "code_not_unique",
+      field: "code",
+      message: "Location code must be unique.",
+    });
+  }
+
   if (options.requireFloorLevel && isIndoorLocationType(draft.type) && !draft.floor?.trim()) {
     issues.push({
       code: "floor_level_required",
       field: "floor",
       message: "Indoor Locations require a Floor Level.",
+    });
+  }
+  if (options.requireKnownFloorLevel && isIndoorLocationType(draft.type) && draft.floor?.trim() &&
+      draft.floor.trim().toLowerCase() !== "unspecified floor" &&
+      !(standardFloorLevels as readonly string[]).includes(draft.floor.trim())) {
+    issues.push({
+      code: "invalid_floor_level",
+      field: "floor",
+      message: `Floor Level must be one of: ${standardFloorLevels.join(", ")}.`,
+    });
+  }
+  if (options.requireFloorLevel && isIndoorLocationType(draft.type) && draft.floor?.trim().toLowerCase() === "unspecified floor") {
+    issues.push({
+      code: "unspecified_floor_forbidden",
+      field: "floor",
+      message: "Unspecified Floor is only for legacy records and cannot be used for new records.",
     });
   }
 

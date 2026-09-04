@@ -24,7 +24,7 @@ describe("UI Components", () => {
     const onClose = vi.fn();
     render(
       <Modal
-        title="Add Route / Path"
+        title="Add Pathway"
         subtitle="Connect two campus nodes for navigation."
         size="md"
         variant="green"
@@ -34,7 +34,7 @@ describe("UI Components", () => {
       </Modal>,
     );
 
-    expect(screen.getByText("Add Route / Path")).toBeInTheDocument();
+    expect(screen.getByText("Add Pathway")).toBeInTheDocument();
     expect(
       screen.getByText("Connect two campus nodes for navigation."),
     ).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe("UI Components", () => {
           subhelper="Required · must differ from destination"
           placeholder="Select source"
         />
-        <Button variant="primary">Save Route</Button>
+        <Button variant="primary">Save Pathway</Button>
       </div>,
     );
 
@@ -67,7 +67,7 @@ describe("UI Components", () => {
       screen.getByText("Required · must differ from destination"),
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Select source")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Route" })).toHaveClass(
+    expect(screen.getByRole("button", { name: "Save Pathway" })).toHaveClass(
       "btn-pill",
     );
   });

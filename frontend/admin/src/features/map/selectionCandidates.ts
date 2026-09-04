@@ -28,7 +28,7 @@ export function findSelectionCandidates(
   collections: SelectionCandidatesInput
 ): SelectionCandidate[] {
   const candidates: SelectionCandidate[] = [];
-  const maxDistance = 0.01; // Approximate search radius in degrees
+  const maxDistance = 0.00005; // Approximate search radius in degrees (~5 meters)
 
   // Search locations
   collections.locations.forEach((location) => {
@@ -54,7 +54,7 @@ export function findSelectionCandidates(
         id: node.id,
         type: "node",
         label: node.name,
-        kindLabel: node.nodeType,
+        kindLabel: "Route Node",
         distance,
       });
     }

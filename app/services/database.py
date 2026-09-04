@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from extensions import db, mail
 from auth import auth_bp
 from model.location import Location
+from routes.actions import actions_bp
 from routes.location import location_bp
 
 
@@ -129,6 +130,7 @@ CORS(
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(location_bp)
+app.register_blueprint(actions_bp)
 
 
 # ==========================================

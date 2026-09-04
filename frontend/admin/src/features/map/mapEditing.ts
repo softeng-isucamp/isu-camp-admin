@@ -1,4 +1,4 @@
-import type { Building, Location, Pathway, RouteNode } from "../../types";
+import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
 import { locationPolicy } from "../../lib/locationPolicy";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
 
@@ -103,6 +103,8 @@ export interface MapSnapshot {
   buildings: Building[];
 }
 
+import { findBuildingFootprintOverlaps } from "./buildingFootprint";
+
 export interface MapObjectReference {
   type: MapObjectType;
   id: string;
@@ -122,6 +124,7 @@ export interface MapChangeGroup {
 export interface MapDraftReview {
   valid: boolean;
   errors: MapValidationError[];
+  warnings?: MapValidationError[];
   groups: MapChangeGroup[];
 }
 
@@ -145,6 +148,115 @@ export const withoutEndpointPathPoints = (
   ),
 );
 
+export interface PathwayDraftIssue {
+  field: "name" | "type" | "direction" | "status" | "allowedModes" | "pathPoint" | "sequence";
+  message: string;
+}
+
+export interface RouteNodeDraftIssue {
+  field: "name" | "nodeType" | "coordinate" | "association";
+  message: string;
+}
+
+const routeNodeTypes: RouteNode["nodeType"][] = ["Entrance", "Junction", "Access Point"];
+
+/** Local checks shared by placement, editing, and the final draft review. */
+export function validateRouteNodeDraft(
+  node: RouteNode,
+  input: {
+    buildings: readonly Building[];
+    locations?: readonly Location[];
+    campusBoundary?: MapPoint[];
+  },
+): RouteNodeDraftIssue[] {
+  const issues: RouteNodeDraftIssue[] = [];
+  if (!node.name.trim()) issues.push({ field: "name", message: "Route Node name is required." });
+  if (!routeNodeTypes.includes(node.nodeType)) issues.push({ field: "nodeType", message: "Route Node type is required." });
+  if (!Number.isFinite(node.lat) || !Number.isFinite(node.lng) || node.lat < -90 || node.lat > 90 || node.lng < -180 || node.lng > 180) {
+    issues.push({ field: "coordinate", message: "Route Node latitude and longitude must be valid finite coordinates." });
+  } else if (input.campusBoundary && !pointOnCampus([node.lat, node.lng], input.campusBoundary)) {
+    issues.push({ field: "coordinate", message: "The Route Node must be inside the ISU Echague campus boundary." });
+  }
+  if (node.associatedPlaceId && node.nodeType !== "Entrance") {
+    issues.push({ field: "association", message: "Only Entrance Route Nodes may have a Building association." });
+  } else if (node.associatedPlaceId) {
+    const buildingIds = new Set(input.buildings.map((building) => building.id));
+    input.locations?.filter((location) => location.type === "Building" || location.type === "Facility").forEach((location) => buildingIds.add(location.id));
+    if (!buildingIds.has(node.associatedPlaceId)) {
+      issues.push({ field: "association", message: "Associated Building does not exist." });
+    }
+  }
+  return issues;
+}
+
+export interface PathwayDraftValidationOptions {
+  /** Existing pathways are used to prevent a second physical connection. */
+  existingPathways?: readonly Pathway[];
+  /** New and edited Pathways must connect active Route Nodes. */
+  requireActiveEndpoints?: boolean;
+}
+
+/** Local, synchronous checks used by the parent-frame Pathway editor. */
+export function validatePathwayDraft(
+  pathway: Pathway,
+  nodes: readonly RouteNode[],
+  campusBoundary?: MapPoint[],
+  options: PathwayDraftValidationOptions = {},
+): PathwayDraftIssue[] {
+  const issues: PathwayDraftIssue[] = [];
+  if (!pathway.name.trim()) issues.push({ field: "name", message: "Pathway name is required." });
+  if (!pathway.type.trim()) issues.push({ field: "type", message: "Way type is required." });
+  else if (!PATHWAY_WAY_TYPES.includes(normalizePathwayWayType(pathway.type) as typeof PATHWAY_WAY_TYPES[number])) {
+    issues.push({ field: "type", message: "Way type must be Walkway or Road." });
+  }
+  if (pathway.direction !== "Two-way" && pathway.direction !== "One-way") issues.push({ field: "direction", message: "Pathway direction must be Two-way or One-way." });
+  if (pathway.status !== "Active" && pathway.status !== "Open" && pathway.status !== "Closed") issues.push({ field: "status", message: "Pathway status must be Active or Closed." });
+  const allowedModes = pathway.allowedModes ?? ["Walking"];
+  if (!allowedModes.length || allowedModes.some((mode) => !PATHWAY_ALLOWED_MODES.includes(mode))) {
+    issues.push({ field: "allowedModes", message: "Choose Walking, Vehicle, or both Allowed modes." });
+  }
+  if (pathway.type === "Walkway" && allowedModes.includes("Vehicle")) {
+    issues.push({ field: "allowedModes", message: "Walkways cannot allow Vehicle mode." });
+  }
+  const source = nodes.find((node) => node.id === pathway.sourceNodeId);
+  const destination = nodes.find((node) => node.id === pathway.destinationNodeId);
+  if (!source || !destination) issues.push({ field: "sequence", message: "Pathway endpoints must reference existing Route Nodes." });
+  if (source && destination && source.id === destination.id) issues.push({ field: "sequence", message: "Pathway endpoints must be distinct; self-links are not allowed." });
+  if (options.requireActiveEndpoints && source && destination
+    && (source.status !== undefined && source.status !== "Active" || destination.status !== undefined && destination.status !== "Active")) {
+    issues.push({ field: "sequence", message: "Pathway endpoints must reference active Route Nodes." });
+  }
+  const duplicate = options.existingPathways?.find((candidate) =>
+    candidate.id !== pathway.id
+      && candidate.sourceNodeId !== candidate.destinationNodeId
+      && pathway.sourceNodeId !== pathway.destinationNodeId
+      && [candidate.sourceNodeId, candidate.destinationNodeId].sort().join("::")
+        === [pathway.sourceNodeId, pathway.destinationNodeId].sort().join("::"),
+  );
+  if (duplicate) {
+    issues.push({ field: "sequence", message: `Pathway duplicates the physical connection already used by ${duplicate.name}.` });
+  }
+  pathway.pathPoints.forEach(([latitude, longitude], index) => {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      issues.push({ field: "pathPoint", message: `Path Point #${index + 1} must use a valid latitude and longitude.` });
+    }
+  });
+  for (let index = 1; index < pathway.pathPoints.length; index += 1) {
+    if (pathway.pathPoints[index - 1][0] === pathway.pathPoints[index][0]
+      && pathway.pathPoints[index - 1][1] === pathway.pathPoints[index][1]) {
+      issues.push({ field: "sequence", message: `Path Sequence contains duplicate consecutive points at #${index} and #${index + 1}.` });
+      break;
+    }
+  }
+  if (campusBoundary && source && destination) {
+    const coordinates: MapPoint[] = [[source.lat, source.lng], ...pathway.pathPoints, [destination.lat, destination.lng]];
+    if (!geometryOnCampus(coordinates, campusBoundary)) {
+      issues.push({ field: "sequence", message: "The Path Sequence must stay inside the ISU Echague campus boundary." });
+    }
+  }
+  return issues;
+}
+
 export function reviewMapDraft(input: {
   original: MapSnapshot;
   current: MapSnapshot;
@@ -153,10 +265,12 @@ export function reviewMapDraft(input: {
 }): MapDraftReview {
   const { original, current, deleted, campusBoundary } = input;
   const errors: MapValidationError[] = [];
+  const warnings: MapValidationError[] = [];
   const groups = new Map<MapChangeKind, MapObjectReference[]>();
   const addChange = (kind: MapChangeKind, object: MapObjectReference) =>
     groups.set(kind, [...(groups.get(kind) ?? []), object]);
   const addError = (object: MapObjectReference, message: string) => errors.push({ object, message });
+  const addWarning = (object: MapObjectReference, message: string) => warnings.push({ object, message });
 
   const collections: Array<[MapObjectType, Array<Location | RouteNode | Pathway | Building>, Array<Location | RouteNode | Pathway | Building>]> = [
     ["location", original.locations, current.locations], ["node", original.nodes, current.nodes],
@@ -185,7 +299,6 @@ export function reviewMapDraft(input: {
   }
   deleted.forEach((object) => addChange("deleted", object));
 
-  const locationIds = new Set(current.locations.map((object) => object.id));
   const nodeIds = new Set(current.nodes.map((object) => object.id));
   current.locations.forEach((object) => {
     const reference = { type: "location" as const, id: object.id, label: label(object) };
@@ -193,25 +306,41 @@ export function reviewMapDraft(input: {
     if (!object.code.trim()) addError(reference, "Location code is required.");
     if (!object.type) addError(reference, "Location type is required.");
     if (!object.status) addError(reference, "Location status is required.");
+    const hasAuthoritativeFootprint = (object.type === "Building" || object.type === "Facility")
+      && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
     const locationEvaluation = locationPolicy.evaluate(object, {
-      context: "map-readiness",
+      context: hasAuthoritativeFootprint ? "record" : "map-readiness",
       directory: current.locations,
+      currentId: object.id,
     });
-    locationEvaluation.issues.forEach((issue) => addError(reference, issue.message));
+    const previous = original.locations.find((candidate) => candidate.id === object.id);
+    locationEvaluation.issues
+      // Existing imported directories may contain duplicate legacy codes. Keep
+      // unchanged records reviewable; enforce uniqueness for new or renamed codes.
+      .filter((issue) => issue.code !== "code_not_unique" || !previous || previous.code !== object.code)
+      .forEach((issue) => addError(reference, issue.message));
   });
   current.nodes.forEach((object) => {
     const reference = { type: "node" as const, id: object.id, label: label(object) };
-    if (!object.name.trim()) addError(reference, "Route Node name is required.");
-    if (!object.nodeType) addError(reference, "Route Node type is required.");
-    if (!validCoordinate([object.lat, object.lng])) addError(reference, "Route Node latitude and longitude must be valid coordinates.");
-    if (object.associatedPlaceId && !locationIds.has(object.associatedPlaceId)) addError(reference, "Associated Building does not exist.");
-    if (object.associatedPlaceId) {
-      const associated = current.locations.find((location) => location.id === object.associatedPlaceId);
-      // Legacy map fixtures may use a Facility-shaped association. Enforce the
-      // canonical Building boundary once the associated network Building exists.
-      if (associated && associated.type !== "Building" && current.buildings.some((building) => building.id === associated.id)) addError(reference, "Entrance Route Nodes may only be associated with a Building.");
-      if (object.nodeType !== "Entrance") addError(reference, "Only Entrance Route Nodes may have a Building association.");
-    }
+    const previous = original.nodes.find((candidate) => candidate.id === object.id);
+    validateRouteNodeDraft(object, {
+      buildings: current.buildings,
+      locations: current.locations,
+      campusBoundary,
+    }).forEach((issue) => {
+      const unchangedLegacyPosition = issue.field === "coordinate"
+        && previous
+        && previous.lat === object.lat
+        && previous.lng === object.lng;
+      if (unchangedLegacyPosition) return;
+      // Preserve reviewability of unchanged imported legacy associations; any
+      // new or edited association must satisfy the canonical Building rule.
+      const unchangedLegacyAssociation = issue.field === "association"
+        && previous?.associatedPlaceId === object.associatedPlaceId
+        && current.locations.some((location) => location.id === object.associatedPlaceId && location.type !== "Building" && location.type !== "Facility");
+      if (unchangedLegacyAssociation) return;
+      addError(reference, issue.message);
+    });
   });
 
   const connections = new Map<string, string>();
@@ -272,6 +401,32 @@ export function reviewMapDraft(input: {
     });
   }
 
+  // Check for building polygon overlaps (advisory review warnings for draft changes)
+  const modifiedBuildingIds = new Set(
+    current.buildings
+      .filter((bld) => {
+        const orig = original.buildings.find((o) => o.id === bld.id);
+        return !orig || JSON.stringify(orig.points) !== JSON.stringify(bld.points);
+      })
+      .map((bld) => bld.id)
+  );
+
+  const overlaps = findBuildingFootprintOverlaps(
+    current.buildings,
+    (bldA, bldB) => modifiedBuildingIds.has(bldA.id) || modifiedBuildingIds.has(bldB.id),
+  );
+  for (const { bldA, bldB } of overlaps) {
+    addWarning(
+      { type: "building", id: bldA.id, label: label(bldA) },
+      `Building footprint overlaps with ${label(bldB)}.`,
+    );
+  }
+
   const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];
-  return { valid: errors.length === 0, errors, groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []) };
+  return {
+    valid: errors.length === 0,
+    errors,
+    ...(warnings.length > 0 ? { warnings } : {}),
+    groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []),
+  };
 }

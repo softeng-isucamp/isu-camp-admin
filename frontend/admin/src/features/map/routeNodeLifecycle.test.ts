@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Pathway, RouteNode } from "../../types";
-import { deactivateRouteNode } from "./routeNodeLifecycle";
+import type { Building, Pathway, RouteNode } from "../../types";
+import { buildLifecycleChange, calculateLifecycleImpact } from "./routeNodeLifecycle";
 
 const node = (id: string): RouteNode => ({
   id,
@@ -26,18 +26,65 @@ const pathway = (id: string, sourceNodeId: string, destinationNodeId: string): P
   status: "Open",
 });
 
-describe("Route Node deactivation", () => {
-  it("retires the node and cascades connected pathways", () => {
+describe("Walking Network lifecycle", () => {
+  it("deactivates only the node and preserves connected pathways", () => {
     const connected = [pathway("path-a", "node-a", "node-b"), pathway("path-b", "node-c", "node-a")];
-    const result = deactivateRouteNode(node("node-a"), connected);
+    const result = buildLifecycleChange("deactivate_node", node("node-a"));
 
-    expect(result.node.status).toBe("Inactive");
-    expect(result.pathways).toEqual(connected);
-    expect(result.operations.map((operation) => operation.type)).toEqual([
-      "retire_entity",
-      "retire_entity",
-      "retire_entity",
-    ]);
-    expect(result.operations.slice(1).every((operation) => operation.after === null)).toBe(true);
+    expect(result.record.status).toBe("Inactive");
+    expect(result.operation.type).toBe("retire_entity");
+    expect(result.operation.after).toMatchObject({ id: "node-a", status: "Inactive" });
+    expect(connected).toHaveLength(2);
+  });
+
+  it("reports a Building losing routability when its only entrance pathway closes", () => {
+    const building: Building = { id: "building-a", name: "Library", code: "LIB", points: [] };
+    const entrance = { ...node("node-a"), nodeType: "Entrance" as const, associatedPlaceId: building.id };
+    const path = pathway("path-a", "node-a", "node-b");
+    const impact = calculateLifecycleImpact({ action: "close_pathway", object: path, pathways: [path], nodes: [entrance, node("node-b")], buildings: [building] });
+
+    expect(impact.connectedPathways).toEqual([path]);
+    expect(impact.affectedEntrances).toEqual([entrance]);
+    expect(impact.buildingsLosingRoutability).toEqual([building]);
+  });
+
+  it("reopening a pathway produces a restorable identity-preserving operation", () => {
+    const original = pathway("path-a", "node-a", "node-b");
+    const closed = { ...original, status: "Closed" as const, pathPoints: [[16.72, 121.69] as [number, number]] };
+    const result = buildLifecycleChange("reopen_pathway", closed);
+
+    expect(result.operation.type).toBe("restore_entity");
+    expect(result.record).toEqual({ ...closed, status: "Open" });
+    expect((result.record as Pathway).pathPoints).toEqual(closed.pathPoints);
+  });
+
+  it("identifies the affected network object and corrective action when routability is lost", () => {
+    const building: Building = { id: "building-a", name: "Library", code: "LIB", points: [] };
+    const entrance = { ...node("node-a"), nodeType: "Entrance" as const, associatedPlaceId: building.id };
+    const path = pathway("path-a", "node-a", "node-b");
+    const impact = calculateLifecycleImpact({ action: "deactivate_node", object: entrance, pathways: [path], nodes: [entrance, node("node-b")], buildings: [building] });
+
+    expect(impact.findings).toEqual([expect.objectContaining({
+      severity: "advisory",
+      objectId: entrance.id,
+      correctiveAction: expect.stringContaining("another active Entrance Route Node"),
+    })]);
+  });
+
+  it("blocks a lifecycle transition that does not match the current status", () => {
+    const closed = pathway("path-a", "node-a", "node-b");
+    const impact = calculateLifecycleImpact({
+      action: "close_pathway",
+      object: { ...closed, status: "Closed" },
+      pathways: [{ ...closed, status: "Closed" }],
+      nodes: [node("node-a"), node("node-b")],
+      buildings: [],
+    });
+
+    expect(impact.findings).toEqual([expect.objectContaining({
+      severity: "blocking",
+      objectId: "path-a",
+      correctiveAction: expect.stringContaining("current status (Closed)"),
+    })]);
   });
 });
