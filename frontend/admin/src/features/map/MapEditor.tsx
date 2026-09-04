@@ -567,9 +567,17 @@ export function MapEditor() {
     enabled: Boolean(services.map.getMapEditorBootstrap),
     retry: false,
   });
-  const { data: buildingDirectory } = useQuery({
-    queryKey: ["locations", "building-options"],
-    queryFn: async () => (await services.locations.list("", 1, 100, { type: "Building" })).items,
+  const { data: locationDirectory } = useQuery({
+    queryKey: ["locations", "map-directory"],
+    queryFn: async () => {
+      const first = await services.locations.list("", 1, 100);
+      const pages = Math.ceil(first.total / first.pageSize);
+      const remaining = await Promise.all(
+        Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+          services.locations.list("", index + 2, first.pageSize)),
+      );
+      return [first, ...remaining].flatMap((page) => page.items);
+    },
     retry: false,
   });
 
@@ -715,6 +723,11 @@ export function MapEditor() {
   const currentFeatureLinks = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
+  const buildingContentLocations = useMemo(() => {
+    const locationsById = new Map((locationDirectory ?? []).map((location) => [location.id, location]));
+    for (const location of currentLocations) locationsById.set(location.id, location);
+    return Array.from(locationsById.values());
+  }, [currentLocations, locationDirectory]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
   const currentPathways = useMemo(() => {
     const merged = overlayChanges(directoryPathways, localPathways);
@@ -755,7 +768,7 @@ export function MapEditor() {
   }, [currentLocations, sessionBuildings]);
   const buildingAssociationOptions = useMemo(() => {
     const buildingMap = new Map<string, Building>();
-    for (const location of buildingDirectory ?? []) {
+    for (const location of locationDirectory ?? []) {
       if (location.type !== "Building") continue;
       buildingMap.set(location.id, {
         id: location.id,
@@ -772,7 +785,7 @@ export function MapEditor() {
       buildingMap.set(building.id, { ...existing, ...building, type: "Building" });
     }
     return Array.from(buildingMap.values()).sort((left, right) => left.name.localeCompare(right.name));
-  }, [allSessionBuildings, buildingDirectory]);
+  }, [allSessionBuildings, locationDirectory]);
   const buildingAttachmentEligibility = (building: Building) =>
     getBuildingAttachmentEligibility(building, currentFeatureLinks);
   const selectedAttachBuilding = buildingAssociationOptions.find((b) => b.id === selectedAttachBuildingId);
@@ -2711,7 +2724,7 @@ export function MapEditor() {
               <section aria-label="Building room directory">
                 <h4>Indoor Locations by Floor Level</h4>
                 {(() => {
-                  const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
+                  const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
                   const grouped = new Map<string, Location[]>();
                   children.forEach((child) => {
                     const floor = child.floor || "Unspecified Floor";
@@ -4217,7 +4230,7 @@ export function MapEditor() {
                     {(selectedBuilding.type ?? selectedBuildingLocation?.type) === "Building" && <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => setAddRoomOpen(true)}>＋ Add Room</button>}
                   </div>
                   {(() => {
-                    const children = currentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
+                    const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
                     const grouped = new Map<string, Location[]>();
                     children.forEach((child) => { const key = child.floor || "Unassigned floor"; grouped.set(key, [...(grouped.get(key) ?? []), child]); });
                     return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => <div key={floor} className="mt-3"><div className="text-[10px] font-bold uppercase tracking-wide text-[#005931]">{floor}</div>{rooms.map((room) => <div key={room.id} className="flex justify-between gap-2 py-1 text-xs"><span className="font-semibold">{room.name}</span><span className="text-[#6b7280]">{room.code}</span></div>)}</div>) : <p className="mt-2 text-xs text-[#6b7280]">No rooms yet.</p>;
