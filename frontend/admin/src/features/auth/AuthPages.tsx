@@ -10,7 +10,7 @@ import {
   resetRequestSchema,
   resetSchema,
 } from "../../services/schemas";
-import mapIcon from "../../assets/figma/login/login-icon-3.svg";
+import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
 import userIcon from "../../assets/figma/login/login-icon-4.svg";
 import lockIcon from "../../assets/figma/login/login-icon-1.svg";
 import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
@@ -47,7 +47,7 @@ export function Login() {
       <Card className="login-card">
         <div className="auth-brand">
           <div className="auth-mark">
-            <img src={mapIcon} alt="" />
+            <img src={kumpasLogo} alt="KUMPAS logo" />
           </div>
           <h1>KUMPAS</h1>
           <p>Admin Login</p>
@@ -105,7 +105,7 @@ function LoginPreview() {
     <Card className="login-card" aria-hidden="true">
       <div className="auth-brand">
         <div className="auth-mark">
-          <img src={mapIcon} alt="" />
+          <img src={kumpasLogo} alt="KUMPAS logo" />
         </div>
         <h1>KUMPAS</h1>
         <p>Admin Login</p>
