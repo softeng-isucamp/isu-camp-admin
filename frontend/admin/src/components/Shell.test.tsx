@@ -49,7 +49,7 @@ describe("Shell Sidebar Component", () => {
     );
 
     const sidebar = screen.getByRole("complementary", { name: /main navigation/i });
-    expect(within(sidebar).getByText("ISU-CAMP")).toBeInTheDocument();
+    expect(within(sidebar).getByText("KUMPAS")).toBeInTheDocument();
     expect(within(sidebar).getByText("ADMIN PORTAL")).toBeInTheDocument();
     expect(within(sidebar).getByText("Dashboard Overview")).toBeInTheDocument();
     expect(within(sidebar).getByText("Map Editor")).toBeInTheDocument();

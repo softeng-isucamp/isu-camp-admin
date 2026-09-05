@@ -49,7 +49,7 @@ export function Login() {
           <div className="auth-mark">
             <img src={mapIcon} alt="" />
           </div>
-          <h1>ISU-CAMP</h1>
+          <h1>KUMPAS</h1>
           <p>Admin Login</p>
         </div>
         <form onSubmit={handleSubmit(submit)}>
@@ -107,7 +107,7 @@ function LoginPreview() {
         <div className="auth-mark">
           <img src={mapIcon} alt="" />
         </div>
-        <h1>ISU-CAMP</h1>
+        <h1>KUMPAS</h1>
         <p>Admin Login</p>
       </div>
       <form>
