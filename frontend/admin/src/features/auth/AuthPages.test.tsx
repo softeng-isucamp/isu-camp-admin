@@ -27,7 +27,7 @@ describe("login screen", () => {
       </MemoryRouter>,
     );
     expect(
-      screen.getByRole("heading", { name: "ISU-CAMP" }),
+      screen.getByRole("heading", { name: "KUMPAS" }),
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter your username")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();

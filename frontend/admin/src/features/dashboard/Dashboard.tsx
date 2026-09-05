@@ -22,7 +22,7 @@ export function Dashboard() {
     <div className="page dashboard">
       <section className="hero">
         <div>
-          <p className="eyebrow">ISU-CAMP ADMIN</p>
+          <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Campus Overview</h1>
           <p>
             System status is optimal. Currently managing campus infrastructure
