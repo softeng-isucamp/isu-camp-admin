@@ -15,15 +15,18 @@ if APP_DIR not in sys.path:
 
 from urllib.parse import urlsplit, urlunsplit
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
 from extensions import db, mail
 from auth import auth_bp
 from model.location import Location
+
 from routes.actions import actions_bp
 from routes.location import location_bp
+from routes.route_node import route_node_bp
+from routes.map import map_bp   # <-- NEW IMPORT
 
 
 # ==========================================
@@ -55,13 +58,38 @@ app.config["SECRET_KEY"] = os.getenv(
 # SMTP / Email Configuration
 # ==========================================
 
-app.config["MAIL_SERVER"] = os.getenv("MAIL_SERVER", "smtp.resend.com")
-app.config["MAIL_PORT"] = int(os.getenv("MAIL_PORT", 587))
-app.config["MAIL_USE_TLS"] = os.getenv("MAIL_USE_TLS", "True").lower() in ("true", "1", "yes")
-app.config["MAIL_USE_SSL"] = os.getenv("MAIL_USE_SSL", "False").lower() in ("true", "1", "yes")
-app.config["MAIL_USERNAME"] = os.getenv("MAIL_USERNAME", "resend")
-app.config["MAIL_PASSWORD"] = os.getenv("MAIL_PASSWORD")
-app.config["MAIL_DEFAULT_SENDER"] = os.getenv("MAIL_DEFAULT_SENDER", "onboarding@resend.dev")
+app.config["MAIL_SERVER"] = os.getenv(
+    "MAIL_SERVER",
+    "smtp.resend.com"
+)
+
+app.config["MAIL_PORT"] = int(
+    os.getenv("MAIL_PORT", 587)
+)
+
+app.config["MAIL_USE_TLS"] = os.getenv(
+    "MAIL_USE_TLS",
+    "True"
+).lower() in ("true", "1", "yes")
+
+app.config["MAIL_USE_SSL"] = os.getenv(
+    "MAIL_USE_SSL",
+    "False"
+).lower() in ("true", "1", "yes")
+
+app.config["MAIL_USERNAME"] = os.getenv(
+    "MAIL_USERNAME",
+    "resend"
+)
+
+app.config["MAIL_PASSWORD"] = os.getenv(
+    "MAIL_PASSWORD"
+)
+
+app.config["MAIL_DEFAULT_SENDER"] = os.getenv(
+    "MAIL_DEFAULT_SENDER",
+    "onboarding@resend.dev"
+)
 
 mail.init_app(app)
 
@@ -123,21 +151,62 @@ db.init_app(app)
 
 CORS(
     app,
-    supports_credentials=True,
-    origins=[
-        "http://localhost:5173",
-        "http://localhost:5174"
-    ]
+    resources={
+        r"/api/*": {
+            "origins": [
+                "http://localhost:5173",
+                "http://localhost:5174"
+            ],
+            "methods": [
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "OPTIONS"
+            ],
+            "allow_headers": [
+                "Content-Type",
+                "Authorization"
+            ],
+            "supports_credentials": True
+        }
+    }
 )
 
 
 # ==========================================
-# Register Authentication
+# CORS Preflight / Headers
+# ==========================================
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin")
+
+    if origin in [
+        "http://localhost:5173",
+        "http://localhost:5174"
+    ]:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization"
+        )
+        response.headers["Access-Control-Allow-Methods"] = (
+            "GET, POST, PUT, DELETE, OPTIONS"
+        )
+
+    return response
+
+
+# ==========================================
+# Register Blueprints
 # ==========================================
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(location_bp)
 app.register_blueprint(actions_bp)
+app.register_blueprint(route_node_bp)
+app.register_blueprint(map_bp)   # <-- NEW REGISTRATION
 
 
 # ==========================================
@@ -187,6 +256,7 @@ def test_db():
             "error": str(e)
         }), 500
 
+
 # ==========================================
 # TEST LOCATION TABLE
 # ==========================================
@@ -233,6 +303,7 @@ def test_location_table():
             "message": "Could not check location table",
             "error": str(e)
         }), 500
+
 
 # ==========================================
 # Test Location Table
