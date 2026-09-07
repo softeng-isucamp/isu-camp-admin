@@ -13,9 +13,13 @@ class Building(db.Model):
     latitude = db.Column(db.Numeric, nullable=True)
     longitude = db.Column(db.Numeric, nullable=True)
 
+    # Stores the building polygon coordinates as JSONB
+    polygon_coordinates = db.Column(db.JSON, nullable=True)
+
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
         lng = float(self.longitude) if self.longitude is not None else None
+
         return {
             "id": str(self.building_id),
             "name": self.building_name,
@@ -29,6 +33,10 @@ class Building(db.Model):
             "status": "Active",
             "lat": lat,
             "lng": lng,
+
+            # Send polygon coordinates back to frontend
+            "polygonCoordinates": self.polygon_coordinates,
+
             "positioned": lat is not None and lng is not None,
             "hasPhoto": False,
         }

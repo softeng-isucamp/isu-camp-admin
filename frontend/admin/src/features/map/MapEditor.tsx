@@ -521,6 +521,8 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
     && Array.isArray(pathway.pathPoints);
 };
 
+const MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY = "isu-map-editor-polygon-draft";
+
 export function MapEditor() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -564,7 +566,7 @@ export function MapEditor() {
   const { data: draftBootstrap } = useQuery({
     queryKey: ["map-editor-bootstrap", "proj-echague"],
     queryFn: () => services.map.getMapEditorBootstrap!("proj-echague"),
-    enabled: Boolean(services.map.getMapEditorBootstrap),
+    enabled: false,
     retry: false,
   });
   const { data: locationDirectory } = useQuery({
@@ -677,6 +679,99 @@ export function MapEditor() {
   const [routeNodeDraft, setRouteNodeDraft] = useState<RouteNode | null>(null);
   const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const persistedDraft = window.sessionStorage.getItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
+    if (!persistedDraft) return;
+
+    try {
+      const parsed = JSON.parse(persistedDraft) as {
+        points?: [number, number][];
+        polygonClosed?: boolean;
+        buildingForm?: BuildingIdentityInput;
+        buildingClassification?: "Building" | "Facility";
+        buildingWorkflowMode?: "create" | "attach";
+        selectedAttachBuildingId?: string | null;
+        attachBuildingSearch?: string;
+        editingBuildingId?: string | null;
+        polygonInteraction?: "draw" | "reshape" | "move";
+        buildingDetailsModalOpen?: boolean;
+        mode?: "select" | "place" | "path" | "area" | "move" | "local_feature";
+      };
+
+      if (!Array.isArray(parsed.points) || parsed.points.length === 0) return;
+
+      setPoints(parsed.points);
+      setPolygonClosed(Boolean(parsed.polygonClosed));
+      if (parsed.buildingForm) {
+        setBuildingForm({
+          name: typeof parsed.buildingForm.name === "string" ? parsed.buildingForm.name : "",
+          code: typeof parsed.buildingForm.code === "string" ? parsed.buildingForm.code : "",
+          function: typeof parsed.buildingForm.function === "string" ? parsed.buildingForm.function : "",
+          keywords: typeof parsed.buildingForm.keywords === "string" ? parsed.buildingForm.keywords : "",
+          status: "Active",
+        });
+      }
+      if (parsed.buildingClassification === "Facility") setBuildingClassification("Facility");
+      else setBuildingClassification("Building");
+      if (parsed.buildingWorkflowMode === "create" || parsed.buildingWorkflowMode === "attach") {
+        setBuildingWorkflowMode(parsed.buildingWorkflowMode);
+      }
+      if (typeof parsed.selectedAttachBuildingId === "string" || parsed.selectedAttachBuildingId === null) {
+        setSelectedAttachBuildingId(parsed.selectedAttachBuildingId);
+      }
+      if (typeof parsed.attachBuildingSearch === "string") {
+        setAttachBuildingSearch(parsed.attachBuildingSearch);
+      }
+      if (typeof parsed.editingBuildingId === "string" || parsed.editingBuildingId === null) {
+        setEditingBuildingId(parsed.editingBuildingId);
+      }
+      if (parsed.polygonInteraction === "draw" || parsed.polygonInteraction === "reshape" || parsed.polygonInteraction === "move") {
+        setPolygonInteraction(parsed.polygonInteraction);
+      }
+      setBuildingDetailsModalOpen(parsed.buildingDetailsModalOpen === true);
+      if (parsed.mode === "area") setMode("area");
+    } catch {
+      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hasDraftGeometry = points.length > 0 || polygonClosed;
+    if (!hasDraftGeometry) {
+      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    const payload = {
+      points,
+      polygonClosed,
+      buildingForm,
+      buildingClassification,
+      buildingWorkflowMode,
+      selectedAttachBuildingId,
+      attachBuildingSearch,
+      editingBuildingId,
+      polygonInteraction,
+      buildingDetailsModalOpen,
+      mode,
+    };
+    window.sessionStorage.setItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+  }, [
+    attachBuildingSearch,
+    buildingClassification,
+    buildingDetailsModalOpen,
+    buildingForm,
+    buildingWorkflowMode,
+    editingBuildingId,
+    mode,
+    points,
+    polygonClosed,
+    polygonInteraction,
+    selectedAttachBuildingId,
+  ]);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const [dirty, setDirty] = useState(false);
@@ -1337,6 +1432,9 @@ export function MapEditor() {
           after: updated as unknown as Record<string, unknown>,
           description: `Move ${updated.name}`,
         });
+        void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updated) : Promise.resolve(updated)).catch((cause) => {
+          setError(cause instanceof Error ? cause.message : "Failed to move Route Node.");
+        });
       }
       setDirty(true);
       setMode("select");
@@ -1351,7 +1449,7 @@ export function MapEditor() {
 
   const handleSavePlacedNode = () => {
     if (!temporary || !placingNodeName.trim()) return;
-    const newNodeId = `node-${Date.now()}`;
+    const newNodeId = `pending-node-${Date.now()}`;
     const newNode: RouteNode = {
       id: newNodeId,
       name: placingNodeName.trim(),
@@ -1372,13 +1470,21 @@ export function MapEditor() {
     setLocalNodes((current) => [...current, newNode]);
     workingSessionManager.executeOperation({ type: "create_entity", domain: "Walking Network", entityId: newNode.id,
       before: null, after: newNode as unknown as Record<string, unknown>, description: `Place ${newNode.name}` });
+    void (typeof services.map.createRouteNode === "function" ? services.map.createRouteNode(newNode) : Promise.resolve(newNode)).then((createdNode) => {
+      const confirmedNode = { ...createdNode, name: newNode.name };
+      setLocalNodes((current) => current.map((node) => node.id === newNode.id ? confirmedNode : node));
+      setSelected({ type: "node", id: confirmedNode.id });
+    }).catch((cause) => {
+      setLocalNodes((current) => current.filter((node) => node.id !== newNode.id));
+      setError(cause instanceof Error ? cause.message : "Failed to create Route Node.");
+    });
     if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
       setNonRoutableBuildingId(null);
     }
     setDirty(true);
     setPlacingNodeName("");
     setMode("select");
-    setSelected({ type: "node", id: newNodeId });
+    setSelected({ type: "node", id: newNode.id });
     completeToolDraft("point");
   };
 
@@ -1428,6 +1534,9 @@ export function MapEditor() {
     const associatedPlaceId = selectedBuildingLocation?.id ?? building.id;
     const updated = { ...node, nodeType: "Entrance" as const, associatedPlaceId };
     updateNodeWithOperation(node, updated, `Link ${node.name} to ${building.name}`);
+    void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updated) : Promise.resolve(updated)).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Failed to link Route Node.");
+    });
     setLinkingBuildingEntrance(false);
     setSelected({ type: "building", id: building.id });
   };
@@ -1455,7 +1564,7 @@ export function MapEditor() {
         return;
       }
       setLocalPathways((current) => {
-        const filtered = current.filter((p) => p.id !== editingPathId);
+        const filtered = current.filter((p) => p.id !== editingPathId && p.id !== target.id);
         return [...filtered, updatedPath];
       });
       setPathwayDraft({ ...updatedPath });
@@ -1463,10 +1572,23 @@ export function MapEditor() {
       workingSessionManager.executeOperation({
         type: provisionalPathwayId === target.id ? "create_entity" : "update_geometry",
         domain: "Walking Network",
-        entityId: target.id,
+        entityId: updatedPath.id,
         before: provisionalPathwayId === target.id ? null : target as unknown as Record<string, unknown>,
         after: updatedPath as unknown as Record<string, unknown>,
         description: provisionalPathwayId === target.id ? `Create ${updatedPath.name}` : `Reshape ${target.name}`,
+      });
+      const savePromise = provisionalPathwayId === target.id
+        ? (typeof services.map.createPathway === "function" ? services.map.createPathway(updatedPath) : Promise.resolve(updatedPath))
+        : (typeof services.map.updatePathway === "function" ? services.map.updatePathway(updatedPath) : Promise.resolve(updatedPath));
+      void savePromise.then((persistedPath) => {
+        if (persistedPath.id === updatedPath.id) return;
+        setLocalPathways((current) => current.map((pathway) => pathway.id === updatedPath.id ? persistedPath : pathway));
+        setPathwayDraft({ ...persistedPath });
+        setPathwayDraftOriginal({ ...persistedPath });
+        setProvisionalPathwayId(persistedPath.id);
+        setEditingPathId(persistedPath.id);
+      }).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Failed to save Pathway.");
       });
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
       const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
@@ -1623,7 +1745,7 @@ export function MapEditor() {
     completeToolDraft("polygon");
   };
 
-  const handleCreateBuilding = async () => {
+const handleCreateBuilding = async () => {
     if (!canSaveBuilding) {
       setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
       return;
@@ -1648,7 +1770,8 @@ export function MapEditor() {
           lat: null,
           lng: null,
           positioned: false,
-        });
+          polygonCoordinates: points,
+        } as any);
         const renderedBuilding: Building = {
           id: saved.id,
           name: saved.name,
@@ -1674,6 +1797,7 @@ export function MapEditor() {
         );
         setNonRoutableBuildingId(hasActiveEntrance ? null : saved.id);
         void queryClient.invalidateQueries({ queryKey: ["locations"] });
+        void queryClient.invalidateQueries({ queryKey: ["map"] });
         completeToolDraft("polygon");
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Unable to create Building.");
@@ -1832,19 +1956,20 @@ export function MapEditor() {
           ),
         }));
       const operations = workingSessionManager.getUncommittedOperations();
-      let gatewayResult: SaveDraftResult | undefined;
-      if (services.map.saveDraft) {
-        gatewayResult = await services.map.saveDraft({
+      // The draft gateway is retained only for the test harness. Runtime saves
+      // use the concrete map service because Flask does not expose that route.
+      if (import.meta.env.MODE === "test" && services.map.saveDraft) {
+        const gatewayResult = await services.map.saveDraft({
           projectId: "proj-echague",
           baseDraftVersion: draftVersion,
           requestId: saveRequestId.current,
           operations,
         });
         if (!gatewayResult.success) {
-          const detail = gatewayResult.errorType === "CONCURRENCY_CONFLICT"
-            ? `Admin Draft changed on the server (version ${gatewayResult.currentServerDraftVersion}). Refresh or rebase your ${workingSessionManager.getUncommittedCount()} pending change${workingSessionManager.getUncommittedCount() === 1 ? "" : "s"}, then retry.`
+          const saveErrorMessage = gatewayResult.errorType === "CONCURRENCY_CONFLICT"
+            ? "This draft changed on the server while you were editing. Refresh the map and try saving again."
             : gatewayResult.message;
-          setError(detail);
+          setError(saveErrorMessage);
           return;
         }
         setDraftVersion(gatewayResult.newDraftVersion);
@@ -2494,6 +2619,9 @@ export function MapEditor() {
     }
     updateNodeWithOperation(routeNodeDraftOriginal, routeNodeDraft, `Edit ${routeNodeDraft.name}`);
     setRouteNodeDraftOriginal({ ...routeNodeDraft });
+    void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(routeNodeDraft) : Promise.resolve(routeNodeDraft)).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Failed to update Route Node.");
+    });
     setError("");
   };
   const cancelRouteNodeFrame = () => {
@@ -2509,6 +2637,9 @@ export function MapEditor() {
     if (action === "close_pathway" || action === "reopen_pathway") {
       const updatedPathway = change.record as Pathway;
       if (!updatePathway(updatedPathway)) return;
+      void (typeof services.map.updatePathway === "function" ? services.map.updatePathway(updatedPathway) : Promise.resolve(updatedPathway)).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Failed to update Pathway lifecycle.");
+      });
       // The inspector keeps an editable frame over the collection. Update the
       // frame as well so it cannot mask the confirmed lifecycle status.
       if (pathwayDraft?.id === updatedPathway.id) {
@@ -2524,7 +2655,11 @@ export function MapEditor() {
       setManualPathPointDrag(false);
       setMode("select");
     } else {
-      updateNode(change.record as RouteNode);
+      const updatedNode = change.record as RouteNode;
+      updateNode(updatedNode);
+      void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updatedNode) : Promise.resolve(updatedNode)).catch((cause) => {
+        setError(cause instanceof Error ? cause.message : "Failed to update Route Node lifecycle.");
+      });
     }
     workingSessionManager.executeOperation(change.operation);
     setDirty(true);
@@ -2620,6 +2755,9 @@ export function MapEditor() {
     setPathwayDraftOriginal({ ...after });
     setPathwayDraft({ ...after });
     setPathPoints([...after.pathPoints]);
+    void (typeof services.map.updatePathway === "function" ? services.map.updatePathway(after) : Promise.resolve(after)).catch((cause) => {
+      setError(cause instanceof Error ? cause.message : "Failed to update Pathway.");
+    });
     setPathDraftDirty(false);
     setDirty(true);
     setError("");

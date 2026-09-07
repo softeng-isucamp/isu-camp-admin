@@ -231,6 +231,22 @@ describe("Map Editor preview", () => {
     expect(vi.mocked(services.map.saveDraft).mock.calls[0][0].operations.some((item) => item.domain === "Locations")).toBe(false);
   });
 
+  it("restores an in-progress polygon draft after a browser refresh", async () => {
+    sessionStorage.clear();
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.7201, 121.6891);
+    clickMap(16.7202, 121.6892);
+    expect(screen.getByText("Points plotted: 2")).toBeInTheDocument();
+
+    cleanup();
+    renderEditor();
+
+    expect(screen.getByRole("button", { name: "Building Polygon" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Points plotted: 2")).toBeInTheDocument();
+  });
+
   it("keeps an interrupted polygon draft on the suspended shelf and resumes it", async () => {
     renderEditor();
 

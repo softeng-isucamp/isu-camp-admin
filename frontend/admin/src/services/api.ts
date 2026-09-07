@@ -238,6 +238,66 @@ const normalizeMapPathway = (pathway: Pathway): Pathway => {
     allowedModes: normalizedType === "Walkway" ? ["Walking"] : pathway.allowedModes,
   };
 };
+
+type BackendRouteNode = {
+  node_id: number;
+  location_id: number | null;
+  building_id: number | null;
+  latitude: number;
+  longitude: number;
+  node_type: string;
+  status: string;
+};
+
+type BackendPathPoint = {
+  point_id: number;
+  pathway_id: number;
+  sequence_no: number;
+  latitude: number;
+  longitude: number;
+  building_id: number | null;
+  node_type: string;
+  status: string;
+};
+
+type BackendPathway = {
+  pathway_id: number;
+  source_node_id: number;
+  destination_node_id: number;
+  path_type: string;
+  distance_m: number;
+  estimated_minutes: number;
+  status: string;
+  shaded: boolean;
+  surface_type: string | null;
+};
+
+const normalizeBackendRouteNode = (raw: BackendRouteNode): RouteNode => {
+  const type = String(raw.node_type).toLowerCase();
+  return {
+    id: String(raw.node_id),
+    name: `Route Node ${raw.node_id}`,
+    nodeType: type === "entrance" ? "Entrance" : type === "access_point" || type === "access point" ? "Access Point" : "Junction",
+    associatedPlaceId: raw.location_id != null ? String(raw.location_id) : raw.building_id != null ? String(raw.building_id) : null,
+    lat: raw.latitude,
+    lng: raw.longitude,
+    status: String(raw.status).toLowerCase() === "active" ? "Active" : "Inactive",
+  };
+};
+
+const normalizeBackendPathway = (raw: BackendPathway, points: BackendPathPoint[]): Pathway => ({
+  id: String(raw.pathway_id),
+  name: `Pathway ${raw.pathway_id}`,
+  sourceNodeId: String(raw.source_node_id),
+  destinationNodeId: String(raw.destination_node_id),
+  distance: `${raw.distance_m} m`,
+  time: `${raw.estimated_minutes} min`,
+  shade: raw.shaded ? "Fully Shaded" : "Unshaded",
+  type: normalizePathwayWayType(raw.path_type) === "Unknown" ? "Walkway" : normalizePathwayWayType(raw.path_type),
+  direction: "Unknown",
+  status: String(raw.status).toLowerCase() === "active" ? "Active" : "Closed",
+  pathPoints: points.filter((point) => point.pathway_id === raw.pathway_id).sort((a, b) => a.sequence_no - b.sequence_no).map((point) => [point.latitude, point.longitude]),
+});
 const canonicalNetwork = createCanonicalNetworkStore(
   USE_GENERATED_MAP_FIXTURE
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
@@ -415,7 +475,21 @@ export interface Services {
 
     nodes(): Promise<RouteNode[]>;
 
+    createRouteNode(node: Omit<RouteNode, "id">): Promise<RouteNode>;
+
+    updateRouteNode(node: RouteNode): Promise<RouteNode>;
+
+    deleteRouteNode(id: string): Promise<void>;
+
     pathways(): Promise<Pathway[]>;
+
+    createPathway(pathway: Omit<Pathway, "id">): Promise<Pathway>;
+
+    updatePathway(pathway: Pathway): Promise<Pathway>;
+
+    deletePathway(id: string): Promise<void>;
+
+    replacePathPoints(pathwayId: string, points: [number, number][]): Promise<void>;
 
     save(
       edit?: MapSavePayload
@@ -1240,19 +1314,152 @@ export const services: Services = {
     },
 
 
-    locations: async () => USE_HTTP_API
-      ? apiJson<Location[]>("/api/map/locations")
-      : wait(clone(mapLocations)),
+      locations: async () => USE_HTTP_API
+        ? normalizeBackendLocationPage(await apiJson<unknown>("/api/locations")).items
+        : wait(clone(mapLocations)),
 
 
-    nodes: async () => USE_HTTP_API
-      ? apiJson<RouteNode[]>("/api/map/nodes")
-      : wait(clone(mapNodes)),
+    nodes: async () => {
+      if (!USE_HTTP_API) return wait(clone(mapNodes));
+      const response = await apiJson<{ route_nodes: BackendRouteNode[] }>("/api/route-nodes");
+      return response.route_nodes.map(normalizeBackendRouteNode);
+    },
+
+    createRouteNode: async (node) => {
+      if (!USE_HTTP_API) {
+        const localNode = { ...node, id: `node-${Date.now()}` };
+        routeNodes.push(localNode);
+        return clone(localNode);
+      }
+      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
+      const response = await apiJson<{ route_node: BackendRouteNode }>("/api/route-nodes", {
+        method: "POST",
+        body: JSON.stringify({
+          latitude: node.lat,
+          longitude: node.lng,
+          location_id: node.nodeType === "Entrance" ? null : associatedId,
+          building_id: node.nodeType === "Entrance" ? associatedId : null,
+          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
+          status: "active",
+        }),
+      });
+      return normalizeBackendRouteNode(response.route_node);
+    },
+
+    updateRouteNode: async (node) => {
+      if (!USE_HTTP_API) {
+        const index = routeNodes.findIndex((item) => item.id === node.id);
+        if (index >= 0) routeNodes[index] = clone(node);
+        return clone(node);
+      }
+      const nodeId = Number(node.id);
+      if (!Number.isInteger(nodeId)) throw new Error(`Cannot update Route Node "${node.id}". Invalid database ID.`);
+      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
+      const response = await apiJson<{ route_node: BackendRouteNode }>(`/api/route-nodes/${nodeId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          latitude: node.lat,
+          longitude: node.lng,
+          location_id: node.nodeType === "Entrance" ? null : associatedId,
+          building_id: node.nodeType === "Entrance" ? associatedId : null,
+          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
+          status: node.status?.toLowerCase() === "inactive" ? "inactive" : "active",
+        }),
+      });
+      return normalizeBackendRouteNode(response.route_node);
+    },
+
+    deleteRouteNode: async (id) => {
+      if (!USE_HTTP_API) {
+        const index = routeNodes.findIndex((item) => item.id === id);
+        if (index >= 0) routeNodes.splice(index, 1);
+        return;
+      }
+      const nodeId = Number(id);
+      if (!Number.isInteger(nodeId)) throw new Error(`Cannot delete Route Node "${id}". Invalid database ID.`);
+      await apiJson<unknown>(`/api/route-nodes/${nodeId}`, { method: "DELETE" });
+    },
 
 
-    pathways: async () => USE_HTTP_API
-      ? apiJson<Pathway[]>("/api/map/pathways").then((items) => items.map(normalizeMapPathway))
-      : wait(clone(mapPathways).map(normalizeMapPathway)),
+    pathways: async () => {
+      if (!USE_HTTP_API) return wait(clone(mapPathways).map(normalizeMapPathway));
+      const [pathwayResponse, pointResponse] = await Promise.all([
+        apiJson<{ pathways: BackendPathway[] }>("/api/pathways"),
+        apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points"),
+      ]);
+      return pathwayResponse.pathways.map((pathway) => normalizeBackendPathway(pathway, pointResponse.path_points));
+    },
+
+    createPathway: async (pathway) => {
+      if (!USE_HTTP_API) {
+        const localPathway = { ...pathway, id: `pathway-${Date.now()}` };
+        pathways.push(localPathway);
+        return clone(localPathway);
+      }
+      const response = await apiJson<{ pathway: BackendPathway }>("/api/pathways", {
+        method: "POST",
+        body: JSON.stringify({
+          source_node_id: Number(pathway.sourceNodeId),
+          destination_node_id: Number(pathway.destinationNodeId),
+          path_type: pathway.type,
+          distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
+          estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
+          status: pathway.status === "Closed" ? "closed" : "active",
+          shaded: pathway.shade !== "Unshaded",
+        }),
+      });
+      const created = normalizeBackendPathway(response.pathway, []);
+      await services.map.replacePathPoints(created.id, pathway.pathPoints);
+      return { ...created, name: pathway.name, direction: pathway.direction };
+    },
+
+    updatePathway: async (pathway) => {
+      if (!USE_HTTP_API) {
+        const index = pathways.findIndex((item) => item.id === pathway.id);
+        if (index >= 0) pathways[index] = clone(pathway);
+        return clone(pathway);
+      }
+      const pathwayId = Number(pathway.id);
+      if (!Number.isInteger(pathwayId)) throw new Error(`Cannot update Pathway "${pathway.id}". Invalid database ID.`);
+      const response = await apiJson<{ pathway: BackendPathway }>(`/api/pathways/${pathwayId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          source_node_id: Number(pathway.sourceNodeId),
+          destination_node_id: Number(pathway.destinationNodeId),
+          path_type: pathway.type,
+          distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
+          estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
+          status: pathway.status === "Closed" ? "closed" : "active",
+          shaded: pathway.shade !== "Unshaded",
+        }),
+      });
+      await services.map.replacePathPoints(pathway.id, pathway.pathPoints);
+      const updated = normalizeBackendPathway(response.pathway, []);
+      return { ...updated, name: pathway.name, direction: pathway.direction };
+    },
+
+    deletePathway: async (id) => {
+      if (!USE_HTTP_API) {
+        const index = pathways.findIndex((item) => item.id === id);
+        if (index >= 0) pathways.splice(index, 1);
+        return;
+      }
+      const pathwayId = Number(id);
+      if (!Number.isInteger(pathwayId)) throw new Error(`Cannot delete Pathway "${id}". Invalid database ID.`);
+      await apiJson<unknown>(`/api/pathways/${pathwayId}`, { method: "DELETE" });
+    },
+
+    replacePathPoints: async (pathwayId, points) => {
+      if (!USE_HTTP_API) return;
+      const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
+      await Promise.all(existing.path_points.filter((point) => String(point.pathway_id) === pathwayId).map((point) =>
+        apiJson<unknown>(`/api/path-points/${point.point_id}`, { method: "DELETE" }),
+      ));
+      await Promise.all(points.map(([latitude, longitude], index) => apiJson<unknown>("/api/path-points", {
+        method: "POST",
+        body: JSON.stringify({ pathway_id: Number(pathwayId), sequence_no: index + 1, latitude, longitude, node_type: "Waypoint", status: "active" }),
+      })));
+    },
 
 
     save: async (edit) => {
