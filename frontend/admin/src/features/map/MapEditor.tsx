@@ -82,6 +82,31 @@ import "leaflet/dist/leaflet.css";
 // Types & Utilities
 // ============================================================================
 
+/**
+ * Normalizes a free-typed floor label into its short canonical form, e.g.
+ * "2nd Floor" -> "2nd", "Ground Floor" -> "Ground", "Basement 1" -> "Basement 1".
+ * Fixes #33: previously the raw input (e.g. "2nd Floor") was stored and displayed
+ * as-is, with no normalization/filtering applied anywhere in this file.
+ *
+ * NOTE: `standardFloorLevels` (imported from lib/locationPolicy, still unused) was
+ * not used here because its exact shape (normalizing function vs. array of canonical
+ * labels) isn't visible from this file alone. This is a self-contained implementation
+ * so the fix is verifiable now; swap it out for `standardFloorLevels` once its API is
+ * confirmed, to keep normalization consistent with the rest of the app.
+ */
+function normalizeFloorLabel(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  if (/^ground(\s+floor)?$/i.test(trimmed)) return "Ground";
+  if (/^basement(\s+floor)?$/i.test(trimmed)) return "Basement";
+  const basementLevel = trimmed.match(/^basement\s*(\d+)(\s+floor)?$/i);
+  if (basementLevel) return `Basement ${basementLevel[1]}`;
+  const ordinal = trimmed.match(/^(\d+)\s*(st|nd|rd|th)(\s+floor)?$/i);
+  if (ordinal) return `${ordinal[1]}${ordinal[2].toLowerCase()}`;
+  // No recognized pattern (custom wing/label, etc.) — keep the user's text as-is.
+  return trimmed;
+}
+
 type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";
 
 interface OperationProjection {
@@ -1498,7 +1523,7 @@ export function MapEditor() {
       status: "Active",
       parentId: selectedBuilding.id,
       building: selectedBuilding.name,
-      floor: newRoom.floor.trim() || undefined,
+      floor: newRoom.floor.trim() ? normalizeFloorLabel(newRoom.floor) : undefined,
       function: "",
       lat: null,
       lng: null,
@@ -2061,7 +2086,13 @@ const handleCreateBuilding = async () => {
     const pathways = walkingNetworkImport.pathways.map((pathway) => ({
       id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
       pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
-      distance: "Unknown", time: "Unknown", shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Walkway",
+      // Was hardcoded to "Unknown", discarding distance/time metadata carried by the imported network snapshot.
+      // NOTE: this assumes `pathway.distanceMeters` / `pathway.estimatedTimeSeconds` exist on the
+      // WalkingNetworkImportPreview pathway shape (mirroring NetworkSnapshot, per networkSnapshotForImport()
+      // above). If services/walkingNetworkImport.ts uses different field names, adjust accordingly.
+      distance: pathway.distanceMeters != null ? `${Math.round(pathway.distanceMeters)}m` : "Unknown",
+      time: pathway.estimatedTimeSeconds != null ? `${Math.round(pathway.estimatedTimeSeconds / 60)} min` : "Unknown",
+      shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Walkway",
       direction: pathway.direction === "one_way" ? "One-way" : "Two-way", status: pathway.status === "closed" ? "Closed" : "Active",
       allowedModes: pathway.allowedModes?.map((mode) => mode === "vehicle" ? "Vehicle" : "Walking"),
     } as Pathway));
@@ -3611,6 +3642,17 @@ const handleCreateBuilding = async () => {
                 fillOpacity: 0.25,
                 weight: 2,
               }}
+            />
+          )}
+
+          {/* Center marker for the polygon currently being drawn/reshaped, so it's visible
+              before the building is committed (fixes #32 — previously only rendered post-commit
+              when mode === "select", so nothing showed while mode === "area"). Recomputed from
+              `points` on every render, same as the committed-building marker below. */}
+          {mode === "area" && points.length >= 3 && (
+            <Marker
+              position={polygonCentroid(points)}
+              icon={createLocationPinIcon(false)}
             />
           )}
 
