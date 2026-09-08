@@ -4,7 +4,7 @@ import { useAuth } from "../features/auth/AuthContext";
 import { Button } from "./UI";
 import { services } from "../services/api";
 import type { NotificationItem } from "../types";
-import logo from "../assets/figma/brand/isu-camp-logo.png";
+import logo from "../assets/figma/brand/kumpas-logo.png";
 import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
 import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
 import locationsIcon from "../assets/figma/navigation/locations.svg";
@@ -104,12 +104,12 @@ export function Shell({ children }: PropsWithChildren) {
       >
         <div className="sidebar-top-section">
           <div className="brand">
-            <div className="brand-mark" title="ISU-CAMP">
-              <img src={logo} alt="ISU-CAMP logo" />
+            <div className="brand-mark" title="KUMPAS">
+              <img src={logo} alt="KUMPAS logo" />
             </div>
             {!minimized && (
               <div className="sidebar-brand-copy">
-                <strong>ISU-CAMP</strong>
+                <strong>KUMPAS</strong>
                 <small>ADMIN PORTAL</small>
               </div>
             )}
@@ -383,7 +383,7 @@ export function Shell({ children }: PropsWithChildren) {
                     lineHeight: "20px",
                   }}
                 >
-                  You’ll need to sign in again to access the ISU-CAMP admin
+                  You’ll need to sign in again to access the KUMPAS admin
                   dashboard.
                 </p>
               </div>

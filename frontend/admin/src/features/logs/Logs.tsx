@@ -38,7 +38,7 @@ export function Logs() {
         </span>
         <div>
           <h1>System Logs</h1>
-          <p>Review administrator changes and user activity across ISU-CAMP.</p>
+          <p>Review administrator changes and user activity across KUMPAS.</p>
         </div>
       </div>
       <Card className="filters logs-filters">
@@ -209,7 +209,7 @@ export function Logs() {
               ? "This administrator action changed protected campus data."
               : detail.category === "User"
                 ? "This user event records activity originating from a campus account."
-                : "This system event was recorded by the ISU-CAMP service."}
+                : "This system event was recorded by the KUMPAS service."}
           </p>
           {detail.detail && (
             <p className="text-xs text-[#64716a] italic">

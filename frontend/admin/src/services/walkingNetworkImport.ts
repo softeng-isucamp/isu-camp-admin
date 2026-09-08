@@ -21,6 +21,16 @@ export interface WalkingNetworkImportPreview {
   affectedEntityIds: string[];
 }
 
+/** A ready-to-edit starting point for walking-network import files. */
+export const createWalkingNetworkImportTemplate = () => JSON.stringify([
+  { entityType: "RouteNode", id: "node-main-gate", name: "Main Gate", type: "junction", latitude: 16.722, longitude: 121.682, status: "active" },
+  { entityType: "RouteNode", id: "node-library", name: "Library Junction", type: "junction", latitude: 16.723, longitude: 121.683, status: "active" },
+  { entityType: "Pathway", id: "path-main-gate", name: "Main Gate Walkway", sourceNodeId: "node-main-gate", destinationNodeId: "node-library", pathPoints: [], type: "Walkway", direction: "two_way", status: "active", shade: "Unknown", distanceMeters: 100, estimatedTimeSeconds: 90, allowedModes: ["walking"] },
+], null, 2);
+
+export const walkingNetworkImportDescription =
+  "Validate Route Nodes and Pathways before adding them to the current Working Session.";
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 

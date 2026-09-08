@@ -133,8 +133,9 @@ button {
 .brand-mark {
   width: 32px;
   height: 32px;
-  background: #a0f5ba;
+  background: transparent;
   color: var(--green);
+  overflow: hidden;
 }
 .brand-mark img {
   width: 100%;
@@ -1180,9 +1181,10 @@ td small {
   width: 64px;
   height: 64px;
   margin: 0 auto 16px;
-  background: #1a7344;
+  background: transparent;
   color: white;
   font-size: 32px;
+  overflow: hidden;
 }
 .auth-brand h1 {
   margin: 0;
@@ -2395,8 +2397,10 @@ td small {
   font-weight: 600;
 }
 .auth-mark img {
-  width: 24px;
-  height: 24px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
 }
 .login-card .btn img {
   width: 16px;

@@ -14,7 +14,7 @@ test("redirects unauthenticated visitors from protected routes", async ({
 }) => {
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole("heading", { name: "ISU-CAMP" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "KUMPAS" })).toBeVisible();
   await expect(page).toHaveScreenshot("guard-login-redirect.png", {
     animations: "disabled",
   });
@@ -22,7 +22,7 @@ test("redirects unauthenticated visitors from protected routes", async ({
 
 test("administrator can sign in and navigate modules", async ({ page }) => {
   await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "ISU-CAMP" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "KUMPAS" })).toBeVisible();
   await expect(page).toHaveScreenshot("login.png", { animations: "disabled" });
   await page.getByLabel("USERNAME").fill("admin_justine");
   await page.getByLabel(/PASSWORD/).fill("password123");

@@ -59,7 +59,7 @@ import {
   segmentMidpoints,
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
-import { previewWalkingNetworkImport, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
+import { createWalkingNetworkImportTemplate, previewWalkingNetworkImport, walkingNetworkImportDescription, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
 import type { NetworkSnapshot } from "../../services/network";
 import { buildLifecycleChange, calculateLifecycleImpact, lifecycleActionLabel, type LifecycleAction, type LifecycleImpact } from "./routeNodeLifecycle";
 import {
@@ -82,32 +82,17 @@ import "leaflet/dist/leaflet.css";
 // Types & Utilities
 // ============================================================================
 
-/**
- * Normalizes a free-typed floor label into its short canonical form, e.g.
- * "2nd Floor" -> "2nd", "Ground Floor" -> "Ground", "Basement 1" -> "Basement 1".
- * Fixes #33: previously the raw input (e.g. "2nd Floor") was stored and displayed
- * as-is, with no normalization/filtering applied anywhere in this file.
- *
- * NOTE: `standardFloorLevels` (imported from lib/locationPolicy, still unused) was
- * not used here because its exact shape (normalizing function vs. array of canonical
- * labels) isn't visible from this file alone. This is a self-contained implementation
- * so the fix is verifiable now; swap it out for `standardFloorLevels` once its API is
- * confirmed, to keep normalization consistent with the rest of the app.
- */
+type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";
+
 function normalizeFloorLabel(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
-  if (/^ground(\s+floor)?$/i.test(trimmed)) return "Ground";
+  if (/^ground(\s+floor)?$/i.test(trimmed)) return "Ground Floor";
   if (/^basement(\s+floor)?$/i.test(trimmed)) return "Basement";
-  const basementLevel = trimmed.match(/^basement\s*(\d+)(\s+floor)?$/i);
-  if (basementLevel) return `Basement ${basementLevel[1]}`;
   const ordinal = trimmed.match(/^(\d+)\s*(st|nd|rd|th)(\s+floor)?$/i);
-  if (ordinal) return `${ordinal[1]}${ordinal[2].toLowerCase()}`;
-  // No recognized pattern (custom wing/label, etc.) — keep the user's text as-is.
+  if (ordinal) return `${ordinal[1]}${ordinal[2].toLowerCase()} Floor`;
   return trimmed;
 }
-
-type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";
 
 interface OperationProjection {
   collection: ProjectedCollection;
@@ -808,6 +793,9 @@ export function MapEditor() {
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
   const [walkingNetworkImport, setWalkingNetworkImport] = useState<WalkingNetworkImportPreview | null>(null);
   const [importAdvisoriesAcknowledged, setImportAdvisoriesAcknowledged] = useState(false);
+  const [walkingNetworkImportText, setWalkingNetworkImportText] = useState("");
+  const [walkingNetworkImportFileName, setWalkingNetworkImportFileName] = useState("");
+  const [walkingNetworkImportDialogOpen, setWalkingNetworkImportDialogOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
 
@@ -2064,15 +2052,22 @@ const handleCreateBuilding = async () => {
   });
 
   const beginWalkingNetworkImport = () => {
-    importInputRef.current?.click();
+    setWalkingNetworkImportDialogOpen(true);
   };
 
   const handleWalkingNetworkFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const preview = previewWalkingNetworkImport(await file.text(), networkSnapshotForImport(), campusBoundary);
-    setWalkingNetworkImport(preview);
+    setWalkingNetworkImport(null);
+    setImportAdvisoriesAcknowledged(false);
+    setWalkingNetworkImportFileName(file.name);
+    setWalkingNetworkImportText(await file.text());
+  };
+
+  const validateWalkingNetworkImport = () => {
+    if (!walkingNetworkImportText.trim()) return;
+    setWalkingNetworkImport(previewWalkingNetworkImport(walkingNetworkImportText, networkSnapshotForImport(), campusBoundary));
     setImportAdvisoriesAcknowledged(false);
   };
 
@@ -2104,6 +2099,7 @@ const handleCreateBuilding = async () => {
     })));
     setDirty(true);
     setWalkingNetworkImport(null);
+    setWalkingNetworkImportDialogOpen(false);
     setNetworkBrowserOpen(true);
   };
 
@@ -3764,22 +3760,27 @@ const handleCreateBuilding = async () => {
           />
         )}
 
-        {walkingNetworkImport && (
-          <div className="absolute inset-0 z-[1200] grid place-items-center bg-[#14231b]/35 p-4" role="dialog" aria-modal="true" aria-label="Walking Network import preview">
-            <section className="max-h-[min(720px,calc(100%-2rem))] w-full max-w-xl overflow-y-auto rounded-3xl border border-[#dbe0e2] bg-white p-6 shadow-2xl">
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-[#005931]">Walking Network import</p>
-              <h2 className="mt-1 text-xl font-extrabold text-[#191c1d]">Preview proposed changes</h2>
-              <p className="mt-2 text-sm text-[#526158]">{walkingNetworkImport.routeNodes.length} Route Nodes and {walkingNetworkImport.pathways.length} Pathways are ready for the Working Session.</p>
-              <div className="mt-4 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-3 text-xs">
-                <strong>Affected objects</strong>
-                <p className="mt-1 break-words text-[#526158]">{walkingNetworkImport.affectedEntityIds.join(", ") || "None"}</p>
+        {walkingNetworkImportDialogOpen && (
+          <div className="modal-backdrop locations-overlay" role="dialog" aria-modal="true" aria-labelledby="walking-network-import-title" aria-describedby="walking-network-import-description">
+            <div className="modal-card locations-modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
+              <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
+                  <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }} aria-hidden="true">⇧</div>
+                  <div><h2 id="walking-network-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Import Walking Network</h2><p id="walking-network-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>{walkingNetworkImportDescription}</p></div>
+                </div>
+                <button type="button" aria-label="Close import dialog" onClick={() => { setWalkingNetworkImportDialogOpen(false); setWalkingNetworkImport(null); }} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", fontSize: "20px" }}>×</button>
               </div>
-              {walkingNetworkImport.findings.length > 0 && <div className="mt-3 space-y-2" aria-label="Import findings">
-                {walkingNetworkImport.findings.map((finding, index) => <div key={`${finding.row}-${finding.entityId ?? "row"}-${index}`} className={`rounded-xl border p-3 text-xs ${finding.severity === "blocking" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · Row {finding.row}</strong><p className="mt-1">{finding.message}{finding.entityId ? ` (${finding.entityId})` : ""}</p></div>)}
-              </div>}
-              {walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") && <label className="mt-4 flex items-start gap-2 text-xs font-semibold text-[#3f4941]"><input type="checkbox" checked={importAdvisoriesAcknowledged} onChange={(event) => setImportAdvisoriesAcknowledged(event.target.checked)} /> I reviewed the advisory findings and acknowledge importing these objects.</label>}
-              <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setWalkingNetworkImport(null)} className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold text-[#3f4941]">Cancel</button><button type="button" disabled={walkingNetworkImport.operations.length === 0 || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)} onClick={applyWalkingNetworkImport} className="rounded-full bg-[#005931] px-5 py-2 text-xs font-bold text-white disabled:opacity-40">Apply import</button></div>
-            </section>
+              <div className="locations-modal-body" style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
+                  <div><strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong><p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing Route Nodes and Pathways.</p>{walkingNetworkImportFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{walkingNetworkImportFileName} selected</p>}</div>
+                  <button type="button" onClick={() => importInputRef.current?.click()} style={{ border: "1.5px solid #0c7441", borderRadius: "999px", padding: "10px 28px", color: "#0c7441", fontWeight: 600, fontSize: "14px", background: "#fff", cursor: "pointer", flexShrink: 0 }}>Browse</button>
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}><a href={`data:application/json;charset=utf-8,${encodeURIComponent(createWalkingNetworkImportTemplate())}`} download="walking-network-template.json" style={{ color: "#0c7441", fontSize: "14px", fontWeight: 600, textDecoration: "none" }}>⇩&nbsp; Download template</a></div>
+                {walkingNetworkImport && <div role={walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "alert" : "status"} aria-live="polite" style={{ padding: "10px 14px", borderRadius: "10px", background: walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "#fee2e2" : "#e6f7ec", color: walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "#dc2626" : "#0c7441", fontSize: "13px" }}>{walkingNetworkImport.findings.length === 0 ? `Validation passed for ${walkingNetworkImport.routeNodes.length} Route Nodes and ${walkingNetworkImport.pathways.length} Pathways.` : walkingNetworkImport.findings.map((finding, index) => <div key={`${finding.row}-${finding.entityId ?? "row"}-${index}`} style={{ marginBottom: index < walkingNetworkImport.findings.length - 1 ? "8px" : 0 }}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · Row {finding.row}</strong><div>{finding.message}{finding.entityId ? ` (${finding.entityId})` : ""}</div></div>)}</div>}
+                {walkingNetworkImport && walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") && <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#3f4941" }}><input type="checkbox" checked={importAdvisoriesAcknowledged} onChange={(event) => setImportAdvisoriesAcknowledged(event.target.checked)} /> I reviewed the advisory findings and acknowledge importing these objects.</label>}
+              </div>
+              <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}><Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={() => { setWalkingNetworkImportDialogOpen(false); setWalkingNetworkImport(null); }}>Cancel</Button><Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }} disabled={!walkingNetworkImportText.trim()} onClick={validateWalkingNetworkImport}>Validate</Button><Button style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }} disabled={!walkingNetworkImport || walkingNetworkImport.operations.length === 0 || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)} onClick={applyWalkingNetworkImport}>Import Walking Network</Button></div>
+            </div>
           </div>
         )}
 
