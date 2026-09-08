@@ -868,3 +868,197 @@ describe("real locations service boundary", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("real walking network service boundary", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("round-trips persisted Route Node names and associations", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ route_nodes: [{
+        node_id: 42,
+        name: "Library Entrance",
+        location_id: null,
+        building_id: 7,
+        latitude: 16.72,
+        longitude: 121.69,
+        node_type: "entrance",
+        status: "active",
+      }] }), { status: 200 }),
+    );
+
+    await expect(httpServices.map.nodes()).resolves.toEqual([{
+      id: "42",
+      name: "Library Entrance",
+      nodeType: "Entrance",
+      associatedPlaceId: "7",
+      lat: 16.72,
+      lng: 121.69,
+      status: "Active",
+    }]);
+
+    const savedNode = {
+      id: "42",
+      name: "North Library Entrance",
+      nodeType: "Entrance" as const,
+      associatedPlaceId: "7",
+      lat: 16.721,
+      lng: 121.691,
+      status: "Active" as const,
+    };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ route_node: {
+      node_id: 42,
+      name: savedNode.name,
+      location_id: null,
+      building_id: 7,
+      latitude: savedNode.lat,
+      longitude: savedNode.lng,
+      node_type: "entrance",
+      status: "active",
+    } }), { status: 200 }));
+    await expect(httpServices.map.updateRouteNode(savedNode)).resolves.toMatchObject(savedNode);
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({
+        name: "North Library Entrance",
+        latitude: 16.721,
+        longitude: 121.691,
+        location_id: null,
+        building_id: 7,
+        node_type: "entrance",
+        status: "active",
+      }),
+    }));
+  });
+
+  it("round-trips pathway names, direction, detailed shade, modes, and path points", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ pathways: [{
+        pathway_id: 9,
+        name: "Covered Road Connector",
+        source_node_id: 3,
+        destination_node_id: 4,
+        path_type: "Road",
+        distance_m: 120,
+        estimated_minutes: 2,
+        status: "active",
+        shaded: true,
+        shade: "Mostly Shaded",
+        direction: "One-way",
+        surface_type: "concrete",
+        allowed_modes: ["Walking", "Vehicle"],
+      }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [{
+        point_id: 1,
+        pathway_id: 9,
+        sequence_no: 1,
+        latitude: 16.7205,
+        longitude: 121.6905,
+        building_id: null,
+        node_type: "Waypoint",
+        status: "active",
+      }] }), { status: 200 }));
+
+    await expect(httpServices.map.pathways()).resolves.toEqual([{
+      id: "9",
+      name: "Covered Road Connector",
+      sourceNodeId: "3",
+      destinationNodeId: "4",
+      distance: "120 m",
+      time: "2 min",
+      shade: "Mostly Shaded",
+      type: "Road",
+      direction: "One-way",
+      status: "Active",
+      allowedModes: ["Walking", "Vehicle"] as ("Walking" | "Vehicle")[],
+      pathPoints: [[16.7205, 121.6905]],
+    }]);
+
+    const pathway = {
+      id: "9",
+      name: "Updated Road Connector",
+      sourceNodeId: "3",
+      destinationNodeId: "4",
+      distance: "125 m",
+      time: "3 min",
+      shade: "Partial Shade" as const,
+      type: "Road",
+      direction: "Two-way" as const,
+      status: "Active" as const,
+      allowedModes: ["Walking", "Vehicle"] as ("Walking" | "Vehicle")[],
+      pathPoints: [],
+    };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ pathway: {
+      pathway_id: 9,
+      name: pathway.name,
+      source_node_id: 3,
+      destination_node_id: 4,
+      path_type: "Road",
+      distance_m: 125,
+      estimated_minutes: 3,
+      status: "active",
+      shaded: true,
+      shade: pathway.shade,
+      direction: pathway.direction,
+      surface_type: null,
+      allowed_modes: ["Walking", "Vehicle"],
+    } }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [] }), { status: 200 }));
+    await expect(httpServices.map.updatePathway(pathway)).resolves.toMatchObject(pathway);
+    expect(fetchMock.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({
+        name: "Updated Road Connector",
+        source_node_id: 3,
+        destination_node_id: 4,
+        path_type: "Road",
+        distance_m: 125,
+        estimated_minutes: 3,
+        status: "active",
+        shade: "Partial Shade",
+        direction: "Two-way",
+        allowed_modes: ["Walking", "Vehicle"],
+      }),
+    }));
+  });
+
+  it("loads legacy pathways without mode rows as Walking", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ pathways: [{
+        pathway_id: 11,
+        name: "Legacy Covered Walk",
+        source_node_id: 3,
+        destination_node_id: 4,
+        path_type: "Walkway",
+        distance_m: 60,
+        estimated_minutes: 1,
+        status: "inactive",
+        shaded: true,
+        shade: "Fully Shaded",
+        direction: "One-way",
+        surface_type: null,
+      }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [] }), { status: 200 }));
+
+    await expect(httpServices.map.pathways()).resolves.toEqual([expect.objectContaining({
+      id: "11",
+      name: "Legacy Covered Walk",
+      shade: "Fully Shaded",
+      direction: "One-way",
+      status: "Closed",
+      allowedModes: ["Walking"],
+      pathPoints: [],
+    })]);
+  });
+});

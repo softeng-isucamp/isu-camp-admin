@@ -25,7 +25,7 @@ vi.mock("react-leaflet", () => ({
   Marker: ({ position, eventHandlers, draggable, icon }: { position: [number, number]; eventHandlers?: { click?: () => void; dragstart?: () => void; drag?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean; icon?: { className?: string; iconSize?: [number, number]; testId?: number } }) => typeof draggable === "boolean" && icon?.className === "path-point-icon selected"
     ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} data-icon-id={icon.testId} data-icon-size={icon.iconSize?.join(",")} onClick={eventHandlers?.click} onDrag={() => pathPointDragPosition && eventHandlers?.drag?.({ target: { getLatLng: () => pathPointDragPosition! } })} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} />
     : eventHandlers?.drag ? <button aria-label={`Move point at ${position.join(",")}`} data-testid="move-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers.click} onDragStart={eventHandlers.dragstart} onDrag={() => movingPointDragPosition && eventHandlers.drag?.({ target: { getLatLng: () => movingPointDragPosition! } })} onDragEnd={() => movingPointDragPosition && eventHandlers.dragend?.({ target: { getLatLng: () => movingPointDragPosition! } })} />
-    : typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : eventHandlers ? <button aria-label={`Map marker at ${position.join(",")}`} data-testid="saved-map-marker" data-icon-class={icon?.className} data-position={position.join(",")} onClick={eventHandlers.click} /> : null,
+    : typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => pathPointDragPosition! } })} /> : icon ? <button aria-label={`Map marker at ${position.join(",")}`} data-testid="saved-map-marker" data-icon-class={icon.className} data-position={position.join(",")} onClick={eventHandlers?.click} /> : null,
   Polygon: ({ eventHandlers, pathOptions }: { eventHandlers?: { click?: () => void }; pathOptions?: { className?: string } }) => <button aria-label={pathOptions?.className ?? "building polygon"} onClick={eventHandlers?.click} />,
   Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string; color?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : pathOptions?.className?.startsWith("local-feature-") ? "local-feature-line" : "path-geometry"} data-positions={JSON.stringify(positions)} data-color={pathOptions?.color} onClick={eventHandlers?.click}>{children}</output>,
   Popup: () => null,
@@ -966,6 +966,23 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("region", { name: "Building content" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Walking access" })).toBeInTheDocument();
     expect(screen.queryByText(/Move footprint/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a center marker while drawing a building polygon", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.7201, 121.6891);
+    clickMap(16.7202, 121.6892);
+    clickMap(16.7203, 121.6893);
+
+    const marker = Array.from(document.querySelectorAll('[data-testid="saved-map-marker"]')).find((item) =>
+      item.getAttribute("data-icon-class")?.startsWith("location-marker-icon"),
+    );
+    expect(marker).toBeDefined();
+    const [latitude, longitude] = marker!.getAttribute("data-position")!.split(",").map(Number);
+    expect(latitude).toBeCloseTo(16.7202, 10);
+    expect(longitude).toBeCloseTo(121.6892, 10);
   });
 
   it("browses an Active Pathway and applies its metadata from the unified card", async () => {
