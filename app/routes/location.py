@@ -54,7 +54,7 @@ def _floor_label(floor):
         else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
     )
 
-    return f"{number}{suffix}"
+    return f"{number}{suffix} Floor"
 
 
 def _legacy_floor(record, floors):

@@ -4,6 +4,7 @@ from extensions import db
 from model.route_node import RouteNode
 from model.path_point import PathPoint
 from model.pathway import Pathway
+from model.pathway_allowed_mode import PathwayAllowedMode
 
 
 # ==========================================
@@ -15,6 +16,53 @@ route_node_bp = Blueprint(
     __name__,
     url_prefix="/api"
 )
+
+SUPPORTED_SHADES = {
+    "Fully Shaded",
+    "Mostly Shaded",
+    "Partial Shade",
+    "Unshaded",
+    "Unknown",
+}
+SUPPORTED_ALLOWED_MODES = {"Walking", "Vehicle"}
+SUPPORTED_DIRECTIONS = {"Two-way", "One-way", "Unknown"}
+
+
+def _pathway_shade(data, default="Unshaded"):
+    shade = data.get("shade")
+    if shade is None and "shaded" in data:
+        return "Fully Shaded" if data["shaded"] else "Unshaded"
+    shade = default if shade is None else shade
+    if shade not in SUPPORTED_SHADES:
+        raise ValueError("shade must be one of Fully Shaded, Mostly Shaded, Partial Shade, Unshaded, or Unknown")
+    return shade
+
+
+def _pathway_allowed_modes(data, default=("Walking",)):
+    modes = data.get("allowed_modes", list(default))
+    if not isinstance(modes, list):
+        raise ValueError("allowed_modes must be an array containing Walking or Vehicle")
+    modes = list(dict.fromkeys(modes))
+    if not modes or any(mode not in SUPPORTED_ALLOWED_MODES for mode in modes):
+        raise ValueError("allowed_modes must contain at least one of Walking or Vehicle")
+    if data.get("path_type") == "Walkway" and "Vehicle" in modes:
+        raise ValueError("Walkways cannot allow Vehicle mode")
+    return modes
+
+
+def _pathway_direction(value):
+    direction = "Unknown" if value is None else value
+    if direction not in SUPPORTED_DIRECTIONS:
+        raise ValueError("direction must be Two-way, One-way, or Unknown")
+    return direction
+
+
+def _pathway_status(value):
+    return "inactive" if str(value or "active").lower() in {"inactive", "closed"} else "active"
+
+
+def _set_pathway_allowed_modes(pathway, modes):
+    pathway.allowed_modes = [PathwayAllowedMode(mode=mode) for mode in modes]
 
 
 # =========================================================
@@ -126,6 +174,7 @@ def create_route_node():
             building_id=data.get("building_id"),
             latitude=latitude,
             longitude=longitude,
+            name=data.get("name") or "Route Node",
             node_type=data.get(
                 "node_type",
                 "intersection"
@@ -197,6 +246,9 @@ def update_route_node(node_id):
 
         if "longitude" in data:
             node.longitude = data["longitude"]
+
+        if "name" in data:
+            node.name = data["name"]
 
         if "node_type" in data:
             node.node_type = data["node_type"]
@@ -434,18 +486,18 @@ def create_pathway():
             path_type=path_type,
             distance_m=distance_m,
             estimated_minutes=estimated_minutes,
-            status=data.get(
-                "status",
-                "active"
-            ),
-            shaded=data.get(
-                "shaded",
-                False
-            ),
+            name=data.get("name") or "Unnamed Pathway",
+            status=_pathway_status(data.get("status", "active")),
+            shaded=False,
             surface_type=data.get(
                 "surface_type"
             )
         )
+
+        pathway.direction = _pathway_direction(data.get("direction"))
+        pathway.shade = _pathway_shade(data)
+        pathway.shaded = pathway.shade in {"Fully Shaded", "Mostly Shaded", "Partial Shade"}
+        _set_pathway_allowed_modes(pathway, _pathway_allowed_modes(data))
 
         db.session.add(pathway)
         db.session.commit()
@@ -543,11 +595,27 @@ def update_pathway(pathway_id):
         if "estimated_minutes" in data:
             pathway.estimated_minutes = data["estimated_minutes"]
 
+        if "name" in data:
+            pathway.name = data["name"]
+
+        if "direction" in data:
+            pathway.direction = _pathway_direction(data["direction"])
+
         if "status" in data:
-            pathway.status = data["status"]
+            pathway.status = _pathway_status(data["status"])
 
         if "shaded" in data:
             pathway.shaded = data["shaded"]
+
+        if "shade" in data or "shaded" in data:
+            pathway.shade = _pathway_shade(data, pathway.shade)
+            pathway.shaded = pathway.shade in {"Fully Shaded", "Mostly Shaded", "Partial Shade"}
+
+        if "allowed_modes" in data:
+            _set_pathway_allowed_modes(
+                pathway,
+                _pathway_allowed_modes(data, tuple(item.mode for item in pathway.allowed_modes)),
+            )
 
         if "surface_type" in data:
             pathway.surface_type = data["surface_type"]

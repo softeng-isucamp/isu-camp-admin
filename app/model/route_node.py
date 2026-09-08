@@ -46,6 +46,12 @@ class RouteNode(db.Model):
         default="intersection"
     )
 
+    name = db.Column(
+        db.Text,
+        nullable=False,
+        default="Route Node"
+    )
+
     status = db.Column(
         db.String(20),
         nullable=False,
@@ -74,6 +80,7 @@ class RouteNode(db.Model):
             "latitude": self.latitude,
             "longitude": self.longitude,
             "node_type": self.node_type,
+            "name": getattr(self, "name", None) or getattr(self, "node_name", None),
             "status": self.status,
             "created_at": (
                 self.created_at.isoformat()

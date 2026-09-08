@@ -45,6 +45,12 @@ class Pathway(db.Model):
         nullable=False
     )
 
+    name = db.Column(
+        db.Text,
+        nullable=False,
+        default="Unnamed Pathway"
+    )
+
     status = db.Column(
         db.String(20),
         nullable=False,
@@ -55,6 +61,24 @@ class Pathway(db.Model):
         db.Boolean,
         nullable=False,
         default=False
+    )
+
+    direction = db.Column(
+        db.Text,
+        nullable=False,
+        default="Unknown"
+    )
+
+    shade = db.Column(
+        db.Text,
+        nullable=False,
+        default="Unknown"
+    )
+
+    allowed_modes = db.relationship(
+        "PathwayAllowedMode",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     surface_type = db.Column(
@@ -81,6 +105,7 @@ class Pathway(db.Model):
             "source_node_id": self.source_node_id,
             "destination_node_id": self.destination_node_id,
             "path_type": self.path_type,
+            "name": self.name,
             "distance_m": (
                 float(self.distance_m)
                 if self.distance_m is not None
@@ -93,6 +118,9 @@ class Pathway(db.Model):
             ),
             "status": self.status,
             "shaded": self.shaded,
+            "direction": self.direction,
+            "shade": self.shade,
+            "allowed_modes": [item.mode for item in self.allowed_modes],
             "surface_type": self.surface_type,
             "created_at": (
                 self.created_at.isoformat()

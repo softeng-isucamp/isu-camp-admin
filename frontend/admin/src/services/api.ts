@@ -13,7 +13,7 @@ import type {
   Session,
   UserAccount,
 } from "../types";
-import { normalizePathwayWayType } from "../types";
+import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
 import { z } from "zod";
 export { createLocationsBulkImportTemplate, locationsBulkImportDescription } from "./locationImport";
 import type { LocationImportRequest } from "./locationImport";
@@ -241,6 +241,8 @@ const normalizeMapPathway = (pathway: Pathway): Pathway => {
 
 type BackendRouteNode = {
   node_id: number;
+  name?: string | null;
+  node_name?: string | null;
   location_id: number | null;
   building_id: number | null;
   latitude: number;
@@ -262,13 +264,17 @@ type BackendPathPoint = {
 
 type BackendPathway = {
   pathway_id: number;
+  name?: string | null;
   source_node_id: number;
   destination_node_id: number;
   path_type: string;
   distance_m: number;
   estimated_minutes: number;
   status: string;
-  shaded: boolean;
+  shaded?: boolean;
+  shade?: string | null;
+  direction?: string | null;
+  allowed_modes?: string[];
   surface_type: string | null;
 };
 
@@ -276,7 +282,7 @@ const normalizeBackendRouteNode = (raw: BackendRouteNode): RouteNode => {
   const type = String(raw.node_type).toLowerCase();
   return {
     id: String(raw.node_id),
-    name: `Route Node ${raw.node_id}`,
+    name: raw.name?.trim() || raw.node_name?.trim() || `Route Node ${raw.node_id}`,
     nodeType: type === "entrance" ? "Entrance" : type === "access_point" || type === "access point" ? "Access Point" : "Junction",
     associatedPlaceId: raw.location_id != null ? String(raw.location_id) : raw.building_id != null ? String(raw.building_id) : null,
     lat: raw.latitude,
@@ -287,16 +293,32 @@ const normalizeBackendRouteNode = (raw: BackendRouteNode): RouteNode => {
 
 const normalizeBackendPathway = (raw: BackendPathway, points: BackendPathPoint[]): Pathway => ({
   id: String(raw.pathway_id),
-  name: `Pathway ${raw.pathway_id}`,
+  name: raw.name?.trim() || `Pathway ${raw.pathway_id}`,
   sourceNodeId: String(raw.source_node_id),
   destinationNodeId: String(raw.destination_node_id),
   distance: `${raw.distance_m} m`,
   time: `${raw.estimated_minutes} min`,
-  shade: raw.shaded ? "Fully Shaded" : "Unshaded",
+  shade: raw.shade === "Fully Shaded" || raw.shade === "Mostly Shaded" || raw.shade === "Partial Shade" || raw.shade === "Unshaded" || raw.shade === "Unknown"
+    ? raw.shade
+    : raw.shaded ? "Fully Shaded" : "Unshaded",
   type: normalizePathwayWayType(raw.path_type) === "Unknown" ? "Walkway" : normalizePathwayWayType(raw.path_type),
-  direction: "Unknown",
+  direction: raw.direction === "Two-way" || raw.direction === "One-way" || raw.direction === "Unknown" ? raw.direction : "Unknown",
   status: String(raw.status).toLowerCase() === "active" ? "Active" : "Closed",
+  allowedModes: (raw.allowed_modes?.length ? raw.allowed_modes : ["Walking"]).filter((mode): mode is "Walking" | "Vehicle" => PATHWAY_ALLOWED_MODES.includes(mode as "Walking" | "Vehicle")),
   pathPoints: points.filter((point) => point.pathway_id === raw.pathway_id).sort((a, b) => a.sequence_no - b.sequence_no).map((point) => [point.latitude, point.longitude]),
+});
+
+const serializePathway = (pathway: Omit<Pathway, "id">) => ({
+  name: pathway.name,
+  source_node_id: Number(pathway.sourceNodeId),
+  destination_node_id: Number(pathway.destinationNodeId),
+  path_type: pathway.type,
+  distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
+  estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
+  status: pathway.status === "Closed" ? "inactive" : "active",
+  shade: pathway.shade,
+  direction: pathway.direction,
+  allowed_modes: pathway.allowedModes ?? ["Walking"],
 });
 const canonicalNetwork = createCanonicalNetworkStore(
   USE_GENERATED_MAP_FIXTURE
@@ -1335,6 +1357,7 @@ export const services: Services = {
       const response = await apiJson<{ route_node: BackendRouteNode }>("/api/route-nodes", {
         method: "POST",
         body: JSON.stringify({
+          name: node.name,
           latitude: node.lat,
           longitude: node.lng,
           location_id: node.nodeType === "Entrance" ? null : associatedId,
@@ -1358,6 +1381,7 @@ export const services: Services = {
       const response = await apiJson<{ route_node: BackendRouteNode }>(`/api/route-nodes/${nodeId}`, {
         method: "PUT",
         body: JSON.stringify({
+          name: node.name,
           latitude: node.lat,
           longitude: node.lng,
           location_id: node.nodeType === "Entrance" ? null : associatedId,
@@ -1398,19 +1422,11 @@ export const services: Services = {
       }
       const response = await apiJson<{ pathway: BackendPathway }>("/api/pathways", {
         method: "POST",
-        body: JSON.stringify({
-          source_node_id: Number(pathway.sourceNodeId),
-          destination_node_id: Number(pathway.destinationNodeId),
-          path_type: pathway.type,
-          distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
-          estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
-          status: pathway.status === "Closed" ? "closed" : "active",
-          shaded: pathway.shade !== "Unshaded",
-        }),
+        body: JSON.stringify(serializePathway(pathway)),
       });
       const created = normalizeBackendPathway(response.pathway, []);
       await services.map.replacePathPoints(created.id, pathway.pathPoints);
-      return { ...created, name: pathway.name, direction: pathway.direction };
+      return { ...created, pathPoints: pathway.pathPoints };
     },
 
     updatePathway: async (pathway) => {
@@ -1423,19 +1439,11 @@ export const services: Services = {
       if (!Number.isInteger(pathwayId)) throw new Error(`Cannot update Pathway "${pathway.id}". Invalid database ID.`);
       const response = await apiJson<{ pathway: BackendPathway }>(`/api/pathways/${pathwayId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          source_node_id: Number(pathway.sourceNodeId),
-          destination_node_id: Number(pathway.destinationNodeId),
-          path_type: pathway.type,
-          distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
-          estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
-          status: pathway.status === "Closed" ? "closed" : "active",
-          shaded: pathway.shade !== "Unshaded",
-        }),
+        body: JSON.stringify(serializePathway(pathway)),
       });
       await services.map.replacePathPoints(pathway.id, pathway.pathPoints);
       const updated = normalizeBackendPathway(response.pathway, []);
-      return { ...updated, name: pathway.name, direction: pathway.direction };
+      return { ...updated, pathPoints: pathway.pathPoints };
     },
 
     deletePathway: async (id) => {
