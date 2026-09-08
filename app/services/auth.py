@@ -1,3 +1,7 @@
+from collections import defaultdict, deque
+import math
+import time
+
 from flask import Blueprint, request, jsonify, session
 from flask_mail import Message
 from dotenv import load_dotenv
@@ -26,6 +30,28 @@ auth_bp = Blueprint(
 # ==========================================
 
 reset_otps = {}
+
+
+# These buckets are intentionally small and local to the backend process. They
+# protect the current deployment without adding a new infrastructure service;
+# a shared store can replace this seam when the app is scaled horizontally.
+RATE_LIMIT_WINDOW_SECONDS = 60
+rate_limit_buckets = defaultdict(deque)
+
+
+def _rate_limited(scope, key, limit, message):
+    now = time.monotonic()
+    bucket = rate_limit_buckets[(scope, key)]
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
+        response = jsonify({"success": False, "message": message})
+        response.headers["Retry-After"] = str(retry_after)
+        return response, 429
+    bucket.append(now)
+    return None
 
 
 # ==========================================
@@ -73,7 +99,16 @@ def login():
 
         data = request.get_json(silent=True)
 
-        if not data:
+        limited = _rate_limited(
+            "login",
+            request.remote_addr or "unknown",
+            5,
+            "Too many authentication requests. Please try again later.",
+        )
+        if limited:
+            return limited
+
+        if not isinstance(data, dict) or not data:
             return jsonify({
                 "success": False,
                 "message": "Request body is required"
@@ -222,14 +257,22 @@ def request_reset():
     try:
 
         data = request.get_json(silent=True)
+        username = str(data.get("username") or "") if isinstance(data, dict) else ""
 
-        if not data:
+        limited = _rate_limited(
+            "reset-request",
+            f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
+            1,
+            "Too many password reset requests. Please wait before requesting another code.",
+        )
+        if limited:
+            return limited
+
+        if not isinstance(data, dict) or not data:
             return jsonify({
                 "success": False,
                 "message": "Request body is required"
             }), 400
-
-        username = data.get("username")
 
         if not username:
             return jsonify({
@@ -309,14 +352,23 @@ def reset_password():
     try:
 
         data = request.get_json(silent=True)
+        username = str(data.get("username") or "") if isinstance(data, dict) else ""
 
-        if not data:
+        limited = _rate_limited(
+            "reset-password",
+            f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
+            5,
+            "Too many password reset attempts. Please try again later.",
+        )
+        if limited:
+            return limited
+
+        if not isinstance(data, dict) or not data:
             return jsonify({
                 "success": False,
                 "message": "Request body is required"
             }), 400
 
-        username = data.get("username")
         otp = data.get("code")
         password = data.get("password")
 
