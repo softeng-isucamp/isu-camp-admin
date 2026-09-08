@@ -2081,7 +2081,13 @@ const handleCreateBuilding = async () => {
     const pathways = walkingNetworkImport.pathways.map((pathway) => ({
       id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
       pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
-      distance: "Unknown", time: "Unknown", shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Walkway",
+      // Was hardcoded to "Unknown", discarding distance/time metadata carried by the imported network snapshot.
+      // NOTE: this assumes `pathway.distanceMeters` / `pathway.estimatedTimeSeconds` exist on the
+      // WalkingNetworkImportPreview pathway shape (mirroring NetworkSnapshot, per networkSnapshotForImport()
+      // above). If services/walkingNetworkImport.ts uses different field names, adjust accordingly.
+      distance: pathway.distanceMeters != null ? `${Math.round(pathway.distanceMeters)}m` : "Unknown",
+      time: pathway.estimatedTimeSeconds != null ? `${Math.round(pathway.estimatedTimeSeconds / 60)} min` : "Unknown",
+      shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Walkway",
       direction: pathway.direction === "one_way" ? "One-way" : "Two-way", status: pathway.status === "closed" ? "Closed" : "Active",
       allowedModes: pathway.allowedModes?.map((mode) => mode === "vehicle" ? "Vehicle" : "Walking"),
     } as Pathway));
@@ -3635,6 +3641,10 @@ const handleCreateBuilding = async () => {
             />
           )}
 
+          {/* Center marker for the polygon currently being drawn/reshaped, so it's visible
+              before the building is committed (fixes #32 — previously only rendered post-commit
+              when mode === "select", so nothing showed while mode === "area"). Recomputed from
+              `points` on every render, same as the committed-building marker below. */}
           {mode === "area" && points.length >= 3 && (
             <Marker
               position={polygonCentroid(points)}
