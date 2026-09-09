@@ -22,11 +22,15 @@ from dotenv import load_dotenv
 from extensions import db, mail
 from auth import auth_bp
 from model.location import Location
+from model.app_user import AppUser
+from model.audit_log import AuditLog
 
 from routes.actions import actions_bp
 from routes.location import location_bp
 from routes.route_node import route_node_bp
 from routes.map import map_bp   # <-- NEW IMPORT
+from routes.users import users_bp
+from routes.logs import logs_bp
 
 
 # ==========================================
@@ -209,6 +213,8 @@ app.register_blueprint(location_bp)
 app.register_blueprint(actions_bp)
 app.register_blueprint(route_node_bp)
 app.register_blueprint(map_bp)   # <-- NEW REGISTRATION
+app.register_blueprint(users_bp)
+app.register_blueprint(logs_bp)
 
 
 # ==========================================

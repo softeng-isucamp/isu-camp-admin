@@ -8,6 +8,7 @@ from model.building import Building
 from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from services.audit import log_audit
 
 actions_bp = Blueprint(
     "actions",
@@ -219,6 +220,7 @@ def add_room_to_building(building_id):
 
         db.session.add(location)
         db.session.flush()
+        log_audit("Admin", None, "create", "Location", location.location_id, location.location_name)
         db.session.commit()
 
         return jsonify(
@@ -284,6 +286,7 @@ def edit_location(location_id):
             building.building_name = values["name"]
             building.description = values["description"]
             db.session.flush()
+            log_audit("Admin", None, "update", "Building", building.building_id, building.building_name)
             db.session.commit()
             return jsonify(building.to_location_dto()), 200
 
@@ -300,6 +303,7 @@ def edit_location(location_id):
             location.photo_mime_type = photo_mime_type
 
         db.session.flush()
+        log_audit("Admin", None, "update", "Location", location.location_id, location.location_name)
         db.session.commit()
 
         return jsonify(
@@ -388,6 +392,7 @@ def delete_location(location_id):
             }), 404
 
         db.session.delete(building or location)
+        log_audit("Admin", None, "delete", "Building" if building else "Location", location_id)
         db.session.commit()
 
         return jsonify({

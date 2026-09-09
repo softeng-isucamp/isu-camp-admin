@@ -5,6 +5,7 @@ from model.route_node import RouteNode
 from model.path_point import PathPoint
 from model.pathway import Pathway
 from model.pathway_allowed_mode import PathwayAllowedMode
+from services.audit import log_audit
 
 
 # ==========================================
@@ -186,6 +187,9 @@ def create_route_node():
         )
 
         db.session.add(node)
+        if hasattr(db.session, "flush"):
+            db.session.flush()
+        log_audit("Admin", None, "create", "Route Node", node.node_id, node.name)
         db.session.commit()
 
         return jsonify({
@@ -256,6 +260,11 @@ def update_route_node(node_id):
         if "status" in data:
             node.status = data["status"]
 
+        if "building_id" in data and str(node.node_type).lower() == "entrance":
+            association_action = "clear entrance association" if data["building_id"] is None else "associate entrance"
+        else:
+            association_action = "update"
+        log_audit("Admin", None, association_action, "Route Node", node_id, node.name)
         db.session.commit()
 
         return jsonify({
@@ -297,6 +306,7 @@ def delete_route_node(node_id):
             }), 404
 
         db.session.delete(node)
+        log_audit("Admin", None, "delete", "Route Node", node_id, node.name)
         db.session.commit()
 
         return jsonify({
@@ -500,6 +510,9 @@ def create_pathway():
         _set_pathway_allowed_modes(pathway, _pathway_allowed_modes(data))
 
         db.session.add(pathway)
+        if hasattr(db.session, "flush"):
+            db.session.flush()
+        log_audit("Admin", None, "create", "Pathway", pathway.pathway_id, pathway.name)
         db.session.commit()
 
         return jsonify({
@@ -620,6 +633,7 @@ def update_pathway(pathway_id):
         if "surface_type" in data:
             pathway.surface_type = data["surface_type"]
 
+        log_audit("Admin", None, "update", "Pathway", pathway_id, pathway.name)
         db.session.commit()
 
         return jsonify({
@@ -661,6 +675,7 @@ def delete_pathway(pathway_id):
             }), 404
 
         db.session.delete(pathway)
+        log_audit("Admin", None, "delete", "Pathway", pathway_id, pathway.name)
         db.session.commit()
 
         return jsonify({
@@ -822,6 +837,9 @@ def create_path_point():
         )
 
         db.session.add(point)
+        if hasattr(db.session, "flush"):
+            db.session.flush()
+        log_audit("Admin", None, "create", "Path Point", point.point_id, point.node_type)
         db.session.commit()
 
         return jsonify({
@@ -892,6 +910,7 @@ def update_path_point(point_id):
         if "status" in data:
             point.status = data["status"]
 
+        log_audit("Admin", None, "update", "Path Point", point_id, point.node_type)
         db.session.commit()
 
         return jsonify({
@@ -933,6 +952,7 @@ def delete_path_point(point_id):
             }), 404
 
         db.session.delete(point)
+        log_audit("Admin", None, "delete", "Path Point", point_id, point.node_type)
         db.session.commit()
 
         return jsonify({

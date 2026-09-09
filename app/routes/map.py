@@ -7,6 +7,7 @@ from extensions import db
 from model.building import Building
 from model.route_node import RouteNode
 from model.pathway import Pathway
+from services.audit import log_audit
 
 map_bp = Blueprint("map", __name__, url_prefix="/api/map")
 
@@ -58,6 +59,7 @@ def delete_map_building(building_id):
             return jsonify({"success": False, "message": "Building not found."}), 404
 
         db.session.delete(building)
+        log_audit("Admin", None, "delete", "Building", building_id, building.building_name)
         db.session.commit()
         return jsonify({"success": True, "message": "Building deleted."}), 200
     except Exception:
@@ -127,6 +129,7 @@ def save_map_draft():
             if "points" in building:
                 record.polygon_coordinates = building["points"]
 
+        log_audit("Admin", None, "save draft", "Map", None, "Map draft changes saved")
         db.session.commit()
         return jsonify({"success": True, "message": "Map draft saved."}), 200
 
@@ -134,3 +137,29 @@ def save_map_draft():
         db.session.rollback()
         logger.exception("Failed to save map draft")
         return jsonify({"success": False, "message": "Failed to save map draft."}), 500
+
+
+@map_bp.route("/publish", methods=["POST"])
+def publish_map_revision():
+    """Record publication of the current validated map revision."""
+    _, error = admin_required()
+    if error:
+        return error
+
+    try:
+        data = request.get_json(silent=True) or {}
+        revision_id = data.get("revisionId") or data.get("revision_id")
+        log_audit(
+            "Admin",
+            None,
+            "publish revision",
+            "Map",
+            revision_id,
+            "Map revision published",
+        )
+        db.session.commit()
+        return jsonify({"success": True, "message": "Map revision published."}), 200
+    except Exception:
+        db.session.rollback()
+        logger.exception("Failed to publish map revision")
+        return jsonify({"success": False, "message": "Failed to publish map revision."}), 500
