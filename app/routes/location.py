@@ -7,6 +7,7 @@ from extensions import db
 from model.building import Building
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from services.audit import log_audit
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
@@ -548,6 +549,7 @@ def create_location():
             db.session.add(building)
 
             db.session.flush()
+            log_audit("Admin", None, "create", "Building", building.building_id, building.building_name)
 
             db.session.commit()
 
@@ -577,6 +579,7 @@ def create_location():
         db.session.add(location)
 
         db.session.flush()
+        log_audit("Admin", None, "create", "Location", location.location_id, location.location_name)
 
         db.session.commit()
 

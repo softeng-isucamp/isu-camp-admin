@@ -7,6 +7,7 @@ from flask_mail import Message
 from dotenv import load_dotenv
 
 from extensions import db, mail
+from services.audit import log_audit
 
 import secrets
 from datetime import datetime, timedelta
@@ -141,6 +142,8 @@ def login():
 
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
+        log_audit("System", admin, "login", "Admin", admin.id, "Admin login successful")
+        db.session.commit()
 
         return jsonify({
             "success": True,
@@ -168,7 +171,9 @@ def login():
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-
+    actor = session.get("admin_username") or "system"
+    log_audit("System", actor, "logout", "Admin", session.get("admin_id"), "Admin logout")
+    db.session.commit()
     session.clear()
 
     return jsonify({

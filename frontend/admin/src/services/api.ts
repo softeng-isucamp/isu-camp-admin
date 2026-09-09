@@ -148,6 +148,23 @@ type BackendLocation = {
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
   lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown; polygonCoordinates?: unknown;
 };
+type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown; lastSignIn?: unknown; last_sign_in_at?: unknown; role?: unknown };
+type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
+export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
+  const id = raw.id ?? raw.user_id;
+  if (id === undefined || typeof raw.username !== "string") throw new Error("Backend returned a malformed user record.");
+  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), lastSignIn: raw.lastSignIn == null && raw.last_sign_in_at == null ? null : String(raw.lastSignIn ?? raw.last_sign_in_at), role: raw.role === "Administrator" || raw.role === "Staff" ? raw.role : "User" };
+};
+export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
+  if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
+  return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: raw.detail == null ? undefined : String(raw.detail), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
+};
+const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
+  const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const page = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  if (!Array.isArray(page.items) || typeof page.total !== "number" || typeof page.page !== "number" || typeof page.pageSize !== "number") throw new Error(`Backend returned a malformed ${label} page.`);
+  return { items: page.items.map(normalize), total: page.total, page: page.page, pageSize: page.pageSize };
+};
 
 const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
 const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
@@ -464,7 +481,7 @@ export interface Services {
   };
 
   users: {
-    list(query?: string): Promise<Page<UserAccount>>;
+    list(query?: string, page?: number, pageSize?: number, createdRange?: string, signInRange?: string): Promise<Page<UserAccount>>;
 
     create(user: UserAccount): Promise<UserAccount>;
 
@@ -480,7 +497,7 @@ export interface Services {
       category?: string,
       query?: string,
       actor?: string,
-      date?: string
+      date?: string, page?: number, pageSize?: number
     ): Promise<Page<AuditEntry>>;
 
     forLocation(id: string, name?: string): Promise<Page<AuditEntry>>;
@@ -1099,28 +1116,20 @@ export const services: Services = {
 
   users: {
 
-    list: async (q) => {
-
-      const filtered = q
-        ? users.filter((user) =>
-            matches(
-              user.username,
-              q
-            )
-          )
-        : users;
-
-      return wait({
-        items:
-          clone(filtered),
-
-        total:
-          filtered.length,
-
-        page: 1,
-
-        pageSize: 20,
+    list: async (q = "", page = 1, pageSize = 20, createdRange = "all", signInRange = "all") => {
+      if (USE_HTTP_API) {
+        const params = new URLSearchParams({ q, page: String(page), pageSize: String(pageSize), created_range: createdRange, sign_in_range: signInRange });
+        const raw = await apiJson<unknown>(`/api/users?${params.toString()}`);
+        return normalizeBackendPage(raw, (row) => normalizeBackendUser(row as BackendUser), "users");
+      }
+      const cutoff = (range: string) => range === "all" ? null : Date.now() - Number(range.replace("d", "")) * 86400000;
+      const filtered = users.filter((user) => {
+        const created = Date.parse(user.createdAt.replace(" · ", " "));
+        const signIn = user.lastSignIn ? Date.parse(user.lastSignIn.replace(" · ", " ")) : NaN;
+        return matches(user.username, q) && (cutoff(createdRange) === null || (Number.isFinite(created) && created >= cutoff(createdRange)!)) && (cutoff(signInRange) === null || (Number.isFinite(signIn) && signIn >= cutoff(signInRange)!));
       });
+      const start = (page - 1) * pageSize;
+      return wait({ items: clone(filtered.slice(start, start + pageSize)), total: filtered.length, page, pageSize });
     },
 
 
@@ -1239,12 +1248,12 @@ export const services: Services = {
 
   logs: {
 
-    list: async (
-      category,
-      q,
-      actor,
-      date
-    ) => {
+    list: async (category = "All", q = "", actor = "All Actors", date = "all", page = 1, pageSize = 20) => {
+      if (USE_HTTP_API) {
+        const params = new URLSearchParams({ category, q, actor: actor === "All Actors" ? "" : actor, date_range: date, page: String(page), pageSize: String(pageSize) });
+        const raw = await apiJson<unknown>(`/api/logs?${params.toString()}`);
+        return normalizeBackendPage(raw, (row) => normalizeBackendAudit(row as BackendAudit), "logs");
+      }
 
       const filtered =
         auditEntries.filter(
@@ -1271,12 +1280,12 @@ export const services: Services = {
               actor === "All Actors" ||
               entry.actor === actor;
 
-            const dateMatch =
-              !date ||
-              date === "All Dates" ||
-              entry.createdAt.includes(
-                date
-              );
+            const timestamp = Date.parse(entry.createdAt.replace(" · ", " "));
+            const days = date === "today" ? 0 : date === "7d" ? 7 : date === "30d" ? 30 : null;
+            const start = days === null ? null : new Date(new Date().setHours(0, 0, 0, 0)).getTime() - days * 86400000;
+            const dateMatch = date.includes(",")
+              ? entry.createdAt.includes(date)
+              : start === null || (Number.isFinite(timestamp) && timestamp >= start);
 
             return (
               categoryMatch &&
@@ -1287,17 +1296,8 @@ export const services: Services = {
           }
         );
 
-      return wait({
-        items:
-          clone(filtered),
-
-        total:
-          filtered.length,
-
-        page: 1,
-
-        pageSize: 20,
-      });
+      const start = (page - 1) * pageSize;
+      return wait({ items: clone(filtered.slice(start, start + pageSize)), total: filtered.length, page, pageSize });
     },
 
     forLocation: async (id) => {
