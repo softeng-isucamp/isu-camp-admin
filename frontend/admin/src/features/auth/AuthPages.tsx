@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { Button, Card, Field } from "../../components/UI";
-import { services } from "../../services/api";
+import { RateLimitError, services } from "../../services/api";
 import {
   loginSchema,
   resetPasswordSchema,
@@ -20,6 +20,14 @@ export function Login() {
   const navigate = useNavigate();
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
+  const [loginCountdown, setLoginCountdown] = useState(0);
+  const [loginPending, setLoginPending] = useState(false);
+  const loginInFlight = useRef(false);
+  useEffect(() => {
+    if (loginCountdown <= 0) return;
+    const timer = setTimeout(() => setLoginCountdown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [loginCountdown]);
   const {
     register,
     handleSubmit,
@@ -28,17 +36,24 @@ export function Login() {
     defaultValues: { username: "", password: "" },
   });
   const submit = async (values: { username: string; password: string }) => {
+    if (loginInFlight.current || loginCountdown > 0) return;
     setError("");
     const parsed = loginSchema.safeParse(values);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Check your credentials.");
       return;
     }
+    loginInFlight.current = true;
+    setLoginPending(true);
     try {
       await login(values.username, values.password);
       navigate("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
+      if (err instanceof RateLimitError) setLoginCountdown(err.retryAfterSeconds);
+    } finally {
+      loginInFlight.current = false;
+      setLoginPending(false);
     }
   };
   return (
@@ -91,8 +106,8 @@ export function Login() {
               {error || errors.username?.message || errors.password?.message}
             </div>
           )}
-          <Button type="submit">
-            Login <img src={arrowIcon} alt="" />
+          <Button type="submit" disabled={loginPending || loginCountdown > 0}>
+            {loginPending ? "Logging in…" : loginCountdown > 0 ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
           </Button>
         </form>
       </Card>
@@ -145,6 +160,8 @@ export function PasswordReset() {
   const [error, setError] = useState("");
   const [resendMessage, setResendMessage] = useState("");
   const [resendCountdown, setResendCountdown] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
   const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
 
   useEffect(() => {
@@ -154,18 +171,24 @@ export function PasswordReset() {
   }, [resendCountdown]);
 
   const handleResendCode = async () => {
+    if (submissionInFlight.current || resendCountdown > 0) return;
+    submissionInFlight.current = true;
     setError("");
     setResendMessage("");
-    setDigits(["", "", "", "", "", ""]);
-    setValue("code", "");
+    setSubmitting(true);
     try {
       await services.auth.requestReset(getValues("username"));
+      setDigits(["", "", "", "", "", ""]);
+      setValue("code", "");
       setResendMessage("A new 6-digit verification code has been sent.");
       setResendCountdown(60);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to resend code.";
       setError(msg);
-      setResendCountdown(0);
+      if (err instanceof RateLimitError) setResendCountdown(err.retryAfterSeconds);
+    } finally {
+      submissionInFlight.current = false;
+      setSubmitting(false);
     }
   };
   const { register, getValues, setValue } = useForm({
@@ -243,7 +266,10 @@ export function PasswordReset() {
     password: string;
     confirmPassword: string;
   }) => {
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     setError("");
+    setSubmitting(true);
     try {
       if (step === "request") {
         const parsed = resetRequestSchema.safeParse({ username: values.username });
@@ -254,6 +280,7 @@ export function PasswordReset() {
           return;
         }
         await services.auth.requestReset(values.username);
+        setResendCountdown(60);
         setStep("code");
       } else if (step === "code") {
         const rawCode = values.code || digits.join("");
@@ -265,6 +292,7 @@ export function PasswordReset() {
           return;
         }
         setValue("code", parsed.data);
+        await services.auth.verifyReset(values.username, parsed.data);
         setStep("new");
       } else if (step === "new") {
         const rawCode = values.code || digits.join("");
@@ -284,6 +312,10 @@ export function PasswordReset() {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to reset password");
+      if (e instanceof RateLimitError && step === "code") setResendCountdown(e.retryAfterSeconds);
+    } finally {
+      submissionInFlight.current = false;
+      setSubmitting(false);
     }
   };
 
@@ -383,8 +415,8 @@ export function PasswordReset() {
                     <button
                       type="button"
                       onClick={handleResendCode}
-                      disabled={resendCountdown > 0}
-                      style={{ background: "none", border: "none", color: resendCountdown > 0 ? "#999" : "#0c7441", fontWeight: 600, fontSize: "13px", cursor: resendCountdown > 0 ? "default" : "pointer", padding: 0 }}
+                      disabled={resendCountdown > 0 || submitting}
+                      style={{ background: "none", border: "none", color: resendCountdown > 0 || submitting ? "#999" : "#0c7441", fontWeight: 600, fontSize: "13px", cursor: resendCountdown > 0 || submitting ? "default" : "pointer", padding: 0 }}
                     >
                       {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : "Resend code"}
                     </button>
@@ -420,6 +452,7 @@ export function PasswordReset() {
                 type="button"
                 style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%", marginTop: "8px" }}
                 onClick={() => void submit(getValues())}
+                disabled={submitting}
               >
                 {step === "request"
                   ? "Send Code →"

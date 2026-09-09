@@ -168,6 +168,7 @@ CORS(
                 "Content-Type",
                 "Authorization"
             ],
+            "expose_headers": ["Retry-After"],
             "supports_credentials": True
         }
     }
@@ -194,6 +195,7 @@ def add_cors_headers(response):
         response.headers["Access-Control-Allow-Methods"] = (
             "GET, POST, PUT, DELETE, OPTIONS"
         )
+        response.headers["Access-Control-Expose-Headers"] = "Retry-After"
 
     return response
 

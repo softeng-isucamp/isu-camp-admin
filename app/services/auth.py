@@ -343,6 +343,40 @@ ISU-CAMP Admin System
 
 
 # ==========================================
+# VERIFY PASSWORD RESET OTP
+# ==========================================
+
+@auth_bp.route("/reset/verify", methods=["POST"])
+def verify_reset_code():
+
+    data = request.get_json(silent=True)
+    username = str(data.get("username") or "") if isinstance(data, dict) else ""
+    otp = str(data.get("code") or "") if isinstance(data, dict) else ""
+
+    limited = _rate_limited(
+        "reset-verify",
+        f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
+        5,
+        "Too many verification attempts. Please try again later.",
+    )
+    if limited:
+        return limited
+
+    if not username or not otp:
+        return jsonify({"success": False, "message": "Username and verification code are required"}), 400
+
+    reset = reset_otps.get(username)
+    if not reset or datetime.utcnow() > reset["expires_at"]:
+        reset_otps.pop(username, None)
+        return jsonify({"success": False, "message": "Verification code has expired"}), 400
+
+    if not secrets.compare_digest(str(reset["otp"]), otp):
+        return jsonify({"success": False, "message": "Invalid verification code"}), 400
+
+    return jsonify({"success": True, "message": "Verification code accepted"}), 200
+
+
+# ==========================================
 # RESET PASSWORD
 # ==========================================
 

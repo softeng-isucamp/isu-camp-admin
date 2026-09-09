@@ -58,6 +58,8 @@ export interface Location {
   lat: number | null;
   lng: number | null;
   positioned: boolean;
+  /** Footprint geometry supplied when creating or updating a Building. */
+  polygonCoordinates?: [number, number][];
   /** Internal Admin Draft marker for footprint-backed Facilities. */
   spatialRole?: "building_footprint_owner";
   hasPhoto?: boolean;

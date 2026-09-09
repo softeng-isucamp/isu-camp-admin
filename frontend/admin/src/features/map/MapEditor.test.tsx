@@ -11,6 +11,7 @@ import { MapEditor } from "./MapEditor";
 let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void) | undefined;
 let pathPointDragPosition: { lat: number; lng: number } | undefined;
 let movingPointDragPosition: { lat: number; lng: number } | undefined;
+let mapFitBounds = vi.fn();
 
 vi.mock("leaflet", () => {
   let iconId = 0;
@@ -32,6 +33,7 @@ vi.mock("react-leaflet", () => ({
   TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useMap: () => ({
     flyTo: vi.fn(),
+    fitBounds: (...args: unknown[]) => mapFitBounds(...args),
     latLngToContainerPoint: ({ lat, lng }: { lat: number; lng: number }) => ({ x: lng * 100_000, y: lat * 100_000 }),
     containerPointToLatLng: ({ x, y }: { x: number; y: number }) => ({ lat: y / 100_000, lng: x / 100_000 }),
   }),
@@ -74,8 +76,10 @@ describe("Map Editor preview", () => {
     mapClickHandler = undefined;
     pathPointDragPosition = undefined;
     movingPointDragPosition = undefined;
+    mapFitBounds = vi.fn();
     services.map.saveDraft = undefined;
     services.locations.save = undefined as unknown as typeof services.locations.save;
+    services.map.updateRouteNode = undefined as unknown as typeof services.map.updateRouteNode;
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
       { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
@@ -536,6 +540,75 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
     expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction Route Node");
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("persists converting an Entrance to a Junction and restores truthful UI when persistence fails", async () => {
+    const updateRouteNode = vi.fn(async () => {
+      throw new Error("Route Node update failed");
+    });
+    services.map.updateRouteNode = updateRouteNode;
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "building-1", lat: 16.7205, lng: 121.6895 },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
+    fireEvent.click(await screen.findByRole("button", { name: "North Entrance Route Node" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Standard Node" }));
+
+    await waitFor(() => expect(updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: "node-a", nodeType: "Junction", associatedPlaceId: null,
+    })));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Route Node update failed");
+    expect(screen.getByRole("complementary", { name: "North Entrance object details" })).toHaveTextContent("Entrance Route Node");
+  });
+
+  it("frames and selects a polygon Building queried from a parent-location handoff", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "building-1", name: "Engineering Hall", code: "ENG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false },
+      { id: "room-1", name: "Room 101", code: "101", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
+    ]);
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-1", name: "Engineering Hall", code: "ENG", points: [[16.72, 121.689], [16.722, 121.689], [16.722, 121.691]] },
+    ]);
+    renderEditor(["/map-editor?location=building-1"]);
+
+    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("Building summary");
+    await waitFor(() => expect(mapFitBounds).toHaveBeenCalledWith(
+      [[16.72, 121.689], [16.722, 121.691]],
+      expect.objectContaining({ maxZoom: 19 }),
+    ));
+  });
+
+  it("keeps a persisted Building feature anchor after the Map Editor remounts", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-1", name: "Engineering Hall", code: "ENG", points: [[16.72, 121.689], [16.722, 121.689], [16.722, 121.691]] },
+    ]);
+    const firstRender = renderEditor();
+
+    expect(await screen.findByRole("button", { name: "Map marker at 16.721333333333334,121.68966666666665" })).toBeInTheDocument();
+
+    firstRender.unmount();
+    renderEditor();
+
+    expect(await screen.findByRole("button", { name: "Map marker at 16.721333333333334,121.68966666666665" })).toBeInTheDocument();
+  });
+
+  it("keeps a colliding Indoor Location from replacing the selected Pathway inspector", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "42", name: "Collision Room", code: "42", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "42", name: "Collision Pathway", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Collision Pathway" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Collision Pathway Pathway" }));
+
+    expect(await screen.findByRole("complementary", { name: "Collision Pathway object details" })).toHaveTextContent("[Walking Network]");
+    expect(screen.queryByRole("complementary", { name: "Collision Room object details" })).not.toBeInTheDocument();
   });
 
   it("shows canonical Buildings for an Entrance association without persisting the selection", async () => {

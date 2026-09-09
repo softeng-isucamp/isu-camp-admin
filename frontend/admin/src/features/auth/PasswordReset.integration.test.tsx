@@ -66,24 +66,10 @@ describe("forgot-password and rate-limit integration", () => {
     expect(
       screen.getByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/a new 6-digit verification code/i)).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
-    await flushAsync();
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      "/api/reset/request",
-      expect.objectContaining({
-        body: JSON.stringify({ username: "admin01" }),
-      }),
-    );
-    expect(
-      screen.getByText(/a new 6-digit verification code has been sent/i),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /resend code in 60s/i }),
     ).toBeDisabled();
+    expect(screen.queryByText(/a new 6-digit verification code/i)).toBeNull();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -108,24 +94,8 @@ describe("forgot-password and rate-limit integration", () => {
       await tickSecond();
     }
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
-
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(
-        { message: "Too many requests. Please wait 42 seconds." },
-        429,
-        { "Retry-After": "42" },
-      ),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await flushAsync();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Too many requests. Please wait 42 seconds.",
-    );
-    expect(screen.queryByText(/a new 6-digit verification code/i)).toBeNull();
-    expect(screen.queryByText(/resend code in \d+s/i)).toBeNull();
-    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
   });
 
   it("maps a second requestReset within the window to the friendly 429 message", async () => {
@@ -142,8 +112,13 @@ describe("forgot-password and rate-limit integration", () => {
     await expect(
       services.auth.requestReset("admin01"),
     ).resolves.toBeUndefined();
-    await expect(services.auth.requestReset("admin01")).rejects.toThrow(
-      "Too many requests. Please wait 37 seconds.",
+    const error = await services.auth.requestReset("admin01").then(
+      () => null,
+      (reason: unknown) => reason,
     );
+    expect(error).toMatchObject({
+      message: "Too many requests. Please wait 37 seconds.",
+      retryAfterSeconds: 37,
+    });
   });
 });

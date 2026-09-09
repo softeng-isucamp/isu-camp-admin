@@ -1,9 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "./AuthContext";
 import { Login, PasswordReset } from "./AuthPages";
-import { services } from "../../services/api";
+import { RateLimitError, services } from "../../services/api";
 
 vi.spyOn(services.auth, "reset").mockResolvedValue(undefined);
 
@@ -56,6 +56,7 @@ describe("password recovery screen", () => {
 
   it("validates the code with empty boxes and displays new password placeholders", async () => {
     mockResetRequest();
+    vi.spyOn(services.auth, "verifyReset").mockResolvedValue(undefined);
     render(
       <MemoryRouter>
         <PasswordReset />
@@ -78,12 +79,13 @@ describe("password recovery screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(screen.getByRole("alert")).toHaveTextContent(/6-digit verification code/i);
+    await act(async () => { await Promise.resolve(); });
     fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), {
       target: { value: "000000" },
     });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
-    expect(screen.getByPlaceholderText("Enter new password")).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Enter new password")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Confirm new password")).toBeInTheDocument();
 
     const newPassInput = screen.getByLabelText("NEW PASSWORD");
@@ -101,6 +103,7 @@ describe("password recovery screen", () => {
 
   it("supports pasting a 6-digit code into the segmented inputs", async () => {
     mockResetRequest();
+    vi.spyOn(services.auth, "verifyReset").mockResolvedValue(undefined);
     render(
       <MemoryRouter>
         <PasswordReset />
@@ -129,7 +132,7 @@ describe("password recovery screen", () => {
     expect(screen.getByLabelText("Digit 6")).toHaveValue("6");
 
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByLabelText("NEW PASSWORD")).toBeInTheDocument();
+    expect(await screen.findByLabelText("NEW PASSWORD")).toBeInTheDocument();
   });
 
   it("supports resending verification code when requested", async () => {
@@ -147,17 +150,47 @@ describe("password recovery screen", () => {
       await screen.findByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
 
-    const resendButton = screen.getByRole("button", { name: /resend code/i });
-    expect(resendButton).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /resend code in 60s/i })).toBeDisabled();
+  });
 
-    fireEvent.click(resendButton);
-    expect(
-      await screen.findByText(/a new 6-digit verification code has been sent/i),
-    ).toBeInTheDocument();
+  it("keeps an incorrect code on the verification step and advances only after server verification", async () => {
+    mockResetRequest();
+    const verify = vi.spyOn(services.auth, "verifyReset")
+      .mockRejectedValueOnce(new Error("Invalid verification code"))
+      .mockResolvedValueOnce(undefined);
+    render(<MemoryRouter><PasswordReset /></MemoryRouter>);
+
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), { target: { value: "admin01" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await screen.findByRole("heading", { name: /verification code/i });
+    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), { target: { value: "111111" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid verification code");
+    expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), { target: { value: "222222" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    expect(await screen.findByLabelText("NEW PASSWORD")).toBeInTheDocument();
+    expect(verify).toHaveBeenNthCalledWith(1, "admin01", "111111");
+    expect(verify).toHaveBeenNthCalledWith(2, "admin01", "222222");
   });
 });
 
 describe("rate limiting", () => {
+  it("disables Login during a server-provided retry window", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(services.auth, "login").mockRejectedValue(new RateLimitError(3));
+    render(<MemoryRouter><AuthProvider><Login /></AuthProvider></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText("Enter your username"), { target: { value: "admin01" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "wrongpass" } });
+    fireEvent.click(screen.getByRole("button", { name: /login/i }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole("button", { name: /login in 3s/i })).toBeDisabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByRole("button", { name: /login in 2s/i })).toBeDisabled();
+    vi.useRealTimers();
+  });
+
   it("shows rate-limit error on 429 response", async () => {
     vi.spyOn(services.auth, "requestReset").mockRejectedValue(
       new Error("Too many requests. Please wait 45 seconds.")

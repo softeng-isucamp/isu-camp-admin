@@ -146,7 +146,7 @@ type BackendLocation = {
   code?: unknown; location_code?: unknown; type?: unknown; type_id?: unknown;
   parentId?: unknown; building_id?: unknown; building?: unknown; floor_id?: unknown; floor?: unknown;
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
-  lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown;
+  lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown; polygonCoordinates?: unknown;
 };
 
 const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
@@ -183,6 +183,11 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   if (raw.floor != null) normalized.floor = String(raw.floor);
   if (raw.function != null || raw.description != null) normalized.function = String(raw.function ?? raw.description);
   if (raw.keywords != null) normalized.keywords = String(raw.keywords);
+  if (Array.isArray(raw.polygonCoordinates) && raw.polygonCoordinates.every((point) =>
+    Array.isArray(point) && point.length === 2 && point.every((coordinate) => typeof coordinate === "number"),
+  )) {
+    normalized.polygonCoordinates = raw.polygonCoordinates.map(([lat, lng]) => [lat, lng]);
+  }
   if (Object.prototype.hasOwnProperty.call(raw, "hasPhoto")) normalized.hasPhoto = raw.hasPhoto === true;
   return normalized;
 };
@@ -433,6 +438,8 @@ export interface Services {
 
     requestReset(username: string): Promise<void>;
 
+    verifyReset(username: string, code: string): Promise<void>;
+
     reset(
       username: string,
       code: string,
@@ -573,13 +580,22 @@ enrichLegacyLocationAuditIds();
 // Services
 // ==========================================
 
-function checkRateLimit(response: Response): void {
+export class RateLimitError extends Error {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number, message?: string) {
+    super(message ?? `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
+    this.name = "RateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+function checkRateLimit(response: Response, message?: string): void {
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
-    const seconds = retryAfter ? parseInt(retryAfter, 10) : 60;
-    throw new Error(
-      `Too many requests. Please wait ${seconds} second${seconds === 1 ? "" : "s"}.`
-    );
+    const parsedSeconds = retryAfter ? Number.parseInt(retryAfter, 10) : NaN;
+    const seconds = Number.isFinite(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : 60;
+    throw new RateLimitError(seconds, message);
   }
 }
 
@@ -704,7 +720,7 @@ export const services: Services = {
         );
       }
 
-      checkRateLimit(response);
+      checkRateLimit(response, data.message);
 
       if (!response.ok) {
         throw new Error(
@@ -829,10 +845,32 @@ export const services: Services = {
       } catch {
         throw new Error("Unable to connect to the backend.");
       }
-      checkRateLimit(response);
+      checkRateLimit(response, data.message);
       if (!response.ok) {
         throw new Error(data.message || "Failed to send verification code");
       }
+    },
+
+    verifyReset: async (username, code) => {
+      if (API_MODE === "local") {
+        if (username.trim() !== "admin_justine" || code !== "000000") {
+          throw new Error("Invalid verification code.");
+        }
+        return;
+      }
+      const response = await fetch(`${API_URL}/api/reset/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, code }),
+      });
+      let data: { message?: string };
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Unable to connect to the backend.");
+      }
+      checkRateLimit(response, data.message);
+      if (!response.ok) throw new Error(data.message || "Invalid verification code");
     },
 
 
@@ -860,7 +898,7 @@ export const services: Services = {
       } catch {
         throw new Error("Unable to connect to the backend.");
       }
-      checkRateLimit(response);
+      checkRateLimit(response, data.message);
       if (!response.ok) {
         throw new Error(data.message || "Password reset failed");
       }
@@ -1320,7 +1358,7 @@ export const services: Services = {
 
     buildings: async () => USE_HTTP_API
       ? apiJson<typeof buildings>("/api/map/buildings")
-      : wait(clone(mapBuildings)),
+      : wait(localAdapter.buildings.list()),
 
     removeBuilding: async (id) => {
       if (USE_HTTP_API) {
