@@ -5,7 +5,6 @@ import {
   services,
   setMockFailure,
 } from "./api";
-import { auditEntries } from "./mockData";
 import { resetPasswordSchema, resetSchema } from "./schemas";
 import { reviewMapDraft } from "../features/map/mapEditing";
 import { indoorLocationTypes } from "../lib/locationPolicy";
@@ -162,15 +161,6 @@ describe("mock service contracts", () => {
       .toEqual({ valid: true, errors: [], groups: [] });
   });
 
-  it("creates an audit entry after a user mutation", async () => {
-    const before = (await services.logs.list("Admin")).total;
-    const page = await services.users.list("admin01");
-    await services.users.update({ ...page.items[0], username: "admin01" });
-    expect((await services.logs.list("Admin")).total).toBeGreaterThanOrEqual(
-      before,
-    );
-  });
-
   it("reports invalid import JSON and missing references", async () => {
     await expect(services.imports.locations({ json: "{bad" })).resolves.toMatchObject({
       imported: 0,
@@ -183,15 +173,6 @@ describe("mock service contracts", () => {
     await expect(services.map.save()).rejects.toThrow("Mock mapSave failed");
     setMockFailure("mapSave", false);
     await expect(services.map.save()).resolves.toBeUndefined();
-  });
-
-  it("injects user mutation failures through the service boundary", async () => {
-    const user = (await services.users.list("admin01")).items[0];
-    setMockFailure("userUpdate", true);
-    await expect(services.users.update(user)).rejects.toThrow(
-      "Mock userUpdate failed",
-    );
-    setMockFailure("userUpdate", false);
   });
 
   it("validates recovery code and password requirements", () => {
@@ -603,25 +584,6 @@ describe("mock service contracts", () => {
     expect(history.items.every((entry) => entry.targetId === original.id)).toBe(true);
   });
 
-  it("retains seeded legacy history when a location is renamed before history is opened", async () => {
-    const seededLegacyEntry = auditEntries.find(
-      (entry) => entry.id === "a1" && entry.action === "Updated Location",
-    );
-    const seededLocation = (await services.locations.list()).items.find(
-      (location) => location.name === seededLegacyEntry?.target,
-    );
-    expect(seededLegacyEntry).toBeDefined();
-    expect(seededLocation).toBeDefined();
-    expect(seededLegacyEntry?.targetId).toBe(seededLocation?.id);
-
-    await services.locations.save({ ...seededLocation!, name: `Renamed ${seededLocation!.name}` });
-    const history = await services.logs.forLocation(seededLocation!.id);
-
-    expect(history.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "a1", targetId: seededLocation!.id }),
-    ]));
-  });
-
   it("rejects invalid bulk coordinate pairs and ranges transactionally", async () => {
     const totalBefore = (await services.locations.list()).total;
     const invalidCoordinates = JSON.stringify([
@@ -649,9 +611,6 @@ describe("mock service contracts", () => {
     ).rejects.toThrow();
     expect((await services.locations.list()).total).toBe(locationsBefore);
 
-    await expect(
-      services.users.create({ id: "bad", username: "" } as never),
-    ).rejects.toThrow("Username is required");
   });
 
   it("accepts unpositioned location drafts and rejects partial coordinates", async () => {

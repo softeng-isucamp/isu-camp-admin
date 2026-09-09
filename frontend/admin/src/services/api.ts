@@ -19,20 +19,17 @@ export { createLocationsBulkImportTemplate, locationsBulkImportDescription } fro
 import type { LocationImportRequest } from "./locationImport";
 
 import {
-  auditEntries,
   buildings,
   locations,
   notifications,
   pathways,
   routeNodes,
-  users,
   topSearchedLocations,
 } from "./mockData";
 
 import {
   locationImportSchema,
   locationSchema,
-  userAccountSchema,
 } from "./schemas";
 import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
@@ -397,14 +394,12 @@ export type FailureKey =
   | "locationSave"
   | "locationRemove"
   | "buildingRemove"
-  | "userUpdate"
   | "mapSave";
 
 export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
   locationRemove: false,
   buildingRemove: false,
-  userUpdate: false,
   mapSave: false,
 };
 
@@ -482,14 +477,6 @@ export interface Services {
 
   users: {
     list(query?: string, page?: number, pageSize?: number, createdRange?: string, signInRange?: string): Promise<Page<UserAccount>>;
-
-    create(user: UserAccount): Promise<UserAccount>;
-
-    update(user: UserAccount): Promise<UserAccount>;
-
-    reset(id: string): Promise<void>;
-
-    remove(id: string): Promise<void>;
   };
 
   logs: {
@@ -566,7 +553,7 @@ const addAudit = (
   category: AuditEntry["category"] = "Admin",
   targetId?: string,
 ) => {
-  auditEntries.unshift({
+  localAuditEntries.unshift({
     id: `a-${Date.now()}`,
     actor: "admin01",
     action,
@@ -577,13 +564,15 @@ const addAudit = (
   });
 };
 
+const localAuditEntries: AuditEntry[] = [];
+
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
   "Bulk Imported Location", "Bulk Updated Location",
 ]);
 
 const enrichLegacyLocationAuditIds = () => {
-  auditEntries.forEach((entry) => {
+  localAuditEntries.forEach((entry) => {
     if (entry.targetId || !locationAuditActions.has(entry.action)) return;
     const namedLocations = locations.filter((location) => location.name === entry.target);
     if (namedLocations.length === 1) entry.targetId = namedLocations[0].id;
@@ -950,8 +939,8 @@ export const services: Services = {
           clone(topSearchedLocations),
 
         recent:
-          clone(
-            auditEntries.slice(0, 3)
+            clone(
+            localAuditEntries.slice(0, 3)
           ),
       }),
   },
@@ -1122,122 +1111,7 @@ export const services: Services = {
         const raw = await apiJson<unknown>(`/api/users?${params.toString()}`);
         return normalizeBackendPage(raw, (row) => normalizeBackendUser(row as BackendUser), "users");
       }
-      const cutoff = (range: string) => range === "all" ? null : Date.now() - Number(range.replace("d", "")) * 86400000;
-      const filtered = users.filter((user) => {
-        const created = Date.parse(user.createdAt.replace(" · ", " "));
-        const signIn = user.lastSignIn ? Date.parse(user.lastSignIn.replace(" · ", " ")) : NaN;
-        return matches(user.username, q) && (cutoff(createdRange) === null || (Number.isFinite(created) && created >= cutoff(createdRange)!)) && (cutoff(signInRange) === null || (Number.isFinite(signIn) && signIn >= cutoff(signInRange)!));
-      });
-      const start = (page - 1) * pageSize;
-      return wait({ items: clone(filtered.slice(start, start + pageSize)), total: filtered.length, page, pageSize });
-    },
-
-
-    create: async (user) => {
-
-      failIfConfigured(
-        "userUpdate"
-      );
-
-      userAccountSchema.parse(
-        user
-      );
-
-      users.push(
-        clone(user)
-      );
-
-      addAudit(
-        "Created User",
-        user.username
-      );
-
-      return wait(
-        clone(user)
-      );
-    },
-
-
-    update: async (user) => {
-
-      failIfConfigured(
-        "userUpdate"
-      );
-
-      userAccountSchema.parse(
-        user
-      );
-
-      const index =
-        users.findIndex(
-          (item) =>
-            item.id === user.id
-        );
-
-      if (index >= 0) {
-
-        users[index] =
-          clone(user);
-      }
-
-      addAudit(
-        "Updated User",
-        user.username
-      );
-
-      return wait(
-        clone(user)
-      );
-    },
-
-
-    reset: async (id) => {
-
-      failIfConfigured(
-        "userUpdate"
-      );
-
-      const user =
-        users.find(
-          (item) =>
-            item.id === id
-        );
-
-      if (user) {
-
-        addAudit(
-          "Reset User Password",
-          user.username
-        );
-      }
-
-      return wait(undefined);
-    },
-
-
-    remove: async (id) => {
-
-      const index =
-        users.findIndex(
-          (user) =>
-            user.id === id
-        );
-
-      if (index >= 0) {
-
-        const removed =
-          users.splice(
-            index,
-            1
-          )[0];
-
-        addAudit(
-          "Removed User",
-          removed.username
-        );
-      }
-
-      return wait(undefined);
+      return wait({ items: [], total: 0, page, pageSize });
     },
   },
 
@@ -1256,7 +1130,7 @@ export const services: Services = {
       }
 
       const filtered =
-        auditEntries.filter(
+        localAuditEntries.filter(
           (entry) => {
 
             const categoryMatch =
@@ -1302,7 +1176,7 @@ export const services: Services = {
 
     forLocation: async (id) => {
       enrichLegacyLocationAuditIds();
-      const entries = auditEntries.filter((entry) => entry.targetId === id);
+      const entries = localAuditEntries.filter((entry) => entry.targetId === id);
       return wait({ items: clone(entries), total: entries.length, page: 1, pageSize: 20 });
     },
   },
