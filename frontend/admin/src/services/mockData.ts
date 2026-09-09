@@ -1,11 +1,4 @@
-import type {
-  AuditEntry,
-  Building,
-  Location,
-  Pathway,
-  RouteNode,
-  UserAccount,
-} from "../types";
+import type { Building, Location, Pathway, RouteNode } from "../types";
 import { generatedMapFixture } from "./generatedMapFixture";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 
@@ -1192,83 +1185,6 @@ export const pathways: Pathway[] = [
     status: "Open",
     pathPoints: [[16.72051, 121.68987]],
   },
-];
-
-export const users: UserAccount[] = [
-  {
-    id: "usr-1",
-    username: "admin01",
-    createdAt: "Aug 10, 2026 · 9:15 AM",
-    lastSignIn: "Aug 17, 2026 · 10:42 PM",
-    role: "Administrator",
-  },
-  {
-    id: "usr-2",
-    username: "staff02",
-    createdAt: "Aug 12, 2026 · 1:30 PM",
-    lastSignIn: "Aug 17, 2026 · 8:16 PM",
-    role: "Staff",
-  },
-  {
-    id: "usr-3",
-    username: "user03",
-    createdAt: "Aug 15, 2026 · 11:05 AM",
-    lastSignIn: null,
-    role: "User",
-  },
-];
-
-export const auditEntries: AuditEntry[] = [
-  {
-    id: "a1",
-    actor: "admin01",
-    action: "Updated Location",
-    target: "Administration Building",
-    createdAt: "Aug 17, 2026 · 2:05 PM",
-    category: "Admin",
-    detail: "Campus record updated with OSM geospatial coordinates.",
-  },
-  {
-    id: "a2",
-    actor: "admin01",
-    action: "Moved Route Node",
-    target: "CAS Entrance",
-    createdAt: "Aug 17, 2026 · 1:52 PM",
-    category: "Admin",
-  },
-  {
-    id: "a3",
-    actor: "student01",
-    action: "Searched Location",
-    target: "Administration Building",
-    createdAt: "Aug 17, 2026 · 1:30 PM",
-    category: "User",
-  },
-  {
-    id: "a4",
-    actor: "student02",
-    action: "Requested Route",
-    target: "Administration Building → Main Library",
-    createdAt: "Aug 17, 2026 · 1:22 PM",
-    category: "User",
-  },
-  {
-    id: "a5",
-    actor: "staff02",
-    action: "Removed User",
-    target: "staff02",
-    createdAt: "Aug 17, 2026 · 12:40 PM",
-    category: "Admin",
-  },
-  ...Array.from({ length: 20 }, (_, index) => ({
-    id: `a-seed-${index + 1}`,
-    actor: "system",
-    action: "Health Check",
-    target: `Campus service ${index + 1}`,
-    createdAt: `Aug ${16 - Math.floor(index / 5)}, 2026 · ${String(9 + (index % 10)).padStart(2, "0")}:00 AM`,
-    category: "System" as const,
-    detail: "Scheduled system activity recorded by the campus service.",
-  })),
 ];
 
 export const notifications: import("../types").NotificationItem[] = [
