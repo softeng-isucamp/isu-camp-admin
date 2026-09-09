@@ -224,6 +224,37 @@ describe("mock service contracts", () => {
     ).toMatchObject({ lat: next[0], lng: next[1] });
   });
 
+  it("makes a newly saved Building footprint available to a fresh map read", async () => {
+    const polygon: [number, number][] = [
+      [16.7201, 121.6891],
+      [16.7201, 121.6894],
+      [16.7204, 121.6894],
+    ];
+
+    const saved = await services.locations.save({
+      id: "local-footprint-building",
+      name: "Local Footprint Building",
+      code: "LOCAL-FOOTPRINT",
+      type: "Building",
+      parentId: null,
+      status: "Active",
+      lat: null,
+      lng: null,
+      positioned: false,
+      polygonCoordinates: polygon,
+    });
+
+    expect((await services.map.buildings()).find((building) => building.id === saved.id))
+      .toMatchObject({
+        id: saved.id,
+        name: "Local Footprint Building",
+        code: "LOCAL-FOOTPRINT",
+        type: "Building",
+        points: polygon,
+        status: "Active",
+      });
+  });
+
   it("persists a location position through the narrow position seam", async () => {
     const location = (await services.locations.list()).items[0];
     const next = { lat: 16.7215, lng: 121.6895 };
