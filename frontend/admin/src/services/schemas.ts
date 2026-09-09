@@ -49,6 +49,7 @@ export const locationSchema = locationImportFields.extend({
   function: z.string().optional(),
   keywords: z.string().optional(),
   positioned: z.boolean(),
+  polygonCoordinates: z.array(z.tuple([z.number(), z.number()])).optional(),
   photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
 });
 export const userAccountSchema = z.object({

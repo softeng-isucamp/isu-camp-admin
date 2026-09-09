@@ -77,6 +77,23 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const index = mapData.locations.findIndex((item) => item.id === location.id);
         if (index >= 0) mapData.locations[index] = structuredClone(location);
         else mapData.locations.push(structuredClone(location));
+
+        // Locations own a Building's identity, while the linked Building record
+        // owns its footprint. Keep that one local source of map geometry in sync
+        // with a Location save so the next Map Editor read sees the same polygon.
+        if ((location.type === "Building" || location.type === "Facility") && location.polygonCoordinates) {
+          const building: Building = {
+            id: location.id,
+            name: location.name,
+            code: location.code,
+            type: location.type,
+            points: structuredClone(location.polygonCoordinates),
+            status: location.status,
+          };
+          const buildingIndex = mapData.buildings?.findIndex((item) => item.id === building.id) ?? -1;
+          if (buildingIndex >= 0 && mapData.buildings) mapData.buildings[buildingIndex] = building;
+          else mapData.buildings?.push(building);
+        }
         return location;
       },
       remove: (id: string): Location | undefined => {
@@ -85,6 +102,9 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const [location] = mapData.locations.splice(index, 1);
         return location;
       },
+    },
+    buildings: {
+      list: (): Building[] => structuredClone(mapData.buildings ?? []),
     },
   };
 };
