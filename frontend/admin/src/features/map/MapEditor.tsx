@@ -1086,16 +1086,24 @@ export function MapEditor() {
     return currentPathways;
   }, [currentPathways, mode]);
 
-  const selectedLocation =
-    currentLocations.find((item) => item.id === selected?.id);
-  const selectedNode =
-    currentNodes.find((item) => item.id === selected?.id);
-  const selectedPath =
-    currentPathways.find((item) => item.id === selected?.id);
-  const selectedBuilding =
-    currentBuildings.find((item) => item.id === selected?.id);
-  const selectedLocalFeature =
-    currentLocalFeatures.find((item) => item.id === selected?.id);
+  // IDs are scoped to an entity type. A Pathway and an Indoor Location may
+  // legitimately share a database ID, so every derived selection must cross
+  // the typed identity seam rather than matching only the ID.
+  const selectedLocation = selected?.type === "location"
+    ? currentLocations.find((item) => item.id === selected.id)
+    : undefined;
+  const selectedNode = selected?.type === "node"
+    ? currentNodes.find((item) => item.id === selected.id)
+    : undefined;
+  const selectedPath = selected?.type === "pathway"
+    ? currentPathways.find((item) => item.id === selected.id)
+    : undefined;
+  const selectedBuilding = selected?.type === "building"
+    ? currentBuildings.find((item) => item.id === selected.id)
+    : undefined;
+  const selectedLocalFeature = selected?.type === "local_feature"
+    ? currentLocalFeatures.find((item) => item.id === selected.id)
+    : undefined;
   const movingObjectName = selectedNode?.name ?? "Route Node";
   const movingOutsideBoundary = Boolean(
     mode === "move" && temporary && !pointOnCampus(temporary, campusBoundary),
@@ -1137,16 +1145,27 @@ export function MapEditor() {
     );
     if (locationId && directoryLocations.some((item) => item.id === locationId)) {
       const loc = directoryLocations.find((item) => item.id === locationId);
-      setSelected({ type: "location", id: locationId });
+      const building = currentBuildings.find((item) => item.id === locationId);
+      const buildingPoints = building?.points ?? [];
       // Locations may locate an existing record, but it must never hand off
       // into a standalone point-placement workflow. Footprint geometry stays
       // owned by Map Editor's Building Polygon tool.
       setMode("select");
+      if ((loc?.type === "Building" || loc?.type === "Facility") && buildingPoints.length >= 3) {
+        setSelected({ type: "building", id: locationId });
+        setFrameBounds([
+          [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
+          [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
+        ]);
+      } else {
+        setSelected({ type: "location", id: locationId });
+      }
       if (loc && isPositionedLocation(loc)) {
+        setFrameBounds(null);
         setFlyTarget([loc.lat, loc.lng]);
       }
     }
-  }, [directoryLocations, routeLocation.search]);
+  }, [currentBuildings, directoryLocations, routeLocation.search]);
 
   useEffect(() => {
     const pathwayId = new URLSearchParams(routeLocation.search).get("pathway");
@@ -3055,8 +3074,21 @@ const handleCreateBuilding = async () => {
             tone: "danger" as const,
             onSelect: () => {
               const updated = { ...selectedNode, nodeType: "Junction" as const, associatedPlaceId: null };
-              updateNode(updated);
-              recordPropertyOperation("Walking Network", selectedNode.id, selectedNode, updated, `Convert ${selectedNode.name} to a standard Route Node`);
+              // Persist first: claiming this conversion succeeded locally when
+              // the route-node write fails leaves an Entrance association
+              // falsely cleared until refresh.
+              void (typeof services.map.updateRouteNode === "function"
+                ? services.map.updateRouteNode(updated)
+                : Promise.resolve(updated)
+              ).then((persisted) => {
+                const confirmed = { ...persisted, nodeType: "Junction" as const, associatedPlaceId: null };
+                updateNodeWithOperation(selectedNode, confirmed, `Convert ${selectedNode.name} to a standard Route Node`);
+                setRouteNodeDraft({ ...confirmed });
+                setRouteNodeDraftOriginal({ ...confirmed });
+                setError("");
+              }).catch((cause) => {
+                setError(cause instanceof Error ? cause.message : "Failed to convert Route Node.");
+              });
             },
           }] : []),
           {
@@ -3400,7 +3432,7 @@ const handleCreateBuilding = async () => {
                   {footprintRetired && <div className="text-[10px] font-semibold text-amber-700">Retired · restore available</div>}
                 </Tooltip>
               </Polygon>
-              {localBuildings.some((draft) => draft.id === building.id) && mode === "select" && editingBuildingId === null && (
+              {mode === "select" && editingBuildingId === null && (
                 <Marker
                   position={polygonCentroid(building.points)}
                   icon={createLocationPinIcon(isSelected)}
@@ -4593,7 +4625,10 @@ const handleCreateBuilding = async () => {
         )}
 
         {inspectorModel && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
-          <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
+          <>
+            {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
+            <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
+          </>
         )}
 
         <div className="map-glass-panel absolute bottom-4 left-4 z-[900] w-52 rounded-[24px] p-4 pointer-events-auto">
