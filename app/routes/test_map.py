@@ -112,8 +112,10 @@ def test_map_buildings_returns_polygon_points(monkeypatch):
 
 def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
     session = FakeSession()
+    audits = []
     building = type("BuildingRecord", (), {
         "building_id": 4,
+        "building_name": "Engineering Hall",
         "latitude": None,
         "longitude": None,
         "polygon_coordinates": None,
@@ -125,7 +127,7 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
         type("BuildingModel", (), {"query": FakeQuery([building])}),
     )
     monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
-    monkeypatch.setattr(map_module, "log_audit", lambda *_args: None)
+    monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
     points = [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691], [16.72, 121.691]]
     response = app_with_map_blueprint().test_client().post(
@@ -135,6 +137,10 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
     assert response.status_code == 200
     assert building.polygon_coordinates == points
     assert session.commits == 1
+    assert audits == [
+        ("Admin", None, "update geometry", "Building", 4, "Engineering Hall footprint updated"),
+        ("Admin", None, "save draft", "Map", None, "Map draft changes saved"),
+    ]
 
 
 def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeypatch):
@@ -156,6 +162,32 @@ def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeyp
 
     assert response.status_code == 400
     assert response.json["fields"]["buildings[0].points"]
+    assert building.polygon_coordinates == [[16.7, 121.6], [16.71, 121.6], [16.71, 121.61]]
+    assert session.commits == 0
+
+
+def test_map_save_rejects_self_touching_footprint_without_mutating_the_building(monkeypatch):
+    session = FakeSession()
+    building = type("BuildingRecord", (), {
+        "building_id": 4,
+        "latitude": None,
+        "longitude": None,
+        "polygon_coordinates": [[16.7, 121.6], [16.71, 121.6], [16.71, 121.61]],
+    })()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_map_blueprint().test_client().post(
+        "/api/map/save",
+        json={"buildings": [{"id": "4", "points": [
+            [16.720, 121.689], [16.724, 121.689], [16.724, 121.693],
+            [16.722, 121.689], [16.720, 121.693],
+        ]}]},
+    )
+
+    assert response.status_code == 400
+    assert response.json["fields"]["buildings[0].points"] == "Footprint edges must not intersect."
     assert building.polygon_coordinates == [[16.7, 121.6], [16.71, 121.6], [16.71, 121.61]]
     assert session.commits == 0
 
