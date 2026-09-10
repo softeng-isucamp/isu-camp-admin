@@ -1051,4 +1051,118 @@ describe("real walking network service boundary", () => {
       pathPoints: [],
     })]);
   });
+
+  it("persists path-point edits with PUT, POST, and DELETE operations", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
+        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
+        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
+        { point_id: 6, pathway_id: 9, sequence_no: 3, latitude: 16.74, longitude: 121.71, building_id: null, node_type: "Waypoint", status: "active" },
+      ] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await httpServices.map.replacePathPoints("9", [
+      [16.721, 121.691],
+      [16.722, 121.692],
+      [16.723, 121.693],
+      [16.724, 121.694],
+    ]);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
+      ["/api/path-points", undefined],
+      ["/api/path-points/4", "PUT"],
+      ["/api/path-points/5", "PUT"],
+      ["/api/path-points/6", "PUT"],
+      ["/api/path-points", "POST"],
+    ]);
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
+      pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active",
+    }));
+    expect(fetchMock.mock.calls[4]?.[1]?.body).toBe(JSON.stringify({
+      pathway_id: 9, sequence_no: 4, latitude: 16.724, longitude: 121.694, node_type: "Waypoint", status: "active",
+    }));
+  });
+
+  it("rejects point persistence with an actionable error and does not report success", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
+        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
+      ] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Coordinate is outside the campus boundary." }), { status: 422 }));
+
+    await expect(httpServices.map.replacePathPoints("9", [[16.721, 121.691]])).rejects.toThrow(
+      "Could not persist Path Points for Pathway 9: Coordinate is outside the campus boundary.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("deletes surplus persisted Path Points after the retained points are updated", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
+        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
+        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
+      ] }), { status: 200 }))
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await httpServices.map.replacePathPoints("9", [[16.721, 121.691]]);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
+      ["/api/path-points", undefined],
+      ["/api/path-points/4", "PUT"],
+      ["/api/path-points/5", "DELETE"],
+    ]);
+  });
+
+  it("removes a newly created Pathway when its Path Point request is rejected", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ pathway: {
+        pathway_id: 9, name: "New Path", source_node_id: 3, destination_node_id: 4,
+        path_type: "Walkway", distance_m: 10, estimated_minutes: 1, status: "active", surface_type: null,
+      } }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid waypoint." }), { status: 422 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await expect(httpServices.map.createPathway({
+      name: "New Path", sourceNodeId: "3", destinationNodeId: "4", distance: "10 m", time: "1 min",
+      shade: "Unshaded", type: "Walkway", direction: "Unknown", status: "Active", allowedModes: ["Walking"],
+      pathPoints: [[16.721, 121.691]],
+    })).rejects.toThrow("Could not persist Path Points for Pathway 9: Invalid waypoint.");
+    expect(String(fetchMock.mock.calls[3]?.[0])).toMatch(/\/api\/pathways\/9$/);
+    expect(fetchMock.mock.calls[3]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("normalizes Building and Facility footprints and reads the committed result after deletion", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify([
+        { id: "4", name: "Engineering Hall", code: "ENG-01", type: "Building", status: "Active", points: [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]] },
+        { id: "8", name: "Campus Clinic", code: "CLINIC", type: "Facility", status: "Active", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] },
+      ]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+
+    await expect(httpServices.map.buildings()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "4", type: "Building" }),
+      expect.objectContaining({ id: "8", type: "Facility", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] }),
+    ]));
+    await httpServices.map.removeBuilding("4");
+    await expect(httpServices.map.buildings()).resolves.toEqual([]);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toMatch(/\/api\/map\/buildings\/4$/);
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
 });
