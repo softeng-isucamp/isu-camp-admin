@@ -55,15 +55,44 @@ def _polygon_error(points):
             - (second[0] - first[0]) * (third[1] - first[1])
         )
 
+    def on_segment(first, second, point):
+        return (
+            min(first[0], second[0]) <= point[0] <= max(first[0], second[0])
+            and min(first[1], second[1]) <= point[1] <= max(first[1], second[1])
+        )
+
+    def segments_intersect(first, second, third, fourth):
+        orientations = (
+            orientation(first, second, third),
+            orientation(first, second, fourth),
+            orientation(third, fourth, first),
+            orientation(third, fourth, second),
+        )
+        if any(math.isclose(value, 0.0, abs_tol=1e-12) for value in orientations):
+            return (
+                math.isclose(orientations[0], 0.0, abs_tol=1e-12)
+                and on_segment(first, second, third)
+            ) or (
+                math.isclose(orientations[1], 0.0, abs_tol=1e-12)
+                and on_segment(first, second, fourth)
+            ) or (
+                math.isclose(orientations[2], 0.0, abs_tol=1e-12)
+                and on_segment(third, fourth, first)
+            ) or (
+                math.isclose(orientations[3], 0.0, abs_tol=1e-12)
+                and on_segment(third, fourth, second)
+            )
+        return (
+            (orientations[0] > 0) != (orientations[1] > 0)
+            and (orientations[2] > 0) != (orientations[3] > 0)
+        )
+
     edges = list(zip(vertices, vertices[1:] + vertices[:1]))
     for index, (first, second) in enumerate(edges):
         for other_index, (third, fourth) in enumerate(edges[index + 1:], index + 1):
             if other_index == index + 1 or (index == 0 and other_index == len(edges) - 1):
                 continue
-            if (
-                orientation(first, second, third) * orientation(first, second, fourth) < 0
-                and orientation(third, fourth, first) * orientation(third, fourth, second) < 0
-            ):
+            if segments_intersect(first, second, third, fourth):
                 return "Footprint edges must not intersect."
     return None
 

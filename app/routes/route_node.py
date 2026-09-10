@@ -247,6 +247,8 @@ def _node_values(data, current=None):
         else getattr(current, "status", "active")
     )
     return values
+
+
 @route_node_bp.route("/route-nodes", methods=["POST"])
 def create_route_node():
     if error := _guard():
@@ -452,6 +454,8 @@ def _apply_pathway(record, values):
     }
     _modes_on(record, modes)
     return points
+
+
 @route_node_bp.route("/pathways", methods=["POST"])
 def create_pathway():
     if error := _guard():

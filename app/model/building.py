@@ -14,7 +14,7 @@ class Building(db.Model):
     latitude = db.Column(db.Numeric, nullable=True)
     longitude = db.Column(db.Numeric, nullable=True)
 
-    # Stores the building polygon coordinates as JSONB
+    # Stores the building polygon coordinates as JSON.
     polygon_coordinates = db.Column(db.JSON, nullable=True)
 
     def to_location_dto(self):

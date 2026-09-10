@@ -379,6 +379,20 @@ def test_create_rejects_invalid_footprint_before_writing(monkeypatch):
     assert session.commits == 0
 
 
+def test_footprint_rejects_non_adjacent_edge_touch(monkeypatch):
+    points = [
+        [0, 0],
+        [4, 0],
+        [4, 4],
+        [0, 4],
+        [0, 2],
+        [2, 2],
+        [2, 0],
+    ]
+
+    assert location_module._polygon_error(points) == "Footprint edges must not intersect."
+
+
 def test_building_and_facility_photo_uploads_are_rejected_without_photo_schema(monkeypatch):
     client, records, _ = make_mutation_client(monkeypatch)
     building = client.post(
