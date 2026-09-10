@@ -1,4 +1,5 @@
 import logging
+import math
 
 from flask import Blueprint, jsonify, request
 
@@ -14,6 +15,55 @@ map_bp = Blueprint("map", __name__, url_prefix="/api/map")
 logger = logging.getLogger(__name__)
 
 
+def _polygon_error(points):
+    if not isinstance(points, list) or len(points) < 3:
+        return "Footprint geometry requires at least three latitude/longitude points."
+
+    vertices = []
+    for point in points:
+        if (
+            not isinstance(point, (list, tuple))
+            or len(point) != 2
+            or any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in point)
+        ):
+            return "Each footprint point must contain finite latitude and longitude values."
+        latitude, longitude = point
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            return "Footprint coordinates must be valid latitude and longitude values."
+        vertices.append((float(latitude), float(longitude)))
+
+    if vertices[0] == vertices[-1]:
+        vertices.pop()
+    if len(vertices) < 3 or len(set(vertices)) != len(vertices):
+        return "Footprint geometry must contain at least three distinct vertices."
+
+    area_twice = sum(
+        first[0] * second[1] - second[0] * first[1]
+        for first, second in zip(vertices, vertices[1:] + vertices[:1])
+    )
+    if abs(area_twice) < 1e-12:
+        return "Footprint geometry must enclose an area."
+
+    def orientation(first, second, third):
+        return (
+            (second[1] - first[1]) * (third[0] - first[0])
+            - (second[0] - first[0]) * (third[1] - first[1])
+        )
+
+    edges = list(zip(vertices, vertices[1:] + vertices[:1]))
+    for index, (first, second) in enumerate(edges):
+        for other_index, (third, fourth) in enumerate(edges[index + 1:], index + 1):
+            if other_index == index + 1 or (index == 0 and other_index == len(edges) - 1):
+                continue
+            if (
+                orientation(first, second, third) * orientation(first, second, fourth) < 0
+                and orientation(third, fourth, first) * orientation(third, fourth, second) < 0
+            ):
+                return "Footprint edges must not intersect."
+
+    return None
+
+
 def _building_dto(building):
     return {
         "id": str(building.building_id),
@@ -21,7 +71,7 @@ def _building_dto(building):
         "code": building.building_code,
         "points": building.polygon_coordinates or [],
         "status": "Active",
-        "type": "Building",
+        "type": getattr(building, "classification", None) or "Building",
     }
 
 
@@ -61,7 +111,10 @@ def delete_map_building(building_id):
         db.session.delete(building)
         log_audit("Admin", None, "delete", "Building", building_id, building.building_name)
         db.session.commit()
-        return jsonify({"success": True, "message": "Building deleted."}), 200
+        return jsonify({
+            "success": True,
+            "message": "Building and associated Indoor Locations permanently deleted.",
+        }), 200
     except Exception:
         db.session.rollback()
         logger.exception("Failed to delete building")
@@ -80,6 +133,24 @@ def save_map_draft():
 
     try:
         data = request.get_json(silent=True) or {}
+
+        building_updates = []
+        for building in data.get("buildings", []) or []:
+            if "points" not in building:
+                continue
+            polygon_error = _polygon_error(building["points"])
+            if polygon_error:
+                return jsonify({
+                    "success": False,
+                    "message": "Map geometry validation failed.",
+                    "fields": {"points": polygon_error},
+                }), 400
+            try:
+                record = Building.query.get(int(building.get("id")))
+            except (TypeError, ValueError):
+                continue
+            if record:
+                building_updates.append((record, building))
 
         for node in data.get("nodes", []) or []:
             try:
@@ -115,13 +186,7 @@ def save_map_draft():
             if record and pathway.get("status"):
                 record.status = "closed" if str(pathway["status"]).lower() == "closed" else "active"
 
-        for building in data.get("buildings", []) or []:
-            try:
-                record = Building.query.get(int(building.get("id")))
-            except (TypeError, ValueError):
-                continue
-            if not record:
-                continue
+        for record, building in building_updates:
             if building.get("lat") is not None:
                 record.latitude = building["lat"]
             if building.get("lng") is not None:

@@ -63,22 +63,27 @@ class FakeFloor:
 
 
 class FakeBuilding:
-    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building"):
+    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None):
         self.building_id = identifier
         self.building_name = name
         self.building_code = code
         self.description = description
         self.latitude = None
         self.longitude = None
+        self.classification = classification
+        self.polygon_coordinates = polygon_coordinates
 
     def to_location_dto(self):
-        return {
+        dto = {
             "id": str(self.building_id), "name": self.building_name,
-            "code": self.building_code, "type": "Building", "parentId": None,
+            "code": self.building_code, "type": self.classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
             "keywords": None, "status": "Active", "lat": None, "lng": None,
             "positioned": False, "hasPhoto": False,
         }
+        if self.polygon_coordinates is not None:
+            dto["polygonCoordinates"] = self.polygon_coordinates
+        return dto
 
 
 def make_client(monkeypatch):
@@ -140,6 +145,19 @@ def test_list_locations_requires_authentication(monkeypatch):
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (None, ({"error": "unused"}, 401)))
     response = app.test_client().get("/api/locations")
+    assert response.status_code == 401
+
+
+def test_create_location_requires_administrator(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(location_bp)
+    monkeypatch.setattr(location_module, "admin_required", lambda: (None, ({"error": "unused"}, 401)))
+
+    response = app.test_client().post(
+        "/api/locations",
+        json={"name": "Library", "code": "LIB", "type": "Building"},
+    )
+
     assert response.status_code == 401
 
 
@@ -248,7 +266,14 @@ def make_mutation_client(monkeypatch):
         building_id = FakeColumn()
 
         def __init__(self, **values):
-            super().__init__(0, values["building_name"], values["building_code"], values.get("description"))
+            super().__init__(
+                0,
+                values["building_name"],
+                values["building_code"],
+                values.get("description"),
+                values.get("classification", "Building"),
+                values.get("polygon_coordinates"),
+            )
 
     monkeypatch.setattr(location_module, "Building", MutationBuilding)
     monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
@@ -319,6 +344,39 @@ def test_create_rolls_back_when_persistence_fails(monkeypatch):
     assert response.status_code == 500
     assert records == []
     assert session.rollbacks == 1
+
+
+def test_create_facility_footprint_round_trips_its_classification_and_geometry(monkeypatch):
+    client, _records, session = make_mutation_client(monkeypatch)
+    polygon = [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691], [16.72, 121.691]]
+
+    response = client.post(
+        "/api/locations",
+        json={"name": "Health Center", "code": "HC", "type": "Facility", "polygonCoordinates": polygon},
+    )
+
+    assert response.status_code == 201
+    assert response.json["type"] == "Facility"
+    assert response.json["polygonCoordinates"] == polygon
+    assert session.commits == 1
+
+    reloaded = client.get("/api/locations")
+    assert reloaded.status_code == 200
+    assert reloaded.json["items"] == [response.json]
+
+
+def test_create_rejects_invalid_footprint_before_writing(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+
+    response = client.post(
+        "/api/locations",
+        json={"name": "Bad Footprint", "code": "BAD", "type": "Building", "polygonCoordinates": [[16.72, 121.69], [16.72, 121.69], [16.721, 121.691]]},
+    )
+
+    assert response.status_code == 400
+    assert response.json["fields"]["polygonCoordinates"]
+    assert records == []
+    assert session.commits == 0
 
 
 def test_building_photo_upload_is_rejected_without_building_photo_schema(monkeypatch):

@@ -9,6 +9,7 @@ class Building(db.Model):
     building_id = db.Column(db.BigInteger, primary_key=True)
     building_code = db.Column(db.String, nullable=False)
     building_name = db.Column(db.String, nullable=False)
+    classification = db.Column(db.String, nullable=False, default="Building")
     description = db.Column(db.Text, nullable=True)
     latitude = db.Column(db.Numeric, nullable=True)
     longitude = db.Column(db.Numeric, nullable=True)
@@ -24,7 +25,7 @@ class Building(db.Model):
             "id": str(self.building_id),
             "name": self.building_name,
             "code": self.building_code,
-            "type": "Building",
+            "type": self.classification or "Building",
             "parentId": None,
             "building": None,
             "floor": None,
