@@ -1,5 +1,7 @@
 from extensions import db
 
+PATH_POINT_TYPES = frozenset({"Waypoint"})
+
 
 class PathPoint(db.Model):
     __tablename__ = "path_point"

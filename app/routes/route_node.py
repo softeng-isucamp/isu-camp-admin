@@ -6,8 +6,8 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
-from model.path_point import PathPoint
-from model.pathway import Pathway
+from model.path_point import PATH_POINT_TYPES, PathPoint
+from model.pathway import PATHWAY_TYPES, Pathway
 from model.pathway_allowed_mode import PathwayAllowedMode
 from model.route_node import RouteNode
 from services.audit import log_audit
@@ -81,9 +81,23 @@ def _points(value):
         if _int(raw.get("sequence_no", sequence_no), "sequence_no") != sequence_no: raise ValidationError("path_points sequence_no values must be contiguous and start at 1")
         building_id = _int(raw.get("building_id"), "building_id", True)
         if (error := _building(building_id)): return error
-        result.append(dict(sequence_no=sequence_no, latitude=lat, longitude=lng, building_id=building_id, node_type=_text(raw.get("node_type", "Waypoint"), "node_type", True, 50), status=_status(raw.get("status", "active"))))
+        result.append(dict(sequence_no=sequence_no, latitude=lat, longitude=lng, building_id=building_id, node_type=_enum(raw.get("node_type", "Waypoint"), "node_type", PATH_POINT_TYPES), status=_status(raw.get("status", "active"))))
     return result
-def _replace_points(pathway, points): pathway.path_points = [PathPoint(pathway_id=pathway.pathway_id, **point) for point in points]
+def _replace_points(pathway, points):
+    """Replace a complete point sequence without violating its unique order."""
+    existing_points = list(pathway.path_points)
+    if existing_points:
+        for point in existing_points:
+            db.session.delete(point)
+        pathway.path_points = []
+        # The database checks (pathway_id, sequence_no) per statement, so make
+        # deleted sequence numbers available before inserting replacements.
+        db.session.flush()
+
+    replacements = [PathPoint(pathway_id=pathway.pathway_id, **point) for point in points]
+    pathway.path_points = replacements
+    for point in replacements:
+        db.session.add(point)
 def _sequence_conflict(pathway_id, sequence_no, current=None):
     """Keep standalone path-point edits from duplicating a pathway position."""
     query = getattr(PathPoint, "query", None)
@@ -176,7 +190,7 @@ def _pathway_values(data, current=None):
     if values["source_node_id"] == values["destination_node_id"]: raise ValidationError("source_node_id and destination_node_id cannot be the same")
     for key in ("source_node_id", "destination_node_id"):
         if not RouteNode.query.get(values[key]): return (f"{'Source' if key == 'source_node_id' else 'Destination'} route node not found", 404)
-    values["path_type"] = _text(data.get("path_type", getattr(current, "path_type", None)), "path_type", True, 50)
+    values["path_type"] = _enum(data.get("path_type", getattr(current, "path_type", None)), "path_type", PATHWAY_TYPES)
     values["distance_m"] = _number(data.get("distance_m", getattr(current, "distance_m", None)), "distance_m", positive=True)
     values["estimated_minutes"] = _number(data.get("estimated_minutes", getattr(current, "estimated_minutes", None)), "estimated_minutes", positive=True)
     values["name"] = _text(data.get("name", getattr(current, "name", "Unnamed Pathway")), "name", True)
@@ -255,7 +269,7 @@ def _point_values(data, current=None):
     if not Pathway.query.get(values["pathway_id"]): return ("Pathway not found", 404)
     if _sequence_conflict(values["pathway_id"], values["sequence_no"], current):
         raise ValidationError("sequence_no is already used by another path point in this pathway")
-    values.update(latitude=_number(data.get("latitude", getattr(current, "latitude", None)), "latitude", -90, 90), longitude=_number(data.get("longitude", getattr(current, "longitude", None)), "longitude", -180, 180), node_type=_text(data.get("node_type", getattr(current, "node_type", None)), "node_type", True, 50), status=_status(data.get("status", getattr(current, "status", "active"))))
+    values.update(latitude=_number(data.get("latitude", getattr(current, "latitude", None)), "latitude", -90, 90), longitude=_number(data.get("longitude", getattr(current, "longitude", None)), "longitude", -180, 180), node_type=_enum(data.get("node_type", getattr(current, "node_type", None)), "node_type", PATH_POINT_TYPES), status=_status(data.get("status", getattr(current, "status", "active"))))
     values["building_id"] = _int(data.get("building_id", getattr(current, "building_id", None)), "building_id", True)
     if (error := _building(values["building_id"])): return error
     return values

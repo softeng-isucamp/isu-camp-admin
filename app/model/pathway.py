@@ -1,6 +1,8 @@
 from extensions import db
 from sqlalchemy.sql import func
 
+PATHWAY_TYPES = frozenset({"Walkway", "Road"})
+
 
 class Pathway(db.Model):
     __tablename__ = "pathway"
