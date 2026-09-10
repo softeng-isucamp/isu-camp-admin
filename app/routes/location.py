@@ -553,6 +553,10 @@ def create_location():
 
     # Get request data
     data = _request_payload()
+    if not isinstance(data, dict):
+        return _validation_error({
+            "request": "Location updates must be an object.",
+        })
 
     values, error = _validate(
         data,
@@ -563,24 +567,27 @@ def create_location():
     if error:
         return error
 
-    photo, photo_mime_type, error = _photo_upload()
-
-    if error:
-        return error
-
-    # Building photos are not supported
+    # Footprint owners do not have a photo column. Reject any supplied upload
+    # before applying normal image validation so Building and Facility produce
+    # the same schema-level response.
     if (
-        values.get("type") == "Building"
-        and photo is not None
+        values.get("type") in {"Building", "Facility"}
+        and (upload := request.files.get("photo")) is not None
+        and upload.filename
     ):
         return _validation_error(
             {
                 "photo": (
-                    "Building photos are not supported "
+                    "Building and Facility photos are not supported "
                     "by the current building schema."
                 )
             }
         )
+
+    photo, photo_mime_type, error = _photo_upload()
+
+    if error:
+        return error
 
     try:
 

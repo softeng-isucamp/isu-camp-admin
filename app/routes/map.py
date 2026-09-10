@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
+from model.location import Location
 from model.route_node import RouteNode
 from model.pathway import Pathway
 from services.audit import log_audit
@@ -64,6 +65,48 @@ def _polygon_error(points):
     return None
 
 
+def _map_validation_error(fields):
+    return jsonify({
+        "success": False,
+        "message": "Map validation failed.",
+        "fields": fields,
+    }), 400
+
+
+def _map_payload():
+    """Validate the container shape before applying any draft updates."""
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, _map_validation_error({
+            "request": "Map updates must be a JSON object.",
+        })
+
+    fields = {}
+    for name in ("buildings", "nodes", "pathways"):
+        if name in data and not isinstance(data[name], list):
+            fields[name] = "Map updates must be a list."
+
+    if "movedNode" in data and not isinstance(data["movedNode"], dict):
+        fields["movedNode"] = "Moved node updates must be an object."
+
+    for name, label in (
+        ("buildings", "Building"),
+        ("nodes", "Route node"),
+        ("pathways", "Pathway"),
+    ):
+        records = data.get(name, [])
+        if isinstance(records, list):
+            for index, record in enumerate(records):
+                if not isinstance(record, dict):
+                    fields[f"{name}[{index}]"] = f"{label} updates must be objects."
+
+    if fields:
+        return None, _map_validation_error(fields)
+
+    return data, None
+
+
 def _building_dto(building):
     return {
         "id": str(building.building_id),
@@ -73,6 +116,20 @@ def _building_dto(building):
         "status": "Active",
         "type": getattr(building, "classification", None) or "Building",
     }
+
+
+def _delete_building_locations(building_id):
+    """Stage every Indoor Location owned by a Building in this transaction.
+
+    The legacy ``location.building_id`` column is not declared as a database
+    foreign key, so relying on a database cascade would leave orphaned
+    directory records.  Staging these deletes explicitly keeps the hard-delete
+    contract true while the Building and audit row still share one commit.
+    """
+    locations = Location.query.filter_by(building_id=building_id).all()
+    for location in locations:
+        db.session.delete(location)
+    return locations
 
 
 # ==========================================
@@ -108,6 +165,7 @@ def delete_map_building(building_id):
         if not building:
             return jsonify({"success": False, "message": "Building not found."}), 404
 
+        _delete_building_locations(building_id)
         db.session.delete(building)
         log_audit("Admin", None, "delete", "Building", building_id, building.building_name)
         db.session.commit()
@@ -132,19 +190,19 @@ def save_map_draft():
         return error
 
     try:
-        data = request.get_json(silent=True) or {}
+        data, error = _map_payload()
+        if error:
+            return error
 
         building_updates = []
-        for building in data.get("buildings", []) or []:
+        for index, building in enumerate(data.get("buildings", [])):
             if "points" not in building:
                 continue
             polygon_error = _polygon_error(building["points"])
             if polygon_error:
-                return jsonify({
-                    "success": False,
-                    "message": "Map geometry validation failed.",
-                    "fields": {"points": polygon_error},
-                }), 400
+                return _map_validation_error({
+                    f"buildings[{index}].points": polygon_error,
+                })
             try:
                 record = Building.query.get(int(building.get("id")))
             except (TypeError, ValueError):

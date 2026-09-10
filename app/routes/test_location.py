@@ -379,15 +379,21 @@ def test_create_rejects_invalid_footprint_before_writing(monkeypatch):
     assert session.commits == 0
 
 
-def test_building_photo_upload_is_rejected_without_building_photo_schema(monkeypatch):
+def test_building_and_facility_photo_uploads_are_rejected_without_photo_schema(monkeypatch):
     client, records, _ = make_mutation_client(monkeypatch)
-    created = client.post(
+    building = client.post(
         "/api/locations",
         data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png")},
         content_type="multipart/form-data",
     )
-    assert created.status_code == 400
-    assert created.json["fields"]["photo"]
+    facility = client.post(
+        "/api/locations",
+        data={"name": "Health Center", "code": "HC", "type": "Facility", "photo": (io.BytesIO(b"png-bytes"), "health-center.png")},
+        content_type="multipart/form-data",
+    )
+
+    assert building.status_code == facility.status_code == 400
+    assert building.json["fields"]["photo"] == facility.json["fields"]["photo"]
     assert records == []
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):
