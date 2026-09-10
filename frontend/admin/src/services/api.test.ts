@@ -1001,7 +1001,6 @@ describe("real walking network service boundary", () => {
       surface_type: null,
       allowed_modes: ["Walking", "Vehicle"],
     } }), { status: 200 }));
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [] }), { status: 200 }));
     await expect(httpServices.map.updatePathway(pathway)).resolves.toMatchObject(pathway);
     expect(fetchMock.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
       method: "PUT",
@@ -1016,6 +1015,7 @@ describe("real walking network service boundary", () => {
         shade: "Partial Shade",
         direction: "Two-way",
         allowed_modes: ["Walking", "Vehicle"],
+        path_points: [],
       }),
     }));
   });
@@ -1122,7 +1122,7 @@ describe("real walking network service boundary", () => {
     ]);
   });
 
-  it("removes a newly created Pathway when its Path Point request is rejected", async () => {
+  it("sends Pathway geometry in the same create request as its metadata", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
@@ -1130,18 +1130,32 @@ describe("real walking network service boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ pathway: {
         pathway_id: 9, name: "New Path", source_node_id: 3, destination_node_id: 4,
         path_type: "Walkway", distance_m: 10, estimated_minutes: 1, status: "active", surface_type: null,
+        shade: "Unshaded", direction: "Unknown", allowed_modes: ["Walking"],
+        path_points: [{ point_id: 12, pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, building_id: null, node_type: "Waypoint", status: "active" }],
       } }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Invalid waypoint." }), { status: 422 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await expect(httpServices.map.createPathway({
       name: "New Path", sourceNodeId: "3", destinationNodeId: "4", distance: "10 m", time: "1 min",
       shade: "Unshaded", type: "Walkway", direction: "Unknown", status: "Active", allowedModes: ["Walking"],
       pathPoints: [[16.721, 121.691]],
-    })).rejects.toThrow("Could not persist Path Points for Pathway 9: Invalid waypoint.");
-    expect(String(fetchMock.mock.calls[3]?.[0])).toMatch(/\/api\/pathways\/9$/);
-    expect(fetchMock.mock.calls[3]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+    })).resolves.toMatchObject({ id: "9", pathPoints: [[16.721, 121.691]] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        name: "New Path",
+        source_node_id: 3,
+        destination_node_id: 4,
+        path_type: "Walkway",
+        distance_m: 10,
+        estimated_minutes: 1,
+        status: "active",
+        shade: "Unshaded",
+        direction: "Unknown",
+        allowed_modes: ["Walking"],
+        path_points: [{ sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" }],
+      }),
+    }));
   });
 
   it("normalizes Building and Facility footprints and reads the committed result after deletion", async () => {

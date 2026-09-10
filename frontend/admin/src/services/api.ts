@@ -294,6 +294,7 @@ type BackendPathway = {
   shade?: string | null;
   direction?: string | null;
   allowed_modes?: string[];
+  path_points?: BackendPathPoint[];
   surface_type: string | null;
 };
 
@@ -384,6 +385,13 @@ const serializePathway = (pathway: Omit<Pathway, "id">) => ({
   shade: pathway.shade,
   direction: pathway.direction,
   allowed_modes: pathway.allowedModes ?? ["Walking"],
+  path_points: pathway.pathPoints.map(([latitude, longitude], index) => ({
+    sequence_no: index + 1,
+    latitude,
+    longitude,
+    node_type: "Waypoint",
+    status: "active",
+  })),
 });
 
 const pathPointWritePayload = (pathwayId: number, sequenceNo: number, [latitude, longitude]: [number, number]) => ({
@@ -1401,19 +1409,8 @@ export const services: Services = {
         method: "POST",
         body: JSON.stringify(serializePathway(pathway)),
       });
-      const created = normalizeBackendPathway(response.pathway, []);
-      try {
-        await services.map.replacePathPoints(created.id, pathway.pathPoints);
-      } catch (cause) {
-        try {
-          await apiJson<unknown>(`/api/pathways/${encodeURIComponent(created.id)}`, { method: "DELETE" });
-        } catch (cleanupCause) {
-          const detail = cleanupCause instanceof Error ? cleanupCause.message : "unknown cleanup failure";
-          throw new Error(`${cause instanceof Error ? cause.message : "Could not persist Path Points."} The new Pathway could not be removed: ${detail}`);
-        }
-        throw cause;
-      }
-      return { ...created, pathPoints: pathway.pathPoints };
+      const created = normalizeBackendPathway(response.pathway, response.pathway.path_points ?? []);
+      return { ...created, pathPoints: created.pathPoints.length === pathway.pathPoints.length ? created.pathPoints : pathway.pathPoints };
     },
 
     updatePathway: async (pathway) => {
@@ -1428,9 +1425,8 @@ export const services: Services = {
         method: "PUT",
         body: JSON.stringify(serializePathway(pathway)),
       });
-      await services.map.replacePathPoints(pathway.id, pathway.pathPoints);
-      const updated = normalizeBackendPathway(response.pathway, []);
-      return { ...updated, pathPoints: pathway.pathPoints };
+      const updated = normalizeBackendPathway(response.pathway, response.pathway.path_points ?? []);
+      return { ...updated, pathPoints: updated.pathPoints.length === pathway.pathPoints.length ? updated.pathPoints : pathway.pathPoints };
     },
 
     deletePathway: async (id) => {

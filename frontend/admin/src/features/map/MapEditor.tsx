@@ -1683,8 +1683,13 @@ export function MapEditor() {
         coordinates: [...points],
         linkedBuildingId: editingBuildingId,
       };
+      const buildingForSave = currentBuildings.find((building) => building.id === editingBuildingId);
+      if (!buildingForSave) {
+        setError("This Building is no longer available. Reload the map and retry the footprint update.");
+        return;
+      }
       try {
-        await services.map.save({ buildings: [{ ...selectedBuilding, points: [...points] }] });
+        await services.map.save({ buildings: [{ ...buildingForSave, points: [...points] }] });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Failed to update Building footprint. Your draft is still open; retry when ready.");
         return;
@@ -1816,7 +1821,7 @@ const handleCreateBuilding = async () => {
           lng: null,
           positioned: false,
           polygonCoordinates: points,
-        } as any);
+        });
         const renderedBuilding: Building = {
           id: saved.id,
           name: saved.name,
