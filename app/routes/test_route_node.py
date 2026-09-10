@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from flask import Flask
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
@@ -30,15 +31,25 @@ class FakeSession:
         self.added = []
         self.commits = 0
         self.rollbacks = 0
+        self.deleted = []
+        self.fail_commit = False
 
     def add(self, record):
         self.added.append(record)
 
     def commit(self):
         self.commits += 1
+        if self.fail_commit:
+            raise RuntimeError("database write failed")
 
     def rollback(self):
         self.rollbacks += 1
+
+    def delete(self, record):
+        self.deleted.append(record)
+
+    def flush(self):
+        return None
 
 
 class FakeAllowedMode:
@@ -60,6 +71,204 @@ def app_with_route_node_blueprint():
     app = Flask(__name__)
     app.register_blueprint(route_node_bp)
     return app
+
+
+@pytest.fixture(autouse=True)
+def authenticated_admin(monkeypatch):
+    """Keep unit tests focused on route behavior; auth has explicit coverage below."""
+    monkeypatch.setattr(route_node_module, "admin_required", lambda: (object(), None), raising=False)
+
+
+def test_walking_network_mutations_require_an_administrator(monkeypatch):
+    monkeypatch.setattr(
+        route_node_module,
+        "admin_required",
+        lambda: (None, ({"success": False, "message": "Authentication required"}, 401)),
+        raising=False,
+    )
+
+    response = app_with_route_node_blueprint().test_client().post(
+        "/api/route-nodes", json={"latitude": 16.72, "longitude": 121.69}
+    )
+
+    assert response.status_code == 401
+    assert response.json["message"] == "Authentication required"
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"latitude": "north", "longitude": 121.69}, "latitude must be a finite number"),
+        ({"latitude": 91, "longitude": 121.69}, "latitude must be between -90 and 90"),
+        ({"latitude": 16.72, "longitude": 181}, "longitude must be between -180 and 180"),
+        ({"latitude": 16.72, "longitude": 121.69, "node_type": "teleporter"}, "node_type must be one of"),
+    ],
+)
+def test_create_route_node_rejects_invalid_values(payload, message):
+    response = app_with_route_node_blueprint().test_client().post("/api/route-nodes", json=payload)
+
+    assert response.status_code == 400
+    assert message in response.json["message"]
+
+
+def test_create_pathway_with_points_is_atomic_and_returns_geometry(monkeypatch):
+    session = FakeSession()
+
+    class FakeRouteNode:
+        query = type("Query", (), {"get": staticmethod(lambda _identifier: object())})()
+
+    class FakePathPoint:
+        next_id = 1
+
+        def __init__(self, **values):
+            self.point_id = FakePathPoint.next_id
+            FakePathPoint.next_id += 1
+            self.__dict__.update(values)
+
+        def to_dict(self):
+            return {"point_id": self.point_id, "pathway_id": self.pathway_id, "sequence_no": self.sequence_no,
+                    "latitude": self.latitude, "longitude": self.longitude}
+
+    class FakePathway:
+        def __init__(self, **values):
+            self.pathway_id = 9
+            self.__dict__.update(values)
+            self.allowed_modes = []
+            self.path_points = []
+
+        def to_dict(self):
+            return {"pathway_id": self.pathway_id, "name": self.name,
+                    "path_points": [point.to_dict() for point in self.path_points]}
+
+    monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
+    monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
+    monkeypatch.setattr(route_node_module, "PathPoint", FakePathPoint)
+    monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
+        "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
+        "distance_m": 12, "estimated_minutes": 1,
+        "path_points": [{"latitude": 16.72, "longitude": 121.69}, {"latitude": 16.721, "longitude": 121.691}],
+    })
+
+    assert response.status_code == 201
+    assert [point["sequence_no"] for point in response.json["pathway"]["path_points"]] == [1, 2]
+    assert session.commits == 1
+
+
+def test_invalid_atomic_pathway_geometry_does_not_create_any_records(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
+        "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
+        "distance_m": 12, "estimated_minutes": 1,
+        "path_points": [{"latitude": 16.72, "longitude": 121.69}, {"latitude": "bad", "longitude": 121.691}],
+    })
+
+    assert response.status_code == 400
+    assert session.added == []
+    assert session.commits == 0
+
+
+def test_path_point_requires_an_existing_pathway_and_positive_unique_order(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: None)})()}))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/path-points", json={
+        "pathway_id": 9, "sequence_no": 0, "latitude": 16.72, "longitude": 121.69, "node_type": "Waypoint",
+    })
+
+    assert response.status_code == 400
+    assert "sequence_no must be a positive integer" == response.json["message"]
+    assert session.added == []
+
+
+def test_path_point_rejects_duplicate_order_within_its_pathway(monkeypatch):
+    session = FakeSession()
+    existing = object()
+    point_query = type(
+        "Query",
+        (),
+        {"filter_by": staticmethod(lambda **_values: type("Result", (), {"first": staticmethod(lambda: existing)})())},
+    )()
+    monkeypatch.setattr(route_node_module, "PathPoint", type("PathPoint", (), {"query": point_query}))
+    monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/path-points", json={
+        "pathway_id": 9, "sequence_no": 1, "latitude": 16.72, "longitude": 121.69, "node_type": "Waypoint",
+    })
+
+    assert response.status_code == 400
+    assert "already used" in response.json["message"]
+
+
+def test_pathway_delete_and_failed_update_roll_back_with_an_audit(monkeypatch):
+    session = FakeSession()
+    pathway = type("PathwayRecord", (), {"pathway_id": 9, "name": "Connector", "path_points": [], "allowed_modes": []})()
+    monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: pathway)})()}))
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    audits = []
+    monkeypatch.setattr(route_node_module, "log_audit", lambda *args: audits.append(args))
+
+    response = app_with_route_node_blueprint().test_client().delete("/api/pathways/9")
+
+    assert response.status_code == 200
+    assert session.deleted == [pathway]
+    assert audits[-1][2:4] == ("delete", "Pathway")
+
+
+def test_route_node_delete_is_audited_as_a_cascade(monkeypatch):
+    session = FakeSession()
+    node = type("RouteNodeRecord", (), {"node_id": 4, "name": "North Gate"})()
+    monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: node)})()}))
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    audits = []
+    monkeypatch.setattr(route_node_module, "log_audit", lambda *args: audits.append(args))
+
+    response = app_with_route_node_blueprint().test_client().delete("/api/route-nodes/4")
+
+    assert response.status_code == 200
+    assert session.deleted == [node]
+    assert "connected pathways" in audits[-1][-1]
+
+
+def test_atomic_pathway_write_rolls_back_everything_when_commit_fails(monkeypatch):
+    session = FakeSession()
+    session.fail_commit = True
+
+    class FakeRouteNode:
+        query = type("Query", (), {"get": staticmethod(lambda _id: object())})()
+
+    class FakePathway:
+        def __init__(self, **values):
+            self.pathway_id = 9
+            self.__dict__.update(values)
+            self.allowed_modes = []
+            self.path_points = []
+
+        def to_dict(self):
+            return {"pathway_id": self.pathway_id}
+
+    monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
+    monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
+    monkeypatch.setattr(route_node_module, "PathPoint", lambda **values: type("Point", (), values)())
+    monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
+        "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
+        "distance_m": 12, "estimated_minutes": 1,
+        "path_points": [{"latitude": 16.72, "longitude": 121.69}],
+    })
+
+    assert response.status_code == 500
+    assert session.commits == 1
+    assert session.rollbacks == 1
 
 
 def test_route_node_blueprint_exposes_walking_network_routes():
@@ -224,7 +433,12 @@ def test_pathway_update_replaces_allowed_modes_and_preserves_metadata(monkeypatc
             "destination_node_id": 4,
             "name": "Old Connector",
             "direction": "Two-way",
-            "shade": "Unshaded",
+                "shade": "Unshaded",
+                "path_type": "Walkway",
+                "distance_m": 20,
+                "estimated_minutes": 1,
+                "status": "active",
+                "surface_type": None,
             "allowed_modes": [],
             "to_dict": lambda self: {
                 "pathway_id": self.pathway_id,
@@ -293,6 +507,7 @@ def test_create_path_point_persists_the_ordered_coordinate(monkeypatch):
             }
 
     monkeypatch.setattr(route_node_module, "PathPoint", FakePathPoint)
+    monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
     monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
 
     response = app_with_route_node_blueprint().test_client().post(

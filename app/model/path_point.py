@@ -3,7 +3,10 @@ from extensions import db
 
 class PathPoint(db.Model):
     __tablename__ = "path_point"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        db.UniqueConstraint("pathway_id", "sequence_no", name="uq_path_point_pathway_sequence"),
+        {"schema": "public"},
+    )
 
     point_id = db.Column(
         db.BigInteger,
