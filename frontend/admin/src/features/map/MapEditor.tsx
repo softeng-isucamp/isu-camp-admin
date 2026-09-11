@@ -1111,7 +1111,8 @@ export function MapEditor() {
     const positioned = currentLocations.filter(isPositionedLocation);
     if (mode === "area") return [];
     return positioned.filter(
-      (loc) => isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id
+      (loc) => loc.type !== "Building"
+        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id)
     );
   }, [currentLocations, currentMapBounds, mode, selected?.id]);
 
