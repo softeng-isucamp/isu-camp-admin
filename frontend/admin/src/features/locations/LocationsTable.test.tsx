@@ -304,6 +304,40 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
   });
 
+  it("offers only Building and Facility when editing a Building and excludes Facility for indoor locations", async () => {
+    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "edit-type-room", name: "Edit Type Room", code: "EDIT-TYPE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+
+    renderLocations();
+
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: building.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+
+    expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
+    expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual([
+      "Building",
+      "Facility",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Room" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Type Room" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+
+    const indoorTypeOptions = Array.from((await screen.findByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text);
+    expect(indoorTypeOptions).not.toContain("Facility");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Facility" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Type Facility" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+
+    expect(await screen.findByLabelText(/location type/i)).toHaveValue("Facility");
+    expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Facility"]);
+  });
+
   it("keeps row action options above neighboring table rows", async () => {
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: "Actions for Administration Building" }));

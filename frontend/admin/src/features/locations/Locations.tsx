@@ -1193,7 +1193,11 @@ export function Locations() {
                 draft={draft}
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
-                  : ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
+                  : draft.type === "Building"
+                    ? ["Building", "Facility"]
+                    : draft.type === "Facility"
+                      ? ["Facility"]
+                    : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 statusEditable={API_MODE === "local"}
                 onChange={setDraft}
