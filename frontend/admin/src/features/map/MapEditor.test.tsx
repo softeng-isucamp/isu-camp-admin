@@ -1228,6 +1228,14 @@ describe("Map Editor preview", () => {
     expect(name).toHaveAttribute("placeholder", "e.g. Science Walk");
     expect(Array.from((screen.getByLabelText("Pathway type") as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Walkway", "Road"]);
     expect(screen.getByRole("checkbox", { name: "Vehicle" })).toBeDisabled();
+
+    fireEvent.change(name, { target: { value: "New Campus Walk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
+    await waitFor(() => expect(services.map.createPathway).toHaveBeenCalledWith(expect.objectContaining({
+      name: "New Campus Walk",
+      distance: expect.stringMatching(/^[1-9]\d* m$/),
+      time: expect.stringMatching(/^[1-9]\d* min$/),
+    })));
   });
 
   it("adds a midpoint Path Point without creating a Route Node", async () => {

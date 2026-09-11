@@ -15,6 +15,32 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
   detail TEXT
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+      ('id'),
+      ('created_at'),
+      ('category'),
+      ('actor'),
+      ('action'),
+      ('target'),
+      ('target_id'),
+      ('detail')
+    ) AS required(column_name)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'audit_log'
+        AND column_name = required.column_name
+    )
+  ) THEN
+    RAISE EXCEPTION 'public.audit_log exists with an incompatible schema';
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS ix_audit_log_created_at
   ON public.audit_log (created_at);
 

@@ -453,6 +453,19 @@ const routeNodePoint = (nodes: RouteNode[], id: string): [number, number] => {
   return node ? [node.lat, node.lng] : [NaN, NaN];
 };
 
+const pathwayLengthInMeters = (points: [number, number][]) =>
+  points.slice(1).reduce((total, point, index) => total + distanceInMeters(points[index], point), 0);
+
+const pathwayMetrics = (points: [number, number][]) => {
+  const distanceMeters = pathwayLengthInMeters(points);
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
+  return {
+    distance: `${Math.max(1, Math.round(distanceMeters))} m`,
+    // Use a conservative walking speed for the initial editable estimate.
+    time: `${Math.max(1, Math.ceil(distanceMeters / 80))} min`,
+  };
+};
+
 function MapController({
   onMapClick,
   flyTarget,
@@ -1600,7 +1613,14 @@ export function MapEditor() {
           routeNodePoint(currentNodes, target.destinationNodeId),
         ),
       };
-      const pathwayIssues = validatePathwayDraft(updatedPath, currentNodes, campusBoundary, {
+      const sourcePoint = routeNodePoint(currentNodes, updatedPath.sourceNodeId);
+      const destinationPoint = routeNodePoint(currentNodes, updatedPath.destinationNodeId);
+      const metricPoints = [sourcePoint, ...updatedPath.pathPoints, destinationPoint];
+      const metrics = metricPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))
+        ? pathwayMetrics(metricPoints)
+        : null;
+      const pathForSave = metrics ? { ...updatedPath, ...metrics } : updatedPath;
+      const pathwayIssues = validatePathwayDraft(pathForSave, currentNodes, campusBoundary, {
         existingPathways: currentPathways.filter((pathway) => pathway.id !== updatedPath.id),
         requireActiveEndpoints: true,
       });
@@ -1611,8 +1631,8 @@ export function MapEditor() {
       let persistedPath: Pathway;
       try {
         persistedPath = provisionalPathwayId === target.id
-          ? await services.map.createPathway(updatedPath)
-          : await services.map.updatePathway(updatedPath);
+          ? await services.map.createPathway(pathForSave)
+          : await services.map.updatePathway(pathForSave);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Failed to save Pathway. Your draft is still open; retry when ready.");
         return;
@@ -3567,13 +3587,17 @@ const handleCreateBuilding = async () => {
                         setError(connectionError);
                         return;
                       }
+                      const directDistance = Math.max(
+                        1,
+                        Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
+                      );
                       const newPath: Pathway = {
                         id: `pathway-${Date.now()}`,
                         name: "",
                         sourceNodeId: source.id,
                         destinationNodeId: node.id,
-                        distance: "Unknown",
-                        time: "Unknown",
+                        distance: `${directDistance} m`,
+                        time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
                         shade: "Unknown",
                         type: "Walkway",
                         direction: "Two-way",

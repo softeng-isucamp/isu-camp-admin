@@ -394,6 +394,19 @@ const serializePathway = (pathway: Omit<Pathway, "id">) => ({
   })),
 });
 
+const serializeRouteNode = (node: Omit<RouteNode, "id">, status = node.status?.toLowerCase() === "inactive" ? "inactive" : "active") => {
+  const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
+  return {
+    name: node.name,
+    latitude: node.lat,
+    longitude: node.lng,
+    location_id: node.nodeType === "Entrance" ? null : associatedId,
+    building_id: node.nodeType === "Entrance" ? associatedId : null,
+    node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
+    status,
+  };
+};
+
 const pathPointWritePayload = (pathwayId: number, sequenceNo: number, [latitude, longitude]: [number, number]) => ({
   pathway_id: pathwayId,
   sequence_no: sequenceNo,
@@ -1338,18 +1351,9 @@ export const services: Services = {
         routeNodes.push(localNode);
         return clone(localNode);
       }
-      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
       const response = await apiJson<{ route_node: BackendRouteNode }>("/api/route-nodes", {
         method: "POST",
-        body: JSON.stringify({
-          name: node.name,
-          latitude: node.lat,
-          longitude: node.lng,
-          location_id: node.nodeType === "Entrance" ? null : associatedId,
-          building_id: node.nodeType === "Entrance" ? associatedId : null,
-          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
-          status: "active",
-        }),
+        body: JSON.stringify(serializeRouteNode(node, "active")),
       });
       return normalizeBackendRouteNode(response.route_node);
     },
@@ -1362,18 +1366,9 @@ export const services: Services = {
       }
       const nodeId = Number(node.id);
       if (!Number.isInteger(nodeId)) throw new Error(`Cannot update Route Node "${node.id}". Invalid database ID.`);
-      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
       const response = await apiJson<{ route_node: BackendRouteNode }>(`/api/route-nodes/${nodeId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          name: node.name,
-          latitude: node.lat,
-          longitude: node.lng,
-          location_id: node.nodeType === "Entrance" ? null : associatedId,
-          building_id: node.nodeType === "Entrance" ? associatedId : null,
-          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
-          status: node.status?.toLowerCase() === "inactive" ? "inactive" : "active",
-        }),
+        body: JSON.stringify(serializeRouteNode(node)),
       });
       return normalizeBackendRouteNode(response.route_node);
     },
