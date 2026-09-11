@@ -466,6 +466,28 @@ const pathwayMetrics = (points: [number, number][]) => {
   };
 };
 
+interface PathwaySavePreparation {
+  pathway: Pathway;
+  issue?: string;
+}
+
+const preparePathwayForSave = (
+  pathway: Pathway,
+  nodes: RouteNode[],
+  points: [number, number][],
+): PathwaySavePreparation => {
+  const sourcePoint = routeNodePoint(nodes, pathway.sourceNodeId);
+  const destinationPoint = routeNodePoint(nodes, pathway.destinationNodeId);
+  const pathPoints = withoutEndpointPathPoints([...points], sourcePoint, destinationPoint);
+  const metricPoints = [sourcePoint, ...pathPoints, destinationPoint];
+  if (!metricPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))) {
+    return { pathway: { ...pathway, pathPoints }, issue: "Pathway endpoints and Path Points must use valid coordinates." };
+  }
+  const metrics = pathwayMetrics(metricPoints);
+  if (!metrics) return { pathway: { ...pathway, pathPoints }, issue: "Pathway geometry must have a positive distance." };
+  return { pathway: { ...pathway, pathPoints, ...metrics } };
+};
+
 function MapController({
   onMapClick,
   flyTarget,
@@ -644,7 +666,6 @@ export function MapEditor() {
   const [pointDraftDirty, setPointDraftDirty] = useState(false);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
-  const [manualPathPointDrag, setManualPathPointDrag] = useState(false);
   const [pathPointDragPreview, setPathPointDragPreview] = useState<{
     index: number;
     point: [number, number];
@@ -1359,7 +1380,7 @@ export function MapEditor() {
       setTemporary(point);
       setPointIsSnapped(false);
       setPointDraftDirty(true);
-    } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
+    } else if (mode === "path" && editingPathId) {
       setPathPoints((current) => [...current, point]);
       setPathDraftDirty(true);
     }
@@ -1603,25 +1624,18 @@ export function MapEditor() {
     if (!editingPathId) return;
     const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
-      const updatedPath: Pathway = {
-        ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
-        // A Pathway owns only intermediate geometry. Endpoint coordinates are
-        // always read from the selected Route Nodes.
-        pathPoints: withoutEndpointPathPoints(
-          [...pathPoints],
-          routeNodePoint(currentNodes, target.sourceNodeId),
-          routeNodePoint(currentNodes, target.destinationNodeId),
-        ),
-      };
-      const sourcePoint = routeNodePoint(currentNodes, updatedPath.sourceNodeId);
-      const destinationPoint = routeNodePoint(currentNodes, updatedPath.destinationNodeId);
-      const metricPoints = [sourcePoint, ...updatedPath.pathPoints, destinationPoint];
-      const metrics = metricPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))
-        ? pathwayMetrics(metricPoints)
-        : null;
-      const pathForSave = metrics ? { ...updatedPath, ...metrics } : updatedPath;
+      const preparation = preparePathwayForSave(
+        pathwayDraft?.id === target.id ? pathwayDraft : target,
+        currentNodes,
+        pathPoints,
+      );
+      if (preparation.issue) {
+        setError(preparation.issue);
+        return;
+      }
+      const pathForSave = preparation.pathway;
       const pathwayIssues = validatePathwayDraft(pathForSave, currentNodes, campusBoundary, {
-        existingPathways: currentPathways.filter((pathway) => pathway.id !== updatedPath.id),
+        existingPathways: currentPathways.filter((pathway) => pathway.id !== pathForSave.id),
         requireActiveEndpoints: true,
       });
       if (pathwayIssues.length > 0) {
@@ -2275,7 +2289,6 @@ const handleCreateBuilding = async () => {
         nestedRecords: {
           editingPathId,
           selectedPathPointIndex,
-          manualPathPointDrag,
           provisionalPathwayId,
           provisionalPathway: provisionalPathwayId
             ? localPathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
@@ -2310,7 +2323,6 @@ const handleCreateBuilding = async () => {
     localPathways,
     localFeatureName,
     localFeaturePoints,
-    manualPathPointDrag,
     mode,
     movingId,
     pathDraftDirty,
@@ -2372,7 +2384,6 @@ const handleCreateBuilding = async () => {
         setEditingPathId(null);
         setProvisionalPathwayId(null);
         setSelectedPathPointIndex(null);
-        setManualPathPointDrag(false);
         setPathDraftDirty(false);
       },
       local_feature: () => setLocalFeaturePoints([]),
@@ -2572,7 +2583,6 @@ const handleCreateBuilding = async () => {
         setPathStartNodeId(draft.provisionalGeometry.startNodeId ?? null);
         setEditingPathId(typeof records.editingPathId === "string" ? records.editingPathId : null);
         setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
-        setManualPathPointDrag(records.manualPathPointDrag === true);
         const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
           ? { ...records.provisionalPathway, pathPoints: restoredPoints }
           : null;
@@ -2808,7 +2818,12 @@ const handleCreateBuilding = async () => {
       return;
     }
     const before = pathwayDraftOriginal!;
-    const after = pathwayFrame;
+    const preparation = preparePathwayForSave(pathwayFrame, currentNodes, pathwayFrame.pathPoints);
+    if (preparation.issue) {
+      setError(preparation.issue);
+      return;
+    }
+    const after = preparation.pathway;
     const operations: WorkingOperation[] = [];
     if (JSON.stringify({ ...before, pathPoints: undefined }) !== JSON.stringify({ ...after, pathPoints: undefined })) {
       operations.push({
@@ -3228,12 +3243,13 @@ const handleCreateBuilding = async () => {
           </>
         ),
         primaryAction: {
-          label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point",
-          onSelect: () => setManualPathPointDrag((enabled) => !enabled),
+          label: "Update Pathway",
+          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0,
+          disabledReason: pathwayFrameIssues[0]?.message,
+          onSelect: applyPathwayFrame,
         },
         overflowActions: [
-          { label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point", onSelect: () => setManualPathPointDrag((enabled) => !enabled) },
-          { label: "✓ Save Pathway", onSelect: applyPathwayFrame },
+          { label: "✓ Update Pathway", onSelect: applyPathwayFrame },
           { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
           {
             label: "↩ Inspect Parent Pathway",
@@ -3637,7 +3653,7 @@ const handleCreateBuilding = async () => {
                 key={`path-point-${index}`}
                 position={point}
                 icon={createPointIcon(true)}
-                draggable={(manualPathPointDrag || activePathway?.status !== "Open") && selectedPathPointIndex === index}
+                draggable={selectedPathPointIndex === index}
                 eventHandlers={{
                   click: () => {
                     setSelectedPathPointIndex(index);
@@ -4368,8 +4384,10 @@ const handleCreateBuilding = async () => {
                         onChange={(e) => {
                           setEditingPathId(e.target.value);
                           const found = directoryPathways.find((p) => p.id === e.target.value) || localPathways.find((p) => p.id === e.target.value);
-                        if (found) setPathPoints(found.pathPoints || []);
-                        setSelectedPathPointIndex(null);
+                          if (found) {
+                            setPathPoints(found.pathPoints || []);
+                          }
+                          setSelectedPathPointIndex(null);
                         }}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
@@ -4381,7 +4399,7 @@ const handleCreateBuilding = async () => {
                       </select>
                     </div>
                     <p className="text-xs text-[#3f4941] my-2">
-                        Drag the selected Path Point to move it, or click the map to add Path Points.{" "}
+                        Select a Path Point to drag it, or click the map to add Path Points.{" "}
                       <strong>{pathPoints.length} points plotted</strong>.
                     </p>
                     <section aria-label="Pathway split handles" className="my-3 rounded-xl border border-[#dbe0e2] p-3">
@@ -4409,9 +4427,6 @@ const handleCreateBuilding = async () => {
                       </section>
                     )}
                     <div className="flex items-center gap-2 mt-3">
-                      {activePathway.status === "Open" && <button type="button" aria-pressed={manualPathPointDrag} onClick={() => setManualPathPointDrag((enabled) => !enabled)} className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4]">
-                        {manualPathPointDrag ? "Stop Dragging" : "Drag Path Point"}
-                      </button>}
                       <button
                         type="button"
                         disabled={!pathPoints.length}

@@ -319,7 +319,6 @@ describe("Map Editor preview", () => {
     await screen.findByTestId("path-geometry");
     fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
-    fireEvent.click(screen.getByRole("button", { name: "✥ Drag Path Point" }));
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
@@ -327,7 +326,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Suspended Drafts (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "Resume Pathway draft" }));
 
-    expect(screen.getByRole("button", { name: "Stop Dragging" })).toBeInTheDocument();
+    expect(screen.getByTestId("path-point-marker")).toHaveAttribute("data-draggable", "true");
     expect(screen.getByLabelText("Path Point latitude")).toHaveValue(16.7209);
   });
 
@@ -428,10 +427,68 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.72095" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6895" } });
     fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Save Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
 
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent(`${generatedMapFixture.pathways[0].name} · pathway`);
+  });
+
+  it("lets Reshape Pathway drag a point immediately and recomputes unknown distance before saving", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-unknown-distance", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "Unknown", time: "Unknown", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+    ]);
+    vi.mocked(services.map.updatePathway).mockImplementation(async (pathway) => {
+      const distanceMeters = Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0);
+      if (!(distanceMeters > 0)) throw new Error("distance_m must be greater than zero");
+      return pathway;
+    });
+    vi.mocked(services.map.updatePathway).mockClear();
+
+    renderEditor();
+    await screen.findByTestId("path-geometry");
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /North Walk/ }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "Path Point at 16.7207,121.6897" }))[0]);
+
+    expect(screen.getByTestId("path-point-marker")).toHaveAttribute("data-draggable", "true");
+    expect(screen.queryByRole("button", { name: "✥ Drag Path Point" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
+
+    await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
+      distance: expect.stringMatching(/^[1-9][0-9]* m$/),
+      pathPoints: [[16.7209, 121.6897]],
+    })));
+    expect(screen.queryByRole("alert")?.textContent ?? "").not.toContain("distance_m must be greater than zero");
+  });
+
+  it("blocks a zero-length Pathway before it can reach the backend", async () => {
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-zero-length", name: "Zero Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "Unknown", time: "Unknown", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    vi.mocked(services.map.updatePathway).mockClear();
+
+    renderEditor();
+    await screen.findByTestId("path-geometry");
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: /Zero Walk/ }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
+
+    const updateButton = screen.getAllByRole("button", { name: "Update Pathway" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    expect(updateButton).toBeDefined();
+    fireEvent.click(updateButton!);
+
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.map((alert) => alert.textContent).join(" ")).toContain("Pathway geometry must have a positive distance.");
+    expect(services.map.updatePathway).not.toHaveBeenCalled();
   });
 
   it("retains building geometry validation for an imported building", async () => {
@@ -1144,13 +1201,13 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6899" } });
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
     fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Save Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Walk · pathway");
   });
 
-  it("moves a selected Path Point only when manual drag mode is enabled", async () => {
+  it("moves a selected Path Point immediately while reshaping", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
       { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
@@ -1159,8 +1216,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
     const point = await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" });
     fireEvent.click(point);
-    expect(point).toHaveAttribute("data-draggable", "false");
-    fireEvent.click(screen.getByRole("button", { name: "✥ Drag Path Point" }));
+    expect(point).toHaveAttribute("data-draggable", "true");
     const draggablePoint = screen.getByRole("button", { name: "Path Point at 16.7207,121.6897" });
     const iconIdBeforeDrag = draggablePoint.getAttribute("data-icon-id");
     expect(draggablePoint).toHaveAttribute("data-icon-size", "30,30");
@@ -1188,7 +1244,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Pathway shade"), { target: { value: "Unshaded" } });
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Save Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
       id: "path-1",
