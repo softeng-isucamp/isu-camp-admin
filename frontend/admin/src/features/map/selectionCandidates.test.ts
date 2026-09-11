@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Building, Pathway, RouteNode } from "../../types";
+import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { findSelectionCandidates } from "./selectionCandidates";
 
 const nodes: RouteNode[] = [
@@ -69,5 +69,30 @@ describe("findSelectionCandidates", () => {
       expect.objectContaining({ id: "building-1", type: "building" }),
     ]));
     expect(candidates).toHaveLength(2);
+  });
+
+  it("deduplicates a canonical Building represented by both a Location and footprint", () => {
+    const location: Location = {
+      id: building.id,
+      name: building.name,
+      code: building.code,
+      type: "Building",
+      parentId: null,
+      status: "Active",
+      lat: 16.72,
+      lng: 121.6895,
+      positioned: true,
+    };
+
+    const candidates = findSelectionCandidates([16.72, 121.6895], {
+      locations: [location],
+      nodes: [],
+      pathways: [],
+      buildings: [building],
+    });
+
+    expect(candidates).toEqual([
+      expect.objectContaining({ id: building.id, type: "building", kindLabel: "Building" }),
+    ]);
   });
 });

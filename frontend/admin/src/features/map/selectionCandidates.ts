@@ -117,6 +117,18 @@ export function findSelectionCandidates(
     }
   });
 
+  // A footprint-backed Building is also present in the Locations collection
+  // because the Building's identity and descriptive content are canonical
+  // there. Treat those records as one selectable object, preferring the
+  // footprint candidate so selection opens the Building inspector.
+  const uniqueCandidates = new Map<string, SelectionCandidate>();
+  for (const candidate of candidates) {
+    const existing = uniqueCandidates.get(candidate.id);
+    if (!existing || (candidate.type === "building" && existing.type === "location")) {
+      uniqueCandidates.set(candidate.id, candidate);
+    }
+  }
+
   // Sort by distance and return
-  return candidates.sort((a, b) => a.distance - b.distance);
+  return Array.from(uniqueCandidates.values()).sort((a, b) => a.distance - b.distance);
 }

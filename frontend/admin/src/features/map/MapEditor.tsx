@@ -3862,7 +3862,7 @@ const handleCreateBuilding = async () => {
         {selectionPopover && (
           <div
             role="dialog"
-            aria-label="Choose overlapping feature"
+            aria-label="Choose overlapping object"
             data-anchor={selectionPopover.anchor.join(",")}
             className="absolute z-[1100] w-64 -translate-x-1/2 -translate-y-full rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
             style={{
@@ -3870,7 +3870,7 @@ const handleCreateBuilding = async () => {
               top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
             }}
           >
-            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose a feature</p>
+            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose an object</p>
             <div className="flex flex-col gap-1">
               {selectionPopover.candidates.map((candidate) => (
                 <button

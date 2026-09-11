@@ -348,7 +348,7 @@ describe("Map Editor preview", () => {
     const overlappingMarkers = await screen.findAllByRole("button", { name: "Map marker at 16.7205,121.6895" });
     fireEvent.click(overlappingMarkers[0]);
 
-    const popover = screen.getByRole("dialog", { name: "Choose overlapping feature" });
+    const popover = screen.getByRole("dialog", { name: "Choose overlapping object" });
     expect(popover).toHaveTextContent("Library");
     expect(popover).toHaveTextContent("Library Entrance");
     expect(popover).toHaveAttribute("data-anchor", "16.7205,121.6895");
