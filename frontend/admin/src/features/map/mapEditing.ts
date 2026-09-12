@@ -93,6 +93,22 @@ export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
   return best ?? areaPoint;
 };
 
+/** Builds the default human-facing label for a Pathway from its endpoints. */
+export const suggestedPathwayName = (
+  pathway: Pick<Pathway, "sourceNodeId" | "destinationNodeId">,
+  nodes: readonly RouteNode[],
+): string => {
+  const endpointNames = [pathway.sourceNodeId, pathway.destinationNodeId]
+    .map((nodeId) => nodes.find((node) => node.id === nodeId)?.name.trim() ?? "")
+    .filter(Boolean);
+  if (endpointNames.length !== 2) return "";
+  return endpointNames.sort((left, right) => left.localeCompare(right)).join(" – ");
+};
+
+/** Applies the endpoint suggestion only when the administrator left the name blank. */
+export const pathwayWithSuggestedName = (pathway: Pathway, nodes: readonly RouteNode[]): Pathway =>
+  pathway.name.trim() ? pathway : { ...pathway, name: suggestedPathwayName(pathway, nodes) };
+
 export type MapObjectType = "location" | "node" | "pathway" | "building";
 export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
 
