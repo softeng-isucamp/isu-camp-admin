@@ -24,6 +24,7 @@ import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
+import { MapLegend } from "./MapLegend";
 import {
   buildRestoreLocalFeatureOperation,
   buildRetireLocalFeatureOperation,
@@ -579,6 +580,7 @@ export function MapEditor() {
   const [pendingToolRequest, setPendingToolRequest] = useState<{
     toolType: ToolType;
     resumeDraftId?: string;
+    openNetworkBrowser?: boolean;
   } | null>(null);
 
   useEffect(
@@ -1265,7 +1267,6 @@ export function MapEditor() {
   const selectObject = useCallback(
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
       setSelected({ type, id });
-      if (type === "node" || type === "pathway") setNetworkBrowserOpen(true);
       setSelectionPopover(null);
       setLocalFeatureActionNotice("");
       if (type === "pathway") {
@@ -2535,7 +2536,7 @@ const handleCreateBuilding = async () => {
       },
       pathway: () => {
         setMode("path");
-        setNetworkBrowserOpen(true);
+        setNetworkBrowserOpen(false);
         if (!editingPathId && (directoryPathways.length || localPathways.length)) {
           const first = localPathways[0] || directoryPathways[0];
           if (first?.status === "Open") {
@@ -2557,12 +2558,24 @@ const handleCreateBuilding = async () => {
   };
 
   const selectTool = (toolType: ToolType) => {
-    if (toolType === activeTool) return;
+    if (toolType === activeTool) {
+      if (toolType === "pathway") setNetworkBrowserOpen(false);
+      return;
+    }
     if (workingSessionManager.hasActiveDraft()) {
       setPendingToolRequest({ toolType });
       return;
     }
     activateTool(toolType);
+  };
+
+  const browseWalkingNetwork = () => {
+    if (workingSessionManager.hasActiveDraft()) {
+      setPendingToolRequest({ toolType: "select", openNetworkBrowser: true });
+      return;
+    }
+    activateTool("select");
+    setNetworkBrowserOpen(true);
   };
 
   const restoreSuspendedDraft = (draftId: string) => {
@@ -2700,6 +2713,7 @@ const handleCreateBuilding = async () => {
     setPendingToolRequest(null);
     if (request.resumeDraftId) restoreSuspendedDraft(request.resumeDraftId);
     else activateTool(request.toolType);
+    if (request.openNetworkBrowser) setNetworkBrowserOpen(true);
   };
 
   useEffect(() => {
@@ -3481,7 +3495,8 @@ const handleCreateBuilding = async () => {
           className="w-full h-full"
         >
           <TileLayer
-            maxNativeZoom={19}
+            key={basemap}
+            maxNativeZoom={basemap === "satellite" ? 18 : 19}
             maxZoom={22}
             attribution={
               basemap === "satellite"
@@ -4022,6 +4037,7 @@ const handleCreateBuilding = async () => {
         <ToolRailDock
           activeTool={activeTool}
           onSelectTool={selectTool}
+          onBrowseWalkingNetwork={browseWalkingNetwork}
           suspendedDrafts={workingSessionState.suspendedDrafts}
           onResumeDraft={requestDraftResume}
         />
@@ -4112,11 +4128,7 @@ const handleCreateBuilding = async () => {
         )}
 
         {mode !== "select" && mode !== "move" && mode !== "local_feature" && selected?.type !== "path_point"
-          && !(mode === "path" && networkBrowserOpen && (
-            activePathway?.status === "Active"
-            || activePathway?.status === "Closed"
-            || (!activePathway && currentPathways.some((pathway) => pathway.status !== "Open"))
-          )) && (
+          && !networkBrowserOpen && (
           <aside className="map-glass-panel absolute right-4 top-20 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto rounded-[28px] p-5">
             {error && (
               <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
@@ -4749,43 +4761,14 @@ const handleCreateBuilding = async () => {
           </aside>
         )}
 
-        {inspectorModel && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
+        {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
           <>
             {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
             <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
           </>
         )}
 
-        <div className="map-glass-panel absolute bottom-4 left-4 z-[900] w-52 rounded-[24px] p-4 pointer-events-auto">
-          <div className="flex items-center justify-between text-xs font-extrabold text-[#191c1d] mb-2">
-            <span>Map Legend</span>
-            <svg className="w-4 h-4 text-[#3f4941]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-          </div>
-          <div className="flex flex-col gap-2 text-[11px] font-semibold text-[#3f4941]">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#005931] border-2 border-white ring-1 ring-[#005931]"></span>
-              <span>Campus Location</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#2563eb] border-2 border-white ring-1 ring-[#1d4ed8]"></span>
-              <span>Route Node</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-white border-2 border-[#005931]"></span>
-              <span>Path Point</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 border-t-2 border-dashed border-amber-600"></span>
-              <span>Walking Path</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-2.5 bg-[#8fd1bd]/50 border border-[#278b70]"></span>
-              <span>Building Footprint</span>
-            </div>
-          </div>
-        </div>
+        <MapLegend />
       </div>
 
       {buildingDetailsModalOpen && polygonClosed && buildingWorkflowMode === "create" && !editingBuildingId && (

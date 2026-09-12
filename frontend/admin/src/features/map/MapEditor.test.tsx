@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
@@ -29,7 +30,10 @@ vi.mock("react-leaflet", () => ({
   Polygon: ({ eventHandlers, pathOptions }: { eventHandlers?: { click?: () => void }; pathOptions?: { className?: string } }) => <button aria-label={pathOptions?.className ?? "building polygon"} onClick={eventHandlers?.click} />,
   Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string; color?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : pathOptions?.className?.startsWith("local-feature-") ? "local-feature-line" : "path-geometry"} data-positions={JSON.stringify(positions)} data-color={pathOptions?.color} onClick={eventHandlers?.click}>{children}</output>,
   Popup: () => null,
-  TileLayer: ({ attribution }: { attribution: string }) => <div aria-label="Map attribution">{attribution}</div>, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  TileLayer: ({ attribution, maxNativeZoom, maxZoom, url }: { attribution: string; maxNativeZoom?: number; maxZoom?: number; url: string }) => {
+    const [effectiveMaxNativeZoom] = useState(maxNativeZoom);
+    return <div aria-label="Map attribution" data-max-native-zoom={effectiveMaxNativeZoom} data-max-zoom={maxZoom} data-tile-url={url}>{attribution}</div>;
+  }, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useMap: () => ({
     flyTo: vi.fn(),
     fitBounds: (...args: unknown[]) => mapFitBounds(...args),
@@ -116,6 +120,16 @@ describe("Map Editor preview", () => {
     act(() => mapClickHandler?.({ latlng: { lat, lng } }));
   };
 
+  const choosePathwayEditor = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create or edit Pathway" }));
+  };
+
+  const chooseWalkingNetworkBrowser = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Browse Walking Network" }));
+  };
+
   it("switches drawing tools from a minimizable command dock without losing the active mode", async () => {
     renderEditor();
 
@@ -157,13 +171,40 @@ describe("Map Editor preview", () => {
     expect(screen.queryByRole("dialog", { name: "Create Outdoor Point Location" })).not.toBeInTheDocument();
   });
 
-  it("keeps Walking Network browser selection synchronized with the map", async () => {
+  it("offers mutually exclusive browsing and Pathway editing choices", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
       { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
 
     fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    const choices = screen.getByRole("menu", { name: "Pathway options" });
+    expect(within(choices).getByRole("menuitem", { name: "Browse Walking Network" })).toBeInTheDocument();
+    expect(within(choices).getByRole("menuitem", { name: "Create or edit Pathway" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Walking Network browser" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Calibrate Path Points" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(choices).getByRole("menuitem", { name: "Browse Walking Network" }));
+    const browser = screen.getByRole("complementary", { name: "Walking Network browser" });
+    expect(browser).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Calibrate Path Points" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(browser).getByRole("button", { name: /Library Walk/ }));
+    expect(screen.queryByRole("complementary", { name: "Library Walk object details" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create or edit Pathway" }));
+    expect(screen.queryByRole("complementary", { name: "Walking Network browser" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Calibrate Path Points" })).toBeInTheDocument();
+  });
+
+  it("keeps Walking Network browser selection synchronized with the map", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    await chooseWalkingNetworkBrowser();
     const pathwayResult = await screen.findByRole("button", { name: /Library Walk/ });
     fireEvent.click(pathwayResult);
     expect(pathwayResult).toHaveAttribute("aria-pressed", "true");
@@ -266,7 +307,7 @@ describe("Map Editor preview", () => {
     clickMap(16.7201, 121.6891);
     expect(screen.getByText("Points plotted: 1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     const firstPrompt = screen.getByRole("dialog", { name: "Switch to Pathway?" });
     fireEvent.click(screen.getByRole("button", { name: "Continue Editing" }));
 
@@ -277,7 +318,7 @@ describe("Map Editor preview", () => {
     );
     expect(screen.getByText("Points plotted: 1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
 
     expect(screen.getByRole("button", { name: "Pathway" })).toHaveAttribute("aria-pressed", "true");
@@ -317,7 +358,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
 
@@ -410,6 +451,16 @@ describe("Map Editor preview", () => {
     expect(screen.getByLabelText("Map attribution")).toHaveTextContent("OpenStreetMap contributors");
   });
 
+  it("keeps satellite imagery available through the same zoom range as the street map", async () => {
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Satellite" }));
+
+    expect(screen.getByTestId("map-container")).toHaveAttribute("data-max-zoom", "22");
+    expect(screen.getByLabelText("Map attribution")).toHaveAttribute("data-max-zoom", "22");
+    expect(screen.getByLabelText("Map attribution")).toHaveAttribute("data-max-native-zoom", "18");
+  });
+
   it("loads the generated OSM fixture and keeps boundary safeguards active", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
     vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
@@ -478,7 +529,7 @@ describe("Map Editor preview", () => {
 
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click((await screen.findAllByRole("button", { name: /North Walk/ }))[0]);
     fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
     fireEvent.click((await screen.findAllByRole("button", { name: "Path Point at 16.7207,121.6897" }))[0]);
@@ -509,7 +560,7 @@ describe("Map Editor preview", () => {
 
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click((await screen.findAllByRole("button", { name: /Zero Walk/ }))[0]);
     fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
 
@@ -1190,9 +1241,10 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    await chooseWalkingNetworkBrowser();
     fireEvent.change(screen.getByPlaceholderText("Search Pathways"), { target: { value: "Active Walk" } });
     fireEvent.click(await screen.findByRole("button", { name: /Active Walk/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Walking Network browser" }));
 
     expect(screen.getByRole("complementary", { name: "Active Walk object details" })).toBeInTheDocument();
     expect(screen.queryByText("Calibrate Path Points")).not.toBeInTheDocument();
@@ -1250,7 +1302,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6899" } });
@@ -1268,7 +1320,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     const point = await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" });
     fireEvent.click(point);
     expect(point).toHaveAttribute("data-draggable", "true");
@@ -1318,7 +1370,7 @@ describe("Map Editor preview", () => {
       { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(screen.getByRole("button", { name: "＋ New Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Map marker at 16.721,121.69" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Map marker at 16.7205,121.6895" })[1]);
@@ -1329,7 +1381,7 @@ describe("Map Editor preview", () => {
   it("starts a new Pathway with a blank name placeholder and constrained Way type", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([]);
     renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(screen.getByRole("button", { name: "＋ New Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Map marker at 16.721,121.69" }));
     fireEvent.click(screen.getAllByRole("button", { name: "Map marker at 16.7205,121.6895" })[1]);
@@ -1355,7 +1407,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     fireEvent.click(await screen.findByTestId("path-geometry"));
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     fireEvent.click(screen.getByRole("button", { name: "Add Path Point on segment 1" }));
 
     expect(screen.getByRole("button", { name: /Path Point at 16\.72075.*121\.68975/ })).toBeInTheDocument();
@@ -1368,7 +1420,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     fireEvent.click(await screen.findByTestId("path-geometry"));
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
 
     expect(screen.getByTestId("map-container")).toHaveAttribute("data-max-zoom", "22");
     expect(screen.getAllByTestId("saved-map-marker").some((marker) =>
@@ -1530,7 +1582,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building keywords"), { target: { value: "admin, office" } });
 
     // Switch to pathway tool to trigger suspend modal
-    fireEvent.click(screen.getByRole("button", { name: "Pathway" }));
+    await choosePathwayEditor();
     expect(screen.getByRole("dialog", { name: "Switch to Pathway?" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Keep Draft for Later (Suspend)" }));
