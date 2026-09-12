@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createLocationsBulkImportTemplate,
+  normalizeBackendDashboardSummary,
   normalizeBackendLocationPage,
   services,
   setMockFailure,
@@ -692,6 +693,43 @@ describe("mock service contracts", () => {
     expect((await services.network.pathways()).find((path) => path.id === original!.id)?.pathSequence.points).not.toEqual([
       { latitude: 16.72, longitude: 121.69 },
     ]);
+  });
+});
+
+describe("real dashboard service boundary", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("requests the selected range and normalizes the dashboard response", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const response = {
+      buildings: 12,
+      buildingChange: 2,
+      offices: 34,
+      locations: 98,
+      pathways: 21,
+      searches: 55,
+      topSearched: [{ rank: "1", locationId: "42", name: "Library", context: "Student Services", searches: 18 }],
+      recent: [{ id: "7", actor: "admin01", action: "update", target: "Library", createdAt: "2026-09-12T08:30:00Z", category: "Admin" }],
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ data: response }), { status: 200 }),
+    );
+
+    await expect(httpServices.dashboard.summary("month")).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/dashboard?range=month",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
+  it("rejects malformed dashboard data before it reaches the UI", () => {
+    expect(() => normalizeBackendDashboardSummary({ buildings: "12" }))
+      .toThrow("Backend returned a malformed dashboard summary.");
   });
 });
 

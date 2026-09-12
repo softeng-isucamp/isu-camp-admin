@@ -1,6 +1,7 @@
 import type {
   AuditEntry,
   Building,
+  DashboardRange,
   DashboardSummary,
   Location,
   LocationDraft,
@@ -155,6 +156,39 @@ export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
   return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: raw.detail == null ? undefined : String(raw.detail), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
+};
+
+const dashboardMetricsSchema = z.object({
+  buildings: z.number().int().nonnegative(),
+  buildingChange: z.number().int().nullable(),
+  offices: z.number().int().nonnegative(),
+  locations: z.number().int().nonnegative(),
+  pathways: z.number().int().nonnegative(),
+  searches: z.number().int().nonnegative(),
+  topSearched: z.array(z.object({
+    rank: z.string().min(1),
+    locationId: z.string().min(1).optional(),
+    name: z.string().min(1),
+    context: z.string(),
+    searches: z.number().int().nonnegative(),
+  })),
+  recent: z.array(z.unknown()),
+});
+
+export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary => {
+  const value = raw && typeof raw === "object" && "data" in raw
+    ? (raw as { data: unknown }).data
+    : raw;
+  const parsed = dashboardMetricsSchema.safeParse(value);
+  if (!parsed.success) throw new Error("Backend returned a malformed dashboard summary.");
+  try {
+    return {
+      ...parsed.data,
+      recent: parsed.data.recent.map((entry) => normalizeBackendAudit(entry as BackendAudit)),
+    };
+  } catch {
+    throw new Error("Backend returned a malformed dashboard summary.");
+  }
 };
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
@@ -541,7 +575,7 @@ export interface Services {
   };
 
   dashboard: {
-    summary(): Promise<DashboardSummary>;
+    summary(range?: DashboardRange): Promise<DashboardSummary>;
   };
 
   locations: {
@@ -999,9 +1033,15 @@ export const services: Services = {
 
   dashboard: {
 
-    summary: async () =>
-      wait({
+    summary: async (range = "week") => {
+      if (USE_HTTP_API) {
+        const raw = await apiJson<unknown>(`/api/dashboard?range=${encodeURIComponent(range)}`);
+        return normalizeBackendDashboardSummary(raw);
+      }
+      return wait({
         buildings: 142,
+
+        buildingChange: 2,
 
         offices: 1854,
 
@@ -1023,7 +1063,8 @@ export const services: Services = {
             clone(
             localAuditEntries.slice(0, 3)
           ),
-      }),
+      });
+    },
   },
 
 
