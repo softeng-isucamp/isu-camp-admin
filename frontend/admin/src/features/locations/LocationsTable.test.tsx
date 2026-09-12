@@ -53,13 +53,14 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByText(/flat view/i)).toBeInTheDocument();
   });
 
-  it("uses ten rows in both views and communicates placement only through the icon", async () => {
+  it("uses ten rows in both views without communicating placement through the icon", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
-    await screen.findAllByLabelText("Positioned location");
-    expect(container.querySelectorAll("tbody tr").length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText("Positioned location").length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText("Positioned location")[0]).toHaveStyle({ background: "#d6ede0", opacity: "1" });
+    await waitFor(() => expect(container.querySelectorAll("tbody tr").length).toBeGreaterThan(0));
+    expect(container.querySelectorAll(".location-type-symbol").length).toBeGreaterThan(0);
+    expect(container.querySelector(".location-type-symbol")).toHaveStyle({ background: "#f3f4f6", opacity: "1" });
+    expect(screen.queryByLabelText("Positioned location")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Unpositioned location")).not.toBeInTheDocument();
     expect(screen.queryByText("Not positioned")).not.toBeInTheDocument();
     expect(screen.queryByText("Positioned")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /toggle view mode/i }));
@@ -69,8 +70,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("moves to the next ten-row page and resets to page one after filtering", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
-    await screen.findAllByLabelText("Positioned location");
-    expect(screen.getByText(/Showing 1–10 of/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Showing 1–10 of/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByText(/Showing 11–20 of/i)).toBeInTheDocument();
     // The backend page contains ten matches; hierarchy mode may add their
@@ -127,11 +127,14 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await waitFor(() => expect(screen.queryByRole("row", { name: /Filtered Empty Floor/ })).not.toBeInTheDocument());
   });
 
-  it("dims an unpositioned type icon without rendering placement status text", async () => {
+  it("uses the same neutral symbol treatment for an unpositioned location", async () => {
     await services.locations.save({ id: "unpositioned-icon-test", name: "Unpositioned icon test", code: "ICON-TEST", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=Unpositioned%20icon%20test"]);
-    const icon = await screen.findByLabelText("Unpositioned location");
-    expect(icon).toHaveStyle({ opacity: "0.55", filter: "grayscale(1)" });
+    const row = await screen.findByRole("row", { name: /Unpositioned icon test/ });
+    const icon = row.querySelector(".location-type-symbol");
+    expect(icon).toHaveStyle({ background: "#f3f4f6", opacity: "1" });
+    expect(icon).not.toHaveStyle({ filter: "grayscale(1)" });
+    expect(icon.querySelector("svg")).toHaveAttribute("stroke", "#0c7441");
     expect(screen.queryByText("Not positioned")).not.toBeInTheDocument();
   });
 

@@ -1006,7 +1006,7 @@ export function Locations() {
                           </svg>
                         </button>
                       )}
-                      <div aria-label={item.positioned ? "Positioned location" : "Unpositioned location"} style={{ width: "34px", height: "34px", borderRadius: "10px", background: item.positioned ? "#d6ede0" : "#f3f4f6", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0, filter: item.positioned ? undefined : "grayscale(1)", opacity: item.positioned ? 1 : 0.55 }}>
+                      <div className="location-type-symbol" aria-hidden="true" style={{ width: "34px", height: "34px", borderRadius: "10px", background: "#f3f4f6", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0, opacity: 1 }}>
                         {renderLocationTypeIcon(item.type)}
                       </div>
                       <div>
