@@ -580,6 +580,29 @@ describe("Map Editor preview", () => {
     expect(await screen.findByRole("complementary", { name: "New Ramp object details" })).toBeInTheDocument();
   });
 
+  it("prevents duplicate Route Node saves while the request is in flight", async () => {
+    let resolveCreate: ((node: RouteNode) => void) | undefined;
+    vi.mocked(services.map.createRouteNode).mockClear();
+    vi.mocked(services.map.createRouteNode).mockImplementation((node) => new Promise((resolve) => {
+      resolveCreate = resolve;
+    }));
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Route Node" }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "New Ramp" } });
+    clickMap(16.7208, 121.6902);
+
+    const saveButton = screen.getByRole("button", { name: "Save Route Node" });
+    fireEvent.click(saveButton);
+    expect(await screen.findByRole("button", { name: "Saving Route Node…" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Saving Route Node…" }));
+
+    expect(services.map.createRouteNode).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveCreate?.({ id: "created-node", name: "New Ramp", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7208, lng: 121.6902 });
+    });
+    expect(await screen.findByRole("complementary", { name: "New Ramp object details" })).toBeInTheDocument();
+  });
+
   it("edits Location details from the object card and records a Working Session operation", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
       { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services" },

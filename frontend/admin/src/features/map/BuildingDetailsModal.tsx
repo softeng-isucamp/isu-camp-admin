@@ -9,9 +9,10 @@ interface BuildingDetailsModalProps {
   onClassificationChange: (classification: "Building" | "Facility") => void;
   onClose: () => void;
   onSubmit: () => void;
+  submitting?: boolean;
 }
 
-export function BuildingDetailsModal({ draft, classification, error, onChange, onClassificationChange, onClose, onSubmit }: BuildingDetailsModalProps) {
+export function BuildingDetailsModal({ draft, classification, error, onChange, onClassificationChange, onClose, onSubmit, submitting = false }: BuildingDetailsModalProps) {
   return (
     <Modal
       title="Add Building"
@@ -39,7 +40,7 @@ export function BuildingDetailsModal({ draft, classification, error, onChange, o
       <p className="text-[11px] text-[#526359]">The footprint supplies the Building’s map anchor; no copied outdoor coordinate stored on Building.</p>
       <div className="modal-actions">
         <Button variant="subtle" onClick={onClose}>Cancel</Button>
-        <Button onClick={onSubmit}>Save Building</Button>
+        <Button disabled={submitting} onClick={onSubmit}>{submitting ? "Saving Building…" : "Save Building"}</Button>
       </div>
     </Modal>
   );
