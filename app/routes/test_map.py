@@ -265,10 +265,12 @@ def test_delete_map_building_deletes_indoor_locations_and_audits_in_one_transact
     session = FakeSession()
     building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
     indoor_location = type("LocationRecord", (), {"location_id": 12, "building_id": 4})()
+    floor = type("FloorRecord", (), {"floor_id": 9, "building_id": 4})()
     audits = []
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([indoor_location])}))
+    monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([floor])}))
     monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
@@ -276,7 +278,7 @@ def test_delete_map_building_deletes_indoor_locations_and_audits_in_one_transact
 
     assert response.status_code == 200
     assert response.json["message"] == "Building and associated Indoor Locations permanently deleted."
-    assert session.deleted == [indoor_location, building]
+    assert session.deleted == [indoor_location, floor, building]
     assert session.commits == 1
     assert audits == [("Admin", None, "delete", "Building", 4, "Engineering Hall")]
 
@@ -289,6 +291,7 @@ def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([])}))
+    monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
     monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 

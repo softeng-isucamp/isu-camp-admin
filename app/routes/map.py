@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
+from model.floor import Floor
 from model.location import Location
 from model.route_node import RouteNode
 from model.pathway import Pathway
@@ -84,6 +85,19 @@ def _delete_building_locations(building_id):
     return locations
 
 
+def _delete_building_floors(building_id):
+    """Stage every Floor owned by a Building in this transaction.
+
+    Locations referencing these floors must already be staged for deletion
+    (see ``_delete_building_locations``) before this runs, since
+    ``location.floor_id`` is a foreign key into ``public.floor``.
+    """
+    floors = Floor.query.filter_by(building_id=building_id).all()
+    for floor in floors:
+        db.session.delete(floor)
+    return floors
+
+
 # ==========================================
 # GET MAP BUILDINGS
 # ==========================================
@@ -118,6 +132,7 @@ def delete_map_building(building_id):
             return jsonify({"success": False, "message": "Building not found."}), 404
 
         _delete_building_locations(building_id)
+        _delete_building_floors(building_id)
         db.session.delete(building)
         log_audit("Admin", None, "delete", "Building", building_id, building.building_name)
         db.session.commit()

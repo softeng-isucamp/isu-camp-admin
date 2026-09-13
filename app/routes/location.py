@@ -8,6 +8,9 @@ from model.building import Building
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from services.audit import log_audit
+from services.floor_lookup import floor_label as _floor_label
+from services.floor_lookup import floor_number_from_label as _floor_number_from_label
+from services.floor_lookup import resolve_floor as _resolve_floor
 from services.geometry import polygon_error as _polygon_error
 from services.location_listing import list_location_page
 
@@ -45,22 +48,7 @@ def _all_floors():
         raise
 
 
-def _floor_label(floor):
-    number = floor.floor_number
-
-    if number == 0:
-        return "Ground Floor"
-
-    suffix = (
-        "th"
-        if 10 < number % 100 < 14
-        else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
-    )
-
-    return f"{number}{suffix} Floor"
-
-
-def _legacy_floor(record, floors):
+def _location_floor(record, floors):
     if record.floor_id is None:
         return None
 
@@ -71,7 +59,7 @@ def _legacy_floor(record, floors):
 
     if floor is None or floor.building_id != record.building_id:
         raise ValueError(
-            f"Location {record.location_id} references an invalid legacy Floor relationship."
+            f"Location {record.location_id} references an invalid Floor relationship."
         )
 
     return floor
@@ -90,17 +78,11 @@ def _location_dto(record, buildings, floors):
 
     building = by_id.get(record.building_id)
 
-    legacy_floor = _legacy_floor(record, floors)
-
-    floor = getattr(record, "floor_level", None)
+    floor = _location_floor(record, floors)
 
     return record.to_location_dto(
         building=building.building_name if building else None,
-        floor=floor or (
-            _floor_label(legacy_floor)
-            if legacy_floor
-            else None
-        )
+        floor=_floor_label(floor) if floor else None
     )
 
 
@@ -174,6 +156,8 @@ def _validate(data, records, buildings):
         data.get("floor", "") or ""
     ).strip()
 
+    floor_number = _floor_number_from_label(floor_level)
+
     # Basic validation
     if not name:
         fields["name"] = "Location name is required."
@@ -221,6 +205,8 @@ def _validate(data, records, buildings):
             fields["floor"] = (
                 "A specific Floor Level is required for a new Indoor Location."
             )
+        elif floor_number is None:
+            fields["floor"] = "Select a valid Floor Level."
 
     elif parent_id not in (None, ""):
         fields["parentId"] = (
@@ -286,7 +272,7 @@ def _validate(data, records, buildings):
             if building
             else None
         ),
-        "floor_level": floor_level or None,
+        "floor_number": floor_number,
         "description": data.get(
             "function",
             data.get("description")
@@ -409,7 +395,7 @@ def create_location():
             }
         )
 
-    photo, photo_mime_type, error = _photo_upload()
+    photo, _photo_mime_type, error = _photo_upload()
 
     if error:
         return error
@@ -454,10 +440,15 @@ def create_location():
         # NORMAL LOCATION CREATION
         # ==================================================
 
+        floor_id = (
+            _resolve_floor(Floor, db.session, values["building_id"], values["floor_number"]).floor_id
+            if values["floor_number"] is not None
+            else None
+        )
+
         location = Location(
             building_id=values["building_id"],
-            floor_id=None,
-            floor_level=values["floor_level"],
+            floor_id=floor_id,
             type_id=values["type_id"],
             location_code=values["code"],
             location_name=values["name"],
@@ -467,7 +458,6 @@ def create_location():
 
         if photo is not None:
             location.photo = photo
-            location.photo_mime_type = photo_mime_type
 
         db.session.add(location)
 
