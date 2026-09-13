@@ -14,6 +14,7 @@ import L from "leaflet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
+import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
@@ -25,11 +26,7 @@ import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
-import {
-  buildRestoreLocalFeatureOperation,
-  buildRetireLocalFeatureOperation,
-  EDITABLE_LOCAL_FEATURE_FAMILIES,
-} from "./localFeatures";
+import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import {
   normalizeMapLayers,
@@ -63,14 +60,17 @@ import { createRoutableCrossing } from "./pathwayCommands";
 import { createWalkingNetworkImportTemplate, previewWalkingNetworkImport, walkingNetworkImportDescription, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
 import type { NetworkSnapshot } from "../../services/network";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
+import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
+import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
+import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
+import { createLocalMapFeatureWorkflow } from "./localFeature/LocalMapFeatureWorkflow";
+import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
 import {
   findSelectionCandidates,
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
 import {
-  buildAttachBuildingCompoundOperation,
-  buildCreateBuildingCompoundOperation,
   detectBuildingFootprintOverlap,
   getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
@@ -454,41 +454,6 @@ const routeNodePoint = (nodes: RouteNode[], id: string): [number, number] => {
   return node ? [node.lat, node.lng] : [NaN, NaN];
 };
 
-const pathwayLengthInMeters = (points: [number, number][]) =>
-  points.slice(1).reduce((total, point, index) => total + distanceInMeters(points[index], point), 0);
-
-const pathwayMetrics = (points: [number, number][]) => {
-  const distanceMeters = pathwayLengthInMeters(points);
-  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return null;
-  return {
-    distance: `${Math.max(1, Math.round(distanceMeters))} m`,
-    // Use a conservative walking speed for the initial editable estimate.
-    time: `${Math.max(1, Math.ceil(distanceMeters / 80))} min`,
-  };
-};
-
-interface PathwaySavePreparation {
-  pathway: Pathway;
-  issue?: string;
-}
-
-const preparePathwayForSave = (
-  pathway: Pathway,
-  nodes: RouteNode[],
-  points: [number, number][],
-): PathwaySavePreparation => {
-  const sourcePoint = routeNodePoint(nodes, pathway.sourceNodeId);
-  const destinationPoint = routeNodePoint(nodes, pathway.destinationNodeId);
-  const pathPoints = withoutEndpointPathPoints([...points], sourcePoint, destinationPoint);
-  const metricPoints = [sourcePoint, ...pathPoints, destinationPoint];
-  if (!metricPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))) {
-    return { pathway: { ...pathway, pathPoints }, issue: "Pathway endpoints and Path Points must use valid coordinates." };
-  }
-  const metrics = pathwayMetrics(metricPoints);
-  if (!metrics) return { pathway: { ...pathway, pathPoints }, issue: "Pathway geometry must have a positive distance." };
-  return { pathway: { ...pathway, pathPoints, ...metrics } };
-};
-
 function MapController({
   onMapClick,
   flyTarget,
@@ -567,14 +532,22 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
     && Array.isArray(pathway.pathPoints);
 };
 
-const MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY = "isu-map-editor-polygon-draft";
+const MAP_EDITOR_PROJECT_ID = "proj-echague";
 
 export function MapEditor() {
+  const { session } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeLocation = useLocation();
   const [workingSessionManager] = useState(() => new WorkingSessionManager());
+  const [workingSessionJournal] = useState(() => createWorkingSessionJournal(window.localStorage));
   const [draftVersion, setDraftVersion] = useState(1);
+  const draftVersionRef = useRef(draftVersion);
+  draftVersionRef.current = draftVersion;
+  const workingSessionKey = useMemo<WorkingSessionKey | null>(() => session ? ({
+    administratorId: session.id,
+    projectId: MAP_EDITOR_PROJECT_ID,
+  }) : null, [session?.id]);
   const saveRequestId = useRef(`map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const [, setWorkingSessionRevision] = useState(0);
   const [pendingToolRequest, setPendingToolRequest] = useState<{
@@ -589,6 +562,48 @@ export function MapEditor() {
     }),
     [workingSessionManager],
   );
+
+  useEffect(() => {
+    if (!workingSessionKey) return undefined;
+    const stored = workingSessionJournal.load(workingSessionKey);
+    if (stored) {
+      workingSessionManager.hydrate(stored.snapshot);
+      const recoveredDraft = workingSessionManager.getActiveDraft();
+      if (recoveredDraft) restoreWorkingSessionDraft(recoveredDraft);
+    }
+
+    const saveRecovery = () => workingSessionJournal.save(workingSessionKey, {
+      schemaVersion: 1,
+      adminDraftVersion: draftVersionRef.current,
+      snapshot: workingSessionManager.exportSnapshot(),
+    });
+    saveRecovery();
+    return workingSessionManager.subscribe(saveRecovery);
+  }, [workingSessionJournal, workingSessionKey, workingSessionManager]);
+
+  const routeNodeWorkflow = useMemo(() => createRouteNodeWorkflow({
+    adapter: services.map,
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const pathwayWorkflow = useMemo(() => createPathwayWorkflow({
+    adapter: services.map,
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const buildingFootprintWorkflow = useMemo(() => createBuildingFootprintWorkflow({
+    adapter: {
+      createBuilding: async (draft) => {
+        if (typeof services.locations.save === "function") return services.locations.save(draft);
+        return { ...draft, id: draft.id ?? `building-${Date.now()}` } as Location;
+      },
+      saveFootprint: async (building, footprintPoints) => {
+        await services.map.save({ buildings: [{ ...building, points: [...footprintPoints] }] });
+      },
+    },
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const localMapFeatureWorkflow = useMemo(() => createLocalMapFeatureWorkflow({
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
 
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
@@ -612,7 +627,7 @@ export function MapEditor() {
   });
   const { data: draftBootstrap } = useQuery({
     queryKey: ["map-editor-bootstrap", "proj-echague"],
-    queryFn: () => services.map.getMapEditorBootstrap!("proj-echague"),
+    queryFn: () => services.map.getMapEditorBootstrap!(MAP_EDITOR_PROJECT_ID),
     enabled: false,
     retry: false,
   });
@@ -739,98 +754,6 @@ export function MapEditor() {
   const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const persistedDraft = window.sessionStorage.getItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-    if (!persistedDraft) return;
-
-    try {
-      const parsed = JSON.parse(persistedDraft) as {
-        points?: [number, number][];
-        polygonClosed?: boolean;
-        buildingForm?: BuildingIdentityInput;
-        buildingClassification?: "Building" | "Facility";
-        buildingWorkflowMode?: "create" | "attach";
-        selectedAttachBuildingId?: string | null;
-        attachBuildingSearch?: string;
-        editingBuildingId?: string | null;
-        polygonInteraction?: "draw" | "reshape" | "move";
-        buildingDetailsModalOpen?: boolean;
-        mode?: "select" | "place" | "path" | "area" | "move" | "local_feature";
-      };
-
-      if (!Array.isArray(parsed.points) || parsed.points.length === 0) return;
-
-      setPoints(parsed.points);
-      setPolygonClosed(Boolean(parsed.polygonClosed));
-      if (parsed.buildingForm) {
-        setBuildingForm({
-          name: typeof parsed.buildingForm.name === "string" ? parsed.buildingForm.name : "",
-          code: typeof parsed.buildingForm.code === "string" ? parsed.buildingForm.code : "",
-          function: typeof parsed.buildingForm.function === "string" ? parsed.buildingForm.function : "",
-          keywords: typeof parsed.buildingForm.keywords === "string" ? parsed.buildingForm.keywords : "",
-          status: "Active",
-        });
-      }
-      if (parsed.buildingClassification === "Facility") setBuildingClassification("Facility");
-      else setBuildingClassification("Building");
-      if (parsed.buildingWorkflowMode === "create" || parsed.buildingWorkflowMode === "attach") {
-        setBuildingWorkflowMode(parsed.buildingWorkflowMode);
-      }
-      if (typeof parsed.selectedAttachBuildingId === "string" || parsed.selectedAttachBuildingId === null) {
-        setSelectedAttachBuildingId(parsed.selectedAttachBuildingId);
-      }
-      if (typeof parsed.attachBuildingSearch === "string") {
-        setAttachBuildingSearch(parsed.attachBuildingSearch);
-      }
-      if (typeof parsed.editingBuildingId === "string" || parsed.editingBuildingId === null) {
-        setEditingBuildingId(parsed.editingBuildingId);
-      }
-      if (parsed.polygonInteraction === "draw" || parsed.polygonInteraction === "reshape" || parsed.polygonInteraction === "move") {
-        setPolygonInteraction(parsed.polygonInteraction);
-      }
-      setBuildingDetailsModalOpen(parsed.buildingDetailsModalOpen === true);
-      if (parsed.mode === "area") setMode("area");
-    } catch {
-      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hasDraftGeometry = points.length > 0 || polygonClosed;
-    if (!hasDraftGeometry) {
-      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-      return;
-    }
-
-    const payload = {
-      points,
-      polygonClosed,
-      buildingForm,
-      buildingClassification,
-      buildingWorkflowMode,
-      selectedAttachBuildingId,
-      attachBuildingSearch,
-      editingBuildingId,
-      polygonInteraction,
-      buildingDetailsModalOpen,
-      mode,
-    };
-    window.sessionStorage.setItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY, JSON.stringify(payload));
-  }, [
-    attachBuildingSearch,
-    buildingClassification,
-    buildingDetailsModalOpen,
-    buildingForm,
-    buildingWorkflowMode,
-    editingBuildingId,
-    mode,
-    points,
-    polygonClosed,
-    polygonInteraction,
-    selectedAttachBuildingId,
-  ]);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const [dirty, setDirty] = useState(false);
@@ -1501,32 +1424,24 @@ export function MapEditor() {
   const handleSavePosition = async () => {
     if (!temporary) return;
     if (!beginSaving("position")) return;
-    if (!pointOnCampus(temporary, campusBoundary)) {
-      setError("The new position must stay inside the ISU Echague campus boundary.");
-      endSaving();
-      return;
-    }
     if (movingId) {
       const existing = currentNodes.find((node) => node.id === movingId);
-      const updated = existing ? { ...existing, lat: temporary[0], lng: temporary[1] } : null;
-      if (updated) {
-        let persisted: RouteNode;
-        try {
-          persisted = await services.map.updateRouteNode(updated);
-        } catch (cause) {
-          setError(cause instanceof Error ? cause.message : "Failed to move Route Node. Your draft is still open; retry when ready.");
+      if (existing) {
+        const updated = { ...existing, lat: temporary[0], lng: temporary[1] };
+        const result = await routeNodeWorkflow.finalize({
+          kind: "update",
+          before: existing,
+          after: updated,
+          context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+          description: `Move ${updated.name}`,
+        });
+        if (!result.ok) {
+          setError(result.message);
           endSaving();
           return;
         }
+        const persisted = result.node;
         setLocalNodes((current) => [...current.filter((n) => n.id !== movingId), persisted]);
-        workingSessionManager.executeOperation({
-          type: "update_geometry",
-          domain: "Walking Network",
-          entityId: movingId,
-          before: existing as unknown as Record<string, unknown>,
-          after: persisted as unknown as Record<string, unknown>,
-          description: `Move ${persisted.name}`,
-        });
         try {
           await refreshMapData();
         } catch (cause) {
@@ -1559,28 +1474,21 @@ export function MapEditor() {
       lat: temporary[0],
       lng: temporary[1],
     };
-    const issues = validateRouteNodeDraft(newNode, {
-      buildings: currentBuildings,
-      locations: currentLocations,
-      campusBoundary,
+    const { id: _pendingId, ...draft } = newNode;
+    const result = await routeNodeWorkflow.finalize({
+      kind: "create",
+      draft,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Place ${newNode.name}`,
     });
-    if (issues.length > 0) {
-      setError(issues[0].message);
+    if (!result.ok) {
+      setError(result.message);
       endSaving();
       return;
     }
-    let confirmedNode: RouteNode;
-    try {
-      confirmedNode = { ...(await services.map.createRouteNode(newNode)), name: newNode.name };
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to create Route Node. Your draft is still open; retry when ready.");
-      endSaving();
-      return;
-    }
+    const confirmedNode = result.node;
     try {
       setLocalNodes((current) => [...current, confirmedNode]);
-      workingSessionManager.executeOperation({ type: "create_entity", domain: "Walking Network", entityId: confirmedNode.id,
-        before: null, after: confirmedNode as unknown as Record<string, unknown>, description: `Place ${confirmedNode.name}` });
       await refreshMapData();
       if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
         setNonRoutableBuildingId(null);
@@ -1642,12 +1550,22 @@ export function MapEditor() {
   const linkExistingEntrance = async (building: Building, node: RouteNode) => {
     const associatedPlaceId = selectedBuildingLocation?.id ?? building.id;
     const updated = { ...node, nodeType: "Entrance" as const, associatedPlaceId };
+    const result = await routeNodeWorkflow.finalize({
+      kind: "update",
+      before: node,
+      after: updated,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Link ${node.name} to ${building.name}`,
+    });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
     try {
-      const persisted = await services.map.updateRouteNode(updated);
-      updateNodeWithOperation(node, persisted, `Link ${node.name} to ${building.name}`);
+      updateNode(result.node);
       await refreshMapData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to link Route Node. The association was not changed; retry when ready.");
+      setError(cause instanceof Error ? cause.message : "The Entrance association was saved, but the map could not refresh.");
       return;
     }
     setLinkingBuildingEntrance(false);
@@ -1659,46 +1577,33 @@ export function MapEditor() {
     if (!beginSaving("pathway")) return;
     const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
-      const preparation = preparePathwayForSave(
-        pathwayWithSuggestedName(pathwayDraft?.id === target.id ? pathwayDraft : target, currentNodes),
-        currentNodes,
+      const draft = {
+        ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
         pathPoints,
-      );
-      if (preparation.issue) {
-        setError(preparation.issue);
+      };
+      const result = provisionalPathwayId === target.id
+        ? await pathwayWorkflow.finalize({
+            kind: "create",
+            draft,
+            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+            description: `Create ${draft.name}`,
+          })
+        : await pathwayWorkflow.finalize({
+            kind: "update",
+            before: target,
+            after: draft,
+            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+            description: `Reshape ${target.name}`,
+          });
+      if (!result.ok) {
+        setError(result.message);
         endSaving();
         return;
       }
-      const pathForSave = preparation.pathway;
-      const pathwayIssues = validatePathwayDraft(pathForSave, currentNodes, campusBoundary, {
-        existingPathways: currentPathways.filter((pathway) => pathway.id !== pathForSave.id),
-        requireActiveEndpoints: true,
-      });
-      if (pathwayIssues.length > 0) {
-        setError(pathwayIssues[0].message);
-        endSaving();
-        return;
-      }
-      let persistedPath: Pathway;
-      try {
-        persistedPath = provisionalPathwayId === target.id
-          ? await services.map.createPathway(pathForSave)
-          : await services.map.updatePathway(pathForSave);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Failed to save Pathway. Your draft is still open; retry when ready.");
-        endSaving();
-        return;
-      }
+      const persistedPath = result.pathway;
       setLocalPathways((current) => [...current.filter((p) => p.id !== editingPathId && p.id !== target.id), persistedPath]);
       setPathwayDraft({ ...persistedPath });
       setPathwayDraftOriginal({ ...persistedPath });
-      workingSessionManager.executeOperation({
-        type: provisionalPathwayId === target.id ? "create_entity" : "update_geometry",
-        domain: "Walking Network", entityId: persistedPath.id,
-        before: provisionalPathwayId === target.id ? null : target as unknown as Record<string, unknown>,
-        after: persistedPath as unknown as Record<string, unknown>,
-        description: provisionalPathwayId === target.id ? `Create ${persistedPath.name}` : `Reshape ${target.name}`,
-      });
       try {
         await refreshMapData();
       } catch (cause) {
@@ -1740,11 +1645,6 @@ export function MapEditor() {
     if (editingBuildingId) {
       if (!canFinishFootprint) return;
       if (!beginSaving("building")) return;
-      if (!geometryOnCampus(points, campusBoundary)) {
-        setError("The building footprint must stay inside the ISU Echague campus boundary.");
-        endSaving();
-        return;
-      }
       const footprintLink = currentFeatureLinks.find((link) =>
         link.targetDomain === "Locations"
         && link.targetEntityId === editingBuildingId
@@ -1760,36 +1660,29 @@ export function MapEditor() {
         endSaving();
         return;
       }
-      const updatedFootprint: LocalMapFeatureEntity = {
-        ...footprint,
-        coordinates: [...points],
-        linkedBuildingId: editingBuildingId,
-      };
       const buildingForSave = currentBuildings.find((building) => building.id === editingBuildingId);
       if (!buildingForSave) {
         setError("This Building is no longer available. Reload the map and retry the footprint update.");
         endSaving();
         return;
       }
-      try {
-        await services.map.save({ buildings: [{ ...buildingForSave, points: [...points] }] });
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Failed to update Building footprint. Your draft is still open; retry when ready.");
+      const result = await buildingFootprintWorkflow.finalize({
+        kind: "reshape",
+        building: buildingForSave,
+        footprint,
+        link: footprintLink,
+        points: [...points],
+        context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+      });
+      if (!result.ok) {
+        setError(result.message);
         endSaving();
         return;
       }
-      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== updatedFootprint.id), updatedFootprint]);
+      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== result.footprint.id), result.footprint]);
       setLocalBuildings((current) => current.map((building) =>
-        building.id === editingBuildingId ? { ...building, points: [...points] } : building,
+        building.id === editingBuildingId ? result.building : building,
       ));
-      workingSessionManager.executeOperation({
-        type: "update_geometry",
-        domain: "Local Map Data",
-        entityId: updatedFootprint.id,
-        before: footprint as unknown as Record<string, unknown>,
-        after: updatedFootprint as unknown as Record<string, unknown>,
-        description: `Reshape linked footprint for ${buildingName.trim() || editingBuildingId}`,
-      });
       setDirty(true);
       void refreshMapData();
       cancelBuildingDraft();
@@ -1801,66 +1694,15 @@ export function MapEditor() {
     }
   };
 
-  const completeBuildingWorkflow = (building: Building, intent: "create" | "attach") => {
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
+  const completeBuildingWorkflow = (
+    result: Extract<Awaited<ReturnType<typeof buildingFootprintWorkflow.finalize>>, { ok: true }>,
+  ) => {
+    if (result.location) {
+      setLocalLocations((current) => [...current.filter((item) => item.id !== result.location!.id), result.location!]);
     }
-
-    let compoundBatch: WorkingOperation;
-    if (intent === "create") {
-      const identityInput: BuildingIdentityInput = {
-        name: building.name,
-        code: building.code,
-        type: buildingClassification,
-        function: buildingFunction,
-        keywords: buildingKeywords,
-        status: "Active",
-      };
-      const identityIssues = validateBuildingIdentityDetails(identityInput, currentLocations);
-      if (identityIssues.length > 0) {
-        setError(identityIssues[0].message);
-        return;
-      }
-      compoundBatch = buildCreateBuildingCompoundOperation(identityInput, points, building.id);
-      const locRecord = compoundBatch.nestedOperations![0].after as unknown as Location;
-      setLocalLocations((current) => [...current.filter((item) => item.id !== locRecord.id), locRecord]);
-    } else {
-      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
-      if (!eligibility.eligible) {
-        setError(eligibility.reason);
-        return;
-      }
-      compoundBatch = buildAttachBuildingCompoundOperation(building, points);
-    }
-
-    const footprintOp = compoundBatch.nestedOperations!.find(
-      (op) => op.domain === "Local Map Data" && op.type === "create_entity",
-    );
-    const linkOp = compoundBatch.nestedOperations!.find(
-      (op) => op.domain === "Local Map Data" && op.type === "link_feature",
-    );
-    const footprint = footprintOp?.after as unknown as LocalMapFeatureEntity;
-    const link = linkOp?.after as unknown as FeatureLinkEntity;
-
-    // The current renderer still consumes Building.points. Keep this local
-    // compatibility projection separate from the geometry-free Building
-    // record stored in the compound operation above.
-    const renderedBuilding = { ...building, type: buildingClassification, points: [...points] };
-    setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), renderedBuilding]);
-    if (footprint) {
-      setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== footprint.id), footprint]);
-    }
-    if (link) {
-      setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== building.id), link]);
-    }
-    workingSessionManager.executeBatch(
-      intent === "create" ? `Create ${building.name} with footprint` : `Attach footprint to ${building.name}`,
-      "Local Map Data",
-      footprint?.id ?? compoundBatch.entityId,
-      compoundBatch.nestedOperations!,
-    );
+    setLocalBuildings((current) => [...current.filter((item) => item.id !== result.building.id), result.building]);
+    setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== result.footprint.id), result.footprint]);
+    setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== result.building.id), result.link]);
     setDirty(true);
     setPoints([]);
     resetBuildingForm();
@@ -1869,112 +1711,72 @@ export function MapEditor() {
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setMode("select");
-    setSelected({ type: "building", id: building.id });
-    setPlacingAssociatedBuildingId(building.id);
+    setSelected({ type: "building", id: result.building.id });
+    setPlacingAssociatedBuildingId(result.building.id);
     const hasActiveEntrance = currentNodes.some((node) =>
       node.nodeType === "Entrance"
-      && node.associatedPlaceId === building.id
+      && node.associatedPlaceId === result.building.id
       && node.status !== "Inactive",
     );
-    setNonRoutableBuildingId(hasActiveEntrance ? null : building.id);
+    setNonRoutableBuildingId(hasActiveEntrance ? null : result.building.id);
     completeToolDraft("polygon");
   };
 
-const handleCreateBuilding = async () => {
+  const handleCreateBuilding = async () => {
     if (!canSaveBuilding) {
       setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
       return;
     }
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
-    }
     if (!beginSaving("building")) return;
-
-    if (typeof services.locations.save === "function") {
-      setError("");
-      try {
-        const saved = await services.locations.save({
-          name: buildingName.trim(),
-          code: buildingCode.trim(),
-          type: buildingClassification,
-          parentId: null,
-          function: buildingFunction.trim(),
-          keywords: buildingKeywords.trim() || undefined,
-          status: "Active",
-          lat: null,
-          lng: null,
-          positioned: false,
-          polygonCoordinates: points,
-        });
-        const renderedBuilding: Building = {
-          id: saved.id,
-          name: saved.name,
-          code: saved.code,
-          type: saved.type === "Facility" ? "Facility" : "Building",
-          status: saved.status,
-          points: [...points],
-        };
-        setLocalLocations((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-        setLocalBuildings((current) => [...current.filter((item) => item.id !== saved.id), renderedBuilding]);
-        setBuildingDetailsModalOpen(false);
-        setPoints([]);
-        resetBuildingForm();
-        setPolygonClosed(false);
-        setPolygonInteraction("draw");
-        setMode("select");
-        setSelected({ type: "building", id: saved.id });
-        setPlacingAssociatedBuildingId(saved.id);
-        const hasActiveEntrance = currentNodes.some((node) =>
-          node.nodeType === "Entrance"
-          && node.associatedPlaceId === saved.id
-          && node.status !== "Inactive",
-        );
-        setNonRoutableBuildingId(hasActiveEntrance ? null : saved.id);
-        await refreshMapData();
-        completeToolDraft("polygon");
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to create Building.");
-      } finally {
-        endSaving();
-      }
+    const result = await buildingFootprintWorkflow.finalize({
+      kind: "create",
+      identity: {
+        name: buildingName,
+        code: buildingCode,
+        type: buildingClassification,
+        function: buildingFunction,
+        keywords: buildingKeywords,
+        status: "Active",
+      },
+      points: [...points],
+      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+    });
+    if (!result.ok) {
+      setError(result.message);
+      endSaving();
       return;
     }
-
-    completeBuildingWorkflow({
-      id: `building-${Date.now()}`,
-      name: buildingName.trim(),
-      code: buildingCode.trim(),
-      points: [],
-    }, "create");
+    setError("");
+    setBuildingDetailsModalOpen(false);
+    completeBuildingWorkflow(result);
+    try {
+      await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
+    }
     endSaving();
   };
 
   const handleAttachBuilding = async () => {
     const existing = buildingAssociationOptions.find((building) => building.id === selectedAttachBuildingId);
     if (!existing) return;
-    const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
-    if (!eligibility.eligible) {
-      setError(eligibility.reason);
-      return;
-    }
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
-    }
     if (!beginSaving("building")) return;
-    try {
-      await services.map.save({ buildings: [{ ...existing, points: [...points] }] });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to save Building footprint. Your draft is still open; retry when ready.");
+    const result = await buildingFootprintWorkflow.finalize({
+      kind: "attach",
+      building: existing,
+      points: [...points],
+      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+    });
+    if (!result.ok) {
+      setError(result.message);
       endSaving();
       return;
     }
-    completeBuildingWorkflow(existing, "attach");
+    completeBuildingWorkflow(result);
     try {
       await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
     } finally {
       endSaving();
     }
@@ -2033,6 +1835,7 @@ const handleCreateBuilding = async () => {
     setMode("select");
     setSelected(null);
     workingSessionManager.reset();
+    if (workingSessionKey) workingSessionJournal.clear(workingSessionKey);
   };
 
   const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
@@ -2481,37 +2284,23 @@ const handleCreateBuilding = async () => {
     const existingBoundary = selectedLocalFeatureFamily === "campus_boundary"
       ? currentLocalFeatures.find((feature) => feature.family === "campus_boundary" && feature.status !== "retired")
       : undefined;
-    const feature: LocalMapFeatureEntity = {
-      ...(existingBoundary ?? {}),
-      id: existingBoundary?.id ?? `local-feature-${Date.now()}`,
+    const result = localMapFeatureWorkflow.finalize({
+      kind: "create",
       family: selectedLocalFeatureFamily,
-      name: localFeatureName.trim(),
-      isEditable: true,
-      geometryType: selectedLocalFeatureDefinition.geometryType,
+      name: localFeatureName,
       coordinates: [...localFeaturePoints],
-      surface: existingBoundary?.surface ?? "unknown",
-      access: existingBoundary?.access ?? "unknown",
-      direction: selectedLocalFeatureDefinition.geometryType === "line"
-        ? existingBoundary?.direction ?? "both"
-        : undefined,
-      status: "active",
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== feature.id), feature]);
-    workingSessionManager.executeOperation({
-      type: existingBoundary ? "update_geometry" : "create_entity",
-      domain: "Local Map Data",
-      entityId: feature.id,
-      before: existingBoundary ? existingBoundary as unknown as Record<string, unknown> : null,
-      after: feature as unknown as Record<string, unknown>,
-      description: existingBoundary
-        ? "Replace Campus Boundary geometry"
-        : `Create ${selectedLocalFeatureDefinition.label}`,
+      campusBoundary,
+      existingBoundary,
     });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     setLocalFeaturePoints([]);
     setDirty(true);
-    setSelected({ type: "local_feature", id: feature.id });
+    setSelected({ type: "local_feature", id: result.feature.id });
     setMode("select");
-    workingSessionManager.discardActiveDraft();
   };
 
   const activateTool = (toolType: ToolType) => {
@@ -2578,9 +2367,7 @@ const handleCreateBuilding = async () => {
     setNetworkBrowserOpen(true);
   };
 
-  const restoreSuspendedDraft = (draftId: string) => {
-    const draft = workingSessionManager.resumeSuspendedDraft(draftId);
-    if (!draft) return;
+  function restoreWorkingSessionDraft(draft: ActiveToolDraft) {
     const restoredPoints = (draft.provisionalGeometry.points ?? []).map((point) => [
       point.lat ?? point.y,
       point.lng ?? point.x,
@@ -2691,6 +2478,11 @@ const handleCreateBuilding = async () => {
       },
     };
     restoreHandlers[draft.toolType]();
+  }
+
+  const restoreSuspendedDraft = (draftId: string) => {
+    const draft = workingSessionManager.resumeSuspendedDraft(draftId);
+    if (draft) restoreWorkingSessionDraft(draft);
   };
 
   const requestDraftResume = (draftId: string) => {
@@ -2783,31 +2575,30 @@ const handleCreateBuilding = async () => {
     });
     setDirty(true);
   };
-  const updateNodeWithOperation = (before: RouteNode, after: RouteNode, description: string) => {
-    updateNode(after);
-    recordPropertyOperation("Walking Network", before.id, before, after, description);
-  };
   const routeNodeFrame = selectedNode && routeNodeDraft?.id === selectedNode.id ? routeNodeDraft : selectedNode;
   const routeNodeFrameDirty = Boolean(routeNodeDraft && routeNodeDraftOriginal
     && JSON.stringify(routeNodeDraft) !== JSON.stringify(routeNodeDraftOriginal));
   const applyRouteNodeFrame = async () => {
     if (!routeNodeDraft || !routeNodeDraftOriginal || !routeNodeFrameDirty) return;
-    const issues = validateRouteNodeDraft(routeNodeDraft, { buildings: currentBuildings, locations: currentLocations, campusBoundary });
-    if (issues.length) {
-      setError(issues[0].message);
-      window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issues[0].field === "name" ? "Route Node name" : issues[0].field === "nodeType" ? "Route Node type" : issues[0].field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
-      return;
-    }
     if (!beginSaving("route-node-metadata")) return;
-    let persisted: RouteNode;
-    try {
-      persisted = await services.map.updateRouteNode(routeNodeDraft);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to update Route Node. Your draft is still open; retry when ready.");
+    const result = await routeNodeWorkflow.finalize({
+      kind: "update",
+      before: routeNodeDraftOriginal,
+      after: routeNodeDraft,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Edit ${routeNodeDraft.name}`,
+    });
+    if (!result.ok) {
+      setError(result.message);
+      const issue = result.issues?.[0];
+      if (issue) {
+        window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issue.field === "name" ? "Route Node name" : issue.field === "nodeType" ? "Route Node type" : issue.field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
+      }
       endSaving();
       return;
     }
-    updateNodeWithOperation(routeNodeDraftOriginal, persisted, `Edit ${persisted.name}`);
+    const persisted = result.node;
+    updateNode(persisted);
     setRouteNodeDraft({ ...persisted });
     setRouteNodeDraftOriginal({ ...persisted });
     try {
@@ -2909,45 +2700,19 @@ const handleCreateBuilding = async () => {
     }
     if (!beginSaving("pathway-metadata")) return;
     const before = pathwayDraftOriginal!;
-    const preparation = preparePathwayForSave(namedPathwayFrame, currentNodes, namedPathwayFrame.pathPoints);
-    if (preparation.issue) {
-      setError(preparation.issue);
-      return;
-    }
-    const after = preparation.pathway;
-    const operations: WorkingOperation[] = [];
-    if (JSON.stringify({ ...before, pathPoints: undefined }) !== JSON.stringify({ ...after, pathPoints: undefined })) {
-      operations.push({
-        id: `pathway-properties-${after.id}`,
-        type: "update_properties",
-        domain: "Walking Network",
-        entityId: after.id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-        description: `Edit ${after.name}`,
-      });
-    }
-    if (JSON.stringify(before.pathPoints) !== JSON.stringify(after.pathPoints)) {
-      operations.push({
-        id: `pathway-geometry-${after.id}`,
-        type: "update_geometry",
-        domain: "Walking Network",
-        entityId: after.id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-        description: `Reshape ${after.name}`,
-      });
-    }
-    let persisted: Pathway;
-    try {
-      persisted = await services.map.updatePathway(after);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to update Pathway. Your draft is still open; retry when ready.");
+    const result = await pathwayWorkflow.finalize({
+      kind: "update",
+      before,
+      after: namedPathwayFrame,
+      context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+      description: `Edit ${namedPathwayFrame.name}`,
+    });
+    if (!result.ok) {
+      setError(result.message);
       endSaving();
       return;
     }
-    if (operations.length > 1) workingSessionManager.executeBatch(`Edit ${persisted.name}`, "Walking Network", persisted.id, operations);
-    else if (operations[0]) workingSessionManager.executeOperation(operations[0]);
+    const persisted = result.pathway;
     setLocalPathways((items) => [...items.filter((item) => item.id !== persisted.id), persisted]);
     setPathwayDraftOriginal({ ...persisted });
     setPathwayDraft({ ...persisted });
@@ -2997,30 +2762,26 @@ const handleCreateBuilding = async () => {
   const retireLocalFeature = (feature: LocalMapFeatureEntity) => {
     const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
       .find((link) => link.featureId === feature.id);
-    const operation = buildRetireLocalFeatureOperation(feature, featureLink);
-    const updated = {
-      ...feature,
-      status: "retired" as const,
-      linkedBuildingId: featureLink ? null : feature.linkedBuildingId,
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    const result = localMapFeatureWorkflow.finalize({ kind: "retire", feature, link: featureLink });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     if (featureLink) setUnlinkedFeatureLinkIds((ids) => [...new Set([...ids, featureLink.id])]);
-    workingSessionManager.executeOperation(operation);
     setDirty(true);
   };
 
   const restoreLocalFeature = (feature: LocalMapFeatureEntity) => {
     const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
       .find((link) => link.featureId === feature.id);
-    const operation = buildRestoreLocalFeatureOperation(feature, featureLink);
-    const updated = {
-      ...feature,
-      status: "active" as const,
-      linkedBuildingId: featureLink?.targetEntityId ?? feature.linkedBuildingId,
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    const result = localMapFeatureWorkflow.finalize({ kind: "restore", feature, link: featureLink });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     if (featureLink) setUnlinkedFeatureLinkIds((ids) => ids.filter((id) => id !== featureLink.id));
-    workingSessionManager.executeOperation(operation);
     setDirty(true);
   };
 
@@ -3211,20 +2972,22 @@ const handleCreateBuilding = async () => {
             tone: "danger" as const,
             onSelect: () => {
               const updated = { ...selectedNode, nodeType: "Junction" as const, associatedPlaceId: null };
-              // Persist first: claiming this conversion succeeded locally when
-              // the route-node write fails leaves an Entrance association
-              // falsely cleared until refresh.
-              void (typeof services.map.updateRouteNode === "function"
-                ? services.map.updateRouteNode(updated)
-                : Promise.resolve(updated)
-              ).then((persisted) => {
-                const confirmed = { ...persisted, nodeType: "Junction" as const, associatedPlaceId: null };
-                updateNodeWithOperation(selectedNode, confirmed, `Convert ${selectedNode.name} to a standard Route Node`);
+              void routeNodeWorkflow.finalize({
+                kind: "update",
+                before: selectedNode,
+                after: updated,
+                context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+                description: `Convert ${selectedNode.name} to a standard Route Node`,
+              }).then((result) => {
+                if (!result.ok) {
+                  setError(result.message);
+                  return;
+                }
+                const confirmed = result.node;
+                updateNode(confirmed);
                 setRouteNodeDraft({ ...confirmed });
                 setRouteNodeDraftOriginal({ ...confirmed });
                 setError("");
-              }).catch((cause) => {
-                setError(cause instanceof Error ? cause.message : "Failed to convert Route Node.");
               });
             },
           }] : []),
@@ -4814,8 +4577,12 @@ const handleCreateBuilding = async () => {
           feature={selectedLocalFeature}
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
-            setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
-            recordPropertyOperation("Local Map Data", selectedLocalFeature.id, selectedLocalFeature, updated, `Edit ${selectedLocalFeature.name} details`);
+            const result = localMapFeatureWorkflow.finalize({ kind: "update", before: selectedLocalFeature, after: updated });
+            if (!result.ok) {
+              setError(result.message);
+              return;
+            }
+            setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
             setOwnerModal(null);
           }}
         />

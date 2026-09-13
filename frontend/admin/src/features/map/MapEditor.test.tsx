@@ -80,11 +80,20 @@ vi.mock("../../services/api", () => ({
     },
   },
 }));
+vi.mock("../auth/AuthContext", () => ({
+  useAuth: () => ({
+    session: { id: "test-admin", username: "test-admin" },
+    login: vi.fn(),
+    logout: vi.fn(),
+    loading: false,
+  }),
+}));
 
 describe("Map Editor preview", () => {
   beforeEach(() => {
     cleanup();
     sessionStorage.clear();
+    localStorage.clear();
     mapClickHandler = undefined;
     pathPointDragPosition = undefined;
     movingPointDragPosition = undefined;
@@ -285,7 +294,7 @@ describe("Map Editor preview", () => {
   });
 
   it("restores an in-progress polygon draft after a browser refresh", async () => {
-    sessionStorage.clear();
+    localStorage.clear();
     renderEditor();
 
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
@@ -992,6 +1001,8 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
+    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
+
     expect(Array.from(document.querySelectorAll('[data-testid="saved-map-marker"]')).some((marker) =>
       marker.getAttribute("data-position")?.startsWith("16.720666"),
     )).toBe(true);
@@ -1145,7 +1156,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
     expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("Science Annex · building");
   });
@@ -1161,7 +1172,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
-    fireEvent.click(screen.getByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
 
     expect(screen.getByRole("button", { name: "Route Node" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Route Node type")).toHaveValue("Entrance");
@@ -1491,7 +1502,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByText(/no copied outdoor coordinate stored on Building/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
 
     fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
@@ -1534,7 +1545,7 @@ describe("Map Editor preview", () => {
     expect(saveBtn).not.toBeDisabled();
     fireEvent.click(saveBtn);
 
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
   });
 
   it("attaches footprint to eligible existing building without creating new location record", async () => {
@@ -1681,7 +1692,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Laboratory" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
 
     // Preview should show the added building
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
