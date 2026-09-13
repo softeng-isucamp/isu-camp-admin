@@ -109,8 +109,6 @@ export interface UserAccount {
   id: string;
   username: string;
   createdAt: string;
-  lastSignIn: string | null;
-  role: "Administrator" | "Staff" | "User";
 }
 export interface AuditEntry {
   id: string;

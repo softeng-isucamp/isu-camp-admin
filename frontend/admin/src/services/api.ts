@@ -146,12 +146,12 @@ type BackendLocation = {
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
   lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown; polygonCoordinates?: unknown;
 };
-type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown; lastSignIn?: unknown; last_sign_in_at?: unknown; role?: unknown };
+type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown };
 type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
   if (id === undefined || typeof raw.username !== "string") throw new Error("Backend returned a malformed user record.");
-  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), lastSignIn: raw.lastSignIn == null && raw.last_sign_in_at == null ? null : String(raw.lastSignIn ?? raw.last_sign_in_at), role: raw.role === "Administrator" || raw.role === "Staff" ? raw.role : "User" };
+  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? "") };
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
@@ -591,7 +591,7 @@ export interface Services {
   };
 
   users: {
-    list(query?: string, page?: number, pageSize?: number, createdRange?: string, signInRange?: string): Promise<Page<UserAccount>>;
+    list(query?: string, page?: number, pageSize?: number, createdRange?: string): Promise<Page<UserAccount>>;
   };
 
   logs: {
@@ -1227,9 +1227,9 @@ export const services: Services = {
 
   users: {
 
-    list: async (q = "", page = 1, pageSize = 20, createdRange = "all", signInRange = "all") => {
+    list: async (q = "", page = 1, pageSize = 20, createdRange = "all") => {
       if (USE_HTTP_API) {
-        const params = new URLSearchParams({ q, page: String(page), pageSize: String(pageSize), created_range: createdRange, sign_in_range: signInRange });
+        const params = new URLSearchParams({ q, page: String(page), pageSize: String(pageSize), created_range: createdRange });
         const raw = await apiJson<unknown>(`/api/users?${params.toString()}`);
         return normalizeBackendPage(raw, (row) => normalizeBackendUser(row as BackendUser), "users");
       }
