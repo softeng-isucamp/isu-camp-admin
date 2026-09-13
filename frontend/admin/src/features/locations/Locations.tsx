@@ -62,7 +62,7 @@ export function Locations() {
 
   const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
-  const [building, setBuilding] = useState("All Buildings");
+  const [buildingId, setBuildingId] = useState("All Buildings");
   const [floorId, setFloorId] = useState("All Floors");
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
@@ -203,8 +203,10 @@ export function Locations() {
   const handoffParent = routeState?.indoorLocationParent;
   const allLocations = useMemo(() => {
     const locations = directory ?? (API_MODE === "local" ? initialLocations : []);
-    if (!handoffParent || locations.some((item) => item.id === handoffParent.id)) return locations;
-    return [...locations, handoffParent];
+    const withHandoff = !handoffParent || locations.some((item) => item.id === handoffParent.id)
+      ? locations
+      : [...locations, handoffParent];
+    return [...new Map(withHandoff.map((item) => [item.id, item])).values()];
   }, [directory, handoffParent]);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
@@ -259,15 +261,27 @@ export function Locations() {
     });
     return [...unique.values()];
   }, [allLocations, buildingsById]);
-  const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.name === building);
+  const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.id === buildingId);
   const availableFloors = useMemo(() => {
-    if (building === "All Buildings" || !selectedBuildingRecord) return floors;
+    if (buildingId === "All Buildings" || !selectedBuildingRecord) return floors;
     return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
-  }, [floors, building, selectedBuildingRecord]);
+  }, [floors, buildingId, selectedBuildingRecord]);
+
+  useEffect(() => {
+    const buildingIsValid = buildingId === "All Buildings" || buildingOptions.some((option) => option.id === buildingId);
+    if (!buildingIsValid) {
+      setBuildingId("All Buildings");
+      setFloorId("All Floors");
+      return;
+    }
+    if (floorId !== "All Floors" && !availableFloors.some((floor) => floor.id === floorId)) {
+      setFloorId("All Floors");
+    }
+  }, [buildingId, buildingOptions, floorId, availableFloors]);
 
   const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
   const { data, isLoading, error: listError } = useQuery({
-    queryKey: ["locations", "page", query, page, type, status, selectedBuildingRecord?.id, selectedFloorRecord?.name],
+    queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorRecord?.name],
     queryFn: () => services.locations.list(query, page, pageSize, {
       type: type === "All Types" ? undefined : type as LocationType,
       status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
@@ -282,14 +296,26 @@ export function Locations() {
       (item) =>
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
-        (building === "All Buildings" || item.building === building || item.name === building) &&
+        (buildingId === "All Buildings" || item.parentId === buildingId || item.id === buildingId) &&
         (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
-  }, [rawItems, type, status, building, floorId, selectedFloorRecord]);
+  }, [rawItems, type, status, buildingId, floorId, selectedFloorRecord]);
 
-  useEffect(() => setPage(1), [query, type, status, building, floorId, viewMode]);
+  useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
-  const matchingIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
+  const hierarchyItems = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return allLocations.filter((item) =>
+      (!normalizedQuery || [item.name, item.code, item.type, item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
+        .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
+      (type === "All Types" || item.type === type) &&
+      (status === "All Statuses" || status === "All Status" || item.status === status) &&
+      (buildingId === "All Buildings" || item.parentId === buildingId || item.id === buildingId) &&
+      (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
+    );
+  }, [allLocations, query, type, status, buildingId, floorId, selectedFloorRecord]);
+
+  const matchingIds = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map((item) => item.id)), [hierarchyItems, items, viewMode]);
 
   // Build complete hierarchy families. Filtering can reduce a family to the
   // matching descendants, but a matching indoor record always keeps its root
@@ -301,16 +327,16 @@ export function Locations() {
 
     // Find roots
     const rootBuildings = allLocations.filter((loc) => loc.type === "Building" && (
-      matchingIds.has(loc.id) || allLocations.some((child) => matchingIds.has(child.id) && (child.parentId === loc.id || child.building === loc.name))
+      matchingIds.has(loc.id) || allLocations.some((child) => matchingIds.has(child.id) && child.parentId === loc.id)
     ));
-    const standalone = items.filter((loc) => loc.parentId === null && loc.type === "Facility");
+    const standalone = hierarchyItems.filter((loc) => loc.parentId === null && loc.type === "Facility");
 
     for (const bldg of rootBuildings) {
       const rootWasMatched = matchingIds.has(bldg.id);
       const bldgCollapsed = collapsedNodes.has(bldg.id);
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && loc.type !== "Building" &&
-        (loc.parentId === bldg.id || (!loc.parentId && loc.building === bldg.name)) &&
+        loc.parentId === bldg.id &&
         (rootWasMatched || matchingIds.has(loc.id)),
       );
       const explicitFloors = allLocations.filter((loc) =>
@@ -318,7 +344,7 @@ export function Locations() {
         loc.type === "Floor" &&
         (rootWasMatched || childLocations.some((child) =>
           child.parentId === loc.id ||
-          (child.floor === loc.name && (child.parentId === bldg.id || (!child.parentId && child.building === bldg.name)))
+          (child.floor === loc.name && child.parentId === bldg.id)
         )),
       );
       const knownFloorNames = new Set(explicitFloors.map((floor) => floor.name));
@@ -346,7 +372,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || ((!loc.parentId || loc.parentId === bldg.id) && loc.building === bldg.name && (loc.floor === flr.name || (flr.name === "Unspecified Floor" && !loc.floor)) && loc.type !== "Floor" && loc.type !== "Building"))
+            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building"))
           );
           family.push({
             item: flr,
@@ -379,25 +405,36 @@ export function Locations() {
 
     // If filter produced items not in tree, include them
     const includedIds = new Set(result.flat().map((r) => r.item.id));
-    for (const item of items) {
+    for (const item of hierarchyItems) {
       if (!includedIds.has(item.id)) {
         result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
       }
     }
 
     return result;
-  }, [items, matchingIds, allLocations, viewMode, collapsedNodes]);
+  }, [items, hierarchyItems, matchingIds, allLocations, viewMode, collapsedNodes]);
 
   const hierarchyRows = hierarchyFamilies.flat();
-  const visibleRows = viewMode === "flat"
-    ? hierarchyRows
-    : hierarchyFamilies.flat();
+  const hierarchyTotal = hierarchyFamilies.length;
+  const hierarchyDisplayCount = hierarchyRows.length;
+  const hierarchyPageCount = Math.max(1, Math.ceil(hierarchyTotal / pageSize));
+  const effectiveHierarchyPage = Math.min(page, hierarchyPageCount);
+  const pagedFamilies = viewMode === "hierarchy"
+    ? hierarchyFamilies.slice((effectiveHierarchyPage - 1) * pageSize, effectiveHierarchyPage * pageSize)
+    : hierarchyFamilies;
+  const visibleRows = pagedFamilies.flat();
+  const uniqueVisibleRows = visibleRows.filter(({ item }, index, rows) => rows.findIndex((row) => row.item.id === item.id) === index);
 
   useEffect(() => {
-    if (!data) return;
+    if (viewMode !== "hierarchy") return;
+    setPage((current) => Math.min(current, hierarchyPageCount));
+  }, [viewMode, hierarchyPageCount]);
+
+  useEffect(() => {
+    if (!data || viewMode === "hierarchy") return;
     const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / pageSize));
     setPage((current) => Math.min(current, totalPages));
-  }, [data]);
+  }, [data, viewMode]);
 
   const toggleCollapse = (id: string) => {
     setCollapsedNodes((prev) => {
@@ -741,7 +778,6 @@ export function Locations() {
               <option>All Types</option>
               {[
                 "Building",
-                "Floor",
                 "Laboratory",
                 "Room",
                 "Office",
@@ -754,16 +790,16 @@ export function Locations() {
             <SelectField
               label="BUILDING"
               aria-label="BUILDING"
-              value={building}
+              value={buildingId}
               onChange={(event) => {
-                setBuilding(event.target.value);
+                setBuildingId(event.target.value);
                 setFloorId("All Floors");
               }}
               style={{ background: "#ffffff", borderRadius: "18px", minWidth: "140px", height: "46px" }}
             >
               <option>All Buildings</option>
               {buildingOptions.map((value) => (
-                <option key={value.id}>{value.name}</option>
+                <option key={value.id} value={value.id}>{value.name}</option>
               ))}
             </SelectField>
             <SelectField
@@ -918,7 +954,7 @@ export function Locations() {
           <div>
             <h2 style={{ fontSize: "18px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Location Directory</h2>
             <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: "14px" }}>
-              {isLoading ? "Loading…" : `${hierarchyRows.length} locations`}
+              {isLoading ? "Loading…" : `${viewMode === "hierarchy" ? hierarchyDisplayCount : data?.total ?? 0} locations`}
             </p>
           </div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -956,8 +992,8 @@ export function Locations() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(({ item, level, hasChildren, isCollapsed }, index) => {
-                const isNearBottom = index >= 3 && index >= visibleRows.length - 2;
+              {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed }, index) => {
+                const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={item.id} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td style={{ padding: "16px 20px" }}>
@@ -1140,8 +1176,8 @@ export function Locations() {
           )}
         </div>
         <Pagination
-          total={data?.total ?? 0}
-          page={page}
+          total={viewMode === "hierarchy" ? hierarchyTotal : data?.total ?? 0}
+          page={viewMode === "hierarchy" ? effectiveHierarchyPage : page}
           pageSize={pageSize}
           onChange={setPage}
         />

@@ -8,6 +8,7 @@ LOCATION_TYPE_NAMES = {
     2: "Laboratory",
     3: "Office",
     4: "Facility",
+    5: "Restroom",
 }
 LOCATION_TYPE_IDS = {name: identifier for identifier, name in LOCATION_TYPE_NAMES.items()}
 

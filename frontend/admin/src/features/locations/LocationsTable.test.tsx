@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 
@@ -21,6 +21,7 @@ function renderLocations(initialEntries: Array<string | { pathname: string; sear
 describe("Locations screen table and hierarchy toggle validation", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("renders the campus locations heading and default hierarchy table with tree connectors", async () => {
@@ -67,17 +68,145 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(container.querySelectorAll("tbody tr")).toHaveLength(10);
   });
 
-  it("moves to the next ten-row page and resets to page one after filtering", async () => {
+  it("keeps derived Floor Levels available without exposing Floor as a record filter", async () => {
+    renderLocations();
+    const typeSelect = await screen.findByLabelText("TYPE");
+    expect(Array.from((typeSelect as HTMLSelectElement).options).map((option) => option.value)).not.toContain("Floor");
+    expect(Array.from((screen.getByLabelText("FLOOR") as HTMLSelectElement).options).map((option) => option.text)).toContain("Ground Floor");
+  });
+
+  it("keeps flat-view pagination record-based and resets to page one after filtering", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
+    fireEvent.click(screen.getByRole("button", { name: /toggle view mode/i }));
     expect(await screen.findByText(/Showing 1–10 of/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByText(/Showing 11–20 of/i)).toBeInTheDocument();
-    // The backend page contains ten matches; hierarchy mode may add their
-    // Building and Floor Level context as non-matching rows.
-    expect(container.querySelectorAll("tbody tr").length).toBeGreaterThanOrEqual(10);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(10);
     fireEvent.change(screen.getByLabelText("TYPE"), { target: { value: "Building" } });
     expect(await screen.findByText(/Showing 1–10 of/i)).toBeInTheDocument();
+  });
+
+  it("paginates hierarchy families atomically across the old page boundary", async () => {
+    for (let index = 1; index <= 11; index += 1) {
+      const buildingId = `pagination-family-building-${index}`;
+      await services.locations.save({
+        id: buildingId,
+        name: `Pagination Family ${index}`,
+        code: `PAG-${index}`,
+        type: "Building",
+        parentId: null,
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      });
+      await services.locations.save({
+        id: `pagination-family-room-${index}`,
+        name: `Pagination Family Room ${index}`,
+        code: `PAG-ROOM-${index}`,
+        type: "Room",
+        parentId: buildingId,
+        building: `Pagination Family ${index}`,
+        floor: "Ground Floor",
+        status: "Active",
+        lat: null,
+        lng: null,
+        positioned: false,
+      });
+    }
+
+    const { container } = renderLocations(["/locations?q=Pagination%20Family"]);
+    expect(await screen.findByText("Pagination Family Room 10", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.getByText(/Showing 1–10 of 11/)).toBeInTheDocument();
+    expect(container.querySelectorAll("tbody tr").length).toBeGreaterThan(10);
+
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    expect(screen.getAllByText("Pagination Family 11").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("Pagination Family Room 11").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("row", { name: /Pagination Family Room 10/ })).not.toBeInTheDocument();
+  });
+
+  it("uses building IDs to isolate duplicate building names", async () => {
+    await services.locations.save({ id: "duplicate-building-a", name: "Duplicate Building", code: "DUP-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-building-b", name: "Duplicate Building", code: "DUP-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-room-a", name: "Room in duplicate A", code: "DUP-ROOM-A", type: "Room", parentId: "duplicate-building-a", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-room-b", name: "Room in duplicate B", code: "DUP-ROOM-B", type: "Room", parentId: "duplicate-building-b", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+
+    renderLocations();
+    const buildingSelect = await screen.findByLabelText("BUILDING");
+    const duplicateOptions = Array.from((buildingSelect as HTMLSelectElement).options).filter((option) => option.text === "Duplicate Building");
+    expect(duplicateOptions.map((option) => option.value)).toEqual(["duplicate-building-a", "duplicate-building-b"]);
+
+    fireEvent.change(buildingSelect, { target: { value: "duplicate-building-b" } });
+    expect(await screen.findByText("Room in duplicate B")).toBeInTheDocument();
+    expect(screen.queryByText("Room in duplicate A")).not.toBeInTheDocument();
+  });
+
+  it("resets stale Building and Floor selections after the selected Building is deleted", async () => {
+    const building = await services.locations.save({ id: "stale-filter-building", name: "Stale Filter Building", code: "STALE-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "stale-filter-room", name: "Stale Filter Room", code: "STALE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+
+    renderLocations();
+    const buildingSelect = await screen.findByLabelText("BUILDING");
+    const floorSelect = screen.getByLabelText("FLOOR");
+    fireEvent.change(buildingSelect, { target: { value: building.id } });
+    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
+    fireEvent.change(floorSelect, { target: { value: `${building.id}-floor-Ground Floor` } });
+    expect(floorSelect).toHaveValue(`${building.id}-floor-Ground Floor`);
+
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(buildingSelect).toHaveValue("All Buildings");
+      expect(floorSelect).toHaveValue("All Floors");
+    });
+  });
+
+  it("returns to the last hierarchy page after a mutation shrinks the result", async () => {
+    for (let index = 1; index <= 11; index += 1) {
+      await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    }
+    renderLocations(["/locations?q=Shrink%20Page"]);
+    expect(await screen.findByText("Shrink Page 11")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "2" }));
+    expect(await screen.findByRole("row", { name: /Shrink Page 11/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Shrink Page 11" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 1–10 of 10/)).toBeInTheDocument();
+      expect(Array.from(document.querySelectorAll("tbody tr")).some((row) => row.querySelector("strong")?.textContent === "Shrink Page 1")).toBe(true);
+      expect(screen.queryByRole("row", { name: /Shrink Page 11/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not attach a normal child with a duplicate legacy building name to both roots", async () => {
+    await services.locations.save({ id: "legacy-name-building-a", name: "Same Name Root", code: "SAME-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "legacy-name-building-b", name: "Same Name Root", code: "SAME-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "authoritative-child", name: "Authoritative Child", code: "AUTH-CHILD", type: "Room", parentId: "legacy-name-building-b", building: "Same Name Root", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+
+    renderLocations(["/locations?q=Authoritative%20Child"]);
+    expect(await screen.findByText("Authoritative Child")).toBeInTheDocument();
+    expect(screen.getAllByRole("row", { name: /Same Name Root/ })).toHaveLength(1);
+  });
+
+  it("renders an orphaned duplicate-name record as an ungrouped row", async () => {
+    const records = [
+      { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-building-b", name: "Orphan Duplicate Building", code: "ORPHAN-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-room", name: "Orphan Room", code: "ORPHAN-ROOM", type: "Room" as const, parentId: null, building: "Orphan Duplicate Building", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations(["/locations?q=Orphan%20Room"]);
+    const orphanRow = await screen.findByRole("row", { name: /Orphan Room/ });
+    expect(orphanRow).toHaveTextContent("Orphan Room");
+    expect(screen.queryAllByRole("row", { name: /Orphan Duplicate Building/ })).toHaveLength(0);
   });
 
   it("filters same-named floors by their distinct record IDs", async () => {
@@ -134,7 +263,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const icon = row.querySelector(".location-type-symbol");
     expect(icon).toHaveStyle({ background: "#f3f4f6", opacity: "1" });
     expect(icon).not.toHaveStyle({ filter: "grayscale(1)" });
-    expect(icon.querySelector("svg")).toHaveAttribute("stroke", "#0c7441");
+    expect(icon?.querySelector("svg")).toHaveAttribute("stroke", "#0c7441");
     expect(screen.queryByText("Not positioned")).not.toBeInTheDocument();
   });
 
@@ -292,7 +421,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     }));
 
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Hierarchy Test Room" } });
-    expect(await screen.findByText("Hierarchy Test Room")).toBeInTheDocument();
+    expect((await screen.findAllByText("Hierarchy Test Room")).length).toBeGreaterThan(0);
   });
 
   it("populates the parent building and floor level when editing a child location", async () => {

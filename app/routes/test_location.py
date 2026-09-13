@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import location as location_module
 from location import location_bp
+from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
 
 class FakeRecord:
@@ -29,7 +30,7 @@ class FakeRecord:
     def to_location_dto(self, building=None, floor=None):
         return {
             "id": str(self.location_id), "name": self.location_name,
-            "code": self.location_code, "type": {1: "Room", 2: "Laboratory", 3: "Office", 4: "Facility"}[self.type_id],
+            "code": self.location_code, "type": LOCATION_TYPE_NAMES[self.type_id],
             "parentId": str(self.building_id) if self.building_id else None,
             "building": building, "floor": floor, "function": self.description,
             "keywords": self.keywords, "status": "Active",
@@ -172,6 +173,89 @@ def test_list_locations_rejects_unknown_persisted_type(monkeypatch):
 
     assert response.status_code == 500
     assert response.json["message"] == "Location 9 references an unknown location type."
+
+
+def test_list_locations_paginates_deterministic_building_families(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(location_bp)
+    monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
+    buildings = [FakeBuilding(2, name="Building B"), FakeBuilding(1, name="Building A")]
+    records = [
+        FakeRecord(12, "Room B", "B-ROOM", 1, building_id=2),
+        FakeRecord(11, "Room A", "A-ROOM", 1, building_id=1),
+    ]
+    monkeypatch.setattr(location_module, "Location", type("LocationModel", (), {
+        "query": FakeQuery(records), "location_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(location_module, "Building", type("BuildingModel", (), {
+        "query": FakeQuery(buildings), "building_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(location_module, "Floor", type("FloorModel", (), {
+        "query": FakeQuery([]), "floor_id": FakeColumn(),
+    }))
+
+    first = app.test_client().get("/api/locations?page=1&pageSize=2")
+    second = app.test_client().get("/api/locations?page=2&pageSize=2")
+
+    assert first.json["total"] == 4
+    assert first.json["page"] == 1
+    assert first.json["pageSize"] == 2
+    assert [item["id"] for item in first.json["items"]] == ["1", "11"]
+    assert [item["id"] for item in second.json["items"]] == ["2", "12"]
+
+
+def test_list_locations_filters_before_pagination_and_clamps_page_size(monkeypatch):
+    client = make_client(monkeypatch)
+
+    response = client.get(
+        "/api/locations?type=Room&buildingId=1&page=2&pageSize=0"
+    )
+
+    assert response.status_code == 200
+    assert response.json["total"] == 1
+    assert response.json["page"] == 2
+    assert response.json["pageSize"] == 1
+    assert response.json["items"] == []
+
+
+def test_location_type_ids_preserve_existing_records_and_add_restroom():
+    assert LOCATION_TYPE_IDS == {
+        "Room": 1,
+        "Laboratory": 2,
+        "Office": 3,
+        "Facility": 4,
+        "Restroom": 5,
+    }
+
+
+def test_restroom_dto_uses_canonical_type_and_indoor_parent():
+    restroom = Location(
+        location_id=8,
+        building_id=42,
+        floor_level="Ground Floor",
+        type_id=LOCATION_TYPE_IDS["Restroom"],
+        location_code="REST-01",
+        location_name="Main Restroom",
+        description="Accessible restroom",
+        keywords="accessible",
+    )
+
+    assert restroom.to_location_dto(building="Engineering Hall") == {
+        "id": "8",
+        "name": "Main Restroom",
+        "code": "REST-01",
+        "type": "Restroom",
+        "parentId": "42",
+        "building": "Engineering Hall",
+        "floor": "Ground Floor",
+        "function": "Accessible restroom",
+        "keywords": "accessible",
+        "status": "Active",
+        "lat": None,
+        "lng": None,
+        "positioned": False,
+        "hasPhoto": False,
+    }
 
 
 class MutationQuery:
@@ -335,6 +419,34 @@ def test_mutations_validate_relationship_floor_and_duplicate_without_partial_wri
     assert duplicate.status_code == 409
     assert len(records) == before
     assert session.commits == 1
+
+
+def test_create_restroom_persists_canonical_type_and_projects_dto(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+    building = client.post(
+        "/api/locations",
+        json={"name": "Engineering Hall", "code": "ENG", "type": "Building"},
+    )
+
+    response = client.post(
+        "/api/locations",
+        json={
+            "name": "Main Restroom",
+            "code": "REST-01",
+            "type": "Restroom",
+            "parentId": building.json["id"],
+            "floor": "Ground Floor",
+            "function": "Accessible restroom",
+            "keywords": "accessible",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json["type"] == "Restroom"
+    assert response.json["parentId"] == building.json["id"]
+    assert response.json["floor"] == "Ground Floor"
+    assert records[-1].type_id == LOCATION_TYPE_IDS["Restroom"]
+    assert session.commits == 2
 
 
 def test_create_rolls_back_when_persistence_fails(monkeypatch):
