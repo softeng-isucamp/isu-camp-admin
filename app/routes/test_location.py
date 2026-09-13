@@ -22,10 +22,7 @@ class FakeRecord:
         self.floor_id = floor_id
         self.description = "A searchable description"
         self.keywords = "directory keyword"
-        self.lat = None
-        self.lng = None
         self.photo = None
-        self.photo_mime_type = None
 
     def to_location_dto(self, building=None, floor=None):
         return {
@@ -34,8 +31,8 @@ class FakeRecord:
             "parentId": str(self.building_id) if self.building_id else None,
             "building": building, "floor": floor, "function": self.description,
             "keywords": self.keywords, "status": "Active",
-            "lat": self.lat, "lng": self.lng,
-            "positioned": self.lat is not None and self.lng is not None,
+            "lat": None, "lng": None,
+            "positioned": False,
             "hasPhoto": self.photo is not None,
         }
 
@@ -49,6 +46,15 @@ class FakeQuery:
 
     def all(self):
         return self.records
+
+    def filter_by(self, **criteria):
+        return FakeQuery([
+            record for record in self.records
+            if all(getattr(record, key, None) == value for key, value in criteria.items())
+        ])
+
+    def first(self):
+        return self.records[0] if self.records else None
 
 
 class FakeColumn:
@@ -232,7 +238,6 @@ def test_restroom_dto_uses_canonical_type_and_indoor_parent():
     restroom = Location(
         location_id=8,
         building_id=42,
-        floor_level="Ground Floor",
         type_id=LOCATION_TYPE_IDS["Restroom"],
         location_code="REST-01",
         location_name="Main Restroom",
@@ -240,7 +245,7 @@ def test_restroom_dto_uses_canonical_type_and_indoor_parent():
         keywords="accessible",
     )
 
-    assert restroom.to_location_dto(building="Engineering Hall") == {
+    assert restroom.to_location_dto(building="Engineering Hall", floor="Ground Floor") == {
         "id": "8",
         "name": "Main Restroom",
         "code": "REST-01",
@@ -273,9 +278,10 @@ class MutationQuery:
 
 
 class MutationSession:
-    def __init__(self, records, buildings):
+    def __init__(self, records, buildings, floors=None):
         self.records = records
         self.buildings = buildings
+        self.floors = floors if floors is not None else []
         self.commits = 0
         self.rollbacks = 0
         self.fail_commit = False
@@ -286,6 +292,9 @@ class MutationSession:
         if record.__class__.__name__ == "MutationBuilding":
             record.building_id = max((item.building_id for item in self.buildings), default=0) + 1
             self.buildings.append(record)
+        elif record.__class__.__name__ == "MutationFloor":
+            record.floor_id = max((item.floor_id for item in self.floors), default=0) + 1
+            self.floors.append(record)
         else:
             record.location_id = max((item.location_id for item in self.records), default=0) + 1
             self.records.append(record)
@@ -310,6 +319,8 @@ class MutationSession:
             self.records.remove(self.pending)
         if self.pending in self.buildings:
             self.buildings.remove(self.pending)
+        if self.pending in self.floors:
+            self.floors.remove(self.pending)
         self.deleted = []
         self.pending = None
 
@@ -324,7 +335,8 @@ def make_mutation_client(monkeypatch):
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
     records = []
     buildings = []
-    session = MutationSession(records, buildings)
+    floors = []
+    session = MutationSession(records, buildings, floors)
 
     class MutationRecord(FakeRecord):
         query = MutationQuery(records)
@@ -334,11 +346,10 @@ def make_mutation_client(monkeypatch):
             super().__init__(0, values["location_name"], values["location_code"], values["type_id"], values.get("building_id"), values.get("floor_id"))
             self.description = values.get("description")
             self.keywords = values.get("keywords")
-            self.floor_level = values.get("floor_level")
             self.photo = None
 
         def to_location_dto(self, building=None, floor=None):
-            dto = super().to_location_dto(building, self.floor_level or floor)
+            dto = super().to_location_dto(building, floor)
             dto["function"] = self.description
             dto["keywords"] = self.keywords
             dto["hasPhoto"] = self.photo is not None
@@ -360,14 +371,22 @@ def make_mutation_client(monkeypatch):
             )
 
     monkeypatch.setattr(location_module, "Building", MutationBuilding)
-    monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
-        "query": FakeQuery([]), "floor_id": FakeColumn(),
-    }))
+
+    class MutationFloor:
+        query = FakeQuery(floors)
+        floor_id = FakeColumn()
+
+        def __init__(self, building_id=None, floor_number=None):
+            self.floor_id = None
+            self.building_id = building_id
+            self.floor_number = floor_number
+
+    monkeypatch.setattr(location_module, "Floor", MutationFloor)
     monkeypatch.setattr(location_module.db, "session", session)
     return app.test_client(), records, session
 
 
-def test_invalid_legacy_floor_relationship_is_reported_instead_of_projected(monkeypatch):
+def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch):
     client, records, _ = make_mutation_client(monkeypatch)
     building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
     wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Building"})
@@ -382,7 +401,7 @@ def test_invalid_legacy_floor_relationship_is_reported_instead_of_projected(monk
     response = client.get("/api/locations")
 
     assert response.status_code == 500
-    assert "invalid legacy Floor relationship" in response.json["message"]
+    assert "invalid Floor relationship" in response.json["message"]
 
 
 def test_mutations_validate_relationship_floor_and_duplicate_without_partial_write(monkeypatch):
