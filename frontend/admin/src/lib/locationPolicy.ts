@@ -154,7 +154,10 @@ const evaluate = (
   const coordinates = analyzeCoordinates(draft);
 
   if (classification.requiresBuildingParent) {
-    const parent = options.directory.find((location) => location.id === draft.parentId);
+    const parentRecord = options.directory.find((location) => location.id === draft.parentId);
+    const parent = options.directory.find(
+      (location) => location.id === draft.parentId && location.type === "Building",
+    );
 
     if (!draft.parentId) {
       issues.push({
@@ -162,13 +165,13 @@ const evaluate = (
         field: "parentId",
         message: `${draft.type} Locations require a parent Building.`,
       });
-    } else if (!parent) {
+    } else if (!parentRecord) {
       issues.push({
         code: "building_parent_not_found",
         field: "parentId",
         message: "The selected parent Location does not exist.",
       });
-    } else if (parent.type !== "Building") {
+    } else if (!parent) {
       issues.push({
         code: "building_parent_wrong_type",
         field: "parentId",

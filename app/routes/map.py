@@ -9,6 +9,7 @@ from model.location import Location
 from model.route_node import RouteNode
 from model.pathway import Pathway
 from services.audit import log_audit
+from services.geometry import polygon_centroid as _polygon_centroid
 from services.geometry import polygon_error as _polygon_error
 
 map_bp = Blueprint("map", __name__, url_prefix="/api/map")
@@ -203,6 +204,7 @@ def save_map_draft():
                 record.longitude = building["lng"]
             if "points" in building:
                 record.polygon_coordinates = building["points"]
+                record.latitude, record.longitude = _polygon_centroid(record.polygon_coordinates)
                 if previous_points != record.polygon_coordinates:
                     log_audit(
                         "Admin",
