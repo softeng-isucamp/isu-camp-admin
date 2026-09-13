@@ -31,6 +31,7 @@ from routes.route_node import route_node_bp
 from routes.map import map_bp   # <-- NEW IMPORT
 from routes.users import users_bp
 from routes.logs import logs_bp
+from routes.dashboard import dashboard_bp
 
 
 # ==========================================
@@ -215,6 +216,7 @@ app.register_blueprint(route_node_bp)
 app.register_blueprint(map_bp)   # <-- NEW REGISTRATION
 app.register_blueprint(users_bp)
 app.register_blueprint(logs_bp)
+app.register_blueprint(dashboard_bp)
 
 
 # ==========================================
