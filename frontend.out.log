@@ -1,0 +1,34 @@
+
+> isu-camp-admin@1.0.0 dev
+> vite
+
+
+  VITE v6.4.3  ready in 538 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+8:59:45 PM [vite] (client) hmr update /src/features/locations/Locations.tsx, /src/styles.css
+8:59:45 PM [vite] (client) hmr update /src/features/dashboard/Dashboard.tsx, /src/styles.css
+8:59:45 PM [vite] (client) hmr update /src/features/map/BuildingDetailsModal.tsx, /src/styles.css
+8:59:45 PM [vite] (client) page reload src/features/locations/LocationsTable.test.tsx
+8:59:45 PM [vite] (client) hmr update /src/features/logs/Logs.tsx, /src/styles.css
+8:59:45 PM [vite] (client) page reload src/features/map/MapEditor.test.tsx
+8:59:45 PM [vite] (client) hmr update /src/features/map/MapEditor.tsx, /src/styles.css
+8:59:45 PM [vite] (client) hmr update /src/features/map/ToolRailDock.tsx, /src/styles.css
+8:59:45 PM [vite] (client) page reload src/features/map/WorkingSessionManager.test.ts
+8:59:45 PM [vite] (client) page reload src/features/map/WorkingSessionManager.test.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/users/Users.tsx, /src/components/UI.tsx
+8:59:45 PM [vite] (client) page reload src/services/api.test.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/map/MapEditor.tsx, /src/features/map/LocalFeatureDetailsModal.tsx
+8:59:45 PM [vite] (client) page reload src/features/map/mapEditing.test.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/map/MapEditor.tsx, /src/components/Shell.tsx, /src/features/auth/AuthContext.tsx, /src/features/logs/Logs.tsx, /src/features/users/Users.tsx, /src/features/dashboard/Dashboard.tsx, /src/features/auth/AuthPages.tsx, /src/features/locations/Locations.tsx
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/map/MapEditor.tsx
+8:59:45 PM [vite] (client) page reload src/features/map/selectionCandidates.test.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/map/MapEditor.tsx
+8:59:45 PM [vite] (client) page reload src/features/map/types.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/features/users/Users.tsx, /src/components/UI.tsx
+8:59:45 PM [vite] (client) hmr update /src/styles.css
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/components/Shell.tsx, /src/features/auth/AuthContext.tsx, /src/features/logs/Logs.tsx, /src/features/users/Users.tsx, /src/features/dashboard/Dashboard.tsx, /src/features/auth/AuthPages.tsx, /src/features/locations/Locations.tsx, /src/features/map/MapEditor.tsx
+8:59:45 PM [vite] (client) page reload src/services/api.test.ts
+8:59:45 PM [vite] (client) hmr update /src/styles.css, /src/components/Shell.tsx, /src/features/auth/AuthContext.tsx, /src/features/logs/Logs.tsx, /src/features/users/Users.tsx, /src/features/dashboard/Dashboard.tsx, /src/features/auth/AuthPages.tsx, /src/features/locations/Locations.tsx, /src/features/map/MapEditor.tsx
+8:59:45 PM [vite] (client) page reload src/features/map/WorkingSessionManager.test.ts
