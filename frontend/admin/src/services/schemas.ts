@@ -56,6 +56,4 @@ export const userAccountSchema = z.object({
   id: z.string().min(1),
   username: z.string().min(1, "Username is required."),
   createdAt: z.string().min(1),
-  lastSignIn: z.string().nullable(),
-  role: z.enum(["Administrator", "Staff", "User"]),
 });
