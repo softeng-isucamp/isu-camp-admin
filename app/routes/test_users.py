@@ -13,32 +13,38 @@ from users import users_bp
 
 class Query:
     def __init__(self, records): self.records = records
-    def order_by(self, _): return self
     def all(self): return self.records
-
-
-class Column:
-    def asc(self): return self
 
 
 def client(monkeypatch, records):
     app = Flask(__name__)
     app.register_blueprint(users_bp)
     monkeypatch.setattr(users_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(users_module, "AppUser", type("AppUserModel", (), {"query": Query(records), "id": Column()}))
+    monkeypatch.setattr(users_module, "AppUser", type("AppUserModel", (), {"query": Query(records)}))
     return app.test_client()
 
 
-def user(identifier, username, created, signed_in=None, email=None):
-    return type("User", (), {"id": identifier, "username": username, "email": email, "created_at": created, "last_sign_in_at": signed_in, "is_active": True, "to_dict": lambda self: {"id": str(self.id), "username": self.username, "email": self.email, "createdAt": self.created_at.isoformat(), "lastSignInAt": self.last_sign_in_at.isoformat() if self.last_sign_in_at else None, "isActive": self.is_active}})()
+def user(identifier, username, created):
+    info = type("UserInfo", (), {"created_at": created})() if created is not None else None
+    return type("User", (), {"id": identifier, "username": username, "info": info, "to_dict": lambda self: {"id": str(self.id), "username": self.username, "createdAt": self.info.created_at.isoformat() if self.info and self.info.created_at else None}})()
 
 
-def test_users_search_date_filter_and_pagination(monkeypatch):
+def test_users_search_date_filter_pagination_and_sort_order(monkeypatch):
     now = datetime.now(timezone.utc)
-    records = [user(1, "admin01", now - timedelta(days=2), now - timedelta(days=1), "admin@example.com"), user(2, "old", now - timedelta(days=40), now - timedelta(days=40))]
+    records = [user(1, "admin01", now - timedelta(days=2)), user(2, "old", now - timedelta(days=40))]
     response = client(monkeypatch, records).get("/api/users?q=ADMIN&created_range=7d&page=1&pageSize=1")
     assert response.status_code == 200
     assert response.json == {"items": [records[0].to_dict()], "total": 1, "page": 1, "pageSize": 1}
+
+
+def test_users_sorted_newest_registered_first(monkeypatch):
+    now = datetime.now(timezone.utc)
+    oldest = user(1, "oldest", now - timedelta(days=10))
+    newest = user(2, "newest", now - timedelta(days=1))
+    without_info = user(3, "no-info", None)
+    response = client(monkeypatch, [oldest, newest, without_info]).get("/api/users")
+    assert response.status_code == 200
+    assert [item["username"] for item in response.json["items"]] == ["newest", "oldest", "no-info"]
 
 
 def test_users_reject_invalid_pagination(monkeypatch):
