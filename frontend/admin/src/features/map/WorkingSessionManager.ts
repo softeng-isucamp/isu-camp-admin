@@ -5,6 +5,7 @@ import type {
   SpatialDomain,
   WorkingOperation,
   WorkingOperationType,
+  WorkingSessionSnapshot,
   WorkingSessionState,
 } from "./types";
 
@@ -50,6 +51,39 @@ export class WorkingSessionManager {
     };
   }
 
+  public exportSnapshot(): WorkingSessionSnapshot {
+    return structuredClone({
+      schemaVersion: 1 as const,
+      pastOperations: this.pastOperations,
+      futureOperations: this.futureOperations,
+      activeDraft: this.activeDraft,
+      suspendedDrafts: this.suspendedDrafts,
+      savedCheckpointIndex: this.savedCheckpointIndex,
+    });
+  }
+
+  public hydrate(snapshot: WorkingSessionSnapshot): void {
+    if (
+      snapshot.schemaVersion !== 1
+      || !Array.isArray(snapshot.pastOperations)
+      || !Array.isArray(snapshot.futureOperations)
+      || !Array.isArray(snapshot.suspendedDrafts)
+      || !Number.isInteger(snapshot.savedCheckpointIndex)
+    ) {
+      throw new Error("Working Session snapshot is invalid.");
+    }
+
+    this.pastOperations = structuredClone(snapshot.pastOperations);
+    this.futureOperations = structuredClone(snapshot.futureOperations);
+    this.activeDraft = snapshot.activeDraft ? structuredClone(snapshot.activeDraft) : null;
+    this.suspendedDrafts = structuredClone(snapshot.suspendedDrafts);
+    this.savedCheckpointIndex = Math.max(
+      0,
+      Math.min(snapshot.savedCheckpointIndex, this.pastOperations.length),
+    );
+    this.notify();
+  }
+
   public subscribe(listener: (state: WorkingSessionState) => void): () => void {
     this.listeners.add(listener);
     return () => {
@@ -81,6 +115,9 @@ export class WorkingSessionManager {
       timestamp: operation.timestamp ?? Date.now(),
     };
 
+    if (this.pastOperations.length < this.savedCheckpointIndex) {
+      this.savedCheckpointIndex = this.pastOperations.length;
+    }
     this.pastOperations.push(op);
     this.futureOperations = [];
     this.notify();

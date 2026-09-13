@@ -1,6 +1,8 @@
 from extensions import db
 from sqlalchemy.sql import func
 
+PATHWAY_TYPES = frozenset({"Walkway", "Road"})
+
 
 class Pathway(db.Model):
     __tablename__ = "pathway"
@@ -79,6 +81,15 @@ class Pathway(db.Model):
         "PathwayAllowedMode",
         cascade="all, delete-orphan",
         lazy="selectin",
+        back_populates="pathway",
+    )
+
+    path_points = db.relationship(
+        "PathPoint",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+        order_by="PathPoint.sequence_no",
     )
 
     surface_type = db.Column(
@@ -121,6 +132,7 @@ class Pathway(db.Model):
             "direction": self.direction,
             "shade": self.shade,
             "allowed_modes": [item.mode for item in self.allowed_modes],
+            "path_points": [point.to_dict() for point in self.path_points],
             "surface_type": self.surface_type,
             "created_at": (
                 self.created_at.isoformat()

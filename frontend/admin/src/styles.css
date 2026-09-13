@@ -633,6 +633,34 @@ main {
   gap: 24px;
   margin-top: 32px;
 }
+.dashboard-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+}
+.dashboard-error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dashboard-state {
+  padding: 28px 12px;
+  color: #64716a;
+  font-size: 13px;
+  text-align: center;
+}
 .stack {
   display: flex;
   flex-direction: column;

@@ -16,3 +16,5 @@ class PathwayAllowedMode(db.Model):
         primary_key=True,
         nullable=False,
     )
+
+    pathway = db.relationship("Pathway", back_populates="allowed_modes")

@@ -9,6 +9,7 @@ from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from services.audit import log_audit
+from services.location_listing import list_location_page
 
 actions_bp = Blueprint(
     "actions",
@@ -135,34 +136,17 @@ def list_locations():
     _, error = admin_required()
     if error: return error
     try:
-        query = request.args.get("q", "").strip().lower()
-        type_filter = request.args.get("type", "").strip()
-        status_filter = request.args.get("status", "").strip()
-        building_id_filter = request.args.get("buildingId", "").strip()
-        floor_filter = request.args.get("floor", "").strip().lower()
-        page = max(request.args.get("page", 1, type=int) or 1, 1)
-        page_size = min(max(request.args.get("pageSize", 20, type=int) or 20, 1), 100)
-        records, buildings, floors, projected = _all_locations(), _all_buildings(), _all_floors(), []
-        def include(dto, record_id, parent_id=None):
-            searchable = " ".join(str(dto.get(field) or "") for field in ("name", "code", "type", "building", "floor", "function", "keywords")).lower()
-            if query and query not in searchable:
-                return False
-            if type_filter and dto["type"] != type_filter:
-                return False
-            if status_filter and dto["status"] != status_filter:
-                return False
-            if building_id_filter and building_id_filter not in {str(parent_id or ""), str(record_id) if dto["type"] == "Building" else ""}:
-                return False
-            if floor_filter and str(dto.get("floor") or "").lower() != floor_filter:
-                return False
-            return True
-        projected.extend(dto for building in buildings if include(dto := building.to_location_dto(), building.building_id))
-        for record in records:
-            dto = _location_dto(record, buildings, floors)
-            if include(dto, record.location_id, record.building_id):
-                projected.append(dto)
-        start = (page - 1) * page_size
-        return jsonify({"success": True, "items": projected[start:start + page_size], "total": len(projected), "page": page, "pageSize": page_size}), 200
+        records, buildings, floors = _all_locations(), _all_buildings(), _all_floors()
+        return jsonify(
+            list_location_page(
+                records,
+                buildings,
+                floors,
+                request.args,
+                _location_dto,
+                lambda building: building.to_location_dto(),
+            )
+        ), 200
     except ValueError as error:
         logger.warning("Invalid persisted location data: %s", error)
         return jsonify({"success": False, "message": str(error)}), 500

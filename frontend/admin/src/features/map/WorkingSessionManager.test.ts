@@ -22,6 +22,31 @@ describe("WorkingSessionManager", () => {
     manager = new WorkingSessionManager();
   });
 
+  it("exports and hydrates recoverable Working Session state", () => {
+    manager.executeOperation({
+      type: "update_properties",
+      domain: "Walking Network",
+      entityId: "node-1",
+      before: { name: "North Entrance" },
+      after: { name: "Library Entrance" },
+    });
+    manager.markSaved();
+    manager.startDraft({
+      toolType: "point",
+      label: "Route Node draft",
+      provisionalGeometry: { points: [{ x: 121.7, y: 16.9 }] },
+    });
+    manager.handleInterruption("keep_draft");
+
+    const snapshot = manager.exportSnapshot();
+    const restored = new WorkingSessionManager();
+    restored.hydrate(snapshot);
+
+    expect(restored.exportSnapshot()).toEqual(snapshot);
+    expect(restored.getSuspendedDrafts()).toHaveLength(1);
+    expect(restored.getIsDirty()).toBe(false);
+  });
+
   describe("Undo / Redo Stack Maintenance", () => {
     it("initializes with empty past and future operations", () => {
       expect(manager.canUndo()).toBe(false);
@@ -130,6 +155,36 @@ describe("WorkingSessionManager", () => {
       expect(manager.getPastOperations()).toHaveLength(2);
       expect(manager.getFutureOperations()).toHaveLength(0);
       expect(manager.canRedo()).toBe(false);
+    });
+
+    it("marks a new branch dirty after undoing past the saved checkpoint", () => {
+      manager.executeOperation({
+        type: "update_properties",
+        domain: "Walking Network",
+        entityId: "node-1",
+        before: { name: "A" },
+        after: { name: "B" },
+      });
+      manager.executeOperation({
+        type: "update_properties",
+        domain: "Walking Network",
+        entityId: "node-1",
+        before: { name: "B" },
+        after: { name: "C" },
+      });
+      manager.markSaved();
+      manager.undo();
+
+      const branched = manager.executeOperation({
+        type: "update_properties",
+        domain: "Walking Network",
+        entityId: "node-1",
+        before: { name: "B" },
+        after: { name: "D" },
+      });
+
+      expect(manager.getIsDirty()).toBe(true);
+      expect(manager.getUncommittedOperations()).toEqual([branched]);
     });
 
     it("returns null when attempting to undo an empty stack or redo an empty future", () => {

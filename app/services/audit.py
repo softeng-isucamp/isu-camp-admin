@@ -14,9 +14,9 @@ def _actor_name(actor=None):
 def log_audit(category, actor, action, target, target_id=None, detail=None):
     """Stage an audit row in the current SQLAlchemy transaction.
 
-    The centralized audit model is introduced by the logs contract. Keeping
-    its import lazy lets mutation routes remain usable during deployments
-    where that contract has not been migrated yet.
+    The centralized audit model is introduced by the logs contract. The
+    matching database migration must be applied before using authenticated
+    routes because audit writes participate in the same transaction.
     """
     try:
         from model.audit_log import AuditLog

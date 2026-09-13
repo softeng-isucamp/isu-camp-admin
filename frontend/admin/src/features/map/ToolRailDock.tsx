@@ -47,13 +47,15 @@ export function getToolDefinition(toolType: ToolType): ToolDefinition {
 type ToolRailDockProps = {
   activeTool: ToolType;
   onSelectTool: (toolType: ToolType) => void;
+  onBrowseWalkingNetwork: () => void;
   suspendedDrafts: ActiveToolDraft[];
   onResumeDraft: (draftId: string) => void;
 };
 
-export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResumeDraft }: ToolRailDockProps) {
+export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork, suspendedDrafts, onResumeDraft }: ToolRailDockProps) {
   const [minimized, setMinimized] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
+  const [pathwayOptionsOpen, setPathwayOptionsOpen] = useState(false);
   const activeDefinition = getToolDefinition(activeTool);
 
   return (
@@ -82,7 +84,16 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
                   key={tool.id}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => onSelectTool(tool.id)}
+                  aria-expanded={tool.id === "pathway" ? pathwayOptionsOpen : undefined}
+                  aria-haspopup={tool.id === "pathway" ? "menu" : undefined}
+                  onClick={() => {
+                    if (tool.id === "pathway") {
+                      setPathwayOptionsOpen((open) => !open);
+                      return;
+                    }
+                    setPathwayOptionsOpen(false);
+                    onSelectTool(tool.id);
+                  }}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition ${active ? "bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
                 >
                   <span aria-hidden="true">{tool.icon}</span>
@@ -96,10 +107,31 @@ export function ToolRailDock({ activeTool, onSelectTool, suspendedDrafts, onResu
               aria-label="Minimize map command dock"
               aria-expanded="true"
               title="Minimize tools"
-              onClick={() => setMinimized(true)}
+              onClick={() => { setMinimized(true); setPathwayOptionsOpen(false); }}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-lg font-bold text-[#3f4941] hover:bg-[#edf3ef]"
             >
               ⚊
+            </button>
+          </div>
+        )}
+
+        {!minimized && pathwayOptionsOpen && (
+          <div role="menu" aria-label="Pathway options" className="map-glass-panel absolute right-12 top-full mt-2 grid w-56 gap-1 rounded-2xl p-2">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { onBrowseWalkingNetwork(); setPathwayOptionsOpen(false); }}
+              className="rounded-xl px-3 py-2 text-left text-xs font-bold text-[#264d3b] hover:bg-emerald-50"
+            >
+              Browse Walking Network
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { onSelectTool("pathway"); setPathwayOptionsOpen(false); }}
+              className="rounded-xl px-3 py-2 text-left text-xs font-bold text-[#264d3b] hover:bg-emerald-50"
+            >
+              Create or edit Pathway
             </button>
           </div>
         )}
