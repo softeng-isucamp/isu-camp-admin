@@ -9,6 +9,9 @@ from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from services.audit import log_audit
+from services.floor_lookup import floor_label as _floor_label
+from services.floor_lookup import floor_number_from_label as _floor_number_from_label
+from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
 
 actions_bp = Blueprint(
@@ -49,20 +52,12 @@ def _all_floors():
         raise
 
 
-def _floor_label(floor):
-    number = floor.floor_number
-    if number == 0:
-        return "Ground Floor"
-    suffix = "th" if 10 < number % 100 < 14 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
-    return f"{number}{suffix} Floor"
-
-
-def _legacy_floor(record, floors):
+def _location_floor(record, floors):
     if record.floor_id is None:
         return None
     floor = next((item for item in floors if item.floor_id == record.floor_id), None)
     if floor is None or floor.building_id != record.building_id:
-        raise ValueError(f"Location {record.location_id} references an invalid legacy Floor relationship.")
+        raise ValueError(f"Location {record.location_id} references an invalid Floor relationship.")
     return floor
 
 
@@ -73,9 +68,8 @@ def _location_dto(record, buildings, floors):
         )
     by_id = {item.building_id: item for item in buildings}
     building = by_id.get(record.building_id)
-    legacy_floor = _legacy_floor(record, floors)
-    floor = getattr(record, "floor_level", None)
-    return record.to_location_dto(building=building.building_name if building else None, floor=floor or (_floor_label(legacy_floor) if legacy_floor else None))
+    floor = _location_floor(record, floors)
+    return record.to_location_dto(building=building.building_name if building else None, floor=_floor_label(floor) if floor else None)
 
 
 def _request_payload():
@@ -104,6 +98,7 @@ def _validate(data, records, buildings):
     name, code = str(data.get("name", "")).strip(), str(data.get("code", "")).strip()
     location_type, parent_id = data.get("type"), data.get("parentId")
     floor_level = str(data.get("floor", "") or "").strip()
+    floor_number = _floor_number_from_label(floor_level)
     if not name: fields["name"] = "Location name is required."
     if not code: fields["code"] = "Location code is required."
     if location_type not in CREATABLE_TYPES: fields["type"] = "Select a supported Location type."
@@ -120,6 +115,8 @@ def _validate(data, records, buildings):
                 relationships["parentId"] = "The selected Building does not exist."
         if not floor_level or floor_level == "Unspecified Floor":
             fields["floor"] = "A specific Floor Level is required for a new Indoor Location."
+        elif floor_number is None:
+            fields["floor"] = "Select a valid Floor Level."
     elif parent_id not in (None, ""):
         fields["parentId"] = "Only Indoor Locations can belong to a Building."
     duplicate = next((item for item in records if item.location_code.lower() == code.lower()), None)
@@ -128,7 +125,7 @@ def _validate(data, records, buildings):
     if duplicate:
         return None, (jsonify({"success": False, "message": "Location code already exists.", "fields": {"code": "Location code must be unique."}}), 409)
     if fields or relationships: return None, _validation_error(fields, relationships)
-    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_level": floor_level or None, "description": data.get("function", data.get("description")), "keywords": data.get("keywords")}, None
+    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords")}, None
 
 
 @actions_bp.route("/locations", methods=["GET"])
@@ -184,14 +181,19 @@ def add_room_to_building(building_id):
     values, error = _validate(data, records, buildings)
     if error: return error
 
-    photo, photo_mime_type, error = _photo_upload()
+    photo, _photo_mime_type, error = _photo_upload()
     if error: return error
 
     try:
+        floor_id = (
+            _resolve_floor(Floor, db.session, building_id, values["floor_number"]).floor_id
+            if values["floor_number"] is not None
+            else None
+        )
+
         location = Location(
             building_id=building_id,
-            floor_id=None,
-            floor_level=values["floor_level"],
+            floor_id=floor_id,
             type_id=values["type_id"],
             location_code=values["code"],
             location_name=values["name"],
@@ -200,7 +202,7 @@ def add_room_to_building(building_id):
         )
 
         if photo is not None:
-            location.photo, location.photo_mime_type = photo, photo_mime_type
+            location.photo = photo
 
         db.session.add(location)
         db.session.flush()
@@ -256,7 +258,7 @@ def edit_location(location_id):
     values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
     if error: return error
 
-    photo, photo_mime_type, error = _photo_upload()
+    photo, _photo_mime_type, error = _photo_upload()
     if error: return error
 
     if values.get("type") == "Building" and photo is not None:
@@ -275,7 +277,11 @@ def edit_location(location_id):
             return jsonify(building.to_location_dto()), 200
 
         location.building_id = values["building_id"]
-        location.floor_level = values["floor_level"]
+        location.floor_id = (
+            _resolve_floor(Floor, db.session, values["building_id"], values["floor_number"]).floor_id
+            if values["floor_number"] is not None
+            else None
+        )
         location.type_id = values["type_id"]
         location.location_code = values["code"]
         location.location_name = values["name"]
@@ -284,7 +290,6 @@ def edit_location(location_id):
 
         if photo is not None:
             location.photo = photo
-            location.photo_mime_type = photo_mime_type
 
         db.session.flush()
         log_audit("Admin", None, "update", "Location", location.location_id, location.location_name)
