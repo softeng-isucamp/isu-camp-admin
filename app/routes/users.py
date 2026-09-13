@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from auth import admin_required
-from model.app_user import AppUser
+from model.app_user import AppUser, UserInfo
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/users")
 RANGES = {"all": None, "7d": 7, "30d": 30, "90d": 90}
@@ -16,10 +16,6 @@ def _range_start(value):
 
 def _error(message):
     return jsonify({"success": False, "message": message}), 400
-
-
-def _registered_at(record):
-    return record.info.created_at if record.info else None
 
 
 @users_bp.get("")
@@ -43,17 +39,27 @@ def list_users():
 
     query = request.args.get("q", "").strip().lower()
     created_start = _range_start(created_range)
-    records = AppUser.query.all()
-    records = [record for record in records if (
-        not query or query in (record.username or "").lower()
-    ) and (created_start is None or (
-        _registered_at(record) is not None and _as_utc(_registered_at(record)) >= created_start
-    ))]
-    records.sort(key=lambda record: _as_utc(_registered_at(record)) if _registered_at(record) else datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    escaped_query = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
+    records_query = AppUser.query.outerjoin(
+        UserInfo,
+        AppUser.info_id == UserInfo.id,
+    )
+    if query:
+        records_query = records_query.filter(
+            AppUser.username.ilike(f"%{escaped_query}%", escape="\\")
+        )
+    if created_start is not None:
+        records_query = records_query.filter(UserInfo.created_at >= created_start)
+
+    total = records_query.count()
     start = (page - 1) * page_size
-    return jsonify({"items": [record.to_dict() for record in records[start:start + page_size]], "total": len(records), "page": page, "pageSize": page_size}), 200
+    records = (
+        records_query
+        .order_by(UserInfo.created_at.desc().nullslast(), AppUser.id.asc())
+        .offset(start)
+        .limit(page_size)
+        .all()
+    )
 
-
-def _as_utc(value):
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    return jsonify({"items": [record.to_dict() for record in records], "total": total, "page": page, "pageSize": page_size}), 200
