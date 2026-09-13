@@ -34,14 +34,13 @@ test("administrator filters the Walking Network browser and follows map selectio
   await expect(page.getByRole("heading", { name: "Interactive Map Editor" })).toBeVisible();
 
   await page.getByRole("button", { name: "Pathway" }).click();
+  await page.getByRole("menuitem", { name: "Browse Walking Network" }).click();
   const browser = page.getByRole("complementary", { name: "Walking Network browser" });
   await expect(browser).toBeVisible();
   await browser.getByLabel("Search Pathways").fill("no matching pathway");
   await expect(browser.getByRole("status", { name: "Pathway results" })).toHaveText("0 Pathways");
   await browser.getByLabel("Search Pathways").fill("");
 
-  await browser.getByRole("button", { name: "Dismiss Walking Network browser" }).click();
-  await page.getByRole("button", { name: "Select" }).click();
   await page.locator(".route-node-icon").first().click();
   await page.getByRole("button", { name: /Select .* Route Node/ }).click();
   await expect(browser.getByRole("tab", { name: "Route Nodes" })).toHaveAttribute("aria-selected", "true");

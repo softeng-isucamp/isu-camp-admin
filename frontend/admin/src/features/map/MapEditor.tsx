@@ -14,21 +14,19 @@ import L from "leaflet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
+import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { pathwayWithSuggestedName, polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
-import {
-  buildRestoreLocalFeatureOperation,
-  buildRetireLocalFeatureOperation,
-  EDITABLE_LOCAL_FEATURE_FAMILIES,
-} from "./localFeatures";
+import { MapLegend } from "./MapLegend";
+import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import {
   normalizeMapLayers,
@@ -61,15 +59,18 @@ import {
 import { createRoutableCrossing } from "./pathwayCommands";
 import { createWalkingNetworkImportTemplate, previewWalkingNetworkImport, walkingNetworkImportDescription, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
 import type { NetworkSnapshot } from "../../services/network";
-import { buildLifecycleChange, calculateLifecycleImpact, lifecycleActionLabel, type LifecycleAction, type LifecycleImpact } from "./routeNodeLifecycle";
+import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
+import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
+import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
+import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
+import { createLocalMapFeatureWorkflow } from "./localFeature/LocalMapFeatureWorkflow";
+import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
 import {
   findSelectionCandidates,
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
 import {
-  buildAttachBuildingCompoundOperation,
-  buildCreateBuildingCompoundOperation,
   detectBuildingFootprintOverlap,
   getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
@@ -531,19 +532,28 @@ const isPathwayDraft = (value: unknown): value is Pathway => {
     && Array.isArray(pathway.pathPoints);
 };
 
-const MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY = "isu-map-editor-polygon-draft";
+const MAP_EDITOR_PROJECT_ID = "proj-echague";
 
 export function MapEditor() {
+  const { session } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeLocation = useLocation();
   const [workingSessionManager] = useState(() => new WorkingSessionManager());
+  const [workingSessionJournal] = useState(() => createWorkingSessionJournal(window.localStorage));
   const [draftVersion, setDraftVersion] = useState(1);
+  const draftVersionRef = useRef(draftVersion);
+  draftVersionRef.current = draftVersion;
+  const workingSessionKey = useMemo<WorkingSessionKey | null>(() => session ? ({
+    administratorId: session.id,
+    projectId: MAP_EDITOR_PROJECT_ID,
+  }) : null, [session?.id]);
   const saveRequestId = useRef(`map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const [, setWorkingSessionRevision] = useState(0);
   const [pendingToolRequest, setPendingToolRequest] = useState<{
     toolType: ToolType;
     resumeDraftId?: string;
+    openNetworkBrowser?: boolean;
   } | null>(null);
 
   useEffect(
@@ -552,6 +562,48 @@ export function MapEditor() {
     }),
     [workingSessionManager],
   );
+
+  useEffect(() => {
+    if (!workingSessionKey) return undefined;
+    const stored = workingSessionJournal.load(workingSessionKey);
+    if (stored) {
+      workingSessionManager.hydrate(stored.snapshot);
+      const recoveredDraft = workingSessionManager.getActiveDraft();
+      if (recoveredDraft) restoreWorkingSessionDraft(recoveredDraft);
+    }
+
+    const saveRecovery = () => workingSessionJournal.save(workingSessionKey, {
+      schemaVersion: 1,
+      adminDraftVersion: draftVersionRef.current,
+      snapshot: workingSessionManager.exportSnapshot(),
+    });
+    saveRecovery();
+    return workingSessionManager.subscribe(saveRecovery);
+  }, [workingSessionJournal, workingSessionKey, workingSessionManager]);
+
+  const routeNodeWorkflow = useMemo(() => createRouteNodeWorkflow({
+    adapter: services.map,
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const pathwayWorkflow = useMemo(() => createPathwayWorkflow({
+    adapter: services.map,
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const buildingFootprintWorkflow = useMemo(() => createBuildingFootprintWorkflow({
+    adapter: {
+      createBuilding: async (draft) => {
+        if (typeof services.locations.save === "function") return services.locations.save(draft);
+        return { ...draft, id: draft.id ?? `building-${Date.now()}` } as Location;
+      },
+      saveFootprint: async (building, footprintPoints) => {
+        await services.map.save({ buildings: [{ ...building, points: [...footprintPoints] }] });
+      },
+    },
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
+  const localMapFeatureWorkflow = useMemo(() => createLocalMapFeatureWorkflow({
+    workingSession: workingSessionManager,
+  }), [workingSessionManager]);
 
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
@@ -575,7 +627,7 @@ export function MapEditor() {
   });
   const { data: draftBootstrap } = useQuery({
     queryKey: ["map-editor-bootstrap", "proj-echague"],
-    queryFn: () => services.map.getMapEditorBootstrap!("proj-echague"),
+    queryFn: () => services.map.getMapEditorBootstrap!(MAP_EDITOR_PROJECT_ID),
     enabled: false,
     retry: false,
   });
@@ -631,7 +683,6 @@ export function MapEditor() {
   const [pointDraftDirty, setPointDraftDirty] = useState(false);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
-  const [manualPathPointDrag, setManualPathPointDrag] = useState(false);
   const [pathPointDragPreview, setPathPointDragPreview] = useState<{
     index: number;
     point: [number, number];
@@ -673,6 +724,19 @@ export function MapEditor() {
     "Entrance" | "Junction" | "Access Point"
   >("Entrance");
   const [placingNodeName, setPlacingNodeName] = useState("");
+  type SaveAction = "route-node" | "position" | "pathway" | "building" | "route-node-metadata" | "pathway-metadata";
+  const [savingAction, setSavingAction] = useState<SaveAction | null>(null);
+  const savingActionRef = useRef<SaveAction | null>(null);
+  const beginSaving = (action: SaveAction) => {
+    if (savingActionRef.current) return false;
+    savingActionRef.current = action;
+    setSavingAction(action);
+    return true;
+  };
+  const endSaving = () => {
+    savingActionRef.current = null;
+    setSavingAction(null);
+  };
   const [placingAssociatedBuildingId, setPlacingAssociatedBuildingId] = useState<
     string | null
   >(null);
@@ -690,103 +754,11 @@ export function MapEditor() {
   const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const persistedDraft = window.sessionStorage.getItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-    if (!persistedDraft) return;
-
-    try {
-      const parsed = JSON.parse(persistedDraft) as {
-        points?: [number, number][];
-        polygonClosed?: boolean;
-        buildingForm?: BuildingIdentityInput;
-        buildingClassification?: "Building" | "Facility";
-        buildingWorkflowMode?: "create" | "attach";
-        selectedAttachBuildingId?: string | null;
-        attachBuildingSearch?: string;
-        editingBuildingId?: string | null;
-        polygonInteraction?: "draw" | "reshape" | "move";
-        buildingDetailsModalOpen?: boolean;
-        mode?: "select" | "place" | "path" | "area" | "move" | "local_feature";
-      };
-
-      if (!Array.isArray(parsed.points) || parsed.points.length === 0) return;
-
-      setPoints(parsed.points);
-      setPolygonClosed(Boolean(parsed.polygonClosed));
-      if (parsed.buildingForm) {
-        setBuildingForm({
-          name: typeof parsed.buildingForm.name === "string" ? parsed.buildingForm.name : "",
-          code: typeof parsed.buildingForm.code === "string" ? parsed.buildingForm.code : "",
-          function: typeof parsed.buildingForm.function === "string" ? parsed.buildingForm.function : "",
-          keywords: typeof parsed.buildingForm.keywords === "string" ? parsed.buildingForm.keywords : "",
-          status: "Active",
-        });
-      }
-      if (parsed.buildingClassification === "Facility") setBuildingClassification("Facility");
-      else setBuildingClassification("Building");
-      if (parsed.buildingWorkflowMode === "create" || parsed.buildingWorkflowMode === "attach") {
-        setBuildingWorkflowMode(parsed.buildingWorkflowMode);
-      }
-      if (typeof parsed.selectedAttachBuildingId === "string" || parsed.selectedAttachBuildingId === null) {
-        setSelectedAttachBuildingId(parsed.selectedAttachBuildingId);
-      }
-      if (typeof parsed.attachBuildingSearch === "string") {
-        setAttachBuildingSearch(parsed.attachBuildingSearch);
-      }
-      if (typeof parsed.editingBuildingId === "string" || parsed.editingBuildingId === null) {
-        setEditingBuildingId(parsed.editingBuildingId);
-      }
-      if (parsed.polygonInteraction === "draw" || parsed.polygonInteraction === "reshape" || parsed.polygonInteraction === "move") {
-        setPolygonInteraction(parsed.polygonInteraction);
-      }
-      setBuildingDetailsModalOpen(parsed.buildingDetailsModalOpen === true);
-      if (parsed.mode === "area") setMode("area");
-    } catch {
-      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const hasDraftGeometry = points.length > 0 || polygonClosed;
-    if (!hasDraftGeometry) {
-      window.sessionStorage.removeItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY);
-      return;
-    }
-
-    const payload = {
-      points,
-      polygonClosed,
-      buildingForm,
-      buildingClassification,
-      buildingWorkflowMode,
-      selectedAttachBuildingId,
-      attachBuildingSearch,
-      editingBuildingId,
-      polygonInteraction,
-      buildingDetailsModalOpen,
-      mode,
-    };
-    window.sessionStorage.setItem(MAP_EDITOR_POLYGON_DRAFT_STORAGE_KEY, JSON.stringify(payload));
-  }, [
-    attachBuildingSearch,
-    buildingClassification,
-    buildingDetailsModalOpen,
-    buildingForm,
-    buildingWorkflowMode,
-    editingBuildingId,
-    mode,
-    points,
-    polygonClosed,
-    polygonInteraction,
-    selectedAttachBuildingId,
-  ]);
   const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
-  const [lifecycleConfirmation, setLifecycleConfirmation] = useState<{ action: LifecycleAction; impact: LifecycleImpact } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ kind: "building" | "route_node" | "pathway"; id: string; name: string; impact?: DeleteImpact } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
@@ -797,6 +769,13 @@ export function MapEditor() {
   const [walkingNetworkImportFileName, setWalkingNetworkImportFileName] = useState("");
   const [walkingNetworkImportDialogOpen, setWalkingNetworkImportDialogOpen] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  const refreshMapData = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["map"] }),
+      queryClient.invalidateQueries({ queryKey: ["locations"] }),
+    ]);
+  }, [queryClient]);
 
 
 
@@ -1070,7 +1049,8 @@ export function MapEditor() {
     const positioned = currentLocations.filter(isPositionedLocation);
     if (mode === "area") return [];
     return positioned.filter(
-      (loc) => isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id
+      (loc) => loc.type !== "Building"
+        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id)
     );
   }, [currentLocations, currentMapBounds, mode, selected?.id]);
 
@@ -1210,7 +1190,6 @@ export function MapEditor() {
   const selectObject = useCallback(
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
       setSelected({ type, id });
-      if (type === "node" || type === "pathway") setNetworkBrowserOpen(true);
       setSelectionPopover(null);
       setLocalFeatureActionNotice("");
       if (type === "pathway") {
@@ -1339,7 +1318,7 @@ export function MapEditor() {
       setTemporary(point);
       setPointIsSnapped(false);
       setPointDraftDirty(true);
-    } else if (mode === "path" && editingPathId && !manualPathPointDrag) {
+    } else if (mode === "path" && editingPathId) {
       setPathPoints((current) => [...current, point]);
       setPathDraftDirty(true);
     }
@@ -1442,31 +1421,34 @@ export function MapEditor() {
     workingSessionManager.discardActiveDraft();
   };
 
-  const handleSavePosition = () => {
+  const handleSavePosition = async () => {
     if (!temporary) return;
-    if (!pointOnCampus(temporary, campusBoundary)) {
-      setError("The new position must stay inside the ISU Echague campus boundary.");
-      return;
-    }
+    if (!beginSaving("position")) return;
     if (movingId) {
       const existing = currentNodes.find((node) => node.id === movingId);
-      const updated = existing ? { ...existing, lat: temporary[0], lng: temporary[1] } : null;
-      if (updated) {
-        setLocalNodes((current) => {
-          const filtered = current.filter((n) => n.id !== movingId);
-          return [...filtered, updated];
-        });
-        workingSessionManager.executeOperation({
-          type: "update_geometry",
-          domain: "Walking Network",
-          entityId: movingId,
-          before: existing as unknown as Record<string, unknown>,
-          after: updated as unknown as Record<string, unknown>,
+      if (existing) {
+        const updated = { ...existing, lat: temporary[0], lng: temporary[1] };
+        const result = await routeNodeWorkflow.finalize({
+          kind: "update",
+          before: existing,
+          after: updated,
+          context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
           description: `Move ${updated.name}`,
         });
-        void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updated) : Promise.resolve(updated)).catch((cause) => {
-          setError(cause instanceof Error ? cause.message : "Failed to move Route Node.");
-        });
+        if (!result.ok) {
+          setError(result.message);
+          endSaving();
+          return;
+        }
+        const persisted = result.node;
+        setLocalNodes((current) => [...current.filter((n) => n.id !== movingId), persisted]);
+        try {
+          await refreshMapData();
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
+          endSaving();
+          return;
+        }
       }
       setDirty(true);
       setMode("select");
@@ -1477,10 +1459,12 @@ export function MapEditor() {
     setMoveOrigin(null);
     setPointIsSnapped(false);
     setIsPointDragging(false);
+    endSaving();
   };
 
-  const handleSavePlacedNode = () => {
+  const handleSavePlacedNode = async () => {
     if (!temporary || !placingNodeName.trim()) return;
+    if (!beginSaving("route-node")) return;
     const newNodeId = `pending-node-${Date.now()}`;
     const newNode: RouteNode = {
       id: newNodeId,
@@ -1490,34 +1474,35 @@ export function MapEditor() {
       lat: temporary[0],
       lng: temporary[1],
     };
-    const issues = validateRouteNodeDraft(newNode, {
-      buildings: currentBuildings,
-      locations: currentLocations,
-      campusBoundary,
+    const { id: _pendingId, ...draft } = newNode;
+    const result = await routeNodeWorkflow.finalize({
+      kind: "create",
+      draft,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Place ${newNode.name}`,
     });
-    if (issues.length > 0) {
-      setError(issues[0].message);
+    if (!result.ok) {
+      setError(result.message);
+      endSaving();
       return;
     }
-    setLocalNodes((current) => [...current, newNode]);
-    workingSessionManager.executeOperation({ type: "create_entity", domain: "Walking Network", entityId: newNode.id,
-      before: null, after: newNode as unknown as Record<string, unknown>, description: `Place ${newNode.name}` });
-    void (typeof services.map.createRouteNode === "function" ? services.map.createRouteNode(newNode) : Promise.resolve(newNode)).then((createdNode) => {
-      const confirmedNode = { ...createdNode, name: newNode.name };
-      setLocalNodes((current) => current.map((node) => node.id === newNode.id ? confirmedNode : node));
+    const confirmedNode = result.node;
+    try {
+      setLocalNodes((current) => [...current, confirmedNode]);
+      await refreshMapData();
+      if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
+        setNonRoutableBuildingId(null);
+      }
+      setDirty(true);
+      setPlacingNodeName("");
+      setMode("select");
       setSelected({ type: "node", id: confirmedNode.id });
-    }).catch((cause) => {
-      setLocalNodes((current) => current.filter((node) => node.id !== newNode.id));
-      setError(cause instanceof Error ? cause.message : "Failed to create Route Node.");
-    });
-    if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
-      setNonRoutableBuildingId(null);
+      completeToolDraft("point");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
+    } finally {
+      endSaving();
     }
-    setDirty(true);
-    setPlacingNodeName("");
-    setMode("select");
-    setSelected({ type: "node", id: newNode.id });
-    completeToolDraft("point");
   };
 
   const handleSaveNewRoom = () => {
@@ -1562,66 +1547,70 @@ export function MapEditor() {
     });
   };
 
-  const linkExistingEntrance = (building: Building, node: RouteNode) => {
+  const linkExistingEntrance = async (building: Building, node: RouteNode) => {
     const associatedPlaceId = selectedBuildingLocation?.id ?? building.id;
     const updated = { ...node, nodeType: "Entrance" as const, associatedPlaceId };
-    updateNodeWithOperation(node, updated, `Link ${node.name} to ${building.name}`);
-    void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updated) : Promise.resolve(updated)).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Failed to link Route Node.");
+    const result = await routeNodeWorkflow.finalize({
+      kind: "update",
+      before: node,
+      after: updated,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Link ${node.name} to ${building.name}`,
     });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    try {
+      updateNode(result.node);
+      await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The Entrance association was saved, but the map could not refresh.");
+      return;
+    }
     setLinkingBuildingEntrance(false);
     setSelected({ type: "building", id: building.id });
   };
 
-  const handleSavePathShape = () => {
+  const handleSavePathShape = async () => {
     if (!editingPathId) return;
+    if (!beginSaving("pathway")) return;
     const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
-      const updatedPath: Pathway = {
+      const draft = {
         ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
-        // A Pathway owns only intermediate geometry. Endpoint coordinates are
-        // always read from the selected Route Nodes.
-        pathPoints: withoutEndpointPathPoints(
-          [...pathPoints],
-          routeNodePoint(currentNodes, target.sourceNodeId),
-          routeNodePoint(currentNodes, target.destinationNodeId),
-        ),
+        pathPoints,
       };
-      const pathwayIssues = validatePathwayDraft(updatedPath, currentNodes, campusBoundary, {
-        existingPathways: currentPathways.filter((pathway) => pathway.id !== updatedPath.id),
-        requireActiveEndpoints: true,
-      });
-      if (pathwayIssues.length > 0) {
-        setError(pathwayIssues[0].message);
+      const result = provisionalPathwayId === target.id
+        ? await pathwayWorkflow.finalize({
+            kind: "create",
+            draft,
+            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+            description: `Create ${draft.name}`,
+          })
+        : await pathwayWorkflow.finalize({
+            kind: "update",
+            before: target,
+            after: draft,
+            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+            description: `Reshape ${target.name}`,
+          });
+      if (!result.ok) {
+        setError(result.message);
+        endSaving();
         return;
       }
-      setLocalPathways((current) => {
-        const filtered = current.filter((p) => p.id !== editingPathId && p.id !== target.id);
-        return [...filtered, updatedPath];
-      });
-      setPathwayDraft({ ...updatedPath });
-      setPathwayDraftOriginal({ ...updatedPath });
-      workingSessionManager.executeOperation({
-        type: provisionalPathwayId === target.id ? "create_entity" : "update_geometry",
-        domain: "Walking Network",
-        entityId: updatedPath.id,
-        before: provisionalPathwayId === target.id ? null : target as unknown as Record<string, unknown>,
-        after: updatedPath as unknown as Record<string, unknown>,
-        description: provisionalPathwayId === target.id ? `Create ${updatedPath.name}` : `Reshape ${target.name}`,
-      });
-      const savePromise = provisionalPathwayId === target.id
-        ? (typeof services.map.createPathway === "function" ? services.map.createPathway(updatedPath) : Promise.resolve(updatedPath))
-        : (typeof services.map.updatePathway === "function" ? services.map.updatePathway(updatedPath) : Promise.resolve(updatedPath));
-      void savePromise.then((persistedPath) => {
-        if (persistedPath.id === updatedPath.id) return;
-        setLocalPathways((current) => current.map((pathway) => pathway.id === updatedPath.id ? persistedPath : pathway));
-        setPathwayDraft({ ...persistedPath });
-        setPathwayDraftOriginal({ ...persistedPath });
-        setProvisionalPathwayId(persistedPath.id);
-        setEditingPathId(persistedPath.id);
-      }).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Failed to save Pathway.");
-      });
+      const persistedPath = result.pathway;
+      setLocalPathways((current) => [...current.filter((p) => p.id !== editingPathId && p.id !== target.id), persistedPath]);
+      setPathwayDraft({ ...persistedPath });
+      setPathwayDraftOriginal({ ...persistedPath });
+      try {
+        await refreshMapData();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
+        endSaving();
+        return;
+      }
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
       const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
       if (src && !localNodes.some((n) => n.id === src.id)) setLocalNodes((c) => [...c, src]);
@@ -1630,6 +1619,7 @@ export function MapEditor() {
     setDirty(true);
     setMode("select");
     completeToolDraft("pathway");
+    endSaving();
   };
 
   const cancelBuildingDraft = () => {
@@ -1651,13 +1641,10 @@ export function MapEditor() {
     setError("");
   };
 
-  const handleSaveBuilding = () => {
+  const handleSaveBuilding = async () => {
     if (editingBuildingId) {
       if (!canFinishFootprint) return;
-      if (!geometryOnCampus(points, campusBoundary)) {
-        setError("The building footprint must stay inside the ISU Echague campus boundary.");
-        return;
-      }
+      if (!beginSaving("building")) return;
       const footprintLink = currentFeatureLinks.find((link) =>
         link.targetDomain === "Locations"
         && link.targetEntityId === editingBuildingId
@@ -1670,94 +1657,52 @@ export function MapEditor() {
       );
       if (!footprintLink || !footprint) {
         setError("This Building has no linked footprint to reshape. Open Building details to review its ownership.");
+        endSaving();
         return;
       }
-      const updatedFootprint: LocalMapFeatureEntity = {
-        ...footprint,
-        coordinates: [...points],
-        linkedBuildingId: editingBuildingId,
-      };
-      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== updatedFootprint.id), updatedFootprint]);
-      setLocalBuildings((current) => current.map((building) =>
-        building.id === editingBuildingId ? { ...building, points: [...points] } : building,
-      ));
-      workingSessionManager.executeOperation({
-        type: "update_geometry",
-        domain: "Local Map Data",
-        entityId: updatedFootprint.id,
-        before: footprint as unknown as Record<string, unknown>,
-        after: updatedFootprint as unknown as Record<string, unknown>,
-        description: `Reshape linked footprint for ${buildingName.trim() || editingBuildingId}`,
+      const buildingForSave = currentBuildings.find((building) => building.id === editingBuildingId);
+      if (!buildingForSave) {
+        setError("This Building is no longer available. Reload the map and retry the footprint update.");
+        endSaving();
+        return;
+      }
+      const result = await buildingFootprintWorkflow.finalize({
+        kind: "reshape",
+        building: buildingForSave,
+        footprint,
+        link: footprintLink,
+        points: [...points],
+        context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
       });
+      if (!result.ok) {
+        setError(result.message);
+        endSaving();
+        return;
+      }
+      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== result.footprint.id), result.footprint]);
+      setLocalBuildings((current) => current.map((building) =>
+        building.id === editingBuildingId ? result.building : building,
+      ));
       setDirty(true);
+      void refreshMapData();
       cancelBuildingDraft();
       setSelected({ type: "building", id: editingBuildingId });
+      endSaving();
     } else {
       if (!canSaveBuilding) return;
       handleCreateBuilding();
     }
   };
 
-  const completeBuildingWorkflow = (building: Building, intent: "create" | "attach") => {
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
+  const completeBuildingWorkflow = (
+    result: Extract<Awaited<ReturnType<typeof buildingFootprintWorkflow.finalize>>, { ok: true }>,
+  ) => {
+    if (result.location) {
+      setLocalLocations((current) => [...current.filter((item) => item.id !== result.location!.id), result.location!]);
     }
-
-    let compoundBatch: WorkingOperation;
-    if (intent === "create") {
-      const identityInput: BuildingIdentityInput = {
-        name: building.name,
-        code: building.code,
-        type: buildingClassification,
-        function: buildingFunction,
-        keywords: buildingKeywords,
-        status: "Active",
-      };
-      const identityIssues = validateBuildingIdentityDetails(identityInput, currentLocations);
-      if (identityIssues.length > 0) {
-        setError(identityIssues[0].message);
-        return;
-      }
-      compoundBatch = buildCreateBuildingCompoundOperation(identityInput, points, building.id);
-      const locRecord = compoundBatch.nestedOperations![0].after as unknown as Location;
-      setLocalLocations((current) => [...current.filter((item) => item.id !== locRecord.id), locRecord]);
-    } else {
-      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
-      if (!eligibility.eligible) {
-        setError(eligibility.reason);
-        return;
-      }
-      compoundBatch = buildAttachBuildingCompoundOperation(building, points);
-    }
-
-    const footprintOp = compoundBatch.nestedOperations!.find(
-      (op) => op.domain === "Local Map Data" && op.type === "create_entity",
-    );
-    const linkOp = compoundBatch.nestedOperations!.find(
-      (op) => op.domain === "Local Map Data" && op.type === "link_feature",
-    );
-    const footprint = footprintOp?.after as unknown as LocalMapFeatureEntity;
-    const link = linkOp?.after as unknown as FeatureLinkEntity;
-
-    // The current renderer still consumes Building.points. Keep this local
-    // compatibility projection separate from the geometry-free Building
-    // record stored in the compound operation above.
-    const renderedBuilding = { ...building, type: buildingClassification, points: [...points] };
-    setLocalBuildings((current) => [...current.filter((item) => item.id !== building.id), renderedBuilding]);
-    if (footprint) {
-      setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== footprint.id), footprint]);
-    }
-    if (link) {
-      setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== building.id), link]);
-    }
-    workingSessionManager.executeBatch(
-      intent === "create" ? `Create ${building.name} with footprint` : `Attach footprint to ${building.name}`,
-      "Local Map Data",
-      footprint?.id ?? compoundBatch.entityId,
-      compoundBatch.nestedOperations!,
-    );
+    setLocalBuildings((current) => [...current.filter((item) => item.id !== result.building.id), result.building]);
+    setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== result.footprint.id), result.footprint]);
+    setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== result.building.id), result.link]);
     setDirty(true);
     setPoints([]);
     resetBuildingForm();
@@ -1766,99 +1711,75 @@ export function MapEditor() {
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setMode("select");
-    setSelected({ type: "building", id: building.id });
-    setPlacingAssociatedBuildingId(building.id);
+    setSelected({ type: "building", id: result.building.id });
+    setPlacingAssociatedBuildingId(result.building.id);
     const hasActiveEntrance = currentNodes.some((node) =>
       node.nodeType === "Entrance"
-      && node.associatedPlaceId === building.id
+      && node.associatedPlaceId === result.building.id
       && node.status !== "Inactive",
     );
-    setNonRoutableBuildingId(hasActiveEntrance ? null : building.id);
+    setNonRoutableBuildingId(hasActiveEntrance ? null : result.building.id);
     completeToolDraft("polygon");
   };
 
-const handleCreateBuilding = async () => {
+  const handleCreateBuilding = async () => {
     if (!canSaveBuilding) {
       setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
       return;
     }
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
+    if (!beginSaving("building")) return;
+    const result = await buildingFootprintWorkflow.finalize({
+      kind: "create",
+      identity: {
+        name: buildingName,
+        code: buildingCode,
+        type: buildingClassification,
+        function: buildingFunction,
+        keywords: buildingKeywords,
+        status: "Active",
+      },
+      points: [...points],
+      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+    });
+    if (!result.ok) {
+      setError(result.message);
+      endSaving();
       return;
     }
-
-    if (typeof services.locations.save === "function") {
-      setError("");
-      try {
-        const saved = await services.locations.save({
-          name: buildingName.trim(),
-          code: buildingCode.trim(),
-          type: "Building",
-          parentId: null,
-          function: buildingFunction.trim(),
-          keywords: buildingKeywords.trim() || undefined,
-          status: "Active",
-          lat: null,
-          lng: null,
-          positioned: false,
-          polygonCoordinates: points,
-        } as any);
-        const renderedBuilding: Building = {
-          id: saved.id,
-          name: saved.name,
-          code: saved.code,
-          type: saved.type === "Facility" ? "Facility" : "Building",
-          status: saved.status,
-          points: [...points],
-        };
-        setLocalLocations((current) => [...current.filter((item) => item.id !== saved.id), saved]);
-        setLocalBuildings((current) => [...current.filter((item) => item.id !== saved.id), renderedBuilding]);
-        setBuildingDetailsModalOpen(false);
-        setPoints([]);
-        resetBuildingForm();
-        setPolygonClosed(false);
-        setPolygonInteraction("draw");
-        setMode("select");
-        setSelected({ type: "building", id: saved.id });
-        setPlacingAssociatedBuildingId(saved.id);
-        const hasActiveEntrance = currentNodes.some((node) =>
-          node.nodeType === "Entrance"
-          && node.associatedPlaceId === saved.id
-          && node.status !== "Inactive",
-        );
-        setNonRoutableBuildingId(hasActiveEntrance ? null : saved.id);
-        void queryClient.invalidateQueries({ queryKey: ["locations"] });
-        void queryClient.invalidateQueries({ queryKey: ["map"] });
-        completeToolDraft("polygon");
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to create Building.");
-      }
-      return;
+    setError("");
+    setBuildingDetailsModalOpen(false);
+    completeBuildingWorkflow(result);
+    try {
+      await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
     }
-
-    completeBuildingWorkflow({
-      id: `building-${Date.now()}`,
-      name: buildingName.trim(),
-      code: buildingCode.trim(),
-      points: [],
-    }, "create");
+    endSaving();
   };
 
-  const handleAttachBuilding = () => {
+  const handleAttachBuilding = async () => {
     const existing = buildingAssociationOptions.find((building) => building.id === selectedAttachBuildingId);
     if (!existing) return;
-    const eligibility = getBuildingAttachmentEligibility(existing, currentFeatureLinks);
-    if (!eligibility.eligible) {
-      setError(eligibility.reason);
+    if (!beginSaving("building")) return;
+    const result = await buildingFootprintWorkflow.finalize({
+      kind: "attach",
+      building: existing,
+      points: [...points],
+      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+    });
+    if (!result.ok) {
+      setError(result.message);
+      endSaving();
       return;
     }
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
+    completeBuildingWorkflow(result);
+    try {
+      await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
+    } finally {
+      endSaving();
     }
-    completeBuildingWorkflow(existing, "attach");
   };
 
   const startGuidedEntranceDraft = () => {
@@ -1908,12 +1829,13 @@ const handleCreateBuilding = async () => {
     setPathDraftDirty(false);
     setEditingBuildingId(null);
     setConfirm(null);
-    setLifecycleConfirmation(null);
+    setDeleteConfirmation(null);
     setPreviewOpen(false);
     setError("");
     setMode("select");
     setSelected(null);
     workingSessionManager.reset();
+    if (workingSessionKey) workingSessionJournal.clear(workingSessionKey);
   };
 
   const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
@@ -2033,6 +1955,13 @@ const handleCreateBuilding = async () => {
   };
 
   const activePathway = currentPathways.find((p) => p.id === editingPathId);
+
+  const adoptSuggestedPathwayName = (pathway: Pathway | null | undefined) => {
+    if (!pathway) return;
+    const suggestion = suggestedPathwayName(pathway, currentNodes);
+    if (!suggestion) return;
+    setPathwayDraft((current) => current && !current.name.trim() ? { ...current, name: suggestion } : current);
+  };
 
   const startNewPathway = () => {
     setEditingPathId(null);
@@ -2231,7 +2160,6 @@ const handleCreateBuilding = async () => {
         nestedRecords: {
           editingPathId,
           selectedPathPointIndex,
-          manualPathPointDrag,
           provisionalPathwayId,
           provisionalPathway: provisionalPathwayId
             ? localPathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
@@ -2266,7 +2194,6 @@ const handleCreateBuilding = async () => {
     localPathways,
     localFeatureName,
     localFeaturePoints,
-    manualPathPointDrag,
     mode,
     movingId,
     pathDraftDirty,
@@ -2328,7 +2255,6 @@ const handleCreateBuilding = async () => {
         setEditingPathId(null);
         setProvisionalPathwayId(null);
         setSelectedPathPointIndex(null);
-        setManualPathPointDrag(false);
         setPathDraftDirty(false);
       },
       local_feature: () => setLocalFeaturePoints([]),
@@ -2358,37 +2284,23 @@ const handleCreateBuilding = async () => {
     const existingBoundary = selectedLocalFeatureFamily === "campus_boundary"
       ? currentLocalFeatures.find((feature) => feature.family === "campus_boundary" && feature.status !== "retired")
       : undefined;
-    const feature: LocalMapFeatureEntity = {
-      ...(existingBoundary ?? {}),
-      id: existingBoundary?.id ?? `local-feature-${Date.now()}`,
+    const result = localMapFeatureWorkflow.finalize({
+      kind: "create",
       family: selectedLocalFeatureFamily,
-      name: localFeatureName.trim(),
-      isEditable: true,
-      geometryType: selectedLocalFeatureDefinition.geometryType,
+      name: localFeatureName,
       coordinates: [...localFeaturePoints],
-      surface: existingBoundary?.surface ?? "unknown",
-      access: existingBoundary?.access ?? "unknown",
-      direction: selectedLocalFeatureDefinition.geometryType === "line"
-        ? existingBoundary?.direction ?? "both"
-        : undefined,
-      status: "active",
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== feature.id), feature]);
-    workingSessionManager.executeOperation({
-      type: existingBoundary ? "update_geometry" : "create_entity",
-      domain: "Local Map Data",
-      entityId: feature.id,
-      before: existingBoundary ? existingBoundary as unknown as Record<string, unknown> : null,
-      after: feature as unknown as Record<string, unknown>,
-      description: existingBoundary
-        ? "Replace Campus Boundary geometry"
-        : `Create ${selectedLocalFeatureDefinition.label}`,
+      campusBoundary,
+      existingBoundary,
     });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     setLocalFeaturePoints([]);
     setDirty(true);
-    setSelected({ type: "local_feature", id: feature.id });
+    setSelected({ type: "local_feature", id: result.feature.id });
     setMode("select");
-    workingSessionManager.discardActiveDraft();
   };
 
   const activateTool = (toolType: ToolType) => {
@@ -2413,7 +2325,7 @@ const handleCreateBuilding = async () => {
       },
       pathway: () => {
         setMode("path");
-        setNetworkBrowserOpen(true);
+        setNetworkBrowserOpen(false);
         if (!editingPathId && (directoryPathways.length || localPathways.length)) {
           const first = localPathways[0] || directoryPathways[0];
           if (first?.status === "Open") {
@@ -2435,7 +2347,10 @@ const handleCreateBuilding = async () => {
   };
 
   const selectTool = (toolType: ToolType) => {
-    if (toolType === activeTool) return;
+    if (toolType === activeTool) {
+      if (toolType === "pathway") setNetworkBrowserOpen(false);
+      return;
+    }
     if (workingSessionManager.hasActiveDraft()) {
       setPendingToolRequest({ toolType });
       return;
@@ -2443,9 +2358,16 @@ const handleCreateBuilding = async () => {
     activateTool(toolType);
   };
 
-  const restoreSuspendedDraft = (draftId: string) => {
-    const draft = workingSessionManager.resumeSuspendedDraft(draftId);
-    if (!draft) return;
+  const browseWalkingNetwork = () => {
+    if (workingSessionManager.hasActiveDraft()) {
+      setPendingToolRequest({ toolType: "select", openNetworkBrowser: true });
+      return;
+    }
+    activateTool("select");
+    setNetworkBrowserOpen(true);
+  };
+
+  function restoreWorkingSessionDraft(draft: ActiveToolDraft) {
     const restoredPoints = (draft.provisionalGeometry.points ?? []).map((point) => [
       point.lat ?? point.y,
       point.lng ?? point.x,
@@ -2528,7 +2450,6 @@ const handleCreateBuilding = async () => {
         setPathStartNodeId(draft.provisionalGeometry.startNodeId ?? null);
         setEditingPathId(typeof records.editingPathId === "string" ? records.editingPathId : null);
         setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
-        setManualPathPointDrag(records.manualPathPointDrag === true);
         const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
           ? { ...records.provisionalPathway, pathPoints: restoredPoints }
           : null;
@@ -2557,6 +2478,11 @@ const handleCreateBuilding = async () => {
       },
     };
     restoreHandlers[draft.toolType]();
+  }
+
+  const restoreSuspendedDraft = (draftId: string) => {
+    const draft = workingSessionManager.resumeSuspendedDraft(draftId);
+    if (draft) restoreWorkingSessionDraft(draft);
   };
 
   const requestDraftResume = (draftId: string) => {
@@ -2579,6 +2505,7 @@ const handleCreateBuilding = async () => {
     setPendingToolRequest(null);
     if (request.resumeDraftId) restoreSuspendedDraft(request.resumeDraftId);
     else activateTool(request.toolType);
+    if (request.openNetworkBrowser) setNetworkBrowserOpen(true);
   };
 
   useEffect(() => {
@@ -2648,27 +2575,40 @@ const handleCreateBuilding = async () => {
     });
     setDirty(true);
   };
-  const updateNodeWithOperation = (before: RouteNode, after: RouteNode, description: string) => {
-    updateNode(after);
-    recordPropertyOperation("Walking Network", before.id, before, after, description);
-  };
   const routeNodeFrame = selectedNode && routeNodeDraft?.id === selectedNode.id ? routeNodeDraft : selectedNode;
   const routeNodeFrameDirty = Boolean(routeNodeDraft && routeNodeDraftOriginal
     && JSON.stringify(routeNodeDraft) !== JSON.stringify(routeNodeDraftOriginal));
-  const applyRouteNodeFrame = () => {
+  const applyRouteNodeFrame = async () => {
     if (!routeNodeDraft || !routeNodeDraftOriginal || !routeNodeFrameDirty) return;
-    const issues = validateRouteNodeDraft(routeNodeDraft, { buildings: currentBuildings, locations: currentLocations, campusBoundary });
-    if (issues.length) {
-      setError(issues[0].message);
-      window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issues[0].field === "name" ? "Route Node name" : issues[0].field === "nodeType" ? "Route Node type" : issues[0].field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
+    if (!beginSaving("route-node-metadata")) return;
+    const result = await routeNodeWorkflow.finalize({
+      kind: "update",
+      before: routeNodeDraftOriginal,
+      after: routeNodeDraft,
+      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+      description: `Edit ${routeNodeDraft.name}`,
+    });
+    if (!result.ok) {
+      setError(result.message);
+      const issue = result.issues?.[0];
+      if (issue) {
+        window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issue.field === "name" ? "Route Node name" : issue.field === "nodeType" ? "Route Node type" : issue.field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
+      }
+      endSaving();
       return;
     }
-    updateNodeWithOperation(routeNodeDraftOriginal, routeNodeDraft, `Edit ${routeNodeDraft.name}`);
-    setRouteNodeDraftOriginal({ ...routeNodeDraft });
-    void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(routeNodeDraft) : Promise.resolve(routeNodeDraft)).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Failed to update Route Node.");
-    });
-    setError("");
+    const persisted = result.node;
+    updateNode(persisted);
+    setRouteNodeDraft({ ...persisted });
+    setRouteNodeDraftOriginal({ ...persisted });
+    try {
+      await refreshMapData();
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
+    } finally {
+      endSaving();
+    }
   };
   const cancelRouteNodeFrame = () => {
     if (!routeNodeDraftOriginal) return;
@@ -2676,41 +2616,28 @@ const handleCreateBuilding = async () => {
     setError("");
   };
 
-  const confirmLifecycleAction = () => {
-    if (!lifecycleConfirmation) return;
-    const { action, impact } = lifecycleConfirmation;
-    const change = buildLifecycleChange(action, impact.object);
-    if (action === "close_pathway" || action === "reopen_pathway") {
-      const updatedPathway = change.record as Pathway;
-      if (!updatePathway(updatedPathway)) return;
-      void (typeof services.map.updatePathway === "function" ? services.map.updatePathway(updatedPathway) : Promise.resolve(updatedPathway)).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Failed to update Pathway lifecycle.");
-      });
-      // The inspector keeps an editable frame over the collection. Update the
-      // frame as well so it cannot mask the confirmed lifecycle status.
-      if (pathwayDraft?.id === updatedPathway.id) {
-        setPathwayDraft({ ...updatedPathway });
-        setPathwayDraftOriginal({ ...updatedPathway });
-        setPathDraftDirty(false);
+  const confirmDelete = async () => {
+    if (!deleteConfirmation) return;
+    try {
+      if (deleteConfirmation.kind === "building") {
+        await services.map.removeBuilding(deleteConfirmation.id);
+        setLocalBuildings((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+        setLocalLocations((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+      } else if (deleteConfirmation.kind === "route_node") {
+        await services.map.deleteRouteNode(deleteConfirmation.id);
+        setLocalNodes((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+      } else {
+        await services.map.deletePathway(deleteConfirmation.id);
+        setLocalPathways((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+        setDeletedPathwayIds((ids) => [...new Set([...ids, deleteConfirmation.id])]);
       }
-      // Lifecycle changes return to browse mode. This keeps the single
-      // pathway card authoritative after an Active/Closed decision and
-      // prevents a stale reshape surface from masking the new status.
-      setEditingPathId(null);
-      setPathPoints([]);
-      setManualPathPointDrag(false);
-      setMode("select");
-    } else {
-      const updatedNode = change.record as RouteNode;
-      updateNode(updatedNode);
-      void (typeof services.map.updateRouteNode === "function" ? services.map.updateRouteNode(updatedNode) : Promise.resolve(updatedNode)).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Failed to update Route Node lifecycle.");
-      });
+      await refreshMapData();
+      setSelected(null);
+      setDeleteConfirmation(null);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Failed to delete ${deleteConfirmation.name}. Retry when ready.`);
     }
-    workingSessionManager.executeOperation(change.operation);
-    setDirty(true);
-    setLifecycleConfirmation(null);
-    setError("");
   };
 
   const locationModalEntity: Location | null = selectedLocation ?? (selectedBuilding ? {
@@ -2748,65 +2675,58 @@ const handleCreateBuilding = async () => {
   const pathwayFrame = selectedPath && pathwayDraft?.id === selectedPath.id
     ? { ...pathwayDraft, pathPoints: editingPathId === selectedPath.id ? pathPoints : pathwayDraft.pathPoints }
     : selectedPath ?? activePathway;
-  const pathwayFrameIssues = pathwayFrame
-    ? validatePathwayDraft(pathwayFrame, currentNodes, campusBoundary, {
-      existingPathways: currentPathways.filter((pathway) => pathway.id !== pathwayFrame.id),
+  const namedPathwayFrame = pathwayFrame ? pathwayWithSuggestedName(pathwayFrame, currentNodes) : null;
+  const pathwayFrameIssues = namedPathwayFrame
+    ? validatePathwayDraft(namedPathwayFrame, currentNodes, campusBoundary, {
+      existingPathways: currentPathways.filter((pathway) => pathway.id !== namedPathwayFrame.id),
       requireActiveEndpoints: true,
     })
     : [];
   const pathwayFrameDirty = Boolean(
-    pathwayFrame && (
-      (pathwayDraftOriginal && JSON.stringify(pathwayFrame) !== JSON.stringify(pathwayDraftOriginal))
-      || (!pathwayDraftOriginal && provisionalPathwayId === pathwayFrame.id)
+    namedPathwayFrame && (
+      (pathwayDraftOriginal && JSON.stringify(namedPathwayFrame) !== JSON.stringify(pathwayDraftOriginal))
+      || (!pathwayDraftOriginal && provisionalPathwayId === namedPathwayFrame.id)
     ),
   );
-  const applyPathwayFrame = () => {
-    if (!pathwayFrame || pathwayFrameIssues.length > 0) {
+  const applyPathwayFrame = async () => {
+    if (!namedPathwayFrame || pathwayFrameIssues.length > 0) {
       if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
       return;
     }
     if (!pathwayFrameDirty) return;
-    if (!pathwayDraftOriginal && provisionalPathwayId === pathwayFrame.id) {
-      handleSavePathShape();
+    if (!pathwayDraftOriginal && provisionalPathwayId === namedPathwayFrame.id) {
+      await handleSavePathShape();
       return;
     }
+    if (!beginSaving("pathway-metadata")) return;
     const before = pathwayDraftOriginal!;
-    const after = pathwayFrame;
-    const operations: WorkingOperation[] = [];
-    if (JSON.stringify({ ...before, pathPoints: undefined }) !== JSON.stringify({ ...after, pathPoints: undefined })) {
-      operations.push({
-        id: `pathway-properties-${after.id}`,
-        type: "update_properties",
-        domain: "Walking Network",
-        entityId: after.id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-        description: `Edit ${after.name}`,
-      });
-    }
-    if (JSON.stringify(before.pathPoints) !== JSON.stringify(after.pathPoints)) {
-      operations.push({
-        id: `pathway-geometry-${after.id}`,
-        type: "update_geometry",
-        domain: "Walking Network",
-        entityId: after.id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-        description: `Reshape ${after.name}`,
-      });
-    }
-    if (operations.length > 1) workingSessionManager.executeBatch(`Edit ${after.name}`, "Walking Network", after.id, operations);
-    else if (operations[0]) workingSessionManager.executeOperation(operations[0]);
-    setLocalPathways((items) => [...items.filter((item) => item.id !== after.id), after]);
-    setPathwayDraftOriginal({ ...after });
-    setPathwayDraft({ ...after });
-    setPathPoints([...after.pathPoints]);
-    void (typeof services.map.updatePathway === "function" ? services.map.updatePathway(after) : Promise.resolve(after)).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Failed to update Pathway.");
+    const result = await pathwayWorkflow.finalize({
+      kind: "update",
+      before,
+      after: namedPathwayFrame,
+      context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
+      description: `Edit ${namedPathwayFrame.name}`,
     });
-    setPathDraftDirty(false);
-    setDirty(true);
-    setError("");
+    if (!result.ok) {
+      setError(result.message);
+      endSaving();
+      return;
+    }
+    const persisted = result.pathway;
+    setLocalPathways((items) => [...items.filter((item) => item.id !== persisted.id), persisted]);
+    setPathwayDraftOriginal({ ...persisted });
+    setPathwayDraft({ ...persisted });
+    setPathPoints([...persisted.pathPoints]);
+    try {
+      await refreshMapData();
+      setPathDraftDirty(false);
+      setDirty(true);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
+    } finally {
+      endSaving();
+    }
   };
   const cancelPathwayFrame = () => {
     if (!pathwayDraftOriginal) {
@@ -2842,30 +2762,26 @@ const handleCreateBuilding = async () => {
   const retireLocalFeature = (feature: LocalMapFeatureEntity) => {
     const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
       .find((link) => link.featureId === feature.id);
-    const operation = buildRetireLocalFeatureOperation(feature, featureLink);
-    const updated = {
-      ...feature,
-      status: "retired" as const,
-      linkedBuildingId: featureLink ? null : feature.linkedBuildingId,
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    const result = localMapFeatureWorkflow.finalize({ kind: "retire", feature, link: featureLink });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     if (featureLink) setUnlinkedFeatureLinkIds((ids) => [...new Set([...ids, featureLink.id])]);
-    workingSessionManager.executeOperation(operation);
     setDirty(true);
   };
 
   const restoreLocalFeature = (feature: LocalMapFeatureEntity) => {
     const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
       .find((link) => link.featureId === feature.id);
-    const operation = buildRestoreLocalFeatureOperation(feature, featureLink);
-    const updated = {
-      ...feature,
-      status: "active" as const,
-      linkedBuildingId: featureLink?.targetEntityId ?? feature.linkedBuildingId,
-    };
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    const result = localMapFeatureWorkflow.finalize({ kind: "restore", feature, link: featureLink });
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
     if (featureLink) setUnlinkedFeatureLinkIds((ids) => ids.filter((id) => id !== featureLink.id));
-    workingSessionManager.executeOperation(operation);
     setDirty(true);
   };
 
@@ -2958,25 +2874,7 @@ const handleCreateBuilding = async () => {
           ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
           { label: "＋ Add entrance", onSelect: () => { setPlacingNodeType("Entrance"); setPlacingNodeName(`${selectedBuilding.name} Entrance`); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setTemporary(null); setMode("place"); } },
           { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
-          {
-            label: "🗑 Retire Footprint",
-            tone: "danger" as const,
-            onSelect: () => {
-              const footprintLink = currentFeatureLinks.find((link) =>
-                link.targetDomain === "Locations"
-                && link.targetEntityId === selectedBuilding.id
-                && link.linkType === "building_footprint",
-              );
-              const footprint = currentLocalFeatures.find((feature) =>
-                feature.id === footprintLink?.featureId
-                || (feature.family === "building_footprint"
-                  && (feature.linkedBuildingId === selectedBuilding.id || feature.id === `feat-poly-${selectedBuilding.id}`)),
-              );
-              if (!footprint) return;
-              retireLocalFeature(footprint);
-              setSelected({ type: "local_feature", id: footprint.id });
-            },
-          },
+          { label: "🗑 Delete Building", tone: "danger" as const, onSelect: () => setDeleteConfirmation({ kind: "building", id: selectedBuilding.id, name: selectedBuilding.name }) },
         ],
       } satisfies InspectorCardModel;
     }
@@ -3057,13 +2955,13 @@ const handleCreateBuilding = async () => {
                     <option value="">No Building association</option>
                     {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
                   </select>
-                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
+                  <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Update action.</span>
                 </label>
               )}
             </div>
             <div className="inspector-inline-actions">
               <button type="button" onClick={cancelRouteNodeFrame} disabled={!routeNodeFrameDirty}>Cancel</button>
-              <button type="button" onClick={applyRouteNodeFrame} disabled={!routeNodeFrameDirty}>Apply changes</button>
+              <button type="button" onClick={applyRouteNodeFrame} disabled={!routeNodeFrameDirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
             </div>
           </section>
         ),
@@ -3074,29 +2972,30 @@ const handleCreateBuilding = async () => {
             tone: "danger" as const,
             onSelect: () => {
               const updated = { ...selectedNode, nodeType: "Junction" as const, associatedPlaceId: null };
-              // Persist first: claiming this conversion succeeded locally when
-              // the route-node write fails leaves an Entrance association
-              // falsely cleared until refresh.
-              void (typeof services.map.updateRouteNode === "function"
-                ? services.map.updateRouteNode(updated)
-                : Promise.resolve(updated)
-              ).then((persisted) => {
-                const confirmed = { ...persisted, nodeType: "Junction" as const, associatedPlaceId: null };
-                updateNodeWithOperation(selectedNode, confirmed, `Convert ${selectedNode.name} to a standard Route Node`);
+              void routeNodeWorkflow.finalize({
+                kind: "update",
+                before: selectedNode,
+                after: updated,
+                context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+                description: `Convert ${selectedNode.name} to a standard Route Node`,
+              }).then((result) => {
+                if (!result.ok) {
+                  setError(result.message);
+                  return;
+                }
+                const confirmed = result.node;
+                updateNode(confirmed);
                 setRouteNodeDraft({ ...confirmed });
                 setRouteNodeDraftOriginal({ ...confirmed });
                 setError("");
-              }).catch((cause) => {
-                setError(cause instanceof Error ? cause.message : "Failed to convert Route Node.");
               });
             },
           }] : []),
           {
-            label: selectedNode.status === "Inactive" ? "↻ Reactivate Route Node" : "⏸ Deactivate Route Node",
+            label: "🗑 Delete Route Node",
             tone: "danger" as const,
             onSelect: () => {
-              const action: LifecycleAction = selectedNode.status === "Inactive" ? "reactivate_node" : "deactivate_node";
-              setLifecycleConfirmation({ action, impact: calculateLifecycleImpact({ action, object: selectedNode, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
+              setDeleteConfirmation({ kind: "route_node", id: selectedNode.id, name: selectedNode.name, impact: calculateDeleteImpact({ object: selectedNode, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
             },
           },
         ],
@@ -3120,7 +3019,7 @@ const handleCreateBuilding = async () => {
             <section className="inspector-related-section" aria-label="Pathway metadata">
               <h3>Pathway metadata</h3>
               <div className="inspector-edit-fields">
-                <label>Pathway name<input aria-label="Pathway name" placeholder="e.g. Science Walk" value={pathwayFrame?.name ?? selectedPath.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label>
+                <label>Pathway name<input aria-label="Pathway name" placeholder={pathwayFrame && (suggestedPathwayName(pathwayFrame, currentNodes) || "Select two named Route Nodes")} value={pathwayFrame?.name ?? selectedPath.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(pathwayFrame); }} onBlur={() => adoptSuggestedPathwayName(pathwayFrame)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label>
                 <label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label>
                 <label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label>
                 <label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
@@ -3146,8 +3045,8 @@ const handleCreateBuilding = async () => {
           </>
         ),
         primaryAction: {
-          label: "Apply changes",
-          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0,
+          label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
+          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
           disabledReason: pathwayFrameIssues[0]?.message,
           onSelect: applyPathwayFrame,
         },
@@ -3155,11 +3054,10 @@ const handleCreateBuilding = async () => {
           { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
           { label: "⌁ Reshape Pathway", onSelect: () => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); } },
           {
-            label: selectedPath.status === "Closed" ? "↻ Reopen Pathway" : "⏸ Close Pathway",
+            label: "🗑 Delete Pathway",
             tone: "danger" as const,
             onSelect: () => {
-              const action: LifecycleAction = selectedPath.status === "Closed" ? "reopen_pathway" : "close_pathway";
-              setLifecycleConfirmation({ action, impact: calculateLifecycleImpact({ action, object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
+              setDeleteConfirmation({ kind: "pathway", id: selectedPath.id, name: selectedPath.name, impact: calculateDeleteImpact({ object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
             },
           },
         ],
@@ -3206,12 +3104,13 @@ const handleCreateBuilding = async () => {
           </>
         ),
         primaryAction: {
-          label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point",
-          onSelect: () => setManualPathPointDrag((enabled) => !enabled),
+          label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
+          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
+          disabledReason: pathwayFrameIssues[0]?.message,
+          onSelect: applyPathwayFrame,
         },
         overflowActions: [
-          { label: manualPathPointDrag ? "Stop Dragging" : "✥ Drag Path Point", onSelect: () => setManualPathPointDrag((enabled) => !enabled) },
-          { label: "✓ Save Pathway", onSelect: applyPathwayFrame },
+          { label: "✓ Update Pathway", onSelect: applyPathwayFrame },
           { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
           {
             label: "↩ Inspect Parent Pathway",
@@ -3326,16 +3225,16 @@ const handleCreateBuilding = async () => {
           </button>
           <button
             type="button"
-            disabled={!dirty}
-            onClick={() => setConfirm("discard")}
+            disabled
+            title="Use the active tool's Cancel button to discard its draft."
             className="px-4 py-2 border border-[#dbe0e2] rounded-full text-xs font-bold text-[#3f4941] hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
           >
             Discard
           </button>
           <button
             type="button"
-            disabled={!dirty}
-            onClick={openSaveReview}
+            disabled
+            title="Use the active tool's Save, Update, Add, or Delete button to commit changes."
             className="px-5 py-2 bg-[#005931] hover:bg-[#004727] rounded-full text-xs font-bold text-white shadow disabled:opacity-40 transition flex items-center gap-1.5 cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3343,6 +3242,7 @@ const handleCreateBuilding = async () => {
             </svg>
             <span>Save Changes</span>
           </button>
+          <span className="text-[11px] text-[#526359]">Use the active tool’s Save, Update, Add, or Delete button. Map-wide save and discard are unavailable.</span>
         </div>
       </div>
 
@@ -3358,7 +3258,8 @@ const handleCreateBuilding = async () => {
           className="w-full h-full"
         >
           <TileLayer
-            maxNativeZoom={19}
+            key={basemap}
+            maxNativeZoom={basemap === "satellite" ? 18 : 19}
             maxZoom={22}
             attribution={
               basemap === "satellite"
@@ -3564,13 +3465,17 @@ const handleCreateBuilding = async () => {
                         setError(connectionError);
                         return;
                       }
+                      const directDistance = Math.max(
+                        1,
+                        Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
+                      );
                       const newPath: Pathway = {
                         id: `pathway-${Date.now()}`,
                         name: "",
                         sourceNodeId: source.id,
                         destinationNodeId: node.id,
-                        distance: "Unknown",
-                        time: "Unknown",
+                        distance: `${directDistance} m`,
+                        time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
                         shade: "Unknown",
                         type: "Walkway",
                         direction: "Two-way",
@@ -3610,7 +3515,7 @@ const handleCreateBuilding = async () => {
                 key={`path-point-${index}`}
                 position={point}
                 icon={createPointIcon(true)}
-                draggable={(manualPathPointDrag || activePathway?.status !== "Open") && selectedPathPointIndex === index}
+                draggable={selectedPathPointIndex === index}
                 eventHandlers={{
                   click: () => {
                     setSelectedPathPointIndex(index);
@@ -3787,7 +3692,6 @@ const handleCreateBuilding = async () => {
             selected={networkBrowserSelection}
             onSelect={handleNetworkBrowserSelection}
             onDismiss={() => setNetworkBrowserOpen(false)}
-            onImportWalkingNetwork={beginWalkingNetworkImport}
             className=""
           />
         )}
@@ -3819,7 +3723,7 @@ const handleCreateBuilding = async () => {
         {selectionPopover && (
           <div
             role="dialog"
-            aria-label="Choose overlapping feature"
+            aria-label="Choose overlapping object"
             data-anchor={selectionPopover.anchor.join(",")}
             className="absolute z-[1100] w-64 -translate-x-1/2 -translate-y-full rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
             style={{
@@ -3827,7 +3731,7 @@ const handleCreateBuilding = async () => {
               top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
             }}
           >
-            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose a feature</p>
+            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose an object</p>
             <div className="flex flex-col gap-1">
               {selectionPopover.candidates.map((candidate) => (
                 <button
@@ -3896,6 +3800,7 @@ const handleCreateBuilding = async () => {
         <ToolRailDock
           activeTool={activeTool}
           onSelectTool={selectTool}
+          onBrowseWalkingNetwork={browseWalkingNetwork}
           suspendedDrafts={workingSessionState.suspendedDrafts}
           onResumeDraft={requestDraftResume}
         />
@@ -3979,18 +3884,14 @@ const handleCreateBuilding = async () => {
               <span>{isPointDragging ? "Dragging · release to preview" : "Arrow keys 0.5m · Shift + Arrow 5.0m · Enter save · Esc cancel"}</span>
               <div>
                 <button type="button" onClick={handleCancelMove}>Cancel</button>
-                <button type="button" className="primary" disabled={movingOutsideBoundary} onClick={handleSavePosition}>Save Position</button>
+                <button type="button" className="primary" disabled={movingOutsideBoundary || savingAction === "position"} onClick={handleSavePosition}>{savingAction === "position" ? "Saving Position…" : "Save Position"}</button>
               </div>
             </div>
           </section>
         )}
 
         {mode !== "select" && mode !== "move" && mode !== "local_feature" && selected?.type !== "path_point"
-          && !(mode === "path" && networkBrowserOpen && (
-            activePathway?.status === "Active"
-            || activePathway?.status === "Closed"
-            || (!activePathway && currentPathways.some((pathway) => pathway.status !== "Open"))
-          )) && (
+          && !networkBrowserOpen && (
           <aside className="map-glass-panel absolute right-4 top-20 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto rounded-[28px] p-5">
             {error && (
               <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
@@ -4199,17 +4100,17 @@ const handleCreateBuilding = async () => {
                   )}
                   {(editingBuildingId || (polygonClosed && buildingWorkflowMode === "attach")) && <button
                     type="button"
-                    disabled={editingBuildingId
+                    disabled={savingAction === "building" || (editingBuildingId
                       ? !canFinishFootprint
-                      : buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding}
+                      : buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)}
                     onClick={editingBuildingId
                       ? handleSaveBuilding
                         : buildingWorkflowMode === "create" ? () => setBuildingDetailsModalOpen(true) : handleAttachBuilding}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
                     {editingBuildingId
-                      ? "Apply footprint change"
-                      : buildingWorkflowMode === "create" ? "Open Building details" : "Attach Selected Building"}
+                  ? savingAction === "building" ? "Saving Building Footprint…" : "Update Building Footprint"
+                      : buildingWorkflowMode === "create" ? "Open Building details" : savingAction === "building" ? "Saving Building…" : "Attach Selected Building"}
                   </button>}
                 </div>
               </div>
@@ -4255,7 +4156,7 @@ const handleCreateBuilding = async () => {
                       {building.name} ({building.code})
                     </option>)}
                   </select>
-                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
+                  <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Save action.</span>
                 </div>
                 <div className="my-2 text-xs text-[#3f4941]">
                   {temporary
@@ -4278,11 +4179,11 @@ const handleCreateBuilding = async () => {
                   </button>
                   <button
                     type="button"
-                    disabled={!temporary || !placingNodeName.trim()}
+                    disabled={!temporary || !placingNodeName.trim() || savingAction === "route-node"}
                     onClick={handleSavePlacedNode}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
-                    Save Route Node
+                    {savingAction === "route-node" ? "Saving Route Node…" : "Save Route Node"}
                   </button>
                 </div>
               </div>
@@ -4309,7 +4210,7 @@ const handleCreateBuilding = async () => {
                     <section aria-label="Pathway metadata" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-[#3f4941]">Pathway name
-                          <input aria-label="New Pathway name" placeholder="e.g. Science Walk" value={pathwayDraft?.name ?? activePathway.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                          <input aria-label="New Pathway name" placeholder={suggestedPathwayName(activePathway, currentNodes) || "Select two named Route Nodes"} value={pathwayDraft?.name ?? activePathway.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(activePathway); }} onBlur={() => adoptSuggestedPathwayName(activePathway)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
                         </label>
                         <label className="text-xs font-semibold text-[#3f4941]">Way type
                           <select aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
@@ -4342,8 +4243,10 @@ const handleCreateBuilding = async () => {
                         onChange={(e) => {
                           setEditingPathId(e.target.value);
                           const found = directoryPathways.find((p) => p.id === e.target.value) || localPathways.find((p) => p.id === e.target.value);
-                        if (found) setPathPoints(found.pathPoints || []);
-                        setSelectedPathPointIndex(null);
+                          if (found) {
+                            setPathPoints(found.pathPoints || []);
+                          }
+                          setSelectedPathPointIndex(null);
                         }}
                         className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                       >
@@ -4355,7 +4258,7 @@ const handleCreateBuilding = async () => {
                       </select>
                     </div>
                     <p className="text-xs text-[#3f4941] my-2">
-                        Drag the selected Path Point to move it, or click the map to add Path Points.{" "}
+                        Select a Path Point to drag it, or click the map to add Path Points.{" "}
                       <strong>{pathPoints.length} points plotted</strong>.
                     </p>
                     <section aria-label="Pathway split handles" className="my-3 rounded-xl border border-[#dbe0e2] p-3">
@@ -4383,9 +4286,6 @@ const handleCreateBuilding = async () => {
                       </section>
                     )}
                     <div className="flex items-center gap-2 mt-3">
-                      {activePathway.status === "Open" && <button type="button" aria-pressed={manualPathPointDrag} onClick={() => setManualPathPointDrag((enabled) => !enabled)} className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4]">
-                        {manualPathPointDrag ? "Stop Dragging" : "Drag Path Point"}
-                      </button>}
                       <button
                         type="button"
                         disabled={!pathPoints.length}
@@ -4407,10 +4307,11 @@ const handleCreateBuilding = async () => {
                       </button>
                       <button
                         type="button"
+                        disabled={savingAction === "pathway"}
                         onClick={handleSavePathShape}
                         className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
                       >
-                        Apply Pathway
+                        {savingAction === "pathway" ? "Saving Pathway…" : provisionalPathwayId === activePathway.id ? "Save Pathway" : "Update Pathway"}
                       </button>
                     </div>
                   </>
@@ -4452,7 +4353,6 @@ const handleCreateBuilding = async () => {
                 <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
-                    {(selectedBuilding.type ?? selectedBuildingLocation?.type) === "Building" && <button type="button" className="px-2.5 py-1.5 bg-[#005931] text-white rounded-full text-[10px] font-bold" onClick={() => setAddRoomOpen(true)}>＋ Add Room</button>}
                   </div>
                   {(() => {
                     const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
@@ -4575,7 +4475,7 @@ const handleCreateBuilding = async () => {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Connection</div>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Pathway name
-                  <input aria-label="Pathway name" value={pathwayFrame?.name ?? selectedPath.name} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                  <input aria-label="Pathway name" placeholder={pathwayFrame && (suggestedPathwayName(pathwayFrame, currentNodes) || "Select two named Route Nodes")} value={pathwayFrame?.name ?? selectedPath.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(pathwayFrame); }} onBlur={() => adoptSuggestedPathwayName(pathwayFrame)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
                 </label>
                 <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
                   <div className="grid grid-cols-2 py-1.5 gap-2">
@@ -4624,52 +4524,26 @@ const handleCreateBuilding = async () => {
           </aside>
         )}
 
-        {inspectorModel && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
+        {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
           <>
             {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
             <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
           </>
         )}
 
-        <div className="map-glass-panel absolute bottom-4 left-4 z-[900] w-52 rounded-[24px] p-4 pointer-events-auto">
-          <div className="flex items-center justify-between text-xs font-extrabold text-[#191c1d] mb-2">
-            <span>Map Legend</span>
-            <svg className="w-4 h-4 text-[#3f4941]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-            </svg>
-          </div>
-          <div className="flex flex-col gap-2 text-[11px] font-semibold text-[#3f4941]">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#005931] border-2 border-white ring-1 ring-[#005931]"></span>
-              <span>Campus Location</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-[#2563eb] border-2 border-white ring-1 ring-[#1d4ed8]"></span>
-              <span>Route Node</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-white border-2 border-[#005931]"></span>
-              <span>Path Point</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 border-t-2 border-dashed border-amber-600"></span>
-              <span>Walking Path</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-2.5 bg-[#8fd1bd]/50 border border-[#278b70]"></span>
-              <span>Building Footprint</span>
-            </div>
-          </div>
-        </div>
+        <MapLegend />
       </div>
 
       {buildingDetailsModalOpen && polygonClosed && buildingWorkflowMode === "create" && !editingBuildingId && (
         <BuildingDetailsModal
           draft={buildingForm}
+          classification={buildingClassification}
           error={error}
           onChange={setBuildingForm}
+          onClassificationChange={setBuildingClassification}
           onClose={closeBuildingDetailsModal}
           onSubmit={handleCreateBuilding}
+          submitting={savingAction === "building"}
         />
       )}
 
@@ -4703,8 +4577,12 @@ const handleCreateBuilding = async () => {
           feature={selectedLocalFeature}
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
-            setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== updated.id), updated]);
-            recordPropertyOperation("Local Map Data", selectedLocalFeature.id, selectedLocalFeature, updated, `Edit ${selectedLocalFeature.name} details`);
+            const result = localMapFeatureWorkflow.finalize({ kind: "update", before: selectedLocalFeature, after: updated });
+            if (!result.ok) {
+              setError(result.message);
+              return;
+            }
+            setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
             setOwnerModal(null);
           }}
         />
@@ -4765,31 +4643,28 @@ const handleCreateBuilding = async () => {
           </div>
         </Modal>
       )}
-      {lifecycleConfirmation && (
+      {deleteConfirmation && (
         <Modal
-          title={`${lifecycleActionLabel(lifecycleConfirmation.action)}?`}
-          subtitle="Review the Walking Network impact before confirming."
+          title={`Delete ${deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}?`}
+          subtitle="This is a permanent hard delete and cannot be undone."
           size="sm"
           variant="danger"
-          onClose={() => setLifecycleConfirmation(null)}
+          onClose={() => setDeleteConfirmation(null)}
         >
           <div className="space-y-2 text-xs text-[#3f4941]" role="document">
-            <p><strong>{lifecycleConfirmation.impact.object.name}</strong> keeps its identity, geometry, metadata, associations, and history. Related records will not be deleted or changed.</p>
-            <p><strong>Connected Pathways:</strong> {lifecycleConfirmation.impact.connectedPathways.length ? lifecycleConfirmation.impact.connectedPathways.map((pathway) => pathway.name).join(", ") : "None"}</p>
-            <p><strong>Affected Entrance Route Nodes:</strong> {lifecycleConfirmation.impact.affectedEntrances.length ? lifecycleConfirmation.impact.affectedEntrances.map((node) => node.name).join(", ") : "None"}</p>
-            {lifecycleConfirmation.impact.affectedBuildings.length > 0 && <p><strong>Buildings reviewed:</strong> {lifecycleConfirmation.impact.affectedBuildings.map((building) => building.name).join(", ")}</p>}
-            {lifecycleConfirmation.impact.buildingsLosingRoutability.length > 0 && <p className="text-red-700"><strong>Will lose routability:</strong> {lifecycleConfirmation.impact.buildingsLosingRoutability.map((building) => building.name).join(", ")}. Add another active Entrance Route Node or keep this network object active.</p>}
-            {lifecycleConfirmation.impact.buildingsRegainingRoutability.length > 0 && <p className="text-green-700"><strong>Will regain routability:</strong> {lifecycleConfirmation.impact.buildingsRegainingRoutability.map((building) => building.name).join(", ")}.</p>}
-            {lifecycleConfirmation.impact.findings.length > 0 && <div aria-label="Lifecycle findings" className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">{lifecycleConfirmation.impact.findings.map((finding) => <p key={`${finding.objectId}-${finding.message}`}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · {finding.objectId}:</strong> {finding.message} Corrective action: {finding.correctiveAction}</p>)}</div>}
+            <p><strong>{deleteConfirmation.name}</strong> will be permanently removed.</p>
+            {deleteConfirmation.kind === "building" && <p className="text-red-700">The Building record and all associated Indoor Locations are permanently removed.</p>}
+            {deleteConfirmation.kind === "route_node" && <><p><strong>Connected Pathways:</strong> {deleteConfirmation.impact?.connectedPathways.length ? deleteConfirmation.impact.connectedPathways.map((pathway) => pathway.name).join(", ") : "None"}</p><p className="text-red-700">Connected Pathways and their Path Points are removed by the existing delete cascade in the same transaction.</p></>}
+            {deleteConfirmation.kind === "pathway" && <p className="text-red-700">This Pathway and its {deleteConfirmation.impact?.connectedPathways[0]?.pathPoints.length ?? 0} Path Point(s) are permanently removed.</p>}
+            {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2 text-red-700">{error}</div>}
           </div>
           <div className="modal-actions">
-            <Button variant="subtle" onClick={() => setLifecycleConfirmation(null)}>Cancel</Button>
+            <Button variant="subtle" onClick={() => setDeleteConfirmation(null)}>Cancel</Button>
             <Button
               variant="danger"
-              disabled={lifecycleConfirmation.impact.findings.some((finding) => finding.severity === "blocking")}
-              onClick={confirmLifecycleAction}
+              onClick={confirmDelete}
             >
-              Confirm {lifecycleActionLabel(lifecycleConfirmation.action)}
+              Delete {deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}
             </Button>
           </div>
         </Modal>

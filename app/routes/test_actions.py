@@ -8,6 +8,84 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import actions as actions_module
 from actions import actions_bp
+import location as location_module
+from location import location_bp
+
+
+class ListRecord:
+    def __init__(self, identifier, name, code, building_id=None):
+        self.location_id = identifier
+        self.location_name = name
+        self.location_code = code
+        self.type_id = 1
+        self.building_id = building_id
+        self.floor_id = None
+        self.floor_level = "Ground Floor"
+        self.description = name
+        self.keywords = "keyword"
+        self.lat = self.lng = None
+        self.photo = None
+
+    def to_location_dto(self, building=None, floor=None):
+        return {
+            "id": str(self.location_id), "name": self.location_name,
+            "code": self.location_code, "type": "Room",
+            "parentId": str(self.building_id) if self.building_id else None,
+            "building": building, "floor": self.floor_level or floor,
+            "function": self.description, "keywords": self.keywords,
+            "status": "Active", "lat": None, "lng": None,
+            "positioned": False, "hasPhoto": False,
+        }
+
+
+class ListBuilding:
+    def __init__(self, identifier, name):
+        self.building_id = identifier
+        self.building_name = name
+        self.building_code = f"B-{identifier}"
+
+    def to_location_dto(self):
+        return {
+            "id": str(self.building_id), "name": self.building_name,
+            "code": self.building_code, "type": "Building", "parentId": None,
+            "building": None, "floor": None, "function": None,
+            "keywords": None, "status": "Active", "lat": None, "lng": None,
+            "positioned": False, "hasPhoto": False,
+        }
+
+
+class ListQuery:
+    def __init__(self, values):
+        self.values = values
+
+    def order_by(self, *_columns):
+        return self
+
+    def all(self):
+        return self.values
+
+
+def _list_app(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    buildings = [ListBuilding(2, "Building B"), ListBuilding(1, "Building A")]
+    records = [ListRecord(12, "Room B", "B-ROOM", 2), ListRecord(11, "Room A", "A-ROOM", 1)]
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {
+        "query": ListQuery(records), "location_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {
+        "query": ListQuery(buildings), "building_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(actions_module, "Floor", type("FloorModel", (), {
+        "query": ListQuery([]), "floor_id": FakeColumn(),
+    }))
+    monkeypatch.setattr(location_module, "Location", actions_module.Location)
+    monkeypatch.setattr(location_module, "Building", actions_module.Building)
+    monkeypatch.setattr(location_module, "Floor", actions_module.Floor)
+    return app
+from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES
 
 
 class FakeQuery:
@@ -28,6 +106,9 @@ class FakeQuery:
 
 
 class FakeColumn:
+    def asc(self):
+        return self
+
     def desc(self):
         return self
 
@@ -76,6 +157,43 @@ def test_actions_blueprint_requires_authentication(monkeypatch):
     response = app.test_client().get("/api/actions/locations")
 
     assert response.status_code == 401
+
+
+def test_actions_locations_share_deterministic_family_pagination_contract(monkeypatch):
+    client = _list_app(monkeypatch).test_client()
+
+    first = client.get("/api/actions/locations?page=1&pageSize=2")
+    second = client.get("/api/actions/locations?page=2&pageSize=2")
+    filtered = client.get("/api/actions/locations?type=Room&buildingId=1&pageSize=1")
+
+    assert first.json["success"] is True
+    assert first.json["total"] == 4
+    assert first.json["page"] == 1
+    assert first.json["pageSize"] == 2
+    assert [item["id"] for item in first.json["items"]] == ["1", "11"]
+    assert [item["id"] for item in second.json["items"]] == ["2", "12"]
+    assert filtered.json["total"] == 1
+    assert [item["id"] for item in filtered.json["items"]] == ["11"]
+
+
+def test_locations_endpoints_have_identical_list_results(monkeypatch):
+    app = _list_app(monkeypatch)
+    app.register_blueprint(location_bp)
+    params = "?q=room&buildingId=1&page=1&pageSize=1"
+
+    actions_response = app.test_client().get("/api/actions/locations" + params)
+    locations_response = app.test_client().get("/api/locations" + params)
+
+    assert actions_response.status_code == locations_response.status_code == 200
+    assert actions_response.json == locations_response.json
+
+
+def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
+    assert actions_module.CREATABLE_TYPES == {
+        "Room", "Laboratory", "Office", "Facility", "Restroom", "Building"
+    }
+    assert actions_module.TYPE_IDS == LOCATION_TYPE_IDS
+    assert LOCATION_TYPE_NAMES[LOCATION_TYPE_IDS["Restroom"]] == "Restroom"
 
 
 def test_actions_can_delete_a_building(monkeypatch):

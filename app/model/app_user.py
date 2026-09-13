@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from extensions import db
 
 
@@ -24,9 +26,20 @@ class AppUser(db.Model):
 
     info = db.relationship("UserInfo", lazy="joined")
 
+    @property
+    def registered_at(self):
+        return self.info.created_at if self.info else None
+
     def to_dict(self):
+        created_at = self.registered_at
+        if created_at is not None:
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            else:
+                created_at = created_at.astimezone(timezone.utc)
+
         return {
             "id": str(self.id),
             "username": self.username,
-            "createdAt": self.info.created_at.isoformat() if self.info and self.info.created_at else None,
+            "createdAt": created_at.isoformat() if created_at else None,
         }

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, Badge, Empty } from "../../components/UI";
 import { services } from "../../services/api";
+import type { DashboardRange } from "../../types";
 import campusMap from "../../assets/figma/dashboard/campus-map.png";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
@@ -12,11 +13,15 @@ import mapZoomIcon from "../../assets/figma/dashboard/map-zoom-icon.svg";
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [searchWindow, setSearchWindow] = useState("This Week");
-  const { data } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: services.dashboard.summary,
+  const [searchWindow, setSearchWindow] = useState<DashboardRange>("week");
+  const { data, error, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ["dashboard", searchWindow],
+    queryFn: () => services.dashboard.summary(searchWindow),
+    placeholderData: (previous) => previous,
   });
+
+  const rangeLabel = searchWindow === "week" ? "this week" : searchWindow === "month" ? "this month" : "all time";
+  const buildingChange = data?.buildingChange;
 
   return (
     <div className="page dashboard">
@@ -25,7 +30,7 @@ export function Dashboard() {
           <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Campus Overview</h1>
           <p>
-            System status is optimal. Currently managing campus infrastructure
+            Monitor campus infrastructure, location records,
             <br />
             and geospatial routing configurations.
           </p>
@@ -40,7 +45,9 @@ export function Dashboard() {
             <span className="metric-icon">
               <img src={metricBuildings} alt="" />
             </span>
-            <Badge>+2 this week</Badge>
+            {buildingChange !== null && buildingChange !== undefined && (
+              <Badge>{buildingChange >= 0 ? "+" : ""}{buildingChange} {rangeLabel}</Badge>
+            )}
           </div>
           <span>Total Buildings</span>
           <strong>{data?.buildings ?? "—"}</strong>
@@ -55,13 +62,19 @@ export function Dashboard() {
           <strong>{data?.offices?.toLocaleString() ?? "—"}</strong>
         </Card>
       </div>
+      {error && (
+        <div className="dashboard-error" role="alert">
+          <span>Unable to load the dashboard. {error instanceof Error ? error.message : "The dashboard service returned an error."}</span>
+          <button type="button" onClick={() => void refetch()}>Try again</button>
+        </div>
+      )}
       <div className="dashboard-grid">
         <div className="stack">
           <Card className="map-card">
             <div className="card-heading">
               <div>
                 <h2>Campus Map Status</h2>
-                <p>Live locations and pathways across campus.</p>
+                <p>Preview campus locations and pathways.</p>
               </div>
               <Link to="/map-editor">Expand View ↗</Link>
             </div>
@@ -92,7 +105,7 @@ export function Dashboard() {
                 </button>
               </div>
               <div className="legend">
-                <b>LIVE LAYERS</b>
+                <b>MAP LAYERS</b>
                 <span>
                   <i className="dot green" />
                   Academic Buildings
@@ -120,16 +133,21 @@ export function Dashboard() {
                   className="dashboard-time-filter"
                   aria-label="Top searched time range"
                   value={searchWindow}
-                  onChange={(event) => setSearchWindow(event.target.value)}
+                  disabled={isFetching}
+                  onChange={(event) => setSearchWindow(event.target.value as DashboardRange)}
                 >
-                  <option>This Week</option>
-                  <option>This Month</option>
-                  <option>All Time</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="all">All Time</option>
                 </select>
               </div>
             </div>
             <div className="rank-list">
-              {(data?.topSearched ?? []).length === 0 ? (
+              {isLoading ? (
+                <div className="dashboard-state" role="status" aria-live="polite">Loading search analytics…</div>
+              ) : error && !data ? (
+                <Empty>Search analytics are unavailable.</Empty>
+              ) : (data?.topSearched ?? []).length === 0 ? (
                 <Empty>No search analytics recorded yet.</Empty>
               ) : (
                 (data?.topSearched ?? []).map((r) => (
@@ -162,7 +180,13 @@ export function Dashboard() {
               <Link to="/system-logs">VIEW ALL</Link>
             </div>
             <div className="activity">
-              {(data?.recent ?? []).map((a) => (
+              {isLoading ? (
+                <div className="dashboard-state" role="status" aria-live="polite">Loading recent activity…</div>
+              ) : error && !data ? (
+                <Empty>Recent activity is unavailable.</Empty>
+              ) : (data?.recent ?? []).length === 0 ? (
+                <Empty>No recent activity recorded yet.</Empty>
+              ) : (data?.recent ?? []).map((a) => (
                 <div
                   className="activity-row"
                   key={a.id}

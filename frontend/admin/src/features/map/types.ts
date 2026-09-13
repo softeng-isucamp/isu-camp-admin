@@ -77,6 +77,15 @@ export interface WorkingSessionState {
   canRedo: boolean;
 }
 
+export interface WorkingSessionSnapshot {
+  schemaVersion: 1;
+  pastOperations: WorkingOperation[];
+  futureOperations: WorkingOperation[];
+  activeDraft: ActiveToolDraft | null;
+  suspendedDrafts: ActiveToolDraft[];
+  savedCheckpointIndex: number;
+}
+
 // Entity schemas used across Map Editor domains
 export interface BuildingEntity {
   id: string;

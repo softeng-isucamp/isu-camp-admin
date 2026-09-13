@@ -124,8 +124,10 @@ export interface Session {
   id: string;
   username: string;
 }
+export type DashboardRange = "week" | "month" | "all";
 export interface DashboardSummary {
   buildings: number;
+  buildingChange: number | null;
   offices: number;
   locations: number;
   pathways: number;
@@ -135,6 +137,7 @@ export interface DashboardSummary {
 }
 export interface TopSearchedLocation {
   rank: string;
+  locationId?: string;
   name: string;
   context: string;
   searches: number;

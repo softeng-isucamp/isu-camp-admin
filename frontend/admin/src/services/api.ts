@@ -1,6 +1,7 @@
 import type {
   AuditEntry,
   Building,
+  DashboardRange,
   DashboardSummary,
   Location,
   LocationDraft,
@@ -156,6 +157,39 @@ export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
   return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: raw.detail == null ? undefined : String(raw.detail), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
 };
+
+const dashboardMetricsSchema = z.object({
+  buildings: z.number().int().nonnegative(),
+  buildingChange: z.number().int().nullable(),
+  offices: z.number().int().nonnegative(),
+  locations: z.number().int().nonnegative(),
+  pathways: z.number().int().nonnegative(),
+  searches: z.number().int().nonnegative(),
+  topSearched: z.array(z.object({
+    rank: z.string().min(1),
+    locationId: z.string().min(1).optional(),
+    name: z.string().min(1),
+    context: z.string(),
+    searches: z.number().int().nonnegative(),
+  })),
+  recent: z.array(z.unknown()),
+});
+
+export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary => {
+  const value = raw && typeof raw === "object" && "data" in raw
+    ? (raw as { data: unknown }).data
+    : raw;
+  const parsed = dashboardMetricsSchema.safeParse(value);
+  if (!parsed.success) throw new Error("Backend returned a malformed dashboard summary.");
+  try {
+    return {
+      ...parsed.data,
+      recent: parsed.data.recent.map((entry) => normalizeBackendAudit(entry as BackendAudit)),
+    };
+  } catch {
+    throw new Error("Backend returned a malformed dashboard summary.");
+  }
+};
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const page = value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -294,7 +328,54 @@ type BackendPathway = {
   shade?: string | null;
   direction?: string | null;
   allowed_modes?: string[];
+  path_points?: BackendPathPoint[];
   surface_type: string | null;
+};
+
+type BackendMapBuilding = {
+  id?: unknown;
+  building_id?: unknown;
+  name?: unknown;
+  building_name?: unknown;
+  code?: unknown;
+  building_code?: unknown;
+  type?: unknown;
+  status?: unknown;
+  points?: unknown;
+  polygon_coordinates?: unknown;
+};
+
+const normalizeMapPoints = (raw: unknown, label: string): [number, number][] => {
+  if (!Array.isArray(raw) || !raw.every((point) =>
+    Array.isArray(point)
+    && point.length === 2
+    && point.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate)),
+  )) {
+    throw new Error(`Backend returned malformed ${label} geometry.`);
+  }
+  return raw.map(([lat, lng]) => [lat, lng]);
+};
+
+const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building => {
+  const id = raw.id ?? raw.building_id;
+  const name = raw.name ?? raw.building_name;
+  const code = raw.code ?? raw.building_code;
+  const type = raw.type ?? "Building";
+  if (id === undefined || typeof name !== "string" || typeof code !== "string" || (type !== "Building" && type !== "Facility")) {
+    throw new Error("Backend returned a malformed building record.");
+  }
+  const status = raw.status ?? "Active";
+  if (!locationStatuses.includes(status as typeof locationStatuses[number])) {
+    throw new Error("Backend returned an invalid building status.");
+  }
+  return {
+    id: String(id),
+    name,
+    code,
+    type,
+    status: status as Building["status"],
+    points: normalizeMapPoints(raw.points ?? raw.polygon_coordinates ?? [], "building"),
+  };
 };
 
 const normalizeBackendRouteNode = (raw: BackendRouteNode): RouteNode => {
@@ -338,7 +419,41 @@ const serializePathway = (pathway: Omit<Pathway, "id">) => ({
   shade: pathway.shade,
   direction: pathway.direction,
   allowed_modes: pathway.allowedModes ?? ["Walking"],
+  path_points: pathway.pathPoints.map(([latitude, longitude], index) => ({
+    sequence_no: index + 1,
+    latitude,
+    longitude,
+    node_type: "Waypoint",
+    status: "active",
+  })),
 });
+
+const serializeRouteNode = (node: Omit<RouteNode, "id">, status = node.status?.toLowerCase() === "inactive" ? "inactive" : "active") => {
+  const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
+  return {
+    name: node.name,
+    latitude: node.lat,
+    longitude: node.lng,
+    location_id: node.nodeType === "Entrance" ? null : associatedId,
+    building_id: node.nodeType === "Entrance" ? associatedId : null,
+    node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
+    status,
+  };
+};
+
+const pathPointWritePayload = (pathwayId: number, sequenceNo: number, [latitude, longitude]: [number, number]) => ({
+  pathway_id: pathwayId,
+  sequence_no: sequenceNo,
+  latitude,
+  longitude,
+  node_type: "Waypoint",
+  status: "active",
+});
+
+const actionablePathPointError = (pathwayId: string, cause: unknown) => {
+  const message = cause instanceof Error ? cause.message : "The backend did not accept the Path Point change.";
+  return new Error(`Could not persist Path Points for Pathway ${pathwayId}: ${message}`);
+};
 const canonicalNetwork = createCanonicalNetworkStore(
   USE_GENERATED_MAP_FIXTURE
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
@@ -460,7 +575,7 @@ export interface Services {
   };
 
   dashboard: {
-    summary(): Promise<DashboardSummary>;
+    summary(range?: DashboardRange): Promise<DashboardSummary>;
   };
 
   locations: {
@@ -918,9 +1033,15 @@ export const services: Services = {
 
   dashboard: {
 
-    summary: async () =>
-      wait({
+    summary: async (range = "week") => {
+      if (USE_HTTP_API) {
+        const raw = await apiJson<unknown>(`/api/dashboard?range=${encodeURIComponent(range)}`);
+        return normalizeBackendDashboardSummary(raw);
+      }
+      return wait({
         buildings: 142,
+
+        buildingChange: 2,
 
         offices: 1854,
 
@@ -942,7 +1063,8 @@ export const services: Services = {
             clone(
             localAuditEntries.slice(0, 3)
           ),
-      }),
+      });
+    },
   },
 
 
@@ -1230,13 +1352,18 @@ export const services: Services = {
   map: {
     getMapEditorBootstrap: (projectId) => mapEditorApiClient.getMapEditorBootstrap(projectId),
 
-    buildings: async () => USE_HTTP_API
-      ? apiJson<typeof buildings>("/api/map/buildings")
-      : wait(localAdapter.buildings.list()),
+    buildings: async () => {
+      if (!USE_HTTP_API) return wait(localAdapter.buildings.list());
+      const response = await apiJson<unknown>("/api/map/buildings");
+      if (!Array.isArray(response)) throw new Error("Backend returned a malformed buildings response.");
+      return response.map((building) => normalizeBackendMapBuilding(building as BackendMapBuilding));
+    },
 
     removeBuilding: async (id) => {
       if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/map/buildings/${encodeURIComponent(id)}`, { method: "DELETE" });
+        const buildingId = Number(id);
+        if (!Number.isInteger(buildingId)) throw new Error(`Cannot delete Building "${id}". Invalid database ID.`);
+        await apiJson<unknown>(`/api/map/buildings/${buildingId}`, { method: "DELETE" });
         return;
       }
 
@@ -1265,18 +1392,9 @@ export const services: Services = {
         routeNodes.push(localNode);
         return clone(localNode);
       }
-      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
       const response = await apiJson<{ route_node: BackendRouteNode }>("/api/route-nodes", {
         method: "POST",
-        body: JSON.stringify({
-          name: node.name,
-          latitude: node.lat,
-          longitude: node.lng,
-          location_id: node.nodeType === "Entrance" ? null : associatedId,
-          building_id: node.nodeType === "Entrance" ? associatedId : null,
-          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
-          status: "active",
-        }),
+        body: JSON.stringify(serializeRouteNode(node, "active")),
       });
       return normalizeBackendRouteNode(response.route_node);
     },
@@ -1289,18 +1407,9 @@ export const services: Services = {
       }
       const nodeId = Number(node.id);
       if (!Number.isInteger(nodeId)) throw new Error(`Cannot update Route Node "${node.id}". Invalid database ID.`);
-      const associatedId = node.associatedPlaceId ? Number(node.associatedPlaceId) : null;
       const response = await apiJson<{ route_node: BackendRouteNode }>(`/api/route-nodes/${nodeId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          name: node.name,
-          latitude: node.lat,
-          longitude: node.lng,
-          location_id: node.nodeType === "Entrance" ? null : associatedId,
-          building_id: node.nodeType === "Entrance" ? associatedId : null,
-          node_type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "intersection",
-          status: node.status?.toLowerCase() === "inactive" ? "inactive" : "active",
-        }),
+        body: JSON.stringify(serializeRouteNode(node)),
       });
       return normalizeBackendRouteNode(response.route_node);
     },
@@ -1336,9 +1445,8 @@ export const services: Services = {
         method: "POST",
         body: JSON.stringify(serializePathway(pathway)),
       });
-      const created = normalizeBackendPathway(response.pathway, []);
-      await services.map.replacePathPoints(created.id, pathway.pathPoints);
-      return { ...created, pathPoints: pathway.pathPoints };
+      const created = normalizeBackendPathway(response.pathway, response.pathway.path_points ?? []);
+      return { ...created, pathPoints: created.pathPoints.length === pathway.pathPoints.length ? created.pathPoints : pathway.pathPoints };
     },
 
     updatePathway: async (pathway) => {
@@ -1353,9 +1461,8 @@ export const services: Services = {
         method: "PUT",
         body: JSON.stringify(serializePathway(pathway)),
       });
-      await services.map.replacePathPoints(pathway.id, pathway.pathPoints);
-      const updated = normalizeBackendPathway(response.pathway, []);
-      return { ...updated, pathPoints: pathway.pathPoints };
+      const updated = normalizeBackendPathway(response.pathway, response.pathway.path_points ?? []);
+      return { ...updated, pathPoints: updated.pathPoints.length === pathway.pathPoints.length ? updated.pathPoints : pathway.pathPoints };
     },
 
     deletePathway: async (id) => {
@@ -1371,14 +1478,30 @@ export const services: Services = {
 
     replacePathPoints: async (pathwayId, points) => {
       if (!USE_HTTP_API) return;
-      const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
-      await Promise.all(existing.path_points.filter((point) => String(point.pathway_id) === pathwayId).map((point) =>
-        apiJson<unknown>(`/api/path-points/${point.point_id}`, { method: "DELETE" }),
-      ));
-      await Promise.all(points.map(([latitude, longitude], index) => apiJson<unknown>("/api/path-points", {
-        method: "POST",
-        body: JSON.stringify({ pathway_id: Number(pathwayId), sequence_no: index + 1, latitude, longitude, node_type: "Waypoint", status: "active" }),
-      })));
+      const numericPathwayId = Number(pathwayId);
+      if (!Number.isInteger(numericPathwayId)) throw new Error(`Cannot persist Path Points for Pathway "${pathwayId}". Invalid database ID.`);
+      try {
+        const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
+        if (!Array.isArray(existing.path_points)) throw new Error("Backend returned a malformed Path Point response.");
+        const currentPoints = existing.path_points
+          .filter((point) => point.pathway_id === numericPathwayId)
+          .sort((left, right) => left.sequence_no - right.sequence_no);
+
+        for (const [index, point] of points.entries()) {
+          const body = JSON.stringify(pathPointWritePayload(numericPathwayId, index + 1, point));
+          const current = currentPoints[index];
+          if (current) {
+            await apiJson<unknown>(`/api/path-points/${current.point_id}`, { method: "PUT", body });
+          } else {
+            await apiJson<unknown>("/api/path-points", { method: "POST", body });
+          }
+        }
+        for (const point of currentPoints.slice(points.length)) {
+          await apiJson<unknown>(`/api/path-points/${point.point_id}`, { method: "DELETE" });
+        }
+      } catch (cause) {
+        throw actionablePathPointError(pathwayId, cause);
+      }
     },
 
 

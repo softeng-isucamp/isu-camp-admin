@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints } from "./mapEditing";
+import { pathwayWithSuggestedName, polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints } from "./mapEditing";
 import { echagueCampusBoundary, pointInPolygon } from "./campusBoundary";
 
 const location = (overrides: Partial<Location> = {}): Location => ({
@@ -23,6 +23,16 @@ const building = (overrides: Partial<Building> = {}): Building => ({
 });
 
 describe("map draft review", () => {
+  it("suggests a pathway name from its endpoint names and preserves custom names", () => {
+    const destination = node({ id: "node-2", name: "Central Quad Junction", nodeType: "Junction", associatedPlaceId: null });
+    const unnamed = pathway({ name: "", destinationNodeId: destination.id });
+    expect(suggestedPathwayName(unnamed, [node(), destination])).toBe("Central Quad Junction – Library entrance");
+    expect(suggestedPathwayName({ ...unnamed, sourceNodeId: destination.id, destinationNodeId: node().id }, [node(), destination])).toBe("Central Quad Junction – Library entrance");
+    expect(pathwayWithSuggestedName(unnamed, [node(), destination]).name).toBe("Central Quad Junction – Library entrance");
+    expect(pathwayWithSuggestedName(pathway({ name: "Main Gate – Library" }), [node(), destination]).name).toBe("Main Gate – Library");
+    expect(suggestedPathwayName(unnamed, [node()])).toBe("");
+  });
+
   it("validates Route Node metadata, campus placement, and Entrance associations", () => {
     const campus = [[0, 0], [0, 10], [10, 10], [10, 0]] as [number, number][];
     const buildings = [building({ id: "building-1" })];

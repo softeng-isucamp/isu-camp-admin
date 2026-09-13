@@ -8,6 +8,8 @@ from model.building import Building
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from services.audit import log_audit
+from services.geometry import polygon_error as _polygon_error
+from services.location_listing import list_location_page
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
@@ -262,14 +264,17 @@ def _validate(data, records, buildings):
             ),
         )
 
+    polygon_coordinates = data.get("polygonCoordinates")
+    if polygon_coordinates is not None:
+        polygon_error = _polygon_error(polygon_coordinates)
+        if polygon_error:
+            fields["polygonCoordinates"] = polygon_error
+
     if fields or relationships:
         return None, _validation_error(
             fields,
             relationships
         )
-
-    # Get polygon coordinates from frontend
-    polygon_coordinates = data.get("polygonCoordinates")
 
     return {
         "name": name,
@@ -290,6 +295,10 @@ def _validate(data, records, buildings):
 
         # NEW:
         "polygon_coordinates": polygon_coordinates,
+        "is_footprint_owner": (
+            location_type in {"Building", "Facility"}
+            and polygon_coordinates is not None
+        ),
 
     }, None
 
@@ -303,146 +312,18 @@ def list_locations():
         return error
 
     try:
-        query = request.args.get(
-            "q",
-            ""
-        ).strip().lower()
-
-        type_filter = request.args.get(
-            "type",
-            ""
-        ).strip()
-
-        status_filter = request.args.get(
-            "status",
-            ""
-        ).strip()
-
-        building_id_filter = request.args.get(
-            "buildingId",
-            ""
-        ).strip()
-
-        floor_filter = request.args.get(
-            "floor",
-            ""
-        ).strip().lower()
-
-        page = max(
-            request.args.get(
-                "page",
-                1,
-                type=int
-            ) or 1,
-            1
-        )
-
-        page_size = min(
-            max(
-                request.args.get(
-                    "pageSize",
-                    20,
-                    type=int
-                ) or 20,
-                1
-            ),
-            100,
-        )
-
         records = _all_locations()
         buildings = _all_buildings()
         floors = _all_floors()
-
-        projected = []
-
-        def include(
-            dto,
-            record_id,
-            parent_id=None
-        ):
-            searchable = " ".join(
-                str(dto.get(field) or "")
-                for field in (
-                    "name",
-                    "code",
-                    "type",
-                    "building",
-                    "floor",
-                    "function",
-                    "keywords",
-                )
-            ).lower()
-
-            if query and query not in searchable:
-                return False
-
-            if type_filter and dto["type"] != type_filter:
-                return False
-
-            if status_filter and dto["status"] != status_filter:
-                return False
-
-            if (
-                building_id_filter
-                and building_id_filter
-                not in {
-                    str(parent_id or ""),
-                    (
-                        str(record_id)
-                        if dto["type"] == "Building"
-                        else ""
-                    ),
-                }
-            ):
-                return False
-
-            if (
-                floor_filter
-                and str(dto.get("floor") or "").lower()
-                != floor_filter
-            ):
-                return False
-
-            return True
-
-        # Buildings
-        projected.extend(
-            dto
-            for building in buildings
-            if include(
-                dto := building.to_location_dto(),
-                building.building_id
-            )
-        )
-
-        # Locations
-        for record in records:
-
-            dto = _location_dto(
-                record,
-                buildings,
-                floors
-            )
-
-            if include(
-                dto,
-                record.location_id,
-                record.building_id
-            ):
-                projected.append(dto)
-
-        start = (page - 1) * page_size
-
         return jsonify(
-            {
-                "success": True,
-                "items": projected[
-                    start:start + page_size
-                ],
-                "total": len(projected),
-                "page": page,
-                "pageSize": page_size,
-            }
+            list_location_page(
+                records,
+                buildings,
+                floors,
+                request.args,
+                _location_dto,
+                lambda building: building.to_location_dto(),
+            )
         ), 200
 
     except ValueError as error:
@@ -497,6 +378,10 @@ def create_location():
 
     # Get request data
     data = _request_payload()
+    if not isinstance(data, dict):
+        return _validation_error({
+            "request": "Location updates must be an object.",
+        })
 
     values, error = _validate(
         data,
@@ -507,24 +392,27 @@ def create_location():
     if error:
         return error
 
-    photo, photo_mime_type, error = _photo_upload()
-
-    if error:
-        return error
-
-    # Building photos are not supported
+    # Footprint owners do not have a photo column. Reject any supplied upload
+    # before applying normal image validation so Building and Facility produce
+    # the same schema-level response.
     if (
-        values.get("type") == "Building"
-        and photo is not None
+        values.get("type") in {"Building", "Facility"}
+        and (upload := request.files.get("photo")) is not None
+        and upload.filename
     ):
         return _validation_error(
             {
                 "photo": (
-                    "Building photos are not supported "
+                    "Building and Facility photos are not supported "
                     "by the current building schema."
                 )
             }
         )
+
+    photo, photo_mime_type, error = _photo_upload()
+
+    if error:
+        return error
 
     try:
 
@@ -532,12 +420,17 @@ def create_location():
         # BUILDING CREATION
         # ==================================================
 
-        if values.get("type") == "Building":
+        if values.get("is_footprint_owner") or values.get("type") == "Building":
 
             building = Building(
                 building_code=values["code"],
                 building_name=values["name"],
                 description=values["description"],
+                classification=(
+                    values["type"]
+                    if values.get("is_footprint_owner")
+                    else "Building"
+                ),
 
                 # NEW:
                 # Save polygon coordinates
