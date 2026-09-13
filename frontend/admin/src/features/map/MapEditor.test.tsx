@@ -1229,6 +1229,26 @@ describe("Map Editor preview", () => {
     expect(screen.queryByText(/Move footprint/i)).not.toBeInTheDocument();
   });
 
+  it("locates a Building when its database ID collides with an Indoor Location ID", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "6", name: "Centrum Laboratory Building", code: "CLB", points: [[16.718, 121.688], [16.719, 121.688], [16.719, 121.689]] },
+    ]);
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "6", name: "Room 1", code: "LOC-4401", type: "Room", parentId: "1", building: "CCSICT", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false },
+    ]);
+    vi.mocked(services.locations.list).mockResolvedValue({
+      items: [{ id: "6", name: "Room 1", code: "LOC-4401", type: "Room", parentId: "1", building: "CCSICT", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false }],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
+
+    renderEditor(["/map-editor?location=6"]);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Centrum Laboratory Building" })).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Room 1" })).not.toBeInTheDocument();
+  });
+
   it("shows a center marker while drawing a building polygon", async () => {
     renderEditor();
 

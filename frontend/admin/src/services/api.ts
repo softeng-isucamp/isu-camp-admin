@@ -250,6 +250,19 @@ export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
   return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
 };
 
+const fetchAllBackendLocations = async (): Promise<Location[]> => {
+  const first = normalizeBackendLocationPage(await apiJson<unknown>("/api/locations?page=1&pageSize=100"));
+  const pages = Math.ceil(first.total / first.pageSize);
+  if (pages <= 1) return first.items;
+  const remaining = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, index) =>
+      apiJson<unknown>(`/api/locations?page=${index + 2}&pageSize=${first.pageSize}`)
+        .then(normalizeBackendLocationPage),
+    ),
+  );
+  return [first, ...remaining].flatMap((page) => page.items);
+};
+
 const locationWritePayload = (location: LocationDraft) => {
   const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, ...payload } = location;
   return payload;
@@ -1376,7 +1389,7 @@ export const services: Services = {
 
 
       locations: async () => USE_HTTP_API
-        ? normalizeBackendLocationPage(await apiJson<unknown>("/api/locations")).items
+        ? fetchAllBackendLocations()
         : wait(clone(mapLocations)),
 
 

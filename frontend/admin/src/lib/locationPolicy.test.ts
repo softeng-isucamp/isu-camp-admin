@@ -228,6 +228,34 @@ describe("Location policy", () => {
     },
   );
 
+  it("resolves a colliding parent ID as a Building during indoor validation", () => {
+    const collidingRoom: Location = {
+      ...draft({ type: "Room" }),
+      id: "6",
+      name: "Room 1",
+      code: "ROOM-1",
+      parentId: "1",
+      floor: "2nd Floor",
+    };
+    const centrumBuilding: Location = {
+      ...building,
+      id: "6",
+      name: "Centrum Laboratory Building",
+      code: "CLB",
+    };
+    const result = locationPolicy.evaluate(draft({
+      parentId: "6",
+      building: "Centrum Laboratory Building",
+      floor: "Ground Floor",
+    }), {
+      context: "record",
+      directory: [collidingRoom, centrumBuilding],
+      requireFloorLevel: true,
+    });
+
+    expect(result).toEqual({ valid: true, issues: [] });
+  });
+
   it.each([
     "Floor",
     "Room",

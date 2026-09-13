@@ -3,6 +3,14 @@
 import math
 
 
+def polygon_centroid(points):
+    """Return the arithmetic center used for a footprint's map marker."""
+    return (
+        sum(latitude for latitude, _ in points) / len(points),
+        sum(longitude for _, longitude in points) / len(points),
+    )
+
+
 def polygon_error(points):
     """Return a validation message for an invalid latitude/longitude polygon."""
     if not isinstance(points, list) or len(points) < 3:

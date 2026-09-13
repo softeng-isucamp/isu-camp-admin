@@ -516,6 +516,8 @@ function MapController({
 const isPositionedLocation = (location: Location): location is Location & { lat: number; lng: number } =>
   location.positioned && location.lat !== null && location.lng !== null;
 
+const locationRecordKey = (location: Pick<Location, "id" | "type">) => `${location.type}:${location.id}`;
+
 const isPathwayDraft = (value: unknown): value is Pathway => {
   if (!value || typeof value !== "object") return false;
   const pathway = value as Partial<Pathway>;
@@ -810,8 +812,8 @@ export function MapEditor() {
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const buildingContentLocations = useMemo(() => {
-    const locationsById = new Map((locationDirectory ?? []).map((location) => [location.id, location]));
-    for (const location of currentLocations) locationsById.set(location.id, location);
+    const locationsById = new Map((locationDirectory ?? []).map((location) => [locationRecordKey(location), location]));
+    for (const location of currentLocations) locationsById.set(locationRecordKey(location), location);
     return Array.from(locationsById.values());
   }, [currentLocations, locationDirectory]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
@@ -1050,9 +1052,9 @@ export function MapEditor() {
     if (mode === "area") return [];
     return positioned.filter(
       (loc) => loc.type !== "Building"
-        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id)
+        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
     );
-  }, [currentLocations, currentMapBounds, mode, selected?.id]);
+  }, [currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
@@ -1123,21 +1125,23 @@ export function MapEditor() {
     const locationId = new URLSearchParams(routeLocation.search).get(
       "location",
     );
-    if (locationId && directoryLocations.some((item) => item.id === locationId)) {
-      const loc = directoryLocations.find((item) => item.id === locationId);
-      const building = currentBuildings.find((item) => item.id === locationId);
+    const building = locationId ? currentBuildings.find((item) => item.id === locationId) : undefined;
+    const loc = locationId ? directoryLocations.find((item) => item.id === locationId) : undefined;
+    if (locationId && (building || loc)) {
       const buildingPoints = building?.points ?? [];
       // Locations may locate an existing record, but it must never hand off
       // into a standalone point-placement workflow. Footprint geometry stays
       // owned by Map Editor's Building Polygon tool.
       setMode("select");
-      if ((loc?.type === "Building" || loc?.type === "Facility") && buildingPoints.length >= 3) {
+      if (building) {
         setSelected({ type: "building", id: locationId });
-        setFrameBounds([
-          [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
-          [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
-        ]);
-      } else {
+        if (buildingPoints.length >= 3) {
+          setFrameBounds([
+            [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
+            [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
+          ]);
+        }
+      } else if (loc) {
         setSelected({ type: "location", id: locationId });
       }
       if (loc && isPositionedLocation(loc)) {
@@ -3281,7 +3285,7 @@ export function MapEditor() {
           />
 
           {filteredBuildings.map((building) => {
-            const isSelected = selected?.id === building.id;
+            const isSelected = selected?.type === "building" && selected.id === building.id;
             const footprintLink = currentFeatureLinks.find((link) =>
               link.targetDomain === "Locations"
               && link.targetEntityId === building.id
@@ -3297,9 +3301,9 @@ export function MapEditor() {
               footprintRetired ? 0.1 : mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
             return (
-              <Fragment key={building.id}>
+              <Fragment key={`building:${building.id}`}>
               <Polygon
-                key={building.id}
+                key={`building-polygon:${building.id}`}
                 positions={building.points}
                 pathOptions={{
                   color: footprintRetired
@@ -3409,7 +3413,7 @@ export function MapEditor() {
             const isSelected = selected?.type === "location" && selected?.id === loc.id;
             return (
               <Marker
-                key={loc.id}
+                key={`location:${loc.id}`}
                 position={[loc.lat, loc.lng]}
                 icon={createLocationPinIcon(isSelected)}
                 eventHandlers={{
@@ -3841,7 +3845,7 @@ export function MapEditor() {
             <div className="mt-2 pt-2 border-t border-[#e1e3e4] max-h-56 overflow-y-auto text-xs">
               {results.map((item) => (
                 <button
-                  key={item.id}
+                  key={`${item.kind}:${item.id}`}
                   type="button"
                   className="w-full text-left p-2 hover:bg-[#f8f9fa] rounded-lg flex items-center justify-between transition"
                   onClick={() => handleSearchResultClick(item)}
