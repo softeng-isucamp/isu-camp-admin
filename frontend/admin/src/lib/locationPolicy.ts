@@ -10,6 +10,9 @@ export const standardFloorLevels = [
 export const isIndoorLocationType = (type: LocationType) =>
   (indoorLocationTypes as readonly string[]).includes(type);
 
+export const locationIdentityKey = (location: Pick<Location, "id" | "type">) =>
+  `${location.type}:${location.id}`;
+
 export interface LocationClassification {
   kind: LocationKind;
   requiresBuildingParent: boolean;

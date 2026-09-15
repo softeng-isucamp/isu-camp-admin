@@ -18,7 +18,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { pathwayWithSuggestedName, polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { pathwayWithSuggestedName, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -36,7 +36,7 @@ import {
   type SaveDraftResult,
 } from "../../services/mapEditorApiClient";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
-import { standardFloorLevels } from "../../lib/locationPolicy";
+import { locationIdentityKey, standardFloorLevels } from "../../lib/locationPolicy";
 import {
   echagueCampusBoundary,
   geometryOnCampus,
@@ -516,8 +516,6 @@ function MapController({
 const isPositionedLocation = (location: Location): location is Location & { lat: number; lng: number } =>
   location.positioned && location.lat !== null && location.lng !== null;
 
-const locationRecordKey = (location: Pick<Location, "id" | "type">) => `${location.type}:${location.id}`;
-
 const isPathwayDraft = (value: unknown): value is Pathway => {
   if (!value || typeof value !== "object") return false;
   const pathway = value as Partial<Pathway>;
@@ -812,8 +810,8 @@ export function MapEditor() {
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const buildingContentLocations = useMemo(() => {
-    const locationsById = new Map((locationDirectory ?? []).map((location) => [locationRecordKey(location), location]));
-    for (const location of currentLocations) locationsById.set(locationRecordKey(location), location);
+    const locationsById = new Map((locationDirectory ?? []).map((location) => [locationIdentityKey(location), location]));
+    for (const location of currentLocations) locationsById.set(locationIdentityKey(location), location);
     return Array.from(locationsById.values());
   }, [currentLocations, locationDirectory]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
@@ -1059,7 +1057,8 @@ export function MapEditor() {
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
     return currentNodes.filter(
-      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds) || selected?.id === node.id
+      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds)
+        || (selected?.type === "node" && selected.id === node.id)
     );
   }, [currentMapBounds, currentNodes, mode, selected?.id]);
 
@@ -1144,7 +1143,7 @@ export function MapEditor() {
       } else if (loc) {
         setSelected({ type: "location", id: locationId });
       }
-      if (loc && isPositionedLocation(loc)) {
+      if (!building && loc && isPositionedLocation(loc)) {
         setFrameBounds(null);
         setFlyTarget([loc.lat, loc.lng]);
       }
@@ -3324,7 +3323,7 @@ export function MapEditor() {
                     if (footprintRetired && footprint) selectObject("local_feature", footprint.id);
                     else selectCanvasObject("building", building.id, event.latlng
                       ? [event.latlng.lat, event.latlng.lng]
-                      : polygonCentroid(building.points));
+                  : polygonFeatureAnchor(building.points));
                   },
                 }}
               >
@@ -3339,9 +3338,9 @@ export function MapEditor() {
               </Polygon>
               {mode === "select" && editingBuildingId === null && (
                 <Marker
-                  position={polygonCentroid(building.points)}
+                  position={polygonFeatureAnchor(building.points)}
                   icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonCentroid(building.points)) }}
+                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonFeatureAnchor(building.points)) }}
                 />
               )}
               </Fragment>
@@ -3359,7 +3358,7 @@ export function MapEditor() {
                   )
                 : pathPoints
               : path.pathPoints;
-            const isSelected = selected?.id === path.id || isEditingThisPath;
+            const isSelected = (selected?.type === "pathway" && selected.id === path.id) || isEditingThisPath;
 
             const pathOpacity =
               mode === "place" || mode === "area"
@@ -3588,7 +3587,7 @@ export function MapEditor() {
               `points` on every render, same as the committed-building marker below. */}
           {mode === "area" && points.length >= 3 && (
             <Marker
-              position={polygonCentroid(points)}
+              position={polygonFeatureAnchor(points)}
               icon={createLocationPinIcon(false)}
             />
           )}

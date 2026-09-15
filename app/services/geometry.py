@@ -5,10 +5,94 @@ import math
 
 def polygon_centroid(points):
     """Return the arithmetic center used for a footprint's map marker."""
+    if len(points) > 1 and points[0] == points[-1]:
+        points = points[:-1]
     return (
         sum(latitude for latitude, _ in points) / len(points),
         sum(longitude for _, longitude in points) / len(points),
     )
+
+
+def polygon_feature_anchor(points):
+    """Return a representative point guaranteed to lie on a valid polygon."""
+    ring = points[:-1] if len(points) > 1 and points[0] == points[-1] else points
+    if len(ring) < 3:
+        return polygon_centroid(ring)
+
+    origin = ring[0]
+    translated = [
+        (point[0] - origin[0], point[1] - origin[1])
+        for point in ring
+    ]
+    twice_area = latitude = longitude = 0.0
+    for index, point in enumerate(translated):
+        next_point = translated[(index + 1) % len(translated)]
+        cross = point[0] * next_point[1] - next_point[0] * point[1]
+        twice_area += cross
+        latitude += (point[0] + next_point[0]) * cross
+        longitude += (point[1] + next_point[1]) * cross
+
+    if abs(twice_area) < 1e-12:
+        return polygon_centroid(ring)
+
+    area_point = (
+        origin[0] + latitude / (3 * twice_area),
+        origin[1] + longitude / (3 * twice_area),
+    )
+    if _point_in_polygon(area_point, ring):
+        return area_point
+
+    south = min(point[0] for point in ring)
+    north = max(point[0] for point in ring)
+    west = min(point[1] for point in ring)
+    east = max(point[1] for point in ring)
+    best = None
+    best_clearance = -1.0
+    for row in range(33):
+        for column in range(33):
+            candidate = (
+                south + (north - south) * row / 32,
+                west + (east - west) * column / 32,
+            )
+            if not _point_in_polygon(candidate, ring):
+                continue
+            clearance = min(
+                _distance_to_segment(candidate, point, ring[(index + 1) % len(ring)])
+                for index, point in enumerate(ring)
+            )
+            if clearance > best_clearance:
+                best = candidate
+                best_clearance = clearance
+    return best or tuple(ring[0])
+
+
+def _point_in_polygon(point, polygon):
+    inside = False
+    previous = polygon[-1]
+    for vertex in polygon:
+        if ((vertex[1] > point[1]) != (previous[1] > point[1])) and point[0] < (
+            (previous[0] - vertex[0]) * (point[1] - vertex[1])
+            / (previous[1] - vertex[1]) + vertex[0]
+        ):
+            inside = not inside
+        previous = vertex
+    return inside
+
+
+def _distance_to_segment(point, start, end):
+    latitude_delta = end[0] - start[0]
+    longitude_delta = end[1] - start[1]
+    length_squared = latitude_delta ** 2 + longitude_delta ** 2
+    projection = 0.0 if length_squared == 0 else max(0.0, min(
+        1.0,
+        ((point[0] - start[0]) * latitude_delta
+         + (point[1] - start[1]) * longitude_delta) / length_squared,
+    ))
+    nearest = (
+        start[0] + projection * latitude_delta,
+        start[1] + projection * longitude_delta,
+    )
+    return math.hypot(point[0] - nearest[0], point[1] - nearest[1])
 
 
 def polygon_error(points):

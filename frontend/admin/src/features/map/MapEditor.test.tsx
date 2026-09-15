@@ -12,6 +12,7 @@ let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void)
 let pathPointDragPosition: { lat: number; lng: number } | undefined;
 let movingPointDragPosition: { lat: number; lng: number } | undefined;
 let mapFitBounds = vi.fn();
+let mapFlyTo = vi.fn();
 
 vi.mock("leaflet", () => {
   let iconId = 0;
@@ -35,7 +36,7 @@ vi.mock("react-leaflet", () => ({
     return <div aria-label="Map attribution" data-max-native-zoom={effectiveMaxNativeZoom} data-max-zoom={maxZoom} data-tile-url={url}>{attribution}</div>;
   }, Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useMap: () => ({
-    flyTo: vi.fn(),
+    flyTo: (...args: unknown[]) => mapFlyTo(...args),
     fitBounds: (...args: unknown[]) => mapFitBounds(...args),
     latLngToContainerPoint: ({ lat, lng }: { lat: number; lng: number }) => ({ x: lng * 100_000, y: lat * 100_000 }),
     containerPointToLatLng: ({ x, y }: { x: number; y: number }) => ({ lat: y / 100_000, lng: x / 100_000 }),
@@ -98,6 +99,7 @@ describe("Map Editor preview", () => {
     pathPointDragPosition = undefined;
     movingPointDragPosition = undefined;
     mapFitBounds = vi.fn();
+    mapFlyTo = vi.fn();
     services.map.saveDraft = undefined;
     services.locations.save = undefined as unknown as typeof services.locations.save;
     vi.mocked(services.map.removeBuilding).mockResolvedValue(undefined);
@@ -757,7 +759,7 @@ describe("Map Editor preview", () => {
 
   it("frames and selects a polygon Building queried from a parent-location handoff", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "building-1", name: "Engineering Hall", code: "ENG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false },
+      { id: "building-1", name: "Stale Building Point", code: "ENG", type: "Building", parentId: null, status: "Active", lat: 16.71, lng: 121.68, positioned: true },
       { id: "room-1", name: "Room 101", code: "101", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
     ]);
     vi.mocked(services.map.buildings).mockResolvedValue([
@@ -770,20 +772,41 @@ describe("Map Editor preview", () => {
       [[16.72, 121.689], [16.722, 121.691]],
       expect.objectContaining({ maxZoom: 19 }),
     ));
+    expect(mapFlyTo).not.toHaveBeenCalled();
   });
 
   it("keeps a persisted Building feature anchor after the Map Editor remounts", async () => {
+    const concaveFootprint: [number, number][] = [
+      [0, 0], [0, 4], [4, 4], [4, 3], [1, 3],
+      [1, 1], [4, 1], [4, 0], [0, 0],
+    ];
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "Engineering Hall", code: "ENG", points: [[16.72, 121.689], [16.722, 121.689], [16.722, 121.691]] },
+      { id: "building-1", name: "Engineering Hall", code: "ENG", points: concaveFootprint },
     ]);
     const firstRender = renderEditor();
 
-    expect(await screen.findByRole("button", { name: "Map marker at 16.721333333333334,121.68966666666665" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Map marker at 0.625,0.625" })).toBeInTheDocument();
 
     firstRender.unmount();
     renderEditor();
 
-    expect(await screen.findByRole("button", { name: "Map marker at 16.721333333333334,121.68966666666665" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Map marker at 0.625,0.625" })).toBeInTheDocument();
+  });
+
+  it("does not highlight a colliding Pathway when a Route Node is selected", async () => {
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "42", name: "Collision Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
+      { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Collision Junction" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Collision Junction Route Node" }));
+
+    expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-color", "#005931");
   });
 
   it("keeps a colliding Indoor Location from replacing the selected Pathway inspector", async () => {

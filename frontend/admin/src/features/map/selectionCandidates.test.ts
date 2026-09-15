@@ -95,4 +95,31 @@ describe("findSelectionCandidates", () => {
       expect.objectContaining({ id: building.id, type: "building", kindLabel: "Building" }),
     ]);
   });
+
+  it("keeps a colliding Indoor Location distinct from a Building", () => {
+    const indoorLocation: Location = {
+      id: building.id,
+      name: "Library Office",
+      code: "LIB-OFFICE",
+      type: "Office",
+      parentId: "another-building",
+      status: "Active",
+      lat: 16.72,
+      lng: 121.6895,
+      positioned: true,
+    };
+
+    const candidates = findSelectionCandidates([16.72, 121.6895], {
+      locations: [indoorLocation],
+      nodes: [],
+      pathways: [],
+      buildings: [building],
+    });
+
+    expect(candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: building.id, type: "building" }),
+      expect.objectContaining({ id: indoorLocation.id, type: "location" }),
+    ]));
+    expect(candidates).toHaveLength(2);
+  });
 });
