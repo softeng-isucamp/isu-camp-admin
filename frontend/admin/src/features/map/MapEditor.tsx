@@ -1060,7 +1060,7 @@ export function MapEditor() {
       (node) => isPointInBounds(node.lat, node.lng, currentMapBounds)
         || (selected?.type === "node" && selected.id === node.id)
     );
-  }, [currentMapBounds, currentNodes, mode, selected?.id]);
+  }, [currentMapBounds, currentNodes, mode, selected?.id, selected?.type]);
 
   const filteredPathways = useMemo(() => {
     if (mode === "area") return [];

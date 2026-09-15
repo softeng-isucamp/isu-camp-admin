@@ -13,6 +13,12 @@ let pathPointDragPosition: { lat: number; lng: number } | undefined;
 let movingPointDragPosition: { lat: number; lng: number } | undefined;
 let mapFitBounds = vi.fn();
 let mapFlyTo = vi.fn();
+let mapVisibleBounds: {
+  getSouth: () => number;
+  getNorth: () => number;
+  getWest: () => number;
+  getEast: () => number;
+} | undefined;
 
 vi.mock("leaflet", () => {
   let iconId = 0;
@@ -38,6 +44,8 @@ vi.mock("react-leaflet", () => ({
   useMap: () => ({
     flyTo: (...args: unknown[]) => mapFlyTo(...args),
     fitBounds: (...args: unknown[]) => mapFitBounds(...args),
+    getBounds: mapVisibleBounds ? () => mapVisibleBounds : undefined,
+    getZoom: mapVisibleBounds ? () => 18 : undefined,
     latLngToContainerPoint: ({ lat, lng }: { lat: number; lng: number }) => ({ x: lng * 100_000, y: lat * 100_000 }),
     containerPointToLatLng: ({ x, y }: { x: number; y: number }) => ({ lat: y / 100_000, lng: x / 100_000 }),
   }),
@@ -100,6 +108,7 @@ describe("Map Editor preview", () => {
     movingPointDragPosition = undefined;
     mapFitBounds = vi.fn();
     mapFlyTo = vi.fn();
+    mapVisibleBounds = undefined;
     services.map.saveDraft = undefined;
     services.locations.save = undefined as unknown as typeof services.locations.save;
     vi.mocked(services.map.removeBuilding).mockResolvedValue(undefined);
@@ -807,6 +816,33 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Collision Junction Route Node" }));
 
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-color", "#005931");
+  });
+
+  it("recomputes viewport culling when selection changes type but keeps the same ID", async () => {
+    mapVisibleBounds = {
+      getSouth: () => 0,
+      getNorth: () => 1,
+      getWest: () => 0,
+      getEast: () => 1,
+    };
+    vi.mocked(services.map.locations).mockResolvedValue([]);
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "42", name: "Collision Junction", nodeType: "Junction", associatedPlaceId: null, lat: 10, lng: 10 },
+      { id: "node-b", name: "Remote Junction", nodeType: "Junction", associatedPlaceId: null, lat: 11, lng: 11 },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    const search = await screen.findByPlaceholderText("Search campus places...");
+    fireEvent.change(search, { target: { value: "Collision Pathway" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Collision Pathway Pathway" }));
+    expect(screen.queryByRole("button", { name: "Map marker at 10,10" })).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "Collision Junction" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Collision Junction Route Node" }));
+    expect(await screen.findByRole("button", { name: "Map marker at 10,10" })).toBeInTheDocument();
   });
 
   it("keeps a colliding Indoor Location from replacing the selected Pathway inspector", async () => {
