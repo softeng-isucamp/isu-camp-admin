@@ -143,6 +143,37 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
     ]
 
 
+def test_map_save_persists_an_internal_anchor_for_a_closed_concave_polygon(monkeypatch):
+    session = FakeSession()
+    building = type("BuildingRecord", (), {
+        "building_id": 4,
+        "building_name": "Engineering Hall",
+        "latitude": 16.7,
+        "longitude": 121.6,
+        "polygon_coordinates": [[16.7, 121.6], [16.71, 121.6], [16.71, 121.61]],
+    })()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(
+        map_module,
+        "Building",
+        type("BuildingModel", (), {"query": FakeQuery([building])}),
+    )
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
+
+    points = [
+        [0, 0], [0, 4], [4, 4], [4, 3], [1, 3],
+        [1, 1], [4, 1], [4, 0], [0, 0],
+    ]
+    response = app_with_map_blueprint().test_client().post(
+        "/api/map/save", json={"buildings": [{"id": "4", "points": points}]}
+    )
+
+    assert response.status_code == 200
+    assert building.latitude == 0.625
+    assert building.longitude == 0.625
+
+
 def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {

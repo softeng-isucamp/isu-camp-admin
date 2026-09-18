@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Location, LocationDraft, LocationType } from "../types";
 import { generatedMapFixture } from "../services/generatedMapFixture";
 import { locations as curatedLocations } from "../services/mockData";
-import { locationPolicy } from "./locationPolicy";
+import { locationIdentityKey, locationPolicy } from "./locationPolicy";
 
 const draft = (overrides: Partial<LocationDraft> = {}): LocationDraft => ({
   name: "Computer Laboratory",
@@ -54,6 +54,10 @@ const locationTypes = [
 ] satisfies LocationType[];
 
 describe("Location policy", () => {
+  it("scopes a Location identity to its record type", () => {
+    expect(locationIdentityKey({ id: "6", type: "Building" })).toBe("Building:6");
+    expect(locationIdentityKey({ id: "6", type: "Room" })).toBe("Room:6");
+  });
   it("requires floor metadata for new indoor records while accepting legacy records without it", () => {
     const withoutFloor = draft({ parentId: building.id, building: building.name });
 
@@ -227,6 +231,34 @@ describe("Location policy", () => {
       ]);
     },
   );
+
+  it("resolves a colliding parent ID as a Building during indoor validation", () => {
+    const collidingRoom: Location = {
+      ...draft({ type: "Room" }),
+      id: "6",
+      name: "Room 1",
+      code: "ROOM-1",
+      parentId: "1",
+      floor: "2nd Floor",
+    };
+    const centrumBuilding: Location = {
+      ...building,
+      id: "6",
+      name: "Centrum Laboratory Building",
+      code: "CLB",
+    };
+    const result = locationPolicy.evaluate(draft({
+      parentId: "6",
+      building: "Centrum Laboratory Building",
+      floor: "Ground Floor",
+    }), {
+      context: "record",
+      directory: [collidingRoom, centrumBuilding],
+      requireFloorLevel: true,
+    });
+
+    expect(result).toEqual({ valid: true, issues: [] });
+  });
 
   it.each([
     "Floor",

@@ -18,7 +18,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { pathwayWithSuggestedName, polygonCentroid, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { pathwayWithSuggestedName, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -36,7 +36,7 @@ import {
   type SaveDraftResult,
 } from "../../services/mapEditorApiClient";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
-import { standardFloorLevels } from "../../lib/locationPolicy";
+import { locationIdentityKey, standardFloorLevels } from "../../lib/locationPolicy";
 import {
   echagueCampusBoundary,
   geometryOnCampus,
@@ -810,8 +810,8 @@ export function MapEditor() {
     .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const buildingContentLocations = useMemo(() => {
-    const locationsById = new Map((locationDirectory ?? []).map((location) => [location.id, location]));
-    for (const location of currentLocations) locationsById.set(location.id, location);
+    const locationsById = new Map((locationDirectory ?? []).map((location) => [locationIdentityKey(location), location]));
+    for (const location of currentLocations) locationsById.set(locationIdentityKey(location), location);
     return Array.from(locationsById.values());
   }, [currentLocations, locationDirectory]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
@@ -1050,16 +1050,17 @@ export function MapEditor() {
     if (mode === "area") return [];
     return positioned.filter(
       (loc) => loc.type !== "Building"
-        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || selected?.id === loc.id)
+        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
     );
-  }, [currentLocations, currentMapBounds, mode, selected?.id]);
+  }, [currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
     return currentNodes.filter(
-      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds) || selected?.id === node.id
+      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds)
+        || (selected?.type === "node" && selected.id === node.id)
     );
-  }, [currentMapBounds, currentNodes, mode, selected?.id]);
+  }, [currentMapBounds, currentNodes, mode, selected?.id, selected?.type]);
 
   const filteredPathways = useMemo(() => {
     if (mode === "area") return [];
@@ -1123,24 +1124,26 @@ export function MapEditor() {
     const locationId = new URLSearchParams(routeLocation.search).get(
       "location",
     );
-    if (locationId && directoryLocations.some((item) => item.id === locationId)) {
-      const loc = directoryLocations.find((item) => item.id === locationId);
-      const building = currentBuildings.find((item) => item.id === locationId);
+    const building = locationId ? currentBuildings.find((item) => item.id === locationId) : undefined;
+    const loc = locationId ? directoryLocations.find((item) => item.id === locationId) : undefined;
+    if (locationId && (building || loc)) {
       const buildingPoints = building?.points ?? [];
       // Locations may locate an existing record, but it must never hand off
       // into a standalone point-placement workflow. Footprint geometry stays
       // owned by Map Editor's Building Polygon tool.
       setMode("select");
-      if ((loc?.type === "Building" || loc?.type === "Facility") && buildingPoints.length >= 3) {
+      if (building) {
         setSelected({ type: "building", id: locationId });
-        setFrameBounds([
-          [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
-          [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
-        ]);
-      } else {
+        if (buildingPoints.length >= 3) {
+          setFrameBounds([
+            [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
+            [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
+          ]);
+        }
+      } else if (loc) {
         setSelected({ type: "location", id: locationId });
       }
-      if (loc && isPositionedLocation(loc)) {
+      if (!building && loc && isPositionedLocation(loc)) {
         setFrameBounds(null);
         setFlyTarget([loc.lat, loc.lng]);
       }
@@ -3281,7 +3284,7 @@ export function MapEditor() {
           />
 
           {filteredBuildings.map((building) => {
-            const isSelected = selected?.id === building.id;
+            const isSelected = selected?.type === "building" && selected.id === building.id;
             const footprintLink = currentFeatureLinks.find((link) =>
               link.targetDomain === "Locations"
               && link.targetEntityId === building.id
@@ -3297,9 +3300,9 @@ export function MapEditor() {
               footprintRetired ? 0.1 : mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
 
             return (
-              <Fragment key={building.id}>
+              <Fragment key={`building:${building.id}`}>
               <Polygon
-                key={building.id}
+                key={`building-polygon:${building.id}`}
                 positions={building.points}
                 pathOptions={{
                   color: footprintRetired
@@ -3320,7 +3323,7 @@ export function MapEditor() {
                     if (footprintRetired && footprint) selectObject("local_feature", footprint.id);
                     else selectCanvasObject("building", building.id, event.latlng
                       ? [event.latlng.lat, event.latlng.lng]
-                      : polygonCentroid(building.points));
+                  : polygonFeatureAnchor(building.points));
                   },
                 }}
               >
@@ -3335,9 +3338,9 @@ export function MapEditor() {
               </Polygon>
               {mode === "select" && editingBuildingId === null && (
                 <Marker
-                  position={polygonCentroid(building.points)}
+                  position={polygonFeatureAnchor(building.points)}
                   icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonCentroid(building.points)) }}
+                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonFeatureAnchor(building.points)) }}
                 />
               )}
               </Fragment>
@@ -3355,7 +3358,7 @@ export function MapEditor() {
                   )
                 : pathPoints
               : path.pathPoints;
-            const isSelected = selected?.id === path.id || isEditingThisPath;
+            const isSelected = (selected?.type === "pathway" && selected.id === path.id) || isEditingThisPath;
 
             const pathOpacity =
               mode === "place" || mode === "area"
@@ -3409,7 +3412,7 @@ export function MapEditor() {
             const isSelected = selected?.type === "location" && selected?.id === loc.id;
             return (
               <Marker
-                key={loc.id}
+                key={`location:${loc.id}`}
                 position={[loc.lat, loc.lng]}
                 icon={createLocationPinIcon(isSelected)}
                 eventHandlers={{
@@ -3584,7 +3587,7 @@ export function MapEditor() {
               `points` on every render, same as the committed-building marker below. */}
           {mode === "area" && points.length >= 3 && (
             <Marker
-              position={polygonCentroid(points)}
+              position={polygonFeatureAnchor(points)}
               icon={createLocationPinIcon(false)}
             />
           )}
@@ -3841,7 +3844,7 @@ export function MapEditor() {
             <div className="mt-2 pt-2 border-t border-[#e1e3e4] max-h-56 overflow-y-auto text-xs">
               {results.map((item) => (
                 <button
-                  key={item.id}
+                  key={`${item.kind}:${item.id}`}
                   type="button"
                   className="w-full text-left p-2 hover:bg-[#f8f9fa] rounded-lg flex items-center justify-between transition"
                   onClick={() => handleSearchResultClick(item)}

@@ -58,26 +58,31 @@ export const translatePolygon = (points: MapPoint[], delta: MapPoint): MapPoint[
 
 /** Area-weighted centroid used for internal labels and routing anchors. */
 export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
-  if (points.length < 3) return polygonCentroid(points);
+  const ring = points.length > 1 && points[0][0] === points[points.length - 1][0] && points[0][1] === points[points.length - 1][1]
+    ? points.slice(0, -1)
+    : points;
+  if (ring.length < 3) return polygonCentroid(ring);
+  const origin = ring[0];
+  const translated = ring.map(([lat, lng]) => [lat - origin[0], lng - origin[1]] as MapPoint);
   let twiceArea = 0;
   let latitude = 0;
   let longitude = 0;
-  points.forEach((point, index) => {
-    const next = points[(index + 1) % points.length];
+  translated.forEach((point, index) => {
+    const next = translated[(index + 1) % translated.length];
     const cross = point[0] * next[1] - next[0] * point[1];
     twiceArea += cross;
     latitude += (point[0] + next[0]) * cross;
     longitude += (point[1] + next[1]) * cross;
   });
-  if (Math.abs(twiceArea) < Number.EPSILON) return polygonCentroid(points);
-  const areaPoint: MapPoint = [latitude / (3 * twiceArea), longitude / (3 * twiceArea)];
-  if (pointInPolygon(areaPoint, points)) return areaPoint;
-  const lats = points.map(([lat]) => lat); const lngs = points.map(([, lng]) => lng);
+  if (Math.abs(twiceArea) < Number.EPSILON) return polygonCentroid(ring);
+  const areaPoint: MapPoint = [origin[0] + latitude / (3 * twiceArea), origin[1] + longitude / (3 * twiceArea)];
+  if (pointInPolygon(areaPoint, ring)) return areaPoint;
+  const lats = ring.map(([lat]) => lat); const lngs = ring.map(([, lng]) => lng);
   const south = Math.min(...lats); const north = Math.max(...lats);
   const west = Math.min(...lngs); const east = Math.max(...lngs);
   let best: MapPoint | null = null; let bestClearance = -1;
-  const distanceToEdges = (candidate: MapPoint) => Math.min(...points.map((point, index) => {
-    const next = points[(index + 1) % points.length];
+  const distanceToEdges = (candidate: MapPoint) => Math.min(...ring.map((point, index) => {
+    const next = ring[(index + 1) % ring.length];
     const dx = next[0] - point[0]; const dy = next[1] - point[1];
     const lengthSquared = dx * dx + dy * dy;
     const projection = lengthSquared ? Math.max(0, Math.min(1, ((candidate[0] - point[0]) * dx + (candidate[1] - point[1]) * dy) / lengthSquared)) : 0;
@@ -86,11 +91,11 @@ export const polygonFeatureAnchor = (points: MapPoint[]): MapPoint => {
   }));
   for (let row = 0; row <= 32; row += 1) for (let column = 0; column <= 32; column += 1) {
     const candidate: MapPoint = [south + (north - south) * row / 32, west + (east - west) * column / 32];
-    if (!pointInPolygon(candidate, points)) continue;
+    if (!pointInPolygon(candidate, ring)) continue;
     const clearance = distanceToEdges(candidate);
     if (clearance > bestClearance) { best = candidate; bestClearance = clearance; }
   }
-  return best ?? areaPoint;
+  return best ?? ring[0];
 };
 
 /** Builds the default human-facing label for a Pathway from its endpoints. */
