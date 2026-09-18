@@ -60,7 +60,7 @@ describe("mock service contracts", () => {
           location_id: 42,
           location_name: "Backend Library",
           location_code: "LIB-01",
-          type_id: 7,
+          type_id: 4,
           building_id: null,
           floor_level: null,
           description: "A persisted facility",
@@ -100,6 +100,41 @@ describe("mock service contracts", () => {
       page: 1,
       pageSize: 20,
     })).toThrow("Backend returned a malformed location record.");
+  });
+
+  it("normalizes persisted location type IDs without inferring Building or Floor", () => {
+    const persistedTypes = [
+      [1, "Room"],
+      [2, "Laboratory"],
+      [3, "Office"],
+      [4, "Facility"],
+      [5, "Restroom"],
+    ] as const;
+
+    for (const [type_id, type] of persistedTypes) {
+      expect(normalizeBackendLocationPage({
+        items: [{ id: type_id, name: "Persisted location", code: "PERSISTED", type_id }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      }).items[0].type).toBe(type);
+    }
+
+    expect(normalizeBackendLocationPage({
+      items: [{ id: "string-type", name: "String location", code: "STRING", type: "Building" }],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    }).items[0].type).toBe("Building");
+
+    for (const type_id of [6, 7, 8]) {
+      expect(() => normalizeBackendLocationPage({
+        items: [{ id: type_id, name: "Obsolete location", code: "OBSOLETE", type_id }],
+        total: 1,
+        page: 1,
+        pageSize: 10,
+      })).toThrow("Backend returned a malformed location record.");
+    }
   });
 
   it("uses only the real service response for list data and preserves pagination", async () => {
@@ -746,7 +781,7 @@ describe("real locations service boundary", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({
         success: true,
-        items: [{ location_id: 42, location_name: "Room 204", location_code: "ENG-204", type_id: 3, building: "Engineering Hall", floor: "2nd Floor", description: "Teaching room", keywords: "lecture" }],
+        items: [{ location_id: 42, location_name: "Room 204", location_code: "ENG-204", type_id: 1, building: "Engineering Hall", floor: "2nd Floor", description: "Teaching room", keywords: "lecture" }],
         total: 1, page: 2, pageSize: 10,
       }), { status: 200 }),
     );
