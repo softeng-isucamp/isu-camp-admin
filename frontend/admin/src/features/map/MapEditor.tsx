@@ -3370,12 +3370,14 @@ export function MapEditor() {
             return source && destination ? (
               <Polyline
                 key={path.id}
+                bubblingMouseEvents={false}
                 positions={[
                   [source.lat, source.lng],
                   ...currentPoints,
                   [destination.lat, destination.lng],
                 ]}
                 pathOptions={{
+                  className: "map-pathway",
                   color: !geometryOnCampus([
                     ...(source ? [[source.lat, source.lng] as [number, number]] : []),
                     ...currentPoints,

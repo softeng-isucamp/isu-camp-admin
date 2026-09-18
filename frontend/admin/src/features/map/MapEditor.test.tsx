@@ -244,6 +244,19 @@ describe("Map Editor preview", () => {
     )).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("offers a choice when a clicked Pathway overlaps other map objects", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByTestId("path-geometry"));
+
+    expect(screen.getByRole("dialog", { name: "Choose overlapping object" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Select Library Walk Pathway" }));
+    expect(screen.getByRole("complementary", { name: "Library Walk object details" })).toBeVisible();
+  });
+
   it("confirms, cancels, and hard-deletes a Building with its Indoor Location warning", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-eng", name: "Engineering Hall", code: "ENG", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
