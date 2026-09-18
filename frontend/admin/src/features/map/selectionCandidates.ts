@@ -123,9 +123,12 @@ export function findSelectionCandidates(
   // footprint candidate so selection opens the Building inspector.
   const uniqueCandidates = new Map<string, SelectionCandidate>();
   for (const candidate of candidates) {
-    const existing = uniqueCandidates.get(candidate.id);
+    const canonicalBuilding = candidate.type === "building"
+      || (candidate.type === "location" && (candidate.kindLabel === "Building" || candidate.kindLabel === "Facility"));
+    const key = canonicalBuilding ? `building:${candidate.id}` : `${candidate.type}:${candidate.id}`;
+    const existing = uniqueCandidates.get(key);
     if (!existing || (candidate.type === "building" && existing.type === "location")) {
-      uniqueCandidates.set(candidate.id, candidate);
+      uniqueCandidates.set(key, candidate);
     }
   }
 

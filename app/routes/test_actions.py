@@ -190,7 +190,7 @@ def test_locations_endpoints_have_identical_list_results(monkeypatch):
 
 def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
     assert actions_module.CREATABLE_TYPES == {
-        "Room", "Laboratory", "Office", "Facility", "Restroom", "Building"
+        "Room", "Laboratory", "Office", "Restroom", "Building"
     }
     assert actions_module.TYPE_IDS == LOCATION_TYPE_IDS
     assert LOCATION_TYPE_NAMES[LOCATION_TYPE_IDS["Restroom"]] == "Restroom"

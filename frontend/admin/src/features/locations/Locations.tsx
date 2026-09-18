@@ -13,7 +13,7 @@ import {
 import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
-import { indoorLocationTypes, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
+import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 import { LocationDetailsFields } from "./LocationDetailsModal";
 
 const blankLocation = (): LocationDraft => ({
@@ -194,7 +194,7 @@ export function Locations() {
   });
 
   const { data: history } = useQuery({
-    queryKey: ["logs", "location-history", selected?.id],
+    queryKey: ["logs", "location-history", selected ? locationIdentityKey(selected) : null],
     queryFn: () => services.logs.forLocation(selected!.id, selected!.name),
     enabled: dialog === "history" && selected !== null,
   });
@@ -203,10 +203,10 @@ export function Locations() {
   const handoffParent = routeState?.indoorLocationParent;
   const allLocations = useMemo(() => {
     const locations = directory ?? (API_MODE === "local" ? initialLocations : []);
-    const withHandoff = !handoffParent || locations.some((item) => item.id === handoffParent.id)
+    const withHandoff = !handoffParent || locations.some((item) => locationIdentityKey(item) === locationIdentityKey(handoffParent))
       ? locations
       : [...locations, handoffParent];
-    return [...new Map(withHandoff.map((item) => [item.id, item])).values()];
+    return [...new Map(withHandoff.map((item) => [locationIdentityKey(item), item])).values()];
   }, [directory, handoffParent]);
   const isChildType = (type: LocationType) => locationPolicy.classify(type).requiresBuildingParent;
   const normalizeDraft = (next: LocationDraft) => locationPolicy.normalize(next, {
@@ -296,8 +296,8 @@ export function Locations() {
       (item) =>
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
-        (buildingId === "All Buildings" || item.parentId === buildingId || item.id === buildingId) &&
-        (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
+        (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
+        (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
   }, [rawItems, type, status, buildingId, floorId, selectedFloorRecord]);
 
@@ -310,12 +310,12 @@ export function Locations() {
         .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
       (type === "All Types" || item.type === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
-      (buildingId === "All Buildings" || item.parentId === buildingId || item.id === buildingId) &&
-      (floorId === "All Floors" || item.id === floorId || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
+      (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
+      (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
     );
   }, [allLocations, query, type, status, buildingId, floorId, selectedFloorRecord]);
 
-  const matchingIds = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map((item) => item.id)), [hierarchyItems, items, viewMode]);
+  const matchingKeys = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map(locationIdentityKey)), [hierarchyItems, items, viewMode]);
 
   // Build complete hierarchy families. Filtering can reduce a family to the
   // matching descendants, but a matching indoor record always keeps its root
@@ -327,17 +327,17 @@ export function Locations() {
 
     // Find roots
     const rootBuildings = allLocations.filter((loc) => loc.type === "Building" && (
-      matchingIds.has(loc.id) || allLocations.some((child) => matchingIds.has(child.id) && child.parentId === loc.id)
+      matchingKeys.has(locationIdentityKey(loc)) || allLocations.some((child) => matchingKeys.has(locationIdentityKey(child)) && child.parentId === loc.id)
     ));
     const standalone = hierarchyItems.filter((loc) => loc.parentId === null && loc.type === "Facility");
 
     for (const bldg of rootBuildings) {
-      const rootWasMatched = matchingIds.has(bldg.id);
+      const rootWasMatched = matchingKeys.has(locationIdentityKey(bldg));
       const bldgCollapsed = collapsedNodes.has(bldg.id);
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && loc.type !== "Building" &&
         loc.parentId === bldg.id &&
-        (rootWasMatched || matchingIds.has(loc.id)),
+        (rootWasMatched || matchingKeys.has(locationIdentityKey(loc))),
       );
       const explicitFloors = allLocations.filter((loc) =>
         loc.parentId === bldg.id &&
@@ -372,7 +372,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = collapsedNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => matchingIds.has(loc.id) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building"))
+            (loc) => matchingKeys.has(locationIdentityKey(loc)) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building"))
           );
           family.push({
             item: flr,
@@ -404,15 +404,15 @@ export function Locations() {
     }
 
     // If filter produced items not in tree, include them
-    const includedIds = new Set(result.flat().map((r) => r.item.id));
+    const includedKeys = new Set(result.flat().map((r) => locationIdentityKey(r.item)));
     for (const item of hierarchyItems) {
-      if (!includedIds.has(item.id)) {
+      if (!includedKeys.has(locationIdentityKey(item))) {
         result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
       }
     }
 
     return result;
-  }, [items, hierarchyItems, matchingIds, allLocations, viewMode, collapsedNodes]);
+  }, [items, hierarchyItems, matchingKeys, allLocations, viewMode, collapsedNodes]);
 
   const hierarchyRows = hierarchyFamilies.flat();
   const hierarchyTotal = hierarchyFamilies.length;
@@ -423,7 +423,7 @@ export function Locations() {
     ? hierarchyFamilies.slice((effectiveHierarchyPage - 1) * pageSize, effectiveHierarchyPage * pageSize)
     : hierarchyFamilies;
   const visibleRows = pagedFamilies.flat();
-  const uniqueVisibleRows = visibleRows.filter(({ item }, index, rows) => rows.findIndex((row) => row.item.id === item.id) === index);
+  const uniqueVisibleRows = visibleRows.filter(({ item }, index, rows) => rows.findIndex((row) => locationIdentityKey(row.item) === locationIdentityKey(item)) === index);
 
   useEffect(() => {
     if (viewMode !== "hierarchy") return;
@@ -995,7 +995,7 @@ export function Locations() {
               {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed }, index) => {
                 const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
-                <tr key={item.id} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
+                <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
                       {/* Tree connector graphics */}
@@ -1072,18 +1072,18 @@ export function Locations() {
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === item.id ? 50 : 0 }}>
-                    {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === item.id ? actionMenuRef : undefined}>
+                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === locationIdentityKey(item) ? 50 : 0 }}>
+                    {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === locationIdentityKey(item) ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
                         aria-label={`Actions for ${item.name}`}
-                        aria-expanded={actionMenuId === item.id}
-                        onClick={() => setActionMenuId((current) => (current === item.id ? null : item.id))}
+                        aria-expanded={actionMenuId === locationIdentityKey(item)}
+                        onClick={() => setActionMenuId((current) => (current === locationIdentityKey(item) ? null : locationIdentityKey(item)))}
                         style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" }}
                       >
                         •••
                       </button>
-                      {actionMenuId === item.id && (
+                      {actionMenuId === locationIdentityKey(item) && (
                         <div
                           className="row-action-menu"
                           role="menu"

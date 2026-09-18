@@ -198,13 +198,20 @@ const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, l
 };
 
 const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
+const persistedLocationTypes: Partial<Record<number, Location["type"]>> = {
+  1: "Room",
+  2: "Laboratory",
+  3: "Office",
+  4: "Facility",
+  5: "Restroom",
+};
 const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
 
 export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   const id = raw.id ?? raw.location_id;
   const name = raw.name ?? raw.location_name;
   const code = raw.code ?? raw.location_code;
-  const type = raw.type ?? (typeof raw.type_id === "number" ? locationTypes[raw.type_id - 1] : undefined);
+  const type = raw.type ?? (typeof raw.type_id === "number" ? persistedLocationTypes[raw.type_id] : undefined);
   if (id === undefined || typeof name !== "string" || typeof code !== "string" || !locationTypes.includes(type as typeof locationTypes[number])) {
     throw new Error("Backend returned a malformed location record.");
   }
@@ -248,6 +255,19 @@ export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
     throw new Error("Backend returned a malformed locations page.");
   }
   return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
+};
+
+const fetchAllBackendLocations = async (): Promise<Location[]> => {
+  const first = normalizeBackendLocationPage(await apiJson<unknown>("/api/locations?page=1&pageSize=100"));
+  const pages = Math.ceil(first.total / first.pageSize);
+  if (pages <= 1) return first.items;
+  const remaining = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, index) =>
+      apiJson<unknown>(`/api/locations?page=${index + 2}&pageSize=${first.pageSize}`)
+        .then(normalizeBackendLocationPage),
+    ),
+  );
+  return [first, ...remaining].flatMap((page) => page.items);
 };
 
 const locationWritePayload = (location: LocationDraft) => {
@@ -1376,7 +1396,7 @@ export const services: Services = {
 
 
       locations: async () => USE_HTTP_API
-        ? normalizeBackendLocationPage(await apiJson<unknown>("/api/locations")).items
+        ? fetchAllBackendLocations()
         : wait(clone(mapLocations)),
 
 

@@ -12,3 +12,7 @@ frontend/admin/e2e/portal.spec.ts-snapshots/
 
 # Disposable Admin mock backend runtime state (local-only; not tracked)
 mock-backend/
+
+# Local planning and generated data (not tracked)
+.scratch/
+reference/
