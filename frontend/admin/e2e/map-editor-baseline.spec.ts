@@ -46,3 +46,20 @@ test("administrator filters the Walking Network browser and follows map selectio
   await expect(browser.getByRole("tab", { name: "Route Nodes" })).toHaveAttribute("aria-selected", "true");
   await expect(browser.getByRole("button", { pressed: true }).first()).toBeVisible();
 });
+
+test("Pathway selection is not cleared by the map click", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("USERNAME").fill("admin_justine");
+  await page.getByLabel(/PASSWORD/).fill("password123");
+  await page.getByRole("button", { name: /login/i }).click();
+  await page.goto("/map-editor");
+  await expect(page.getByRole("heading", { name: "Interactive Map Editor" })).toBeVisible();
+  await page.getByRole("button", { name: "Select" }).click();
+
+  await page.locator(".map-pathway").first().click({ position: { x: 1, y: 1 }, force: true });
+
+  const chooser = page.getByRole("dialog", { name: "Choose overlapping object" });
+  await expect(chooser).toBeVisible();
+  await chooser.getByRole("button", { name: /Pathway/ }).first().click();
+  await expect(page.locator(".inspector-card-hud")).toBeVisible();
+});

@@ -41,4 +41,21 @@ describe("borrowed owner module forms", () => {
     }));
   });
 
+  it("limits map-edited building classification to Building and Facility", () => {
+    render(
+      <LocationDetailsModal
+        location={location}
+        directory={[location]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("combobox")[0].querySelectorAll("option")).toHaveLength(2);
+    expect(screen.getByRole("option", { name: "Building" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Facility" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Room" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Laboratory" })).not.toBeInTheDocument();
+  });
+
 });
