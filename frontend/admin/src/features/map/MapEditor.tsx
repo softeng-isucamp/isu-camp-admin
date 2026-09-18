@@ -4554,6 +4554,7 @@ export function MapEditor() {
         <LocationDetailsModal
           location={locationModalEntity}
           directory={currentLocations}
+          allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
             if (selectedBuilding) {

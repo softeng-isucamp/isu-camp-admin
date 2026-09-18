@@ -686,6 +686,8 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("[Locations]");
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
+    const typeOptions = within(screen.getAllByRole("combobox")[0]).getAllByRole("option");
+    expect(typeOptions.map((option) => option.textContent)).toEqual(["Building", "Facility"]);
     fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
 
