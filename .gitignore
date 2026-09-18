@@ -15,5 +15,4 @@ mock-backend/
 
 # Local planning and generated data (not tracked)
 .scratch/
-migrations/
 reference/
