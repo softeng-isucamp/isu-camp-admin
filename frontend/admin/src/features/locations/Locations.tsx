@@ -996,7 +996,7 @@ export function Locations() {
                 const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
-                  <td style={{ padding: "16px 20px" }}>
+                  <td colSpan={item.type === "Floor" ? 6 : undefined} style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
                       {/* Tree connector graphics */}
                       {level === 1 && (
@@ -1047,7 +1047,9 @@ export function Locations() {
                       </div>
                       <div>
                         <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
-                        <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
+                        {item.type !== "Floor" && (
+                          <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
+                        )}
                         {level > 0 && item.floor && (
                           <span style={{ display: "inline-block", marginTop: "5px", padding: "2px 8px", borderRadius: "999px", background: "#eef6f1", color: "#0c7441", fontSize: "11px", fontWeight: 600 }}>
                             {item.floor}
@@ -1056,6 +1058,7 @@ export function Locations() {
                       </div>
                     </div>
                   </td>
+                  {item.type !== "Floor" && <>
                   <td style={{ padding: "16px 20px" }}>
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
                       {item.type}
@@ -1073,7 +1076,7 @@ export function Locations() {
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === locationIdentityKey(item) ? 50 : 0 }}>
-                    {item.type !== "Floor" && <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === locationIdentityKey(item) ? actionMenuRef : undefined}>
+                    <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === locationIdentityKey(item) ? actionMenuRef : undefined}>
                       <button
                         className="table-action menu-trigger"
                         aria-label={`Actions for ${item.name}`}
@@ -1163,8 +1166,9 @@ export function Locations() {
                           </button>
                         </div>
                       )}
-                    </div>}
+                    </div>
                   </td>
+                  </>}
                 </tr>
                 );
               })}

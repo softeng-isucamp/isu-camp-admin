@@ -75,6 +75,19 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(Array.from((screen.getByLabelText("FLOOR") as HTMLSelectElement).options).map((option) => option.text)).toContain("Ground Floor");
   });
 
+  it("renders Floor Levels as grouping rows without location metadata", async () => {
+    renderLocations();
+    const floorRow = (await screen.findAllByRole("row"))
+      .find((row) => row.querySelector("strong")?.textContent === "Ground Floor");
+
+    expect(floorRow).toBeDefined();
+    expect(floorRow).toHaveTextContent("Ground Floor");
+    expect(floorRow).not.toHaveTextContent("Active");
+    expect(floorRow).not.toHaveTextContent("BLD-ADM-01-Ground Floor");
+    expect(floorRow?.querySelectorAll("td")).toHaveLength(1);
+    expect(floorRow?.querySelector("td")).toHaveAttribute("colspan", "6");
+  });
+
   it("keeps flat-view pagination record-based and resets to page one after filtering", async () => {
     const { container } = renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
