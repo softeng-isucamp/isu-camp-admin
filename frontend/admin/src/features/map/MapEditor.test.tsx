@@ -1468,7 +1468,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("A direct Pathway already connects these Route Nodes.");
   });
 
-  it("starts a new Pathway with a blank name placeholder and constrained Way type", async () => {
+  it("starts a new Pathway with an endpoint name suggestion and constrained Way type", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([]);
     renderEditor();
     await choosePathwayEditor();
@@ -1478,9 +1478,12 @@ describe("Map Editor preview", () => {
 
     const name = screen.getByRole("textbox", { name: "Pathway name" });
     expect(name).toHaveValue("");
-    expect(name).toHaveAttribute("placeholder", "e.g. Science Walk");
+    expect(name).toHaveAttribute("placeholder", "North Entrance – South Junction");
     expect(Array.from((screen.getByLabelText("Pathway type") as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Walkway", "Road"]);
-    expect(screen.getByRole("checkbox", { name: "Vehicle" })).toBeDisabled();
+    expect(
+      screen.getAllByRole("checkbox", { name: "Vehicle" })
+        .every((checkbox) => (checkbox as HTMLInputElement).disabled),
+    ).toBe(true);
 
     fireEvent.change(name, { target: { value: "New Campus Walk" } });
     fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
