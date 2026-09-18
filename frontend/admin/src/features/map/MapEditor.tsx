@@ -1050,9 +1050,10 @@ export function MapEditor() {
     if (mode === "area") return [];
     return positioned.filter(
       (loc) => loc.type !== "Building"
+        && (loc.type !== "Facility" || !currentBuildings.some((building) => building.id === loc.id))
         && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
     );
-  }, [currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
+  }, [currentBuildings, currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
@@ -3370,12 +3371,14 @@ export function MapEditor() {
             return source && destination ? (
               <Polyline
                 key={path.id}
+                bubblingMouseEvents={false}
                 positions={[
                   [source.lat, source.lng],
                   ...currentPoints,
                   [destination.lat, destination.lng],
                 ]}
                 pathOptions={{
+                  className: "map-pathway",
                   color: !geometryOnCampus([
                     ...(source ? [[source.lat, source.lng] as [number, number]] : []),
                     ...currentPoints,
@@ -4554,6 +4557,7 @@ export function MapEditor() {
         <LocationDetailsModal
           location={locationModalEntity}
           directory={currentLocations}
+          allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
             if (selectedBuilding) {

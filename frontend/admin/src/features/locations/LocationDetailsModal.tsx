@@ -61,6 +61,7 @@ export function LocationDetailsFields({
 interface LocationDetailsModalProps {
   location: Location;
   directory: Location[];
+  allowedTypes?: LocationType[];
   onClose: () => void;
   onSubmit: (location: Location) => void;
 }
@@ -68,11 +69,17 @@ interface LocationDetailsModalProps {
 export function LocationDetailsModal({
   location,
   directory,
+  allowedTypes,
   onClose,
   onSubmit,
 }: LocationDetailsModalProps) {
   const [draft, setDraft] = useState<Location>({ ...location });
   const [error, setError] = useState("");
+  const effectiveAllowedTypes = allowedTypes ?? (
+    location.type === "Building" || location.type === "Facility"
+      ? ["Building", "Facility"]
+      : undefined
+  );
 
   const save = () => {
     const normalized = locationPolicy.normalize(draft, {
@@ -110,7 +117,7 @@ export function LocationDetailsModal({
       onClose={onClose}
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
-      <LocationDetailsFields draft={draft} onChange={(next) => setDraft(next as Location)} />
+      <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
       <div className="borrowed-spatial-lock" title="Coordinates are edited with the Map Editor spatial action.">
         <strong>🔒 {locationPolicy.classify(draft.type).kind === "indoor" ? "Indoor Location" : "Spatial position"}</strong>
         <span>{locationPolicy.classify(draft.type).kind === "indoor"
