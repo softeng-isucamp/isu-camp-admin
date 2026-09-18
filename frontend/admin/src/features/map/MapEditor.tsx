@@ -1050,9 +1050,10 @@ export function MapEditor() {
     if (mode === "area") return [];
     return positioned.filter(
       (loc) => loc.type !== "Building"
+        && (loc.type !== "Facility" || !currentBuildings.some((building) => building.id === loc.id))
         && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
     );
-  }, [currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
+  }, [currentBuildings, currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];

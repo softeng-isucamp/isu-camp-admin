@@ -463,6 +463,39 @@ describe("Map Editor preview", () => {
     expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7205,121.6895"]')).not.toBeInTheDocument();
   });
 
+  it("does not render an ordinary marker for a positioned Facility with a footprint", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      {
+        id: "facility-admin",
+        name: "Campus Gym",
+        code: "GYM",
+        type: "Facility",
+        points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]],
+      },
+    ]);
+    vi.mocked(services.map.locations).mockResolvedValue([
+      {
+        id: "facility-admin",
+        name: "Campus Gym",
+        code: "GYM",
+        type: "Facility",
+        parentId: null,
+        status: "Active",
+        lat: 16.7205,
+        lng: 121.6895,
+        positioned: true,
+      },
+    ]);
+    vi.mocked(services.map.nodes).mockResolvedValue([]);
+
+    renderEditor();
+
+    await screen.findByRole("button", { name: "building polygon" });
+
+    expect(document.querySelectorAll('[data-testid="saved-map-marker"][data-icon-class^="location-marker-icon"]')).toHaveLength(1);
+    expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7205,121.6895"]')).not.toBeInTheDocument();
+  });
+
   it("deselects the inspected feature when the administrator clicks empty canvas", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
