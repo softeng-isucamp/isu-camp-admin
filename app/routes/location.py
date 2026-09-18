@@ -18,7 +18,9 @@ location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
 TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
-CREATABLE_TYPES = set(TYPE_IDS) | {"Building"}
+# Facility is a Building classification, never a public.location type.  It
+# remains accepted here so the API can create a classified Building record.
+CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
 PHOTO_MAX_BYTES = 5 * 1024 * 1024
 PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 logger = logging.getLogger(__name__)
@@ -213,6 +215,11 @@ def _validate(data, records, buildings):
             "Only Indoor Locations can belong to a Building."
         )
 
+    if location_type in {"Building", "Facility"} and floor_level:
+        fields["floor"] = (
+            "Building classifications cannot have a Floor Level."
+        )
+
     # Duplicate code validation
     duplicate = next(
         (
@@ -281,11 +288,6 @@ def _validate(data, records, buildings):
 
         # NEW:
         "polygon_coordinates": polygon_coordinates,
-        "is_footprint_owner": (
-            location_type in {"Building", "Facility"}
-            and polygon_coordinates is not None
-        ),
-
     }, None
 
 
@@ -406,17 +408,13 @@ def create_location():
         # BUILDING CREATION
         # ==================================================
 
-        if values.get("is_footprint_owner") or values.get("type") == "Building":
+        if values.get("type") in {"Building", "Facility"}:
 
             building = Building(
                 building_code=values["code"],
                 building_name=values["name"],
                 description=values["description"],
-                classification=(
-                    values["type"]
-                    if values.get("is_footprint_owner")
-                    else "Building"
-                ),
+                classification=values["type"],
 
                 # NEW:
                 # Save polygon coordinates

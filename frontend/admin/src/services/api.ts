@@ -198,13 +198,20 @@ const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, l
 };
 
 const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
+const persistedLocationTypes: Partial<Record<number, Location["type"]>> = {
+  1: "Room",
+  2: "Laboratory",
+  3: "Office",
+  4: "Facility",
+  5: "Restroom",
+};
 const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
 
 export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   const id = raw.id ?? raw.location_id;
   const name = raw.name ?? raw.location_name;
   const code = raw.code ?? raw.location_code;
-  const type = raw.type ?? (typeof raw.type_id === "number" ? locationTypes[raw.type_id - 1] : undefined);
+  const type = raw.type ?? (typeof raw.type_id === "number" ? persistedLocationTypes[raw.type_id] : undefined);
   if (id === undefined || typeof name !== "string" || typeof code !== "string" || !locationTypes.includes(type as typeof locationTypes[number])) {
     throw new Error("Backend returned a malformed location record.");
   }

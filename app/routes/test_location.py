@@ -229,9 +229,58 @@ def test_location_type_ids_preserve_existing_records_and_add_restroom():
         "Room": 1,
         "Laboratory": 2,
         "Office": 3,
-        "Facility": 4,
         "Restroom": 5,
     }
+
+
+def test_facility_without_polygon_is_still_created_as_a_building(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+
+    response = client.post(
+        "/api/locations",
+        json={"name": "Covered Court", "code": "COURT", "type": "Facility"},
+    )
+
+    assert response.status_code == 201
+    assert response.json["type"] == "Facility"
+    assert records == []
+    assert len(session.buildings) == 1
+    assert session.buildings[0].classification == "Facility"
+
+
+def test_facility_cannot_use_normal_location_parent_fields(monkeypatch):
+    client, records, session = make_mutation_client(monkeypatch)
+
+    response = client.post(
+        "/api/locations",
+        json={
+            "name": "Legacy Facility Row",
+            "code": "LEGACY-FACILITY",
+            "type": "Facility",
+            "parentId": "1",
+            "floor": "Ground Floor",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json["fields"]["parentId"]
+    assert records == []
+    assert session.commits == 0
+
+    floor_only = client.post(
+        "/api/locations",
+        json={
+            "name": "Standalone Facility",
+            "code": "STANDALONE-FACILITY",
+            "type": "Facility",
+            "floor": "Ground Floor",
+        },
+    )
+
+    assert floor_only.status_code == 400
+    assert floor_only.json["fields"]["floor"]
+    assert records == []
+    assert session.commits == 0
 
 
 def test_restroom_dto_uses_canonical_type_and_indoor_parent():
