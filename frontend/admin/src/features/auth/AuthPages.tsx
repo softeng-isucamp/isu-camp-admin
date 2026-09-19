@@ -439,7 +439,7 @@ export function PasswordReset() {
                     <input {...register("confirmPassword")} type="password" placeholder="Confirm new password" />
                   </label>
                   <div style={{ background: "#f0f8f3", borderRadius: "14px", padding: "12px 16px", color: "#0c5430", fontSize: "13px", lineHeight: "19px" }}>
-                    Use a strong password with at least one uppercase letter, one lowercase letter, one number, and one symbol.
+                    Your new password must contain at least 8 characters.
                   </div>
                 </>
               )}
