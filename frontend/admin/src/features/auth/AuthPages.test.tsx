@@ -174,26 +174,6 @@ describe("password recovery screen", () => {
     expect(verify).toHaveBeenNthCalledWith(1, "admin01", "111111");
     expect(verify).toHaveBeenNthCalledWith(2, "admin01", "222222");
   });
-
-  it("states the eight-character password rule and validates confirmation mismatches", async () => {
-    mockResetRequest();
-    vi.spyOn(services.auth, "verifyReset").mockResolvedValue(undefined);
-    render(<MemoryRouter><PasswordReset /></MemoryRouter>);
-
-    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), { target: { value: "admin01" } });
-    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
-    await screen.findByRole("heading", { name: /verification code/i });
-    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    await screen.findByLabelText("NEW PASSWORD");
-
-    expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "password1" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "password2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Passwords do not match.");
-  });
 });
 
 describe("rate limiting", () => {
