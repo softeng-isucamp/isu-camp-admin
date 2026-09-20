@@ -21,6 +21,7 @@ def list_logs():
         return auth_error
     category = request.args.get("category", "All")
     date_range = request.args.get("date_range", "all")
+    target_id = request.args.get("target_id", "").strip()
     if category not in CATEGORIES or date_range not in RANGES:
         return _error("Invalid category or date range.")
     try:
@@ -36,7 +37,7 @@ def list_logs():
     query = request.args.get("q", "").strip().lower()
     actor = request.args.get("actor", "").strip().lower()
     records = AuditLog.query.order_by(AuditLog.created_at.desc()).all()
-    records = [record for record in records if (category == "All" or record.category == category) and (not actor or (record.actor or "").lower() == actor) and (not query or any(query in (value or "").lower() for value in (record.action, record.actor, record.target, record.detail))) and (start_date is None or _as_utc(record.created_at) >= start_date)]
+    records = [record for record in records if (not target_id or record.target_id == target_id) and (category == "All" or record.category == category) and (not actor or (record.actor or "").lower() == actor) and (not query or any(query in (value or "").lower() for value in (record.action, record.actor, record.target, record.detail))) and (start_date is None or _as_utc(record.created_at) >= start_date)]
     start = (page - 1) * page_size
     return jsonify({"items": [record.to_dict() for record in records[start:start + page_size]], "total": len(records), "page": page, "pageSize": page_size}), 200
 
