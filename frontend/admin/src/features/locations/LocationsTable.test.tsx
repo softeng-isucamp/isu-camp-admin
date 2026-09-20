@@ -465,6 +465,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       "Building",
       "Facility",
     ]);
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
+    expect(screen.queryByText("Spatial position is managed in Map Editor.")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Room" } });
@@ -473,6 +476,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     const indoorTypeOptions = Array.from((await screen.findByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text);
     expect(indoorTypeOptions).not.toContain("Facility");
+    expect(screen.queryByLabelText("Latitude")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Longitude")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Facility" } });
@@ -594,11 +599,18 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("renders a selected location's real history entry", async () => {
     const record = await services.locations.save({ id: "history-test", name: "History test", code: "HISTORY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const historySpy = vi.spyOn(services.logs, "forLocation").mockResolvedValue({
+      items: [{ id: "history-1", actor: "admin01", action: "Updated Location", target: record.name, targetId: record.id, detail: "Name changed", createdAt: "Just now", category: "Admin" }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
     renderLocations(["/locations?q=History%20test"]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /view history/i }));
     expect(await screen.findByRole("heading", { name: "Audit History" })).toBeInTheDocument();
     expect(await screen.findByText("Updated Location")).toBeInTheDocument();
+    expect(historySpy).toHaveBeenCalledWith(record.id, record.name);
   });
 
   it("keeps description and keywords independent and reflects a selected photo", async () => {
