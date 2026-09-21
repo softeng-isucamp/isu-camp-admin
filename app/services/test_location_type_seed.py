@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def _migration_body(path: Path, schema: str) -> str:
@@ -29,7 +30,9 @@ def test_location_type_seed_and_facility_cleanup_migration_contract():
         pytest.skip("SUPABASE_DATABASE_URL is not configured")
 
     schema = f"facility_migration_test_{uuid4().hex}"
-    connection = psycopg2.connect(database_url)
+    # SUPABASE_DATABASE_URL is a SQLAlchemy URL; psycopg2 cannot parse the
+    # "+psycopg2" dialect suffix, so reduce it to a plain libpq DSN.
+    connection = psycopg2.connect(database_url.replace("+psycopg2", "", 1))
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"CREATE SCHEMA {schema}")
