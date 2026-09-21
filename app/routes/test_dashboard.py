@@ -12,12 +12,14 @@ import dashboard as dashboard_module
 from dashboard import dashboard_bp
 from extensions import db
 from model.audit_log import AuditLog
+from model.app_user import AppUser
 from model.building import Building
 from model.location import Location
 from model.path_point import PathPoint  # noqa: F401 - registers Pathway.path_points relationship
 from model.pathway import Pathway
 from model.pathway_allowed_mode import PathwayAllowedMode  # noqa: F401 - registers Pathway.allowed_modes relationship
 from model.route_node import RouteNode
+from model.user_history import UserHistory
 
 
 @pytest.fixture
@@ -70,6 +72,88 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
     assert data["searches"] == 0
     assert data["topSearched"] == []
     assert [entry["id"] for entry in data["recent"]] == ["3", "1", "2"]
+
+
+def test_dashboard_ranks_selected_indoor_locations_without_double_counting_their_building(app):
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        db.session.add_all([
+            AppUser(id=1, username="student01"),
+            Building(building_id=1, building_code="ENG", building_name="Engineering Hall"),
+            Building(building_id=2, building_code="LIB", building_name="Library"),
+            Location(location_id=1, building_id=2, type_id=1, location_code="ENG-201", location_name="Room 201"),
+            UserHistory(id=1, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=2)),
+            UserHistory(id=2, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=1)),
+            UserHistory(id=3, user_id=1, building_id=2, created_at=now - timedelta(minutes=30)),
+            UserHistory(id=4, user_id=1, building_id=1, created_at=now - timedelta(minutes=15)),
+        ])
+        db.session.commit()
+
+    response = app.test_client().get("/api/dashboard?range=week")
+
+    assert response.status_code == 200
+    assert response.json["data"]["searches"] == 4
+    assert response.json["data"]["topSearched"] == [
+        {
+            "rank": "1",
+            "locationId": "Room:1",
+            "name": "Room 201",
+            "context": "Engineering Hall",
+            "searches": 2,
+        },
+        {
+            "rank": "2",
+            "locationId": "Building:1",
+            "name": "Engineering Hall",
+            "context": "Building",
+            "searches": 1,
+        },
+        {
+            "rank": "3",
+            "locationId": "Building:2",
+            "name": "Library",
+            "context": "Building",
+            "searches": 1,
+        },
+    ]
+
+
+def test_dashboard_filters_searches_by_range_and_limits_tied_results_deterministically(app):
+    now = datetime.now(timezone.utc)
+    names = ["Foxtrot", "Echo", "Delta", "Charlie", "Bravo", "Alpha", "Monthly", "Ancient"]
+    with app.app_context():
+        for identifier, name in enumerate(names, start=1):
+            db.session.add(Building(
+                building_id=identifier,
+                building_code=f"B{identifier}",
+                building_name=name,
+            ))
+            db.session.add(UserHistory(
+                id=identifier,
+                building_id=identifier,
+                created_at=now - (
+                    timedelta(days=40)
+                    if name == "Ancient"
+                    else timedelta(days=20)
+                    if name == "Monthly"
+                    else timedelta(hours=identifier)
+                ),
+            ))
+        db.session.commit()
+
+    week = app.test_client().get("/api/dashboard?range=week").json["data"]
+    month = app.test_client().get("/api/dashboard?range=month").json["data"]
+    all_time = app.test_client().get("/api/dashboard?range=all").json["data"]
+
+    assert week["searches"] == 6
+    assert [row["name"] for row in week["topSearched"]] == [
+        "Alpha", "Bravo", "Charlie", "Delta", "Echo",
+    ]
+    assert month["searches"] == 7
+    assert all_time["searches"] == 8
+    assert [row["name"] for row in all_time["topSearched"]] == [
+        "Alpha", "Ancient", "Bravo", "Charlie", "Delta",
+    ]
 
 
 def test_dashboard_all_time_omits_building_change(app):

@@ -153,9 +153,12 @@ export function Dashboard() {
                 (data?.topSearched ?? []).map((r) => (
                   <div
                     className="rank-row"
-                    key={r.rank}
+                    key={r.locationId ?? `${r.rank}:${r.name}`}
                     style={{ cursor: "pointer" }}
-                    onClick={() => navigate(`/locations?q=${encodeURIComponent(r.name)}`)}
+                    onClick={() => navigate(`/locations?${new URLSearchParams({
+                      q: r.name,
+                      ...(r.locationId ? { locationKey: r.locationId } : {}),
+                    })}`)}
                     title={`View ${r.name} in directory`}
                   >
                     <b>{r.rank}</b>
