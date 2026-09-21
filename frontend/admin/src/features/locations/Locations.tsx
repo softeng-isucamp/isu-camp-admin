@@ -55,9 +55,12 @@ export function Locations() {
   }, []);
 
   const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
+  const [targetKey, setTargetKey] = useState<string | null>(() => new URLSearchParams(routeLocation.search).get("locationKey"));
   useEffect(() => {
-    const q = new URLSearchParams(routeLocation.search).get("q");
+    const params = new URLSearchParams(routeLocation.search);
+    const q = params.get("q");
     setQuery(q ?? "");
+    setTargetKey(params.get("locationKey"));
   }, [routeLocation.search]);
 
   const [type, setType] = useState("All Types");
@@ -294,18 +297,20 @@ export function Locations() {
   const items = useMemo(() => {
     return rawItems.filter(
       (item) =>
+        (!targetKey || locationIdentityKey(item) === targetKey) &&
         (type === "All Types" || item.type === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
         (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
-  }, [rawItems, type, status, buildingId, floorId, selectedFloorRecord]);
+  }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
 
   useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
   const hierarchyItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return allLocations.filter((item) =>
+      (!targetKey || locationIdentityKey(item) === targetKey) &&
       (!normalizedQuery || [item.name, item.code, item.type, item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
         .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
       (type === "All Types" || item.type === type) &&
@@ -313,7 +318,7 @@ export function Locations() {
       (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
       (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
     );
-  }, [allLocations, query, type, status, buildingId, floorId, selectedFloorRecord]);
+  }, [allLocations, query, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
 
   const matchingKeys = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map(locationIdentityKey)), [hierarchyItems, items, viewMode]);
 
@@ -733,7 +738,10 @@ export function Locations() {
             aria-label="Search locations"
             placeholder="Search by building, room, office, lab, facility, or keyword..."
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setTargetKey(null);
+              setQuery(event.target.value);
+            }}
             style={{
               width: "100%",
               height: "48px",
