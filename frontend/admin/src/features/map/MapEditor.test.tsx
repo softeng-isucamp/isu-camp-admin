@@ -426,6 +426,7 @@ describe("Map Editor preview", () => {
     expect(popover).toHaveTextContent("Library");
     expect(popover).toHaveTextContent("Library Entrance");
     expect(popover).toHaveAttribute("data-anchor", "16.7205,121.6895");
+    expect(popover).toHaveStyle({ maxHeight: "min(50vh, 420px)", overflowY: "auto" });
 
     fireEvent.click(screen.getByRole("button", { name: "Select Library Entrance Route Node" }));
     expect(screen.getByRole("complementary", { name: "Library Entrance object details" })).toBeInTheDocument();
