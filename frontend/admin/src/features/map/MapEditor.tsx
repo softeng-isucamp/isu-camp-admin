@@ -3735,6 +3735,9 @@ export function MapEditor() {
             style={{
               left: `${Math.max(8, Math.min(92, ((selectionPopover.anchor[1] - navigationBounds[0][1]) / (navigationBounds[1][1] - navigationBounds[0][1])) * 100))}%`,
               top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
+              maxHeight: "min(50vh, 420px)",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
             }}
           >
             <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose an object</p>
