@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from auth import admin_required
 from extensions import db
+from model.audit_log import AuditLog
 from model.building import Building
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
@@ -340,6 +341,33 @@ def list_locations():
                 "message": "Failed to list locations."
             }
         ), 500
+
+
+@location_bp.route("/<int:location_id>/history", methods=["GET"])
+def location_history(location_id):
+    """Return only the audit history belonging to one Campus Location."""
+    _, error = admin_required()
+    if error:
+        return error
+
+    try:
+        location = Location.query.filter_by(location_id=location_id).first()
+        building = Building.query.filter_by(building_id=location_id).first()
+        if location is None and building is None:
+            return jsonify({"success": False, "message": "Location not found."}), 404
+
+        records = AuditLog.query.filter_by(target_id=str(location_id)).order_by(
+            AuditLog.created_at.desc()
+        ).all()
+        return jsonify({
+            "items": [record.to_dict() for record in records],
+            "total": len(records),
+            "page": 1,
+            "pageSize": max(len(records), 20),
+        }), 200
+    except Exception:
+        logger.exception("Failed to get location history")
+        return jsonify({"success": False, "message": "Failed to get location history."}), 500
 
 
 @location_bp.route("", methods=["POST"])

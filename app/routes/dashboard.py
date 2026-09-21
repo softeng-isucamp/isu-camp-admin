@@ -8,6 +8,7 @@ from model.audit_log import AuditLog
 from model.building import Building
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
+from services.search_analytics import summarize_user_searches
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def dashboard_summary():
         offices = Location.query.filter_by(type_id=LOCATION_TYPE_IDS["Office"]).count()
         pathways = Pathway.query.filter_by(status="active").count()
         recent = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(3).all()
+        search_analytics = summarize_user_searches(RANGES[range_key])
 
         return jsonify({
             "success": True,
@@ -59,10 +61,7 @@ def dashboard_summary():
                 "offices": offices,
                 "locations": buildings + Location.query.count(),
                 "pathways": pathways,
-                # No search-analytics tracking exists yet; the frontend
-                # renders an empty state for these until that lands.
-                "searches": 0,
-                "topSearched": [],
+                **search_analytics,
                 "recent": [record.to_dict() for record in recent],
             },
         }), 200
