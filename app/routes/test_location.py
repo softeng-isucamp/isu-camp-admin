@@ -61,6 +61,9 @@ class FakeColumn:
     def asc(self):
         return self
 
+    def desc(self):
+        return self
+
 
 class FakeFloor:
     def __init__(self, identifier, building_id, number):
@@ -111,6 +114,29 @@ def make_client(monkeypatch):
         "query": FakeQuery([FakeFloor(2, 1, 2)]), "floor_id": FakeColumn(),
     }))
     return app.test_client()
+
+
+def test_location_history_is_scoped_to_the_selected_location(monkeypatch):
+    client = make_client(monkeypatch)
+
+    class Audit:
+        def __init__(self, identifier, target_id):
+            self.id = identifier
+            self.target_id = target_id
+
+        def to_dict(self):
+            return {"id": str(self.id), "targetId": self.target_id}
+
+    monkeypatch.setattr(location_module, "AuditLog", type("AuditLogModel", (), {
+        "query": FakeQuery([Audit(1, "1"), Audit(2, "2")]),
+        "created_at": FakeColumn(),
+    }))
+
+    response = client.get("/api/locations/1/history")
+
+    assert response.status_code == 200
+    assert response.json["items"] == [{"id": "1", "targetId": "1"}]
+    assert response.json["total"] == 1
 
 
 def test_list_locations_returns_authenticated_searchable_page(monkeypatch):

@@ -1317,6 +1317,10 @@ export const services: Services = {
     },
 
     forLocation: async (id) => {
+      if (USE_HTTP_API) {
+        const raw = await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}/history`);
+        return normalizeBackendPage(raw, (row) => normalizeBackendAudit(row as BackendAudit), "logs");
+      }
       enrichLegacyLocationAuditIds();
       const entries = localAuditEntries.filter((entry) => entry.targetId === id);
       return wait({ items: clone(entries), total: entries.length, page: 1, pageSize: 20 });

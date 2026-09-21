@@ -159,6 +159,41 @@ describe("mock service contracts", () => {
     vi.unstubAllEnvs();
   });
 
+  it("loads location history from the real backend by target id", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        items: [{
+          id: 17,
+          actor: "admin01",
+          action: "update",
+          target: "Engineering Hall",
+          target_id: "4",
+          detail: "Engineering Hall",
+          created_at: "2026-09-20T01:02:03Z",
+          category: "Admin",
+        }],
+        total: 1,
+        page: 1,
+        pageSize: 20,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+
+    await expect(httpServices.logs.forLocation("4", "Engineering Hall")).resolves.toMatchObject({
+      items: [expect.objectContaining({ action: "update", targetId: "4" })],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/locations/4/history",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    vi.unstubAllEnvs();
+  });
+
   it("filters locations through the service boundary", async () => {
     const result = await services.locations.list("computer lab");
     expect(result.items).toHaveLength(1);

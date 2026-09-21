@@ -21,8 +21,8 @@ class Column:
     def desc(self): return self
 
 
-def entry(identifier, created, category, actor, action, target, detail=None):
-    return type("Log", (), {"id": identifier, "created_at": created, "category": category, "actor": actor, "action": action, "target": target, "target_id": None, "detail": detail, "to_dict": lambda self: {"id": str(self.id), "createdAt": self.created_at.isoformat(), "category": self.category, "actor": self.actor, "action": self.action, "target": self.target, "targetId": self.target_id, "detail": self.detail}})()
+def entry(identifier, created, category, actor, action, target, detail=None, target_id=None):
+    return type("Log", (), {"id": identifier, "created_at": created, "category": category, "actor": actor, "action": action, "target": target, "target_id": target_id, "detail": detail, "to_dict": lambda self: {"id": str(self.id), "createdAt": self.created_at.isoformat(), "category": self.category, "actor": self.actor, "action": self.action, "target": self.target, "targetId": self.target_id, "detail": self.detail}})()
 
 
 def client(monkeypatch, records):
@@ -43,6 +43,20 @@ def test_logs_filters_and_paginates(monkeypatch):
 
 def test_logs_reject_invalid_filter(monkeypatch):
     assert client(monkeypatch, []).get("/api/logs?date_range=tomorrow").status_code == 400
+
+
+def test_logs_filters_by_target_id(monkeypatch):
+    now = datetime.now(timezone.utc)
+    records = [
+        entry(1, now, "Admin", "admin01", "update", "Engineering Hall", target_id="4"),
+        entry(2, now, "Admin", "admin01", "update", "Other Building", target_id="5"),
+    ]
+
+    response = client(monkeypatch, records).get("/api/logs?target_id=4")
+
+    assert response.status_code == 200
+    assert response.json["items"] == [records[0].to_dict()]
+    assert response.json["total"] == 1
 
 
 def test_logs_requires_authentication(monkeypatch):
