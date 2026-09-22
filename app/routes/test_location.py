@@ -2,6 +2,7 @@ import io
 import sys
 from pathlib import Path
 
+import pytest
 from flask import Flask
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -84,12 +85,14 @@ class FakeBuilding:
         self.polygon_coordinates = polygon_coordinates
 
     def to_location_dto(self):
+        lat = float(self.latitude) if self.latitude is not None else None
+        lng = float(self.longitude) if self.longitude is not None else None
         dto = {
             "id": str(self.building_id), "name": self.building_name,
             "code": self.building_code, "type": self.classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
-            "keywords": None, "status": "Active", "lat": None, "lng": None,
-            "positioned": False, "hasPhoto": False,
+            "keywords": None, "status": "Active", "lat": lat, "lng": lng,
+            "positioned": lat is not None and lng is not None, "hasPhoto": False,
         }
         if self.polygon_coordinates is not None:
             dto["polygonCoordinates"] = self.polygon_coordinates
@@ -120,22 +123,23 @@ def test_location_history_is_scoped_to_the_selected_location(monkeypatch):
     client = make_client(monkeypatch)
 
     class Audit:
-        def __init__(self, identifier, target_id):
+        def __init__(self, identifier, target_id, target="Location"):
             self.id = identifier
             self.target_id = target_id
+            self.target = target
 
         def to_dict(self):
             return {"id": str(self.id), "targetId": self.target_id}
 
     monkeypatch.setattr(location_module, "AuditLog", type("AuditLogModel", (), {
-        "query": FakeQuery([Audit(1, "1"), Audit(2, "2")]),
+        "query": FakeQuery([Audit(1, "1"), Audit(2, "2"), Audit(3, "1", "Building")]),
         "created_at": FakeColumn(),
     }))
 
     response = client.get("/api/locations/1/history")
 
     assert response.status_code == 200
-    assert response.json["items"] == [{"id": "1", "targetId": "1"}]
+    assert response.json["items"] == [{"id": "3", "targetId": "1"}]
     assert response.json["total"] == 1
 
 
@@ -444,6 +448,8 @@ def make_mutation_client(monkeypatch):
                 values.get("classification", "Building"),
                 values.get("polygon_coordinates"),
             )
+            self.latitude = values.get("latitude")
+            self.longitude = values.get("longitude")
 
     monkeypatch.setattr(location_module, "Building", MutationBuilding)
 
@@ -564,6 +570,9 @@ def test_create_facility_footprint_round_trips_its_classification_and_geometry(m
     assert response.status_code == 201
     assert response.json["type"] == "Facility"
     assert response.json["polygonCoordinates"] == polygon
+    assert response.json["positioned"] is True
+    assert response.json["lat"] == pytest.approx(16.7205)
+    assert response.json["lng"] == pytest.approx(121.6905)
     assert session.commits == 1
 
     reloaded = client.get("/api/locations")

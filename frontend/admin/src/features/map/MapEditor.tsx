@@ -4562,21 +4562,29 @@ export function MapEditor() {
           directory={currentLocations}
           allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
-          onSubmit={(updated) => {
+          onSubmit={async (updated) => {
             if (selectedBuilding) {
+              const savedLocation = typeof services.locations.save === "function"
+                ? await services.locations.save(updated)
+                : updated;
               const updatedBuilding: Building = {
                 ...selectedBuilding,
-                name: updated.name,
-                code: updated.code,
-                status: updated.status,
+                name: savedLocation.name,
+                code: savedLocation.code,
+                type: savedLocation.type === "Facility" ? "Facility" : "Building",
+                status: savedLocation.status,
               };
               updateBuilding(updatedBuilding);
-              if (selectedBuildingLocation) updateLocation({ ...updated, id: selectedBuildingLocation.id });
+              if (selectedBuildingLocation) updateLocation({ ...savedLocation, id: selectedBuildingLocation.id });
               recordPropertyOperation("Locations", selectedBuilding.id, selectedBuilding, updatedBuilding, `Edit ${selectedBuilding.name} details`);
             } else if (selectedLocation) {
-              updateLocation(updated);
-              recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, updated, `Edit ${selectedLocation.name} details`);
+              const savedLocation = typeof services.locations.save === "function"
+                ? await services.locations.save(updated)
+                : updated;
+              updateLocation(savedLocation);
+              recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);
             }
+            await refreshMapData();
             setOwnerModal(null);
           }}
         />

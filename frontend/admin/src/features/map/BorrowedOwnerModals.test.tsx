@@ -41,6 +41,27 @@ describe("borrowed owner module forms", () => {
     }));
   });
 
+  it("shows latitude and longitude as greyed-out coordinate fields without a read-only notice", () => {
+    render(
+      <LocationDetailsModal
+        location={location}
+        directory={[location]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Latitude")).toHaveValue("16.720500");
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("title", "Read-only coordinate");
+    expect(screen.getByLabelText("Longitude")).toHaveValue("121.689500");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("title", "Read-only coordinate");
+    expect(screen.queryByText(/managed in map editor/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("SPATIAL POSITION")).not.toBeInTheDocument();
+    expect(screen.queryByText("16.720500, 121.689500")).not.toBeInTheDocument();
+  });
+
   it("limits map-edited building classification to Building and Facility", () => {
     render(
       <LocationDetailsModal
