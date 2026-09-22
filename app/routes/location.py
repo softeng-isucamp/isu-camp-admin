@@ -12,6 +12,7 @@ from services.audit import log_audit
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
+from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
 from services.geometry import polygon_error as _polygon_error
 from services.location_listing import list_location_page
 
@@ -353,10 +354,18 @@ def location_history(location_id):
     try:
         location = Location.query.filter_by(location_id=location_id).first()
         building = Building.query.filter_by(building_id=location_id).first()
+        requested_type = request.args.get("type")
+        if requested_type in INDOOR_TYPES:
+            building = None
+        elif requested_type in {"Building", "Facility"}:
+            location = None
+        elif location is not None:
+            building = None
         if location is None and building is None:
             return jsonify({"success": False, "message": "Location not found."}), 404
 
-        records = AuditLog.query.filter_by(target_id=str(location_id)).order_by(
+        target = "Building" if building is not None else "Location"
+        records = AuditLog.query.filter_by(target_id=str(location_id), target=target).order_by(
             AuditLog.created_at.desc()
         ).all()
         return jsonify({
@@ -438,11 +447,19 @@ def create_location():
 
         if values.get("type") in {"Building", "Facility"}:
 
+            latitude = longitude = None
+            if values["polygon_coordinates"] is not None:
+                latitude, longitude = _polygon_feature_anchor(
+                    values["polygon_coordinates"]
+                )
+
             building = Building(
                 building_code=values["code"],
                 building_name=values["name"],
                 description=values["description"],
                 classification=values["type"],
+                latitude=latitude,
+                longitude=longitude,
 
                 # NEW:
                 # Save polygon coordinates

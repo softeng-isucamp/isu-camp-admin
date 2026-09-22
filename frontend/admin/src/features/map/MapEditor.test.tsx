@@ -279,6 +279,33 @@ describe("Map Editor preview", () => {
     expect(buildingPolygon).toBeInTheDocument();
   });
 
+  it("changes a selected footprint-backed Building into a Facility", async () => {
+    const saveLocation = vi.fn(async (draft: LocationDraft): Promise<Location> => ({
+      ...draft,
+      id: draft.id ?? "building-eng",
+    } as Location));
+    services.locations.save = saveLocation;
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Building", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Building", parentId: null, function: "Academic building", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+    ]);
+    renderEditor();
+
+    fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering Hall" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+
+    await waitFor(() => expect(saveLocation).toHaveBeenCalledWith(expect.objectContaining({
+      id: "building-eng",
+      type: "Facility",
+    })));
+    expect(await screen.findByRole("region", { name: "Building summary" })).toHaveTextContent("ENG · Facility");
+  });
+
   it("uses a geometry-only Change scope when reshaping an existing linked footprint", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-eng", name: "Engineering Hall", code: "ENG", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
@@ -426,6 +453,7 @@ describe("Map Editor preview", () => {
     expect(popover).toHaveTextContent("Library");
     expect(popover).toHaveTextContent("Library Entrance");
     expect(popover).toHaveAttribute("data-anchor", "16.7205,121.6895");
+    expect(popover).toHaveStyle({ maxHeight: "min(50vh, 420px)", overflowY: "auto" });
 
     fireEvent.click(screen.getByRole("button", { name: "Select Library Entrance Route Node" }));
     expect(screen.getByRole("complementary", { name: "Library Entrance object details" })).toBeInTheDocument();

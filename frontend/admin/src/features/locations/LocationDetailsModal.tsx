@@ -14,6 +14,31 @@ interface LocationDetailsFieldsProps {
 
 const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
 
+export function LocationCoordinatesFields({
+  lat,
+  lng,
+  positioned,
+}: Pick<Location, "lat" | "lng" | "positioned">) {
+  return (
+    <div className="form-grid-two">
+      <Field
+        aria-label="Latitude"
+        label="LATITUDE"
+        readOnly
+        title="Read-only coordinate"
+        value={positioned && lat !== null ? lat.toFixed(6) : "Not positioned"}
+      />
+      <Field
+        aria-label="Longitude"
+        label="LONGITUDE"
+        readOnly
+        title="Read-only coordinate"
+        value={positioned && lng !== null ? lng.toFixed(6) : "Not positioned"}
+      />
+    </div>
+  );
+}
+
 export function LocationDetailsFields({
   draft,
   allowedTypes = defaultLocationTypes,
@@ -63,7 +88,7 @@ interface LocationDetailsModalProps {
   directory: Location[];
   allowedTypes?: LocationType[];
   onClose: () => void;
-  onSubmit: (location: Location) => void;
+  onSubmit: (location: Location) => void | Promise<void>;
 }
 
 export function LocationDetailsModal({
@@ -75,13 +100,14 @@ export function LocationDetailsModal({
 }: LocationDetailsModalProps) {
   const [draft, setDraft] = useState<Location>({ ...location });
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const effectiveAllowedTypes = allowedTypes ?? (
     location.type === "Building" || location.type === "Facility"
       ? ["Building", "Facility"]
       : undefined
   );
 
-  const save = () => {
+  const save = async () => {
     const normalized = locationPolicy.normalize(draft, {
       directory,
       previous: location,
@@ -99,13 +125,21 @@ export function LocationDetailsModal({
       setError(evaluation.issues[0].message);
       return;
     }
-    onSubmit({
-      ...normalized,
-      id: location.id,
-      lat: location.lat,
-      lng: location.lng,
-      positioned: location.positioned,
-    });
+    setSubmitting(true);
+    setError("");
+    try {
+      await onSubmit({
+        ...normalized,
+        id: location.id,
+        lat: location.lat,
+        lng: location.lng,
+        positioned: location.positioned,
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save location.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -118,15 +152,17 @@ export function LocationDetailsModal({
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
-      <div className="borrowed-spatial-lock" title="Coordinates are edited with the Map Editor spatial action.">
-        <strong>🔒 {locationPolicy.classify(draft.type).kind === "indoor" ? "Indoor Location" : "Spatial position"}</strong>
-        <span>{locationPolicy.classify(draft.type).kind === "indoor"
-          ? "Floor context only · not independently routable"
-          : draft.positioned && draft.lat !== null && draft.lng !== null ? `${draft.lat.toFixed(6)}, ${draft.lng.toFixed(6)}` : "Not positioned"}</span>
-      </div>
+      {locationPolicy.classify(draft.type).kind === "indoor" ? (
+        <div className="borrowed-spatial-lock" title="Indoor locations inherit their position from the selected building.">
+          <strong>🔒 Indoor Location</strong>
+          <span>Floor context only · not independently routable</span>
+        </div>
+      ) : (
+        <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
+      )}
       <div className="modal-actions">
-        <Button variant="subtle" onClick={onClose}>Cancel</Button>
-        <Button onClick={save}>Save Location</Button>
+        <Button variant="subtle" disabled={submitting} onClick={onClose}>Cancel</Button>
+        <Button disabled={submitting} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
       </div>
     </Modal>
   );
