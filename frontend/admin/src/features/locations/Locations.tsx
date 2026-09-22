@@ -14,7 +14,7 @@ import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
-import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
+import { LocationDetailsFields } from "./LocationDetailsModal";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -1301,9 +1301,11 @@ export function Locations() {
                 </div>
               )}
 
-              {locationPolicy.classify(draft.type).kind === "outdoor" && (
-                <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
-              )}
+              <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
+                {locationPolicy.classify(draft.type).kind === "indoor"
+                  ? "Indoor Locations inherit map position and routing from their selected Building."
+                  : "Spatial position is managed in Map Editor."}
+              </p>
 
               {/* Upload Box */}
               <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
