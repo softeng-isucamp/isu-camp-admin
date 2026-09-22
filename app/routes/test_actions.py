@@ -190,7 +190,7 @@ def test_locations_endpoints_have_identical_list_results(monkeypatch):
 
 def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
     assert actions_module.CREATABLE_TYPES == {
-        "Room", "Laboratory", "Office", "Restroom", "Building"
+        "Room", "Laboratory", "Office", "Restroom", "Building", "Facility"
     }
     assert actions_module.TYPE_IDS == LOCATION_TYPE_IDS
     assert LOCATION_TYPE_NAMES[LOCATION_TYPE_IDS["Restroom"]] == "Restroom"
@@ -212,6 +212,23 @@ def test_actions_can_delete_a_building(monkeypatch):
     assert session.deleted is building
 
 
+def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    session = FakeSession()
+    location = type("Location", (), {"location_id": 42})()
+    building = type("Building", (), {"building_id": 42})()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
+    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
+
+    response = app.test_client().delete("/api/actions/locations/42?type=Room")
+
+    assert response.status_code == 200
+    assert session.deleted is location
+
+
 def test_actions_can_edit_a_building(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
@@ -219,20 +236,24 @@ def test_actions_can_edit_a_building(monkeypatch):
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
+        "classification": "Building",
         "description": "Old description",
-        "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "code": self.building_code, "type": "Building"},
+        "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "code": self.building_code, "type": self.classification},
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
     monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
     monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
 
-    response = app.test_client().put("/api/actions/locations/42", json={"name": "New Hall", "code": "NEW", "type": "Building"})
+    response = app.test_client().put("/api/actions/locations/42", json={"name": "New Hall", "code": "NEW", "type": "Facility"})
 
     assert response.status_code == 200
     assert building.building_name == "New Hall"
     assert building.building_code == "NEW"
+    assert building.classification == "Facility"
+    assert response.json["type"] == "Facility"
 
 
 def _history_app(monkeypatch, building, history):

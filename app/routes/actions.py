@@ -22,7 +22,7 @@ actions_bp = Blueprint(
 
 TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
-CREATABLE_TYPES = set(TYPE_IDS) | {"Building"}
+CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
 PHOTO_MAX_BYTES = 5 * 1024 * 1024
 PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 logger = logging.getLogger(__name__)
@@ -233,6 +233,9 @@ def edit_location(location_id):
     except Exception:
         return jsonify({"success": False, "message": "Failed to update location."}), 500
 
+    data = _request_payload()
+    requested_type = data.get("type")
+
     location = next(
         (item for item in records if item.location_id == location_id),
         None
@@ -243,17 +246,19 @@ def edit_location(location_id):
         None
     )
 
+    if requested_type in INDOOR_TYPES:
+        building = None
+    elif requested_type in {"Building", "Facility"}:
+        location = None
+
     if location is None and building is None:
         return jsonify({
             "success": False,
             "message": "Location not found."
         }), 404
 
-    data = _request_payload()
-
     validation_buildings = [item for item in buildings if item.building_id != location_id]
     if building is not None:
-        data["type"] = "Building"
         data["parentId"] = None
     values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
     if error: return error
@@ -270,6 +275,7 @@ def edit_location(location_id):
         if building is not None:
             building.building_code = values["code"]
             building.building_name = values["name"]
+            building.classification = values["type"]
             building.description = values["description"]
             db.session.flush()
             log_audit("Admin", None, "update", "Building", building.building_id, building.building_name)
@@ -373,6 +379,17 @@ def delete_location(location_id):
     try:
         location = Location.query.filter_by(location_id=location_id).first()
         building = Building.query.filter_by(building_id=location_id).first()
+
+        requested_type = request.args.get("type")
+        if requested_type in INDOOR_TYPES:
+            building = None
+        elif requested_type in {"Building", "Facility"}:
+            location = None
+        elif location is not None and building is not None:
+            return jsonify({
+                "success": False,
+                "message": "Location type is required when record IDs overlap."
+            }), 409
 
         if location is None and building is None:
             return jsonify({

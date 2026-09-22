@@ -14,7 +14,7 @@ import type { Location, LocationDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
-import { LocationDetailsFields } from "./LocationDetailsModal";
+import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -144,15 +144,17 @@ export function Locations() {
     const backgroundNodes = page
       ? Array.from(page.children).filter((node) => !node.contains(overlay))
       : [];
-    backgroundNodes.forEach((node) => {
-      node.setAttribute("aria-hidden", "true");
-      (node as HTMLElement).inert = true;
-    });
     const focusable = () => Array.from(overlay.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ));
     const initial = overlay.querySelector<HTMLElement>("[data-modal-initial]") ?? focusable()[0];
-    window.setTimeout(() => initial?.focus(), 0);
+    // Move focus into the dialog before hiding the opener's container. Chrome
+    // otherwise rejects aria-hidden while the opener still owns focus.
+    initial?.focus();
+    backgroundNodes.forEach((node) => {
+      node.setAttribute("aria-hidden", "true");
+      (node as HTMLElement).inert = true;
+    });
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         if (!pendingRef.current) closeOverlay();
@@ -198,7 +200,7 @@ export function Locations() {
 
   const { data: history } = useQuery({
     queryKey: ["logs", "location-history", selected ? locationIdentityKey(selected) : null],
-    queryFn: () => services.logs.forLocation(selected!.id, selected!.name),
+    queryFn: () => services.logs.forLocation(selected!.id, selected!.name, selected!.type),
     enabled: dialog === "history" && selected !== null,
   });
 
@@ -421,7 +423,7 @@ export function Locations() {
 
   const hierarchyRows = hierarchyFamilies.flat();
   const hierarchyTotal = hierarchyFamilies.length;
-  const hierarchyDisplayCount = hierarchyRows.length;
+  const hierarchyDisplayCount = hierarchyItems.filter((item) => item.type !== "Floor").length;
   const hierarchyPageCount = Math.max(1, Math.ceil(hierarchyTotal / pageSize));
   const effectiveHierarchyPage = Math.min(page, hierarchyPageCount);
   const pagedFamilies = viewMode === "hierarchy"
@@ -515,7 +517,7 @@ export function Locations() {
     setError("");
     setDeleting(true);
     try {
-      await services.locations.remove(selected.id);
+      await services.locations.remove(selected.id, selected.type);
       await refresh();
       setDialog(null);
       setNotice(`${selected.name} permanently deleted.`);
@@ -1299,11 +1301,9 @@ export function Locations() {
                 </div>
               )}
 
-              <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
-                {locationPolicy.classify(draft.type).kind === "indoor"
-                  ? "Indoor Locations inherit map position and routing from their selected Building."
-                  : "Spatial position is managed in Map Editor."}
-              </p>
+              {locationPolicy.classify(draft.type).kind === "outdoor" && (
+                <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
+              )}
 
               {/* Upload Box */}
               <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
