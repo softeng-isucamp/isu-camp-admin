@@ -6,6 +6,7 @@ import type {
   Location,
   LocationDraft,
   LocationPosition,
+  LocationType,
   MapSavePayload,
   NotificationItem,
   Page,
@@ -607,7 +608,7 @@ export interface Services {
 
     getPhoto(id: string): Promise<Blob>;
 
-    remove(id: string): Promise<void>;
+    remove(id: string, type?: LocationType): Promise<void>;
   };
 
   users: {
@@ -622,7 +623,7 @@ export interface Services {
       date?: string, page?: number, pageSize?: number
     ): Promise<Page<AuditEntry>>;
 
-    forLocation(id: string, name?: string): Promise<Page<AuditEntry>>;
+    forLocation(id: string, name?: string, type?: LocationType): Promise<Page<AuditEntry>>;
   };
 
   notifications: {
@@ -1162,7 +1163,7 @@ export const services: Services = {
               return form;
             })()
           : JSON.stringify(locationWritePayload(location));
-        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}` : "/api/locations", {
+        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}?type=${encodeURIComponent(location.type)}` : "/api/locations", {
           method: location.id ? "PUT" : "POST",
           body,
         });
@@ -1214,10 +1215,11 @@ export const services: Services = {
     },
 
 
-    remove: async (id) => {
+    remove: async (id, type) => {
 
       if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/actions/locations/${encodeURIComponent(id)}`, {
+        const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
+        await apiJson<unknown>(`/api/actions/locations/${encodeURIComponent(id)}${typeQuery}`, {
           method: "DELETE",
         });
         return;
@@ -1316,9 +1318,10 @@ export const services: Services = {
       return wait({ items: clone(filtered.slice(start, start + pageSize)), total: filtered.length, page, pageSize });
     },
 
-    forLocation: async (id) => {
+    forLocation: async (id, _name, type) => {
       if (USE_HTTP_API) {
-        const raw = await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}/history`);
+        const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
+        const raw = await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}/history${typeQuery}`);
         return normalizeBackendPage(raw, (row) => normalizeBackendAudit(row as BackendAudit), "logs");
       }
       enrichLegacyLocationAuditIds();

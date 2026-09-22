@@ -246,6 +246,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect((await screen.findAllByText("Administration Building")).length).toBeGreaterThan(1);
     expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
     expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
+    expect(screen.getByText("1 locations")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
   });
 
@@ -450,7 +451,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("offers only Building and Facility when editing a Building and excludes Facility for indoor locations", async () => {
-    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Building", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-room", name: "Edit Type Room", code: "EDIT-TYPE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
 
@@ -469,7 +470,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
     expect(screen.queryByText("Spatial position is managed in Map Editor.")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    expect(await screen.findByText("Location updated")).toBeInTheDocument();
+    const updatedBuilding = (await services.locations.list(building.name)).items.find((item) => item.id === building.id);
+    expect(updatedBuilding?.type).toBe("Facility");
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Room" } });
     fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Type Room" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
@@ -610,7 +617,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /view history/i }));
     expect(await screen.findByRole("heading", { name: "Audit History" })).toBeInTheDocument();
     expect(await screen.findByText("Updated Location")).toBeInTheDocument();
-    expect(historySpy).toHaveBeenCalledWith(record.id, record.name);
+    expect(historySpy).toHaveBeenCalledWith(record.id, record.name, record.type);
   });
 
   it("keeps description and keywords independent and reflects a selected photo", async () => {
