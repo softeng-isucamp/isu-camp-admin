@@ -920,7 +920,7 @@ describe("real locations service boundary", () => {
     );
 
     await expect(httpServices.locations.save(saved)).resolves.toEqual(saved);
-    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42$/);
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42\?type=Room$/);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "PUT", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, status: saved.status }) }));
   });
 
@@ -932,8 +932,8 @@ describe("real locations service boundary", () => {
       new Response(JSON.stringify({ success: true }), { status: 200 }),
     );
 
-    await expect(httpServices.locations.remove("42")).resolves.toBeUndefined();
-    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42$/);
+    await expect(httpServices.locations.remove("42", "Room")).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toMatch(/\/api\/actions\/locations\/42\?type=Room$/);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
   });
 

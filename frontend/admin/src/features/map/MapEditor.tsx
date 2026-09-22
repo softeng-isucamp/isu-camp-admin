@@ -3735,6 +3735,9 @@ export function MapEditor() {
             style={{
               left: `${Math.max(8, Math.min(92, ((selectionPopover.anchor[1] - navigationBounds[0][1]) / (navigationBounds[1][1] - navigationBounds[0][1])) * 100))}%`,
               top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
+              maxHeight: "min(50vh, 420px)",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
             }}
           >
             <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose an object</p>
@@ -4559,21 +4562,29 @@ export function MapEditor() {
           directory={currentLocations}
           allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
-          onSubmit={(updated) => {
+          onSubmit={async (updated) => {
             if (selectedBuilding) {
+              const savedLocation = typeof services.locations.save === "function"
+                ? await services.locations.save(updated)
+                : updated;
               const updatedBuilding: Building = {
                 ...selectedBuilding,
-                name: updated.name,
-                code: updated.code,
-                status: updated.status,
+                name: savedLocation.name,
+                code: savedLocation.code,
+                type: savedLocation.type === "Facility" ? "Facility" : "Building",
+                status: savedLocation.status,
               };
               updateBuilding(updatedBuilding);
-              if (selectedBuildingLocation) updateLocation({ ...updated, id: selectedBuildingLocation.id });
+              if (selectedBuildingLocation) updateLocation({ ...savedLocation, id: selectedBuildingLocation.id });
               recordPropertyOperation("Locations", selectedBuilding.id, selectedBuilding, updatedBuilding, `Edit ${selectedBuilding.name} details`);
             } else if (selectedLocation) {
-              updateLocation(updated);
-              recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, updated, `Edit ${selectedLocation.name} details`);
+              const savedLocation = typeof services.locations.save === "function"
+                ? await services.locations.save(updated)
+                : updated;
+              updateLocation(savedLocation);
+              recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);
             }
+            await refreshMapData();
             setOwnerModal(null);
           }}
         />
