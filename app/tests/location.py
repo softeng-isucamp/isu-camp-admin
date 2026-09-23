@@ -1,12 +1,7 @@
 import io
-import sys
-from pathlib import Path
 
 import pytest
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import location as location_module
 from location import location_bp

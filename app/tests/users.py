@@ -1,13 +1,8 @@
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 from flask import Flask
 from sqlalchemy import event
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import users as users_module
 from extensions import db
