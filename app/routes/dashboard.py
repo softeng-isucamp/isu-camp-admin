@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from model.audit_log import AuditLog
 from model.building import Building
+from model.app_user import AppUser
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
 from services.search_analytics import summarize_user_searches
@@ -48,7 +49,10 @@ def dashboard_summary():
 
     try:
         buildings = Building.query.count()
-        offices = Location.query.filter_by(type_id=LOCATION_TYPE_IDS["Office"]).count()
+        indoor_locations = Location.query.filter(
+            Location.type_id.in_(LOCATION_TYPE_IDS.values())
+        ).count()
+        users = AppUser.query.count()
         pathways = Pathway.query.filter_by(status="active").count()
         recent = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(3).all()
         search_analytics = summarize_user_searches(RANGES[range_key])
@@ -58,7 +62,8 @@ def dashboard_summary():
             "data": {
                 "buildings": buildings,
                 "buildingChange": _building_change(RANGES[range_key]),
-                "offices": offices,
+                "indoorLocations": indoor_locations,
+                "users": users,
                 "locations": buildings + Location.query.count(),
                 "pathways": pathways,
                 **search_analytics,

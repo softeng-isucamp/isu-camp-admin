@@ -5,17 +5,22 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import type { DashboardSummary } from "../../types";
+import { formatDateTime } from "../../lib/format";
 import { Dashboard } from "./Dashboard";
 
 const summary: DashboardSummary = {
   buildings: 12,
   buildingChange: 2,
-  offices: 34,
+  indoorLocations: 34,
+  users: 56,
   locations: 98,
   pathways: 21,
   searches: 55,
   topSearched: [{ rank: "1", locationId: "Building:42", name: "Library", context: "Student Services", searches: 18 }],
-  recent: [{ id: "7", actor: "admin01", action: "Updated Location", target: "Library", createdAt: "Sep 12, 2026", category: "Admin" }],
+  recent: [
+    { id: "7", actor: "admin01", action: "Updated Location", target: "Library", createdAt: "2026-09-12T08:30:00Z", category: "Admin" },
+    { id: "8", actor: "student01", action: "Searched Location", target: "Library", createdAt: "Sep 12, 2026", category: "User" },
+  ],
 };
 
 function renderDashboard() {
@@ -44,7 +49,20 @@ describe("Dashboard backend boundary", () => {
 
     expect(await screen.findByText("12")).toBeInTheDocument();
     expect(request).toHaveBeenCalledWith("week");
-    expect(screen.getByText("+2 this week")).toBeInTheDocument();
+    expect(screen.getByText("+2 added this week")).toBeInTheDocument();
+    expect(screen.getAllByText("Indoor Locations")).toHaveLength(2);
+    expect(screen.getByText("Registered Users")).toBeInTheDocument();
+    expect(screen.getByText("56")).toBeInTheDocument();
+    expect(screen.getByText("Campus Map Preview")).toBeInTheDocument();
+    expect(screen.getByText("Buildings")).toBeInTheDocument();
+    expect(screen.getAllByText("Indoor Locations")).toHaveLength(2);
+    expect(screen.getByText("Walking Network")).toBeInTheDocument();
+    expect(screen.getByText("Updated Location")).toBeInTheDocument();
+    expect(screen.getByText(formatDateTime("2026-09-12T08:30:00Z"))).toBeInTheDocument();
+    expect(screen.queryByText("2026-09-12T08:30:00Z")).not.toBeInTheDocument();
+    expect(screen.queryByText("Searched Location")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Registered Users"));
+    expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users");
     const rankedLibrary = screen.getByTitle("View Library in directory");
     expect(within(rankedLibrary).getByText("Library")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("Student Services")).toBeInTheDocument();
@@ -56,7 +74,7 @@ describe("Dashboard backend boundary", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Top searched time range"), "month");
     await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
-    expect(screen.getByText("+2 this month")).toBeInTheDocument();
+    expect(screen.getByText("+2 added this month")).toBeInTheDocument();
   });
 
   it("shows an actionable error when the backend request fails", async () => {

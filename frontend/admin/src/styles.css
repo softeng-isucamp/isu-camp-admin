@@ -617,6 +617,20 @@ main {
   font-size: 34px;
   margin-top: 4px;
 }
+.registered-users-card {
+  min-height: 196px;
+}
+.registered-users-card > span {
+  display: block;
+  margin-top: 56px;
+  color: #4c5751;
+  font-size: 14px;
+}
+.registered-users-card strong {
+  display: block;
+  font-size: 34px;
+  margin-top: 4px;
+}
 .badge {
   display: inline-block;
   padding: 5px 10px;
@@ -723,6 +737,49 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.dashboard-leaflet-map {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.dashboard-leaflet-map:active {
+  cursor: grabbing;
+}
+.dashboard-map-state {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: #52665a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.dashboard-basemap-toggle {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 500;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #fffffff2;
+  box-shadow: 0 2px 8px #0003;
+}
+.dashboard-basemap-toggle button {
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: transparent;
+  color: #52665a;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+.dashboard-basemap-toggle button.active {
+  background: #005931;
+  color: #fff;
 }
 .dashboard-map-controls {
   position: absolute;
