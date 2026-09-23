@@ -1584,6 +1584,31 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
+  it("switches a selected Pathway's endpoints and reverses its Path Sequence", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]] },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch source and destination" }));
+
+    const inspector = screen.getByRole("complementary", { name: "North Walk object details" });
+    expect(inspector).toHaveTextContent("Source Route NodeSouth Junction");
+    expect(inspector).toHaveTextContent("Destination Route NodeNorth Entrance");
+    const updateButton = screen.getAllByRole("button", { name: "Update Pathway" })
+      .find((button) => !(button as HTMLButtonElement).disabled);
+    expect(updateButton).toBeDefined();
+    fireEvent.click(updateButton!);
+
+    await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
+      sourceNodeId: "node-b",
+      destinationNodeId: "node-a",
+      pathPoints: [[16.7208, 121.6898], [16.7207, 121.6897]],
+    })));
+  });
+
   it("blocks drawing a duplicate direct Pathway in either direction", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
       { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },

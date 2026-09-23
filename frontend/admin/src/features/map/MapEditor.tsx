@@ -2739,6 +2739,19 @@ export function MapEditor() {
       endSaving();
     }
   };
+  const switchPathwayEndpoints = () => {
+    if (!pathwayFrame) return;
+    const reversedPoints = [...pathwayFrame.pathPoints].reverse();
+    const currentDraft = pathwayDraft?.id === pathwayFrame.id ? pathwayDraft : pathwayFrame;
+    setPathwayDraft({
+      ...currentDraft,
+      sourceNodeId: currentDraft.destinationNodeId,
+      destinationNodeId: currentDraft.sourceNodeId,
+      pathPoints: reversedPoints,
+    });
+    setPathwayDraftOriginal((current) => current?.id === pathwayFrame.id ? current : { ...pathwayFrame });
+    if (editingPathId === pathwayFrame.id) setPathPoints(reversedPoints);
+  };
   const cancelPathwayFrame = () => {
     if (!pathwayDraftOriginal) {
       if (provisionalPathwayId) setLocalPathways((items) => items.filter((item) => item.id !== provisionalPathwayId));
@@ -3020,8 +3033,8 @@ export function MapEditor() {
         domain: "Walking Network",
         status: `${selectedPath.direction} · ${selectedPath.status}${pathwayFrameDirty ? " · Unsaved draft" : ""}`,
         summary: [
-          { label: "Source Route Node", value: currentNodes.find((node) => node.id === selectedPath.sourceNodeId)?.name ?? selectedPath.sourceNodeId },
-          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === selectedPath.destinationNodeId)?.name ?? selectedPath.destinationNodeId },
+          { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
+          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
           { label: "Path Sequence", value: `${selectedPath.pathPoints.length} intermediate point${selectedPath.pathPoints.length === 1 ? "" : "s"}` },
           { label: "Distance", value: selectedPath.distance },
         ],
@@ -3040,6 +3053,9 @@ export function MapEditor() {
             </section>
             <section className="inspector-related-section" aria-label="Path Sequence editor">
               <h3>Path Sequence</h3>
+              <button type="button" className="inspector-secondary-action" onClick={switchPathwayEndpoints} disabled={!pathwayFrame} aria-label="Switch source and destination">
+                ⇄ Switch source and destination
+              </button>
               <label className="inspector-point-selector">Select Path Point
                 <select aria-label="Select Path Point" value={selectedPathPointIndex ?? ""} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); setSelected({ type: "path_point", id: `${selectedPath.id}:point:${index}` }); }}>
                   <option value="" disabled>Choose an ordered point</option>
