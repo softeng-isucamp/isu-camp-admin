@@ -1385,6 +1385,26 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7208,121.6902"]')).toBeTruthy());
   });
 
+  it("allows metadata edits immediately after creating a Route Node", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Route Node" }));
+    fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Access Point" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "New Access Point" } });
+    clickMap(16.7208, 121.6902);
+    fireEvent.click(screen.getByRole("button", { name: "Save Route Node" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Route Node name")).toHaveValue("New Access Point"));
+    fireEvent.change(screen.getByLabelText("Route Node name"), { target: { value: "Updated Access Point" } });
+    fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Junction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update Route Node" }));
+
+    await waitFor(() => expect(services.map.updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: "created-node",
+      name: "Updated Access Point",
+      nodeType: "Junction",
+    })));
+  });
+
   it("shows a building room directory and associated entrances in the inspector", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-room-test", name: "Engineering Hall", code: "ENG-HALL", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
@@ -1676,6 +1696,7 @@ describe("Map Editor preview", () => {
   });
 
   it("prompts for a visual crossing and commits a Junction split as one Working Session change", async () => {
+    vi.mocked(services.map.createRouteNode).mockImplementation(async (node) => ({ ...node, id: "42" }));
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "A", nodeType: "Junction", lat: 16.72, lng: 121.689 },
       { id: "node-b", name: "B", nodeType: "Junction", lat: 16.722, lng: 121.691 },
@@ -1690,8 +1711,23 @@ describe("Map Editor preview", () => {
 
     expect(await screen.findByRole("alert", { name: "Non-routable pathway crossing" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway" }));
+    await waitFor(() => expect(services.map.createRouteNode).toHaveBeenCalledWith(expect.objectContaining({
+      name: expect.stringContaining("Junction"),
+      nodeType: "Junction",
+      lat: expect.any(Number),
+      lng: expect.any(Number),
+    })));
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
     await waitFor(() => expect(screen.queryByRole("alert", { name: "Non-routable pathway crossing" })).not.toBeInTheDocument());
+
+    fireEvent.change(await screen.findByLabelText("Route Node name"), { target: { value: "Central Crossing" } });
+    fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Access Point" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update Route Node" }));
+    await waitFor(() => expect(services.map.updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: "42",
+      name: "Central Crossing",
+      nodeType: "Access Point",
+    })));
   });
 
   it("supports editing polygon draft with vertex removal, clear area, finish footprint, and cancel", async () => {
