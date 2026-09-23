@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
-
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import actions as actions_module
 from actions import actions_bp
