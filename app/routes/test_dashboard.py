@@ -48,6 +48,7 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
         db.session.add_all([
             Building(building_id=1, building_code="ENG", building_name="Engineering Hall"),
             Building(building_id=2, building_code="LIB", building_name="Library"),
+            AppUser(id=1, username="student01"),
             Location(location_id=1, building_id=1, type_id=3, location_code="ENG-201", location_name="Dean's Office"),
             Location(location_id=2, building_id=1, type_id=1, location_code="ENG-202", location_name="Room 202"),
             RouteNode(node_id=1, building_id=1, latitude=1.0, longitude=1.0, node_type="entrance"),
@@ -65,7 +66,8 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
     assert response.status_code == 200
     data = response.json["data"]
     assert data["buildings"] == 2
-    assert data["offices"] == 1
+    assert data["indoorLocations"] == 2
+    assert data["users"] == 1
     assert data["locations"] == 4
     assert data["pathways"] == 1
     assert data["buildingChange"] == 1

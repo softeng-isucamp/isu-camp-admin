@@ -763,6 +763,8 @@ export function MapEditor() {
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
+  const [currentMapZoom, setCurrentMapZoom] = useState(18);
+  const isOverviewZoom = currentMapZoom < 18;
   const [walkingNetworkImport, setWalkingNetworkImport] = useState<WalkingNetworkImportPreview | null>(null);
   const [importAdvisoriesAcknowledged, setImportAdvisoriesAcknowledged] = useState(false);
   const [walkingNetworkImportText, setWalkingNetworkImportText] = useState("");
@@ -792,8 +794,9 @@ export function MapEditor() {
     completionHandlers[toolType]();
     workingSessionManager.discardActiveDraft();
   };
-  const handleViewportChange = useCallback((bounds: L.LatLngBounds | null) => {
+  const handleViewportChange = useCallback((bounds: L.LatLngBounds | null, zoom: number) => {
     setCurrentMapBounds(bounds);
+    setCurrentMapZoom(zoom);
   }, []);
 
   const directoryLocations = data?.locations || [];
@@ -1305,6 +1308,10 @@ export function MapEditor() {
     if (mode === "select") {
       setSelected(null);
       setSelectionPopover(null);
+      return;
+    }
+    if (isOverviewZoom) {
+      setError("Zoom in to edit map geometry.");
       return;
     }
     if (mode !== "move" && !pointOnCampus(point, campusBoundary)) {
@@ -3328,16 +3335,16 @@ export function MapEditor() {
                   },
                 }}
               >
-                <Tooltip sticky direction="top" className="map-label">
+                {!isOverviewZoom && <Tooltip sticky direction="top" className="map-label">
                   <div className="font-bold text-xs">{building.name}</div>
                   {building.code && <div className="text-[10px] text-gray-500 font-normal">{building.code}</div>}
                   {!geometryOnCampus(building.points, campusBoundary) && (
                     <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
                   )}
                   {footprintRetired && <div className="text-[10px] font-semibold text-amber-700">Retired · restore available</div>}
-                </Tooltip>
+                </Tooltip>}
               </Polygon>
-              {mode === "select" && editingBuildingId === null && (
+              {mode === "select" && editingBuildingId === null && (!isOverviewZoom || isSelected) && (
                 <Marker
                   position={polygonFeatureAnchor(building.points)}
                   icon={createLocationPinIcon(isSelected)}
@@ -3384,8 +3391,8 @@ export function MapEditor() {
                     ...currentPoints,
                     ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
                   ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
-                  weight: isSelected ? 6 : mode === "path" ? 5 : 4,
-                  dashArray: isSelected ? undefined : "7 6",
+                  weight: isSelected ? 6 : isOverviewZoom ? 2 : mode === "path" ? 5 : 4,
+                  dashArray: isSelected || isOverviewZoom ? undefined : "7 6",
                   opacity: pathOpacity,
                 }}
                 eventHandlers={{
@@ -3396,7 +3403,7 @@ export function MapEditor() {
                   },
                 }}
               >
-                <Tooltip sticky direction="top" className="map-label">
+                {!isOverviewZoom && <Tooltip sticky direction="top" className="map-label">
                   <div className="font-bold text-xs">{path.name || "Campus Pathway"}</div>
                   <div className="text-[10px] text-gray-500 font-normal">Shade: {path.shade} · {path.direction}</div>
                   {!geometryOnCampus([
@@ -3406,13 +3413,14 @@ export function MapEditor() {
                   ], campusBoundary) && (
                     <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
                   )}
-                </Tooltip>
+                </Tooltip>}
               </Polyline>
             ) : null;
           })}
 
           {filteredLocations.map((loc) => {
             const isSelected = selected?.type === "location" && selected?.id === loc.id;
+            if (isOverviewZoom && !isSelected) return null;
             return (
               <Marker
                 key={`location:${loc.id}`}
@@ -3424,13 +3432,13 @@ export function MapEditor() {
                   },
                 }}
               >
-                <Tooltip direction="top" offset={[0, -28]} className="map-label">
+                {!isOverviewZoom && <Tooltip direction="top" offset={[0, -28]} className="map-label">
                   <div className="font-bold text-xs">{loc.name}</div>
                   <div className="text-[10px] text-gray-500 font-normal">{loc.type} · {loc.code}</div>
                   {!pointOnCampus([loc.lat, loc.lng], campusBoundary) && (
                     <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
                   )}
-                </Tooltip>
+                </Tooltip>}
                 <Popup>
                   <strong>{loc.name}</strong>
                   <br />
@@ -3443,6 +3451,7 @@ export function MapEditor() {
           {filteredNodes.map((node) => {
             if (mode === "move" && movingId === node.id) return null;
             const isSelected = selected?.type === "node" && selected?.id === node.id;
+            if (isOverviewZoom && !isSelected) return null;
             return (
               <Marker
                 key={node.id}
@@ -3451,6 +3460,10 @@ export function MapEditor() {
                 eventHandlers={{
                   click: () => {
                     if (mode === "path" && !editingPathId) {
+                      if (isOverviewZoom) {
+                        setError("Zoom in to edit map geometry.");
+                        return;
+                      }
                       if (node.status !== undefined && node.status !== "Active") {
                         setError("Pathways can only use active Route Nodes.");
                         return;
@@ -3504,18 +3517,18 @@ export function MapEditor() {
                   },
                 }}
               >
-                <Tooltip direction="top" offset={[0, -10]} className="map-label">
+                {!isOverviewZoom && <Tooltip direction="top" offset={[0, -10]} className="map-label">
                   <div className="font-bold text-xs">{node.name}</div>
                   <div className="text-[10px] text-gray-500 font-normal">Route Node ({node.nodeType})</div>
                   {!pointOnCampus([node.lat, node.lng], campusBoundary) && (
                     <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
                   )}
-                </Tooltip>
+                </Tooltip>}
               </Marker>
             );
           })}
 
-          {mode === "path" &&
+          {!isOverviewZoom && mode === "path" &&
             pathPoints.map((point, index) => (
               <Marker
                 key={`path-point-${index}`}
@@ -3554,7 +3567,7 @@ export function MapEditor() {
               />
             ))}
 
-          {mode === "path" && activePathway && (() => {
+          {!isOverviewZoom && mode === "path" && activePathway && (() => {
             const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
             const destination = currentNodes.find((node) => node.id === activePathway.destinationNodeId);
             if (!source || !destination) return null;
@@ -3588,14 +3601,14 @@ export function MapEditor() {
               before the building is committed (fixes #32 — previously only rendered post-commit
               when mode === "select", so nothing showed while mode === "area"). Recomputed from
               `points` on every render, same as the committed-building marker below. */}
-          {mode === "area" && points.length >= 3 && (
+          {!isOverviewZoom && mode === "area" && points.length >= 3 && (
             <Marker
               position={polygonFeatureAnchor(points)}
               icon={createLocationPinIcon(false)}
             />
           )}
 
-          {mode === "area" &&
+          {!isOverviewZoom && mode === "area" &&
             points.map((pt, i) => (
               <Marker
                 key={`area-pt-${i}`}
@@ -3620,7 +3633,7 @@ export function MapEditor() {
               />
             ))}
 
-          {mode === "area" && polygonInteraction === "reshape" && points.length >= 3 && points.map((point, index) => {
+          {!isOverviewZoom && mode === "area" && polygonInteraction === "reshape" && points.length >= 3 && points.map((point, index) => {
             const next = points[(index + 1) % points.length];
             return (
               <Marker
@@ -3632,7 +3645,7 @@ export function MapEditor() {
             );
           })}
 
-          {mode === "area" && polygonInteraction === "move" && points.length >= 3 && (
+          {!isOverviewZoom && mode === "area" && polygonInteraction === "move" && points.length >= 3 && (
             <Marker
               position={polygonFeatureAnchor(points)}
               icon={createLocationPinIcon(true)}
@@ -3650,7 +3663,7 @@ export function MapEditor() {
             />
           )}
 
-          {mode === "move" && moveOrigin && temporary && (
+          {!isOverviewZoom && mode === "move" && moveOrigin && temporary && (
             <PointMoveLayer
               origin={moveOrigin}
               position={temporary}
@@ -3665,7 +3678,7 @@ export function MapEditor() {
             />
           )}
 
-          {temporary && mode !== "move" && (
+          {!isOverviewZoom && temporary && mode !== "move" && (
             <Marker
               position={temporary}
               icon={createTempIcon()}
@@ -3689,6 +3702,12 @@ export function MapEditor() {
             />
           )}
         </MapContainer>
+
+        {isOverviewZoom && mode !== "select" && (
+          <div role="status" className="pointer-events-none absolute bottom-5 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-xs font-semibold text-[#234333] shadow-lg">
+            Zoom in to edit geometry
+          </div>
+        )}
 
         {networkBrowserOpen && (
           <NetworkBrowser

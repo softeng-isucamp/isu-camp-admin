@@ -3,13 +3,13 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, Badge, Empty } from "../../components/UI";
 import { services } from "../../services/api";
+import { formatDateTime } from "../../lib/format";
 import type { DashboardRange } from "../../types";
-import campusMap from "../../assets/figma/dashboard/campus-map.png";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
+import metricUsers from "../../assets/figma/navigation/profile-user.svg";
 import actionMap from "../../assets/figma/dashboard/action-map.svg";
-import mapLayersIcon from "../../assets/figma/dashboard/map-layers-icon.svg";
-import mapZoomIcon from "../../assets/figma/dashboard/map-zoom-icon.svg";
+import { DashboardMapPreview } from "./DashboardMapPreview";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -22,6 +22,7 @@ export function Dashboard() {
 
   const rangeLabel = searchWindow === "week" ? "this week" : searchWindow === "month" ? "this month" : "all time";
   const buildingChange = data?.buildingChange;
+  const recentAdminActivity = (data?.recent ?? []).filter((entry) => entry.category === "Admin");
 
   return (
     <div className="page dashboard">
@@ -30,9 +31,9 @@ export function Dashboard() {
           <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Campus Overview</h1>
           <p>
-            Monitor campus infrastructure, location records,
+            Monitor campus data quality, location coverage,
             <br />
-            and geospatial routing configurations.
+            map configuration, and recent administrative activity.
           </p>
         </div>
         <Link className="btn btn-primary" to="/locations">
@@ -46,7 +47,9 @@ export function Dashboard() {
               <img src={metricBuildings} alt="" />
             </span>
             {buildingChange !== null && buildingChange !== undefined && (
-              <Badge>{buildingChange >= 0 ? "+" : ""}{buildingChange} {rangeLabel}</Badge>
+              <Badge>
+                {buildingChange >= 0 ? "+" : ""}{buildingChange} {buildingChange >= 0 ? "added" : "change"} {rangeLabel}
+              </Badge>
             )}
           </div>
           <span>Total Buildings</span>
@@ -58,8 +61,8 @@ export function Dashboard() {
               <img src={metricOffices} alt="" />
             </span>
           </div>
-          <span>Registered Offices</span>
-          <strong>{data?.offices?.toLocaleString() ?? "—"}</strong>
+          <span>Indoor Locations</span>
+          <strong>{data?.indoorLocations?.toLocaleString() ?? "—"}</strong>
         </Card>
       </div>
       {error && (
@@ -73,53 +76,12 @@ export function Dashboard() {
           <Card className="map-card">
             <div className="card-heading">
               <div>
-                <h2>Campus Map Status</h2>
+                <h2>Campus Map Preview</h2>
                 <p>Preview campus locations and pathways.</p>
               </div>
               <Link to="/map-editor">Expand View ↗</Link>
             </div>
-            <div className="map-preview">
-              <img
-                className="map-image"
-                src={campusMap}
-                alt="Campus map preview"
-                onClick={() => navigate("/map-editor")}
-                style={{ cursor: "pointer" }}
-              />
-              <div className="dashboard-map-controls" aria-label="Map controls">
-                <button
-                  type="button"
-                  aria-label="Show map layers"
-                  onClick={() => navigate("/map-editor")}
-                  title="Open map layers"
-                >
-                  <img src={mapLayersIcon} alt="" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Zoom map"
-                  onClick={() => navigate("/map-editor")}
-                  title="Zoom into interactive map"
-                >
-                  <img src={mapZoomIcon} alt="" />
-                </button>
-              </div>
-              <div className="legend">
-                <b>MAP LAYERS</b>
-                <span>
-                  <i className="dot green" />
-                  Academic Buildings
-                </span>
-                <span>
-                  <i className="dot blue" />
-                  Student Services
-                </span>
-                <span>
-                  <i className="dot orange" />
-                  Maintenance Zones
-                </span>
-              </div>
-            </div>
+            <DashboardMapPreview />
           </Card>
           <Card>
             <div className="card-heading">
@@ -187,9 +149,9 @@ export function Dashboard() {
                 <div className="dashboard-state" role="status" aria-live="polite">Loading recent activity…</div>
               ) : error && !data ? (
                 <Empty>Recent activity is unavailable.</Empty>
-              ) : (data?.recent ?? []).length === 0 ? (
-                <Empty>No recent activity recorded yet.</Empty>
-              ) : (data?.recent ?? []).map((a) => (
+              ) : recentAdminActivity.length === 0 ? (
+                <Empty>No recent administrative activity recorded yet.</Empty>
+              ) : recentAdminActivity.map((a) => (
                 <div
                   className="activity-row"
                   key={a.id}
@@ -199,13 +161,22 @@ export function Dashboard() {
                 >
                   <i />
                   <div>
-                    <small>{a.createdAt}</small>
+                    <small>{formatDateTime(a.createdAt)}</small>
                     <strong>{a.action}</strong>
                     <p>{a.detail ?? `${a.target} was updated.`}</p>
                   </div>
                 </div>
               ))}
             </div>
+          </Card>
+          <Card className="registered-users-card" style={{ cursor: "pointer" }} onClick={() => navigate("/users")}>
+            <div className="metric-top">
+              <span className="metric-icon">
+                <img src={metricUsers} alt="" />
+              </span>
+            </div>
+            <span>Registered Users</span>
+            <strong>{data?.users?.toLocaleString() ?? "—"}</strong>
           </Card>
           <Card>
             <div className="card-heading">

@@ -9,6 +9,8 @@ import type { Location, LocationDraft, RouteNode } from "../../types";
 import { MapEditor } from "./MapEditor";
 
 let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void) | undefined;
+let mapZoomEndHandler: (() => void) | undefined;
+let mapZoom = 18;
 let pathPointDragPosition: { lat: number; lng: number } | undefined;
 let movingPointDragPosition: { lat: number; lng: number } | undefined;
 let mapFitBounds = vi.fn();
@@ -45,12 +47,13 @@ vi.mock("react-leaflet", () => ({
     flyTo: (...args: unknown[]) => mapFlyTo(...args),
     fitBounds: (...args: unknown[]) => mapFitBounds(...args),
     getBounds: mapVisibleBounds ? () => mapVisibleBounds : undefined,
-    getZoom: mapVisibleBounds ? () => 18 : undefined,
+    getZoom: () => mapZoom,
     latLngToContainerPoint: ({ lat, lng }: { lat: number; lng: number }) => ({ x: lng * 100_000, y: lat * 100_000 }),
     containerPointToLatLng: ({ x, y }: { x: number; y: number }) => ({ lat: y / 100_000, lng: x / 100_000 }),
   }),
-  useMapEvents: ({ click }: { click: (event: { latlng: { lat: number; lng: number } }) => void }) => {
+  useMapEvents: ({ click, zoomend }: { click: (event: { latlng: { lat: number; lng: number } }) => void; zoomend?: () => void }) => {
     mapClickHandler = click;
+    mapZoomEndHandler = zoomend;
   },
 }));
 vi.mock("../../services/api", () => ({
@@ -104,6 +107,8 @@ describe("Map Editor preview", () => {
     sessionStorage.clear();
     localStorage.clear();
     mapClickHandler = undefined;
+    mapZoomEndHandler = undefined;
+    mapZoom = 18;
     pathPointDragPosition = undefined;
     movingPointDragPosition = undefined;
     mapFitBounds = vi.fn();
@@ -457,6 +462,54 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Select Library Entrance Route Node" }));
     expect(screen.getByRole("complementary", { name: "Library Entrance object details" })).toBeInTheDocument();
+  });
+
+  it("clears overview zoom of pins while preserving footprints and pathways", async () => {
+    mapVisibleBounds = {
+      getSouth: () => 16.7,
+      getNorth: () => 16.8,
+      getWest: () => 121.6,
+      getEast: () => 121.8,
+    };
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-admin", name: "Administration Building", code: "ADMIN", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "Campus Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", pathPoints: [], distance: "50 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"] },
+    ]);
+    renderEditor();
+
+    await screen.findByRole("button", { name: "building polygon" });
+    expect(screen.getByTestId("path-geometry")).toBeInTheDocument();
+    expect(screen.getAllByTestId("saved-map-marker").length).toBeGreaterThan(0);
+
+    act(() => { mapZoom = 17; mapZoomEndHandler?.(); });
+    expect(screen.getByRole("button", { name: "building polygon" })).toBeInTheDocument();
+    expect(screen.getByTestId("path-geometry")).toBeInTheDocument();
+    expect(screen.queryAllByTestId("saved-map-marker")).toHaveLength(0);
+
+    act(() => { mapZoom = 18; mapZoomEndHandler?.(); });
+    expect(screen.getAllByTestId("saved-map-marker").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a selected Location findable in overview zoom", async () => {
+    mapVisibleBounds = {
+      getSouth: () => 16.7,
+      getNorth: () => 16.8,
+      getWest: () => 121.6,
+      getEast: () => 121.8,
+    };
+    renderEditor();
+    fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    await screen.findByRole("button", { name: /Library Location/ });
+
+    act(() => { mapZoom = 17; mapZoomEndHandler?.(); });
+    expect(screen.queryAllByTestId("saved-map-marker")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Library Location/ }));
+    const selectedMarkers = screen.getAllByTestId("saved-map-marker");
+    expect(selectedMarkers).toHaveLength(1);
+    expect(selectedMarkers[0]).toHaveAttribute("data-icon-class", "location-marker-icon selected");
   });
 
   it("does not render an ordinary marker for a positioned Building with a footprint", async () => {

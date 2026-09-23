@@ -779,7 +779,8 @@ describe("real dashboard service boundary", () => {
     const response = {
       buildings: 12,
       buildingChange: 2,
-      offices: 34,
+      indoorLocations: 34,
+      users: 56,
       locations: 98,
       pathways: 21,
       searches: 55,
