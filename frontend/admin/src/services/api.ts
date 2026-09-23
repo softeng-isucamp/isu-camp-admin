@@ -162,7 +162,8 @@ export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
 const dashboardMetricsSchema = z.object({
   buildings: z.number().int().nonnegative(),
   buildingChange: z.number().int().nullable(),
-  offices: z.number().int().nonnegative(),
+  indoorLocations: z.number().int().nonnegative(),
+  users: z.number().int().nonnegative(),
   locations: z.number().int().nonnegative(),
   pathways: z.number().int().nonnegative(),
   searches: z.number().int().nonnegative(),
@@ -1064,7 +1065,11 @@ export const services: Services = {
 
         buildingChange: 2,
 
-        offices: 1854,
+        indoorLocations: locations.filter((location) =>
+          ["Room", "Office", "Laboratory", "Restroom"].includes(location.type),
+        ).length,
+
+        users: 0,
 
         locations:
           locations.length,

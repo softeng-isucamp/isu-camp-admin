@@ -128,7 +128,8 @@ export type DashboardRange = "week" | "month" | "all";
 export interface DashboardSummary {
   buildings: number;
   buildingChange: number | null;
-  offices: number;
+  indoorLocations: number;
+  users: number;
   locations: number;
   pathways: number;
   searches: number;
