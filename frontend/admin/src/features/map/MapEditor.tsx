@@ -1507,6 +1507,8 @@ export function MapEditor() {
       setDirty(true);
       setPlacingNodeName("");
       setMode("select");
+      setRouteNodeDraft({ ...confirmedNode });
+      setRouteNodeDraftOriginal({ ...confirmedNode });
       setSelected({ type: "node", id: confirmedNode.id });
       completeToolDraft("point");
     } catch (cause) {
@@ -2078,34 +2080,50 @@ export function MapEditor() {
     setPathDraftDirty(true);
   };
 
-  const createJunctionAtCrossing = () => {
+  const createJunctionAtCrossing = async () => {
     const crossing = pathwayCrossings[0];
     if (!crossing) return;
     const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
     const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);
     if (!pathwayA || !pathwayB) return;
-    const junctionId = `junction-${Date.now()}`;
-    const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junctionId);
-    setLocalNodes((current) => [...current.filter((node) => node.id !== junctionId), crossingChange.junction]);
-    setLocalPathways((current) => [
-      ...current.filter((pathway) =>
-        !crossingChange.closedPathways.some((closed) => closed.id === pathway.id)
-        && !crossingChange.replacementPathways.some((replacement) => replacement.id === pathway.id)),
-      ...crossingChange.closedPathways,
-      ...crossingChange.replacementPathways,
-    ]);
-    workingSessionManager.executeBatch(
-      `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
-      "Walking Network",
-      junctionId,
-      crossingChange.operations,
-    );
-    setEditingPathId(null);
-    setPathPoints([]);
-    setSelected({ type: "node", id: junctionId });
-    setMode("select");
-    setDirty(true);
-    completeToolDraft("pathway");
+    if (!beginSaving("route-node")) return;
+    const provisional = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, `pending-junction-${Date.now()}`);
+    try {
+      const junction = await services.map.createRouteNode({
+        name: provisional.junction.name,
+        nodeType: "Junction",
+        associatedPlaceId: null,
+        lat: provisional.junction.lat,
+        lng: provisional.junction.lng,
+      });
+      const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junction.id);
+      setLocalNodes((current) => [...current.filter((node) => node.id !== junction.id), junction]);
+      setLocalPathways((current) => [
+        ...current.filter((pathway) =>
+          !crossingChange.closedPathways.some((closed) => closed.id === pathway.id)
+          && !crossingChange.replacementPathways.some((replacement) => replacement.id === pathway.id)),
+        ...crossingChange.closedPathways,
+        ...crossingChange.replacementPathways,
+      ]);
+      workingSessionManager.executeBatch(
+        `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
+        "Walking Network",
+        junction.id,
+        crossingChange.operations,
+      );
+      setEditingPathId(null);
+      setPathPoints([]);
+      setRouteNodeDraft({ ...junction });
+      setRouteNodeDraftOriginal({ ...junction });
+      setSelected({ type: "node", id: junction.id });
+      setMode("select");
+      setDirty(true);
+      completeToolDraft("pathway");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the Junction Route Node.");
+    } finally {
+      endSaving();
+    }
   };
 
   const activeTool: ToolType = mode === "place" || mode === "move"
