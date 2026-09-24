@@ -1,6 +1,6 @@
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from auth import admin_required
 from extensions import db
@@ -87,6 +87,37 @@ def _photo_upload():
     if len(content) > PHOTO_MAX_BYTES:
         return None, None, _validation_error({"photo": "Photo must be 5 MB or smaller."})
     return content, upload.mimetype, None
+
+
+# Magic numbers for the three formats the uploader accepts.
+PHOTO_MAGIC_NUMBERS = (
+    (bytes.fromhex("89504e470d0a1a0a"), "image/png"),
+    (bytes.fromhex("ffd8ff"), "image/jpeg"),
+)
+
+
+def _sniff_photo_mime_type(content):
+    """Recover a Content-Type for rows written before photo_mime_type existed.
+
+    Only the formats the uploader accepts are probed; anything else falls back
+    to a generic binary type rather than guessing wrongly.
+    """
+    for signature, mime_type in PHOTO_MAGIC_NUMBERS:
+        if content.startswith(signature):
+            return mime_type
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+def _photo_response(content, mime_type):
+    resolved = mime_type if mime_type in PHOTO_MIME_TYPES else _sniff_photo_mime_type(content)
+    response = Response(content, mimetype=resolved)
+    response.headers["Content-Length"] = str(len(content))
+    # Photos are replaced in place on the same id, so revalidate every time
+    # rather than letting a stale image stick in the browser cache.
+    response.headers["Cache-Control"] = "no-cache, private"
+    return response
 
 
 def _validation_error(fields=None, relationships=None):
@@ -181,7 +212,7 @@ def add_room_to_building(building_id):
     values, error = _validate(data, records, buildings)
     if error: return error
 
-    photo, _photo_mime_type, error = _photo_upload()
+    photo, photo_mime_type, error = _photo_upload()
     if error: return error
 
     try:
@@ -203,6 +234,7 @@ def add_room_to_building(building_id):
 
         if photo is not None:
             location.photo = photo
+            location.photo_mime_type = photo_mime_type
 
         db.session.add(location)
         db.session.flush()
@@ -263,13 +295,8 @@ def edit_location(location_id):
     values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
     if error: return error
 
-    photo, _photo_mime_type, error = _photo_upload()
+    photo, photo_mime_type, error = _photo_upload()
     if error: return error
-
-    if values.get("type") == "Building" and photo is not None:
-        return _validation_error({
-            "photo": "Building photos are not supported by the current building schema."
-        })
 
     try:
         if building is not None:
@@ -277,6 +304,11 @@ def edit_location(location_id):
             building.building_name = values["name"]
             building.classification = values["type"]
             building.description = values["description"]
+
+            if photo is not None:
+                building.photo = photo
+                building.photo_mime_type = photo_mime_type
+
             db.session.flush()
             log_audit("Admin", None, "update", "Building", building.building_id, building.building_name)
             db.session.commit()
@@ -296,6 +328,7 @@ def edit_location(location_id):
 
         if photo is not None:
             location.photo = photo
+            location.photo_mime_type = photo_mime_type
 
         db.session.flush()
         log_audit("Admin", None, "update", "Location", location.location_id, location.location_name)
@@ -313,6 +346,57 @@ def edit_location(location_id):
             "success": False,
             "message": "Failed to update location."
         }), 500
+
+@actions_bp.route("/locations/<int:location_id>/photo", methods=["GET"])
+def view_location_photo(location_id):
+    """Serve the stored image bytes for a Location, Building, or Facility.
+
+    Buildings and Locations are separate tables with independent id sequences,
+    so an explicit ``?type=`` disambiguates which one the id belongs to. With
+    no hint the Location table is searched first, matching how the rest of the
+    directory resolves an ambiguous id.
+    """
+
+    _, error = admin_required()
+    if error: return error
+
+    requested_type = request.args.get("type")
+
+    try:
+        record = None
+
+        if requested_type in {"Building", "Facility"}:
+            record = Building.query.filter_by(building_id=location_id).first()
+        elif requested_type in INDOOR_TYPES:
+            record = Location.query.filter_by(location_id=location_id).first()
+        else:
+            record = (
+                Location.query.filter_by(location_id=location_id).first()
+                or Building.query.filter_by(building_id=location_id).first()
+            )
+
+        if record is None:
+            return jsonify({
+                "success": False,
+                "message": "Location not found."
+            }), 404
+
+        if record.photo is None:
+            return jsonify({
+                "success": False,
+                "message": "Location has no photo."
+            }), 404
+
+        return _photo_response(record.photo, record.photo_mime_type)
+
+    except Exception:
+        logger.exception("Failed to load location photo")
+
+        return jsonify({
+            "success": False,
+            "message": "Failed to load location photo."
+        }), 500
+
 
 @actions_bp.route("/buildings/<int:building_id>/history", methods=["GET"])
 def view_building_history(building_id):

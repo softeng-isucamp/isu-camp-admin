@@ -1,12 +1,7 @@
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import dashboard as dashboard_module
 from dashboard import dashboard_bp
