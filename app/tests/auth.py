@@ -1,10 +1,6 @@
-import sys
-from pathlib import Path
 from datetime import datetime, timedelta
 
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import auth as auth_module
 from auth import auth_bp

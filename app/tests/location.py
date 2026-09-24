@@ -1,12 +1,7 @@
 import io
-import sys
-from pathlib import Path
 
 import pytest
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import location as location_module
 from location import location_bp
@@ -83,6 +78,8 @@ class FakeBuilding:
         self.longitude = None
         self.classification = classification
         self.polygon_coordinates = polygon_coordinates
+        self.photo = None
+        self.photo_mime_type = None
 
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
@@ -92,7 +89,8 @@ class FakeBuilding:
             "code": self.building_code, "type": self.classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
             "keywords": None, "status": "Active", "lat": lat, "lng": lng,
-            "positioned": lat is not None and lng is not None, "hasPhoto": False,
+            "positioned": lat is not None and lng is not None,
+            "hasPhoto": self.photo is not None,
         }
         if self.polygon_coordinates is not None:
             dto["polygonCoordinates"] = self.polygon_coordinates
@@ -608,22 +606,44 @@ def test_footprint_rejects_non_adjacent_edge_touch(monkeypatch):
     assert location_module._polygon_error(points) == "Footprint edges must not intersect."
 
 
-def test_building_and_facility_photo_uploads_are_rejected_without_photo_schema(monkeypatch):
-    client, records, _ = make_mutation_client(monkeypatch)
+def test_building_and_facility_photo_uploads_are_persisted(monkeypatch):
+    client, _, _ = make_mutation_client(monkeypatch)
     building = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png")},
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png", "image/png")},
         content_type="multipart/form-data",
     )
     facility = client.post(
         "/api/locations",
-        data={"name": "Health Center", "code": "HC", "type": "Facility", "photo": (io.BytesIO(b"png-bytes"), "health-center.png")},
+        data={"name": "Health Center", "code": "HC", "type": "Facility", "photo": (io.BytesIO(b"png-bytes"), "health-center.png", "image/png")},
         content_type="multipart/form-data",
     )
 
-    assert building.status_code == facility.status_code == 400
-    assert building.json["fields"]["photo"] == facility.json["fields"]["photo"]
-    assert records == []
+    assert building.status_code == facility.status_code == 201
+    assert building.json["hasPhoto"] is True
+    assert facility.json["hasPhoto"] is True
+
+
+def test_building_photo_upload_records_the_uploaded_mime_type(monkeypatch):
+    client, _, session = make_mutation_client(monkeypatch)
+    response = client.post(
+        "/api/locations",
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"webp-bytes"), "library.webp", "image/webp")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    saved = session.buildings[-1]
+    assert saved.photo == b"webp-bytes"
+    assert saved.photo_mime_type == "image/webp"
+
+
+def test_building_created_without_a_photo_reports_no_photo(monkeypatch):
+    client, _, _ = make_mutation_client(monkeypatch)
+    response = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+
+    assert response.status_code == 201
+    assert response.json["hasPhoto"] is False
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)

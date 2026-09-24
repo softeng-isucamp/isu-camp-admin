@@ -417,24 +417,7 @@ def create_location():
     if error:
         return error
 
-    # Footprint owners do not have a photo column. Reject any supplied upload
-    # before applying normal image validation so Building and Facility produce
-    # the same schema-level response.
-    if (
-        values.get("type") in {"Building", "Facility"}
-        and (upload := request.files.get("photo")) is not None
-        and upload.filename
-    ):
-        return _validation_error(
-            {
-                "photo": (
-                    "Building and Facility photos are not supported "
-                    "by the current building schema."
-                )
-            }
-        )
-
-    photo, _photo_mime_type, error = _photo_upload()
+    photo, photo_mime_type, error = _photo_upload()
 
     if error:
         return error
@@ -467,6 +450,10 @@ def create_location():
                     "polygon_coordinates"
                 ],
             )
+
+            if photo is not None:
+                building.photo = photo
+                building.photo_mime_type = photo_mime_type
 
             db.session.add(building)
 
@@ -501,6 +488,7 @@ def create_location():
 
         if photo is not None:
             location.photo = photo
+            location.photo_mime_type = photo_mime_type
 
         db.session.add(location)
 

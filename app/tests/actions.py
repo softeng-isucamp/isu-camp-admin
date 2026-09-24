@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
-
 from flask import Flask
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services"))
 
 import actions as actions_module
 from actions import actions_bp
@@ -349,3 +343,128 @@ def test_building_history_rolls_back_and_returns_500_on_query_failure(monkeypatc
     assert response.status_code == 500
     assert response.json == {"success": False, "message": "Failed to get building history."}
     assert session.rollbacks == 1
+
+
+# ==================================================
+# PHOTO UPLOAD AND RETRIEVAL
+# ==================================================
+
+PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"body"
+JPEG_BYTES = bytes.fromhex("ffd8ff") + b"body"
+
+
+def _photo_app(monkeypatch, location=None, building=None):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
+    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    return app.test_client()
+
+
+def _photo_record(photo, mime_type):
+    return type("Record", (), {"photo": photo, "photo_mime_type": mime_type})()
+
+
+def test_actions_can_attach_a_photo_when_editing_a_building(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Building", (), {
+        "building_id": 42,
+        "building_code": "ENG",
+        "building_name": "Engineering Hall",
+        "classification": "Building",
+        "description": "A building",
+        "photo": None,
+        "photo_mime_type": None,
+        "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
+    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (PNG_BYTES, "image/png", None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+
+    response = app.test_client().put("/api/actions/locations/42", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+
+    assert response.status_code == 200
+    assert building.photo == PNG_BYTES
+    assert building.photo_mime_type == "image/png"
+    assert response.json["hasPhoto"] is True
+
+
+def test_editing_a_building_without_an_upload_keeps_the_existing_photo(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Building", (), {
+        "building_id": 42,
+        "building_code": "ENG",
+        "building_name": "Engineering Hall",
+        "classification": "Building",
+        "description": "A building",
+        "photo": PNG_BYTES,
+        "photo_mime_type": "image/png",
+        "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
+    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+
+    response = app.test_client().put("/api/actions/locations/42", json={"name": "Renamed Hall", "code": "ENG", "type": "Building"})
+
+    assert response.status_code == 200
+    assert building.photo == PNG_BYTES
+    assert building.photo_mime_type == "image/png"
+
+
+def test_location_photo_is_served_with_its_stored_content_type(monkeypatch):
+    client = _photo_app(monkeypatch, location=_photo_record(PNG_BYTES, "image/png"))
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/png"
+    assert response.data == PNG_BYTES
+
+
+def test_building_photo_is_served_when_the_type_hint_names_a_footprint(monkeypatch):
+    client = _photo_app(
+        monkeypatch,
+        location=_photo_record(JPEG_BYTES, "image/jpeg"),
+        building=_photo_record(PNG_BYTES, "image/png"),
+    )
+
+    response = client.get("/api/actions/locations/42/photo?type=Building")
+
+    assert response.status_code == 200
+    assert response.data == PNG_BYTES
+
+
+def test_photo_content_type_is_sniffed_when_the_stored_type_is_missing(monkeypatch):
+    client = _photo_app(monkeypatch, location=_photo_record(JPEG_BYTES, None))
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/jpeg"
+
+
+def test_photo_request_for_a_row_without_an_image_is_not_found(monkeypatch):
+    client = _photo_app(monkeypatch, location=_photo_record(None, None))
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.status_code == 404
+    assert response.json["success"] is False
+
+
+def test_photo_request_for_an_unknown_id_is_not_found(monkeypatch):
+    client = _photo_app(monkeypatch)
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.status_code == 404
