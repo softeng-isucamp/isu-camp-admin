@@ -73,6 +73,14 @@ export interface Location {
   source?: SourceProvenance;
 }
 export type LocationDraft = Omit<Location, "id"> & { id?: string };
+export interface LocationPhotoDraft {
+  id: string;
+  name: string;
+  type: string;
+  previewUrl: string;
+  file?: File;
+  isCover: boolean;
+}
 export interface LocationPosition { id: string; lat: number | null; lng: number | null; }
 export interface RouteNode {
   id: string;

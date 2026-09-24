@@ -15,6 +15,7 @@ from services.floor_lookup import resolve_floor as _resolve_floor
 from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
 from services.geometry import polygon_error as _polygon_error
 from services.location_listing import list_location_page
+from services.location_photos import apply_gallery, read_gallery_change
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
@@ -421,6 +422,9 @@ def create_location():
 
     if error:
         return error
+    gallery_change, gallery_error = read_gallery_change(request)
+    if gallery_error:
+        return _validation_error({"photo": gallery_error})
 
     try:
 
@@ -458,6 +462,10 @@ def create_location():
             db.session.add(building)
 
             db.session.flush()
+            gallery_error = apply_gallery(building, gallery_change)
+            if gallery_error:
+                db.session.rollback()
+                return _validation_error({"photo": gallery_error})
             log_audit("Admin", None, "create", "Building", building.building_id, building.building_name)
 
             db.session.commit()
@@ -493,6 +501,10 @@ def create_location():
         db.session.add(location)
 
         db.session.flush()
+        gallery_error = apply_gallery(location, gallery_change)
+        if gallery_error:
+            db.session.rollback()
+            return _validation_error({"photo": gallery_error})
         log_audit("Admin", None, "create", "Location", location.location_id, location.location_name)
 
         db.session.commit()

@@ -98,6 +98,9 @@ class FakeQuery:
     def all(self):
         return self.record
 
+    def delete(self):
+        return 0
+
 
 class FakeColumn:
     def asc(self):
@@ -198,6 +201,7 @@ def test_actions_can_delete_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("Location", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
 
     response = app.test_client().delete("/api/actions/locations/42")
@@ -215,6 +219,7 @@ def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeyp
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
 
     response = app.test_client().delete("/api/actions/locations/42?type=Room")
