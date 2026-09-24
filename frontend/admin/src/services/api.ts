@@ -668,6 +668,15 @@ export interface Services {
 
     createPathway(pathway: Omit<Pathway, "id">): Promise<Pathway>;
 
+    convertPathPoint(request: {
+      pathwayId: string;
+      sequenceNo: number;
+      point: [number, number];
+      node: Omit<RouteNode, "id"> | null;
+      existingNodeId: string | null;
+      pathways: [Pathway, Pathway];
+    }): Promise<{ node: RouteNode; pathways: [Pathway, Pathway] }>;
+
     updatePathway(pathway: Pathway): Promise<Pathway>;
 
     deletePathway(id: string): Promise<void>;
@@ -1493,6 +1502,45 @@ export const services: Services = {
       });
       const created = normalizeBackendPathway(response.pathway, response.pathway.path_points ?? []);
       return { ...created, pathPoints: created.pathPoints.length === pathway.pathPoints.length ? created.pathPoints : pathway.pathPoints };
+    },
+
+    convertPathPoint: async ({ pathwayId, sequenceNo, point, node, existingNodeId, pathways: replacements }) => {
+      if (!USE_HTTP_API) {
+        const savedNode = existingNodeId
+          ? mapNodes.find((item) => item.id === existingNodeId)
+          : node ? { ...node, id: `node-${Date.now()}` } : undefined;
+        if (!savedNode) throw new Error("Route Node is unavailable.");
+        const savedPaths = replacements.map((pathway, index) => ({ ...pathway, id: `pathway-${Date.now()}-${index}` })) as [Pathway, Pathway];
+        if (!existingNodeId) routeNodes.push(savedNode);
+        const original = pathways.find((item) => item.id === pathwayId);
+        if (original) original.status = "Closed";
+        pathways.push(...savedPaths);
+        return { node: clone(savedNode), pathways: clone(savedPaths) };
+      }
+      const id = Number(pathwayId);
+      if (!Number.isInteger(id)) throw new Error("Pathway must be saved before conversion.");
+      const response = await apiJson<{ route_node: BackendRouteNode; pathways: BackendPathway[] }>(`/api/pathways/${id}/convert-point`, {
+        method: "POST",
+        body: JSON.stringify({
+          sequence_no: sequenceNo,
+          point: { latitude: point[0], longitude: point[1] },
+          existing_node_id: existingNodeId ? Number(existingNodeId) : null,
+          node: node ? serializeRouteNode(node) : null,
+          pathways: replacements.map((pathway) => ({
+            name: pathway.name,
+            path_type: pathway.type,
+            direction: pathway.direction,
+            shade: pathway.shade,
+            status: pathway.status === "Closed" ? "inactive" : "active",
+            allowed_modes: pathway.allowedModes ?? ["Walking"],
+          })),
+        }),
+      });
+      if (response.pathways.length !== 2) throw new Error("Backend returned an incomplete Pathway split.");
+      return {
+        node: normalizeBackendRouteNode(response.route_node),
+        pathways: response.pathways.map((raw) => normalizeBackendPathway(raw, raw.path_points ?? [])) as [Pathway, Pathway],
+      };
     },
 
     updatePathway: async (pathway) => {
