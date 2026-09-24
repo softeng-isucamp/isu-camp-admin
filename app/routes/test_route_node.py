@@ -159,6 +159,121 @@ def test_create_pathway_with_points_is_atomic_and_returns_geometry(monkeypatch):
     assert session.commits == 1
 
 
+@pytest.mark.parametrize("fail_commit", [False, True])
+@pytest.mark.parametrize("reuse_existing_node", [False, True])
+def test_convert_saved_point_creates_one_node_and_two_geometry_preserving_pathways_in_one_commit(monkeypatch, fail_commit, reuse_existing_node):
+    from types import SimpleNamespace
+
+    session = FakeSession()
+    session.fail_commit = fail_commit
+    original_points = [
+        SimpleNamespace(latitude=16.7207, longitude=121.6897, to_dict=lambda: {"latitude": 16.7207, "longitude": 121.6897, "sequence_no": 1}),
+        SimpleNamespace(latitude=16.7208, longitude=121.6898, to_dict=lambda: {"latitude": 16.7208, "longitude": 121.6898, "sequence_no": 2}),
+    ]
+    original = SimpleNamespace(
+        pathway_id=9, name="North Walk", status="active", source_node_id=1, destination_node_id=2,
+        path_type="Walkway", direction="Two-way", shade="Mostly Shaded", allowed_modes=[SimpleNamespace(mode="Walking")],
+        path_points=original_points,
+    )
+    session.get = lambda _model, identifier, **_options: original if identifier == 9 else None
+    nodes = {
+        1: SimpleNamespace(node_id=1, latitude=16.7205, longitude=121.6895, status="active"),
+        2: SimpleNamespace(node_id=2, latitude=16.721, longitude=121.69, status="active"),
+        4: SimpleNamespace(node_id=4, latitude=16.7207, longitude=121.6897, status="inactive"),
+    }
+
+    class FakeNode:
+        query = SimpleNamespace(
+            get=lambda identifier: nodes.get(identifier),
+            filter_by=lambda **values: SimpleNamespace(first=lambda: next(
+                (node for node in nodes.values() if all(getattr(node, key, None) == value for key, value in values.items())),
+                None,
+            )),
+        )
+
+        def __init__(self, **values):
+            self.node_id = 3
+            self.__dict__.update(values)
+            nodes[3] = self
+
+        def to_dict(self):
+            return {"node_id": self.node_id, "name": self.name, "node_type": self.node_type}
+
+    if reuse_existing_node:
+        nodes[3] = FakeNode(name="Library Junction", node_type="intersection", latitude=16.7207, longitude=121.6897, status="active")
+
+    class FakePathway:
+        query = SimpleNamespace(get=lambda identifier: original if identifier == 9 else None)
+        next_id = 10
+
+        def __init__(self, **values):
+            self.pathway_id = FakePathway.next_id
+            FakePathway.next_id += 1
+            self.__dict__.update(values)
+            self.path_points = []
+            self.allowed_modes = []
+
+        def to_dict(self):
+            return {"pathway_id": self.pathway_id, "source_node_id": self.source_node_id,
+                    "destination_node_id": self.destination_node_id, "name": self.name,
+                    "distance_m": self.distance_m, "estimated_minutes": self.estimated_minutes,
+                    "path_points": self.path_points}
+
+    monkeypatch.setattr(route_node_module, "RouteNode", FakeNode)
+    monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
+    monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
+    monkeypatch.setattr(route_node_module, "db", SimpleNamespace(session=session))
+    monkeypatch.setattr(route_node_module, "log_audit", lambda *_args: None)
+    monkeypatch.setattr(route_node_module, "_replace_points", lambda pathway, points: setattr(pathway, "path_points", points))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/pathways/9/convert-point", json={
+        "sequence_no": 1,
+        "point": {"latitude": 16.7207, "longitude": 121.6897},
+        "node": None if reuse_existing_node else {"name": "Library Junction", "node_type": "intersection"},
+        "existing_node_id": 3 if reuse_existing_node else None,
+        "pathways": [
+            {"name": "North Walk A", "path_type": "Walkway", "shade": "Mostly Shaded", "allowed_modes": ["Walking"]},
+            {"name": "North Walk B", "path_type": "Road", "shade": "Unshaded", "allowed_modes": ["Walking", "Vehicle"]},
+        ],
+    })
+
+    if fail_commit:
+        assert response.status_code == 500
+        assert session.rollbacks == 1
+        return
+    assert response.status_code == 201, response.json
+    assert session.commits == 1
+    assert original.status == "inactive"
+    assert sum(isinstance(item, FakeNode) for item in session.added) == (0 if reuse_existing_node else 1)
+    assert response.json["route_node"]["name"] == "Library Junction"
+    first, second = response.json["pathways"]
+    assert (first["source_node_id"], first["destination_node_id"]) == (1, 3)
+    assert (second["source_node_id"], second["destination_node_id"]) == (3, 2)
+    assert first["path_points"] == []
+    assert second["path_points"] == [{"sequence_no": 1, "latitude": 16.7208, "longitude": 121.6898,
+                                      "building_id": None, "node_type": "Waypoint", "status": "active"}]
+    assert first["distance_m"] > 0 and second["distance_m"] > first["distance_m"]
+
+
+def test_convert_point_rejects_stale_coordinates_without_writing(monkeypatch):
+    from types import SimpleNamespace
+
+    session = FakeSession()
+    original = SimpleNamespace(status="active", path_points=[SimpleNamespace(latitude=16.72, longitude=121.69)])
+    session.get = lambda _model, _identifier, **_options: original
+    monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": SimpleNamespace(get=lambda _id: original)}))
+    monkeypatch.setattr(route_node_module, "db", SimpleNamespace(session=session))
+
+    response = app_with_route_node_blueprint().test_client().post("/api/pathways/9/convert-point", json={
+        "sequence_no": 1, "point": {"latitude": 16.73, "longitude": 121.69},
+    })
+
+    assert response.status_code == 400
+    assert "changed" in response.json["message"]
+    assert session.added == []
+    assert session.commits == 0
+
+
 def test_invalid_atomic_pathway_geometry_does_not_create_any_records(monkeypatch):
     session = FakeSession()
     monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
