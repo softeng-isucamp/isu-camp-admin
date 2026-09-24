@@ -5,6 +5,7 @@ import type {
   DashboardSummary,
   Location,
   LocationDraft,
+  LocationPhotoDraft,
   LocationPosition,
   LocationType,
   MapSavePayload,
@@ -616,7 +617,9 @@ export interface Services {
   locations: {
     list(query?: string, page?: number, pageSize?: number, filters?: LocationListFilters): Promise<Page<Location>>;
 
-    save(location: LocationDraft): Promise<Location>;
+    save(location: LocationDraft, photos?: LocationPhotoDraft[]): Promise<Location>;
+
+    getPhotos(id: string, type: LocationType): Promise<LocationPhotoDraft[]>;
 
     savePosition(position: LocationPosition): Promise<Location>;
 
@@ -763,6 +766,9 @@ function checkRateLimit(response: Response, message?: string): void {
     throw new RateLimitError(seconds, message);
   }
 }
+
+const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
+const photoGalleryKey = (id: string, type: LocationType) => `${type === "Building" || type === "Facility" ? "building" : "location"}:${id}`;
 
 export const services: Services = {
 
@@ -1169,18 +1175,25 @@ export const services: Services = {
     },
 
 
-    save: async (location) => {
+    save: async (location, gallery) => {
 
       if (USE_HTTP_API) {
         const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
-        const body = uploadsNewPhoto
+        const body = gallery !== undefined || uploadsNewPhoto
           ? (() => {
               const form = new FormData();
               Object.entries(locationWritePayload(location)).forEach(([key, value]) => {
                 if (value === undefined || value === null) return;
                 form.append(key, String(value));
               });
-              if (location.photo) {
+              if (gallery !== undefined) {
+                const existingIds = new Set(gallery.filter((photo) => !photo.file).map((photo) => photo.id));
+                const original = photoGalleryCache.get(photoGalleryKey(location.id ?? "", location.type)) ?? [];
+                form.append("removePhotoIds", JSON.stringify(original.filter((photo) => !existingIds.has(photo.id)).map((photo) => Number(photo.id)).filter(Number.isFinite)));
+                const coverIndex = gallery.findIndex((photo) => photo.isCover);
+                if (coverIndex >= 0) form.append("coverIndex", String(coverIndex));
+                gallery.forEach((photo) => { if (photo.file) form.append("photos", photo.file, photo.name); });
+              } else if (location.photo) {
                 const comma = location.photo.dataUrl.indexOf(",");
                 const encoded = location.photo.dataUrl.slice(comma + 1);
                 const binary = atob(encoded);
@@ -1195,6 +1208,7 @@ export const services: Services = {
           body,
         });
         const saved = normalizeBackendLocationMutation(response);
+        if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, saved.type), gallery);
         return saved;
       }
 
@@ -1219,8 +1233,29 @@ export const services: Services = {
       if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
 
       const saved = localAdapter.locations.save(normalized);
+      if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, saved.type), gallery);
       addAudit("Updated Location", saved.name, "Admin", saved.id);
       return wait(clone(saved));
+    },
+
+    getPhotos: async (id, type) => {
+      const key = photoGalleryKey(id, type);
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ items: Array<{ id: string; name: string; type: string; isCover: boolean }> }>(`/api/actions/locations/${encodeURIComponent(id)}/photos?type=${encodeURIComponent(type)}`);
+        const photos = await Promise.all(response.items.map(async (photo) => {
+          const blob = await apiBlob(`/api/actions/locations/${encodeURIComponent(id)}/photos/${encodeURIComponent(photo.id)}?type=${encodeURIComponent(type)}`);
+          return { id: photo.id, name: photo.name, type: photo.type, isCover: photo.isCover, previewUrl: URL.createObjectURL(blob) };
+        }));
+        photoGalleryCache.set(key, photos);
+        return photos;
+      }
+      const cached = photoGalleryCache.get(key);
+      if (cached) return cached.map((photo) => ({
+        ...photo,
+        previewUrl: photo.file ? URL.createObjectURL?.(photo.file) ?? photo.previewUrl : photo.previewUrl,
+      }));
+      const location = locations.find((item) => item.id === id && item.type === type);
+      return location?.photo ? [{ id: "legacy", name: location.photo.name, type: location.photo.type, previewUrl: location.photo.dataUrl, isCover: true }] : [];
     },
 
     savePosition: async (position) => {

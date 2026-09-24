@@ -966,6 +966,43 @@ describe("real locations service boundary", () => {
     expect((request?.body as FormData).get("photo")).toBeInstanceOf(Blob);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("submits multiple location photos with the chosen cover", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "42", name: "Room 204", code: "ROOM-204", type: "Room", parentId: "1", status: "Active", lat: null, lng: null, positioned: false, hasPhoto: true }), { status: 201 }),
+    );
+    const first = new File(["front"], "front.png", { type: "image/png" });
+    const second = new File(["side"], "side.jpg", { type: "image/jpeg" });
+    await httpServices.locations.save({ name: "Room 204", code: "ROOM-204", type: "Room", parentId: "1", status: "Active", lat: null, lng: null, positioned: false }, [
+      { id: "new:front", name: first.name, type: first.type, previewUrl: "", file: first, isCover: false },
+      { id: "new:side", name: second.name, type: second.type, previewUrl: "", file: second, isCover: true },
+    ]);
+    const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.getAll("photos")).toHaveLength(2);
+    expect(form.get("coverIndex")).toBe("1");
+    expect(form.get("removePhotoIds")).toBe("[]");
+  });
+
+  it("removes a stored photo when a Building is reclassified as a Facility", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const previousCreateObjectURL = URL.createObjectURL;
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:photo-preview" });
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "7", name: "front.png", type: "image/png", isCover: true }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(new Blob(["image"], { type: "image/png" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: false }), { status: 200 }));
+    await httpServices.locations.getPhotos("42", "Building");
+    await httpServices.locations.save({ id: "42", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false }, []);
+    const form = fetchMock.mock.calls[2]?.[1]?.body as FormData;
+    expect(form.get("removePhotoIds")).toBe("[7]");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: previousCreateObjectURL });
+    vi.unstubAllEnvs();
+  });
 });
 
 describe("real walking network service boundary", () => {

@@ -10,11 +10,12 @@ import {
   Pagination,
   SelectField,
 } from "../../components/UI";
-import type { Location, LocationDraft, LocationType } from "../../types";
+import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 import { LocationDetailsFields } from "./LocationDetailsModal";
+import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -30,9 +31,6 @@ const blankLocation = (): LocationDraft => ({
   lng: null,
   positioned: false,
 });
-
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 type LocationsRouteState = {
   indoorLocationParent?: Location;
@@ -101,7 +99,15 @@ export function Locations() {
   const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
-  const [photoName, setPhotoName] = useState("");
+  const [photos, setPhotos] = useState<LocationPhotoDraft[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+  const photoLoadSequence = useRef(0);
+  const photosRef = useRef<LocationPhotoDraft[]>([]);
+  photosRef.current = photos;
+  const releasePhotoPreviews = () => {
+    photosRef.current.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
+  };
   const [customFloorMode, setCustomFloorMode] = useState(false);
   const [success, setSuccess] = useState<{
     name: string;
@@ -129,6 +135,9 @@ export function Locations() {
   };
   const closeOverlay = () => {
     if (pendingRef.current) return;
+    photoLoadSequence.current += 1;
+    releasePhotoPreviews();
+    setPhotos([]);
     setDialog(null);
     setSuccess(null);
     setImportSuccess(null);
@@ -235,6 +244,11 @@ export function Locations() {
     }
     processedIndoorHandoffRef.current = handoffKey;
     const floor = params.get("floor") ?? "";
+    photoLoadSequence.current += 1;
+    releasePhotoPreviews();
+    setPhotos([]);
+    setLoadingPhotos(false);
+    setPhotoLoadFailed(false);
     setSelected(parent);
     setDraft({ ...blankLocation(), type: "Room", parentId: parent.id, building: parent.name, floor: floor || undefined });
     setLockedParentId(parent.id);
@@ -486,8 +500,10 @@ export function Locations() {
       if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
         await services.locations.save(handoffParent);
       }
-      const saved = await services.locations.save(normalized);
+      const saved = await services.locations.save(normalized, photos);
       await refresh();
+      releasePhotoPreviews();
+      setPhotos([]);
       setDialog(null);
       setNotice(`${draft.name || "Location"} saved successfully.`);
       setSuccess({
@@ -565,49 +581,34 @@ export function Locations() {
   const openEdit = (item: Location) => {
     setSelected(item);
     setDraft({ ...item, photoRemoved: false });
-    setPhotoName(item.photo?.name ?? "");
+    releasePhotoPreviews();
+    setPhotos([]);
+    setLoadingPhotos(true);
+    setPhotoLoadFailed(false);
     setCustomFloorMode(Boolean(item.floor && !(standardFloorLevels as readonly string[]).includes(item.floor)));
     setLockedParentId(null);
     openDialog("edit");
-    if (item.hasPhoto && !item.photo) {
-      void services.locations.getPhoto(item.id, item.type).then((blob) => {
-        setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) }, photoRemoved: false }));
-        setPhotoName("Location photo");
-      }).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load location photo."));
-    }
-  };
-
-  const selectPhoto = (file: File | undefined) => {
-    if (!file) return;
-    const extension = file.name.toLowerCase().split(".").pop();
-    const validType = PHOTO_TYPES.has(file.type) || (file.type === "" && ["png", "jpg", "jpeg", "webp"].includes(extension ?? ""));
-    if (!validType) {
-      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Choose a PNG, JPEG, or WebP image." }]);
-      return;
-    }
-    if (file.size > MAX_PHOTO_BYTES) {
-      setFieldErrors((current) => [...current.filter((issue) => issue.field !== "photo"), { field: "photo", message: "Photo must be 5 MB or smaller." }]);
-      return;
-    }
-    // Show the user's selection immediately, even while the preview is being decoded.
-    setPhotoName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") return;
-      setDraft((current) => ({ ...current, photo: { name: file.name, type: file.type || `image/${extension}`, dataUrl: reader.result as string }, photoRemoved: false }));
-      setPhotoName(file.name);
-      setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removePhoto = () => {
-    setDraft((current) => ({ ...current, photo: undefined, photoRemoved: current.id !== undefined && current.hasPhoto === true }));
-    setPhotoName("");
-    setFieldErrors((current) => current.filter((issue) => issue.field !== "photo"));
+    const sequence = ++photoLoadSequence.current;
+    void services.locations.getPhotos(item.id, item.type).then((loaded) => {
+      if (sequence !== photoLoadSequence.current) {
+        loaded.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
+        return;
+      }
+      setPhotos(loaded);
+    }).catch((cause) => {
+      if (sequence === photoLoadSequence.current) {
+        setPhotoLoadFailed(true);
+        setError(cause instanceof Error ? cause.message : "Unable to load location photos.");
+      }
+    }).finally(() => {
+      if (sequence === photoLoadSequence.current) setLoadingPhotos(false);
+    });
   };
 
   const openAddRoom = (parent: Location) => {
+    photoLoadSequence.current += 1;
+    setLoadingPhotos(false);
+    setPhotoLoadFailed(false);
     setSelected(parent);
     setDraft({
       ...blankLocation(),
@@ -616,7 +617,8 @@ export function Locations() {
       building: parent.name,
       floor: undefined,
     });
-    setPhotoName("");
+    releasePhotoPreviews();
+    setPhotos([]);
     setCustomFloorMode(false);
     setLockedParentId(parent.id);
     setActionMenuId(null);
@@ -884,8 +886,12 @@ export function Locations() {
                 gap: "6px",
               }}
               onClick={() => {
+                photoLoadSequence.current += 1;
+                setLoadingPhotos(false);
+                setPhotoLoadFailed(false);
                 setDraft(blankLocation());
-                setPhotoName("");
+                releasePhotoPreviews();
+                setPhotos([]);
                 setCustomFloorMode(false);
                 setLockedParentId(null);
                 openDialog("add");
@@ -1308,28 +1314,7 @@ export function Locations() {
               </p>
 
               {/* Upload Box */}
-              <div style={{ border: `1px dashed ${errorFor("photo") ? "#dc2626" : "#d1d5db"}`, borderRadius: "14px", padding: "20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f9fafb", gap: "16px", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                  {draft.photo ? <img src={draft.photo.dataUrl} alt="Selected location photo preview" style={{ width: "56px", height: "56px", objectFit: "cover", borderRadius: "8px" }} /> : <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#d6ede0", display: "grid", placeItems: "center" }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-                    </svg>
-                  </div>}
-                  <div>
-                    <strong style={{ fontSize: "14px", color: "#191c1d" }}>Upload a campus location photo or image</strong>
-                    <p style={{ margin: "2px 0 0", color: "#6b7280", fontSize: "12px" }}>{photoName || "PNG, JPEG, or WebP · max 5 MB"}</p>
-                    <p style={{ margin: "3px 0 0", color: "#6b7280", fontSize: "11px" }}>{draft.hasPhoto && !draft.photo ? "Stored photo will be loaded from the photo service." : "PNG, JPEG, or WebP photos are stored with the Location."}</p>
-                    {errorFor("photo") && <p role="alert" style={{ margin: "3px 0 0", color: "#dc2626", fontSize: "12px" }}>{errorFor("photo")}</p>}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <label style={{ border: "1px solid #0c7441", borderRadius: "999px", padding: "8px 12px", color: "#0c7441", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}>
-                    {draft.photo ? "Replace photo" : "Choose photo"}
-                    <input aria-label="Upload location photo" type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={(event) => selectPhoto(event.target.files?.[0])} />
-                  </label>
-                  {(draft.photo || draft.hasPhoto) && <Button type="button" variant="subtle" onClick={removePhoto} style={{ padding: "8px 12px", fontSize: "12px" }}>Remove</Button>}
-                </div>
-              </div>
+              <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} error={errorFor("photo")} />
             </div>
 
             {/* Bottom Actions */}
@@ -1337,7 +1322,7 @@ export function Locations() {
               <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button disabled={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
+              <Button disabled={saving || loadingPhotos || photoLoadFailed} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
                 {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>

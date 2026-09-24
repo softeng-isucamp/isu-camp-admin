@@ -8,11 +8,13 @@ from model.building import Building
 from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from model.location_photo import LocationPhoto
 from services.audit import log_audit
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
+from services.location_photos import apply_gallery, list_photos, read_gallery_change
 
 actions_bp = Blueprint(
     "actions",
@@ -214,6 +216,8 @@ def add_room_to_building(building_id):
 
     photo, photo_mime_type, error = _photo_upload()
     if error: return error
+    gallery_change, gallery_error = read_gallery_change(request)
+    if gallery_error: return _validation_error({"photo": gallery_error})
 
     try:
         floor_id = (
@@ -238,6 +242,10 @@ def add_room_to_building(building_id):
 
         db.session.add(location)
         db.session.flush()
+        gallery_error = apply_gallery(location, gallery_change)
+        if gallery_error:
+            db.session.rollback()
+            return _validation_error({"photo": gallery_error})
         log_audit("Admin", None, "create", "Location", location.location_id, location.location_name)
         db.session.commit()
 
@@ -297,6 +305,8 @@ def edit_location(location_id):
 
     photo, photo_mime_type, error = _photo_upload()
     if error: return error
+    gallery_change, gallery_error = read_gallery_change(request)
+    if gallery_error: return _validation_error({"photo": gallery_error})
 
     try:
         if building is not None:
@@ -310,6 +320,10 @@ def edit_location(location_id):
                 building.photo_mime_type = photo_mime_type
 
             db.session.flush()
+            gallery_error = apply_gallery(building, gallery_change)
+            if gallery_error:
+                db.session.rollback()
+                return _validation_error({"photo": gallery_error})
             log_audit("Admin", None, "update", "Building", building.building_id, building.building_name)
             db.session.commit()
             return jsonify(building.to_location_dto()), 200
@@ -331,6 +345,10 @@ def edit_location(location_id):
             location.photo_mime_type = photo_mime_type
 
         db.session.flush()
+        gallery_error = apply_gallery(location, gallery_change)
+        if gallery_error:
+            db.session.rollback()
+            return _validation_error({"photo": gallery_error})
         log_audit("Admin", None, "update", "Location", location.location_id, location.location_name)
         db.session.commit()
 
@@ -396,6 +414,47 @@ def view_location_photo(location_id):
             "success": False,
             "message": "Failed to load location photo."
         }), 500
+
+
+def _gallery_owner(location_id):
+    requested_type = request.args.get("type")
+    if requested_type in {"Building", "Facility"}:
+        return Building.query.filter_by(building_id=location_id).first()
+    if requested_type in INDOOR_TYPES:
+        return Location.query.filter_by(location_id=location_id).first()
+    return (Location.query.filter_by(location_id=location_id).first()
+            or Building.query.filter_by(building_id=location_id).first())
+
+
+@actions_bp.route("/locations/<int:location_id>/photos", methods=["GET"])
+def list_location_photos(location_id):
+    _, error = admin_required()
+    if error: return error
+    try:
+        owner = _gallery_owner(location_id)
+        if owner is None:
+            return jsonify({"success": False, "message": "Location not found."}), 404
+        return jsonify({"items": [photo.to_metadata() for photo in list_photos(owner)]})
+    except Exception:
+        logger.exception("Failed to list location photos")
+        return jsonify({"success": False, "message": "Failed to list location photos."}), 500
+
+
+@actions_bp.route("/locations/<int:location_id>/photos/<int:photo_id>", methods=["GET"])
+def view_gallery_photo(location_id, photo_id):
+    _, error = admin_required()
+    if error: return error
+    try:
+        owner = _gallery_owner(location_id)
+        if owner is None:
+            return jsonify({"success": False, "message": "Location not found."}), 404
+        photo = next((item for item in list_photos(owner) if item.photo_id == photo_id), None)
+        if photo is None:
+            return jsonify({"success": False, "message": "Photo not found."}), 404
+        return _photo_response(photo.content, photo.mime_type)
+    except Exception:
+        logger.exception("Failed to load gallery photo")
+        return jsonify({"success": False, "message": "Failed to load photo."}), 500
 
 
 @actions_bp.route("/buildings/<int:building_id>/history", methods=["GET"])
@@ -481,6 +540,10 @@ def delete_location(location_id):
                 "message": "Location not found."
             }), 404
 
+        if building is not None:
+            for child in Location.query.filter_by(building_id=location_id).all() or []:
+                LocationPhoto.query.filter_by(owner_type="location", owner_id=child.location_id).delete()
+        LocationPhoto.query.filter_by(owner_type="building" if building else "location", owner_id=location_id).delete()
         db.session.delete(building or location)
         log_audit("Admin", None, "delete", "Building" if building else "Location", location_id)
         db.session.commit()
