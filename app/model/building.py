@@ -17,6 +17,12 @@ class Building(db.Model):
     # Stores the building polygon coordinates as JSON.
     polygon_coordinates = db.Column(db.JSON, nullable=True)
 
+    # Buildings carry an optional photo, mirroring public.location.photo. The
+    # MIME type is stored alongside the bytes so the image can be served back
+    # with a correct Content-Type.
+    photo = db.Column(db.LargeBinary, nullable=True)
+    photo_mime_type = db.Column(db.String, nullable=True)
+
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
         lng = float(self.longitude) if self.longitude is not None else None
@@ -39,5 +45,5 @@ class Building(db.Model):
             "polygonCoordinates": self.polygon_coordinates,
 
             "positioned": lat is not None and lng is not None,
-            "hasPhoto": False,
+            "hasPhoto": self.photo is not None,
         }
