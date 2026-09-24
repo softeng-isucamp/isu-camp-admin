@@ -499,6 +499,19 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return data as T;
 };
 
+const apiBlob = async (path: string, init?: RequestInit): Promise<Blob> => {
+  const response = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
+    ...init,
+  });
+  if (!response.ok) {
+    // Failures still come back as the standard JSON error envelope.
+    const data = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(data?.message ?? `Request failed (${response.status})`);
+  }
+  return response.blob();
+};
+
 
 // ==========================================
 // Mock Helper
@@ -607,7 +620,7 @@ export interface Services {
 
     savePosition(position: LocationPosition): Promise<Location>;
 
-    getPhoto(id: string): Promise<Blob>;
+    getPhoto(id: string, type?: LocationType): Promise<Blob>;
 
     remove(id: string, type?: LocationType): Promise<void>;
   };
@@ -1210,9 +1223,10 @@ export const services: Services = {
       return wait(clone(location));
     },
 
-    getPhoto: async (id) => {
+    getPhoto: async (id, type) => {
       if (USE_HTTP_API) {
-        throw new Error("Location photo retrieval is not available yet.");
+        const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
+        return apiBlob(`/api/actions/locations/${encodeURIComponent(id)}/photo${typeQuery}`);
       }
       const location = locations.find((item) => item.id === id);
       if (!location?.photo?.dataUrl) throw new Error("Location photo not found.");

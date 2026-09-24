@@ -78,6 +78,13 @@ class Location(db.Model):
         nullable=True
     )
 
+    # Stored alongside the bytes so a photo can be served back with a correct
+    # Content-Type. Rows written before this column exists read back as None.
+    photo_mime_type = db.Column(
+        db.String,
+        nullable=True
+    )
+
     def to_dict(self):
 
         return {
