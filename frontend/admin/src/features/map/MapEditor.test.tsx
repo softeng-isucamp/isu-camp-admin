@@ -74,6 +74,7 @@ vi.mock("../../services/api", () => ({
       updateRouteNode: vi.fn(async (node) => node),
       deleteRouteNode: vi.fn(async () => undefined),
       createPathway: vi.fn(async (pathway) => ({ ...pathway, id: "created-pathway" })),
+      convertPathPoint: vi.fn(),
       updatePathway: vi.fn(async (pathway) => pathway),
       deletePathway: vi.fn(async () => undefined),
       save: vi.fn(),
@@ -121,6 +122,11 @@ describe("Map Editor preview", () => {
     vi.mocked(services.map.updateRouteNode).mockImplementation(async (node) => node);
     vi.mocked(services.map.deleteRouteNode).mockResolvedValue(undefined);
     vi.mocked(services.map.createPathway).mockImplementation(async (pathway) => ({ ...pathway, id: "created-pathway" }));
+    vi.mocked(services.map.convertPathPoint).mockReset();
+    vi.mocked(services.map.convertPathPoint).mockImplementation(async (request) => ({
+      node: { ...(request.node ?? { id: request.existingNodeId, name: "Existing Junction", nodeType: "Junction", lat: request.point[0], lng: request.point[1] }), id: request.existingNodeId ?? "created-conversion-node" } as RouteNode,
+      pathways: request.pathways.map((pathway, index) => ({ ...pathway, id: `created-segment-${index}` })) as [typeof request.pathways[0], typeof request.pathways[1]],
+    }));
     vi.mocked(services.map.updatePathway).mockImplementation(async (pathway) => pathway);
     vi.mocked(services.map.deletePathway).mockResolvedValue(undefined);
     vi.mocked(services.map.buildings).mockResolvedValue([]);
@@ -1572,6 +1578,69 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("button", { name: "Path Point at 16.7207,121.6897" })).toHaveAttribute("data-icon-id", iconIdBeforeDrag);
     fireEvent.dragEnd(screen.getByRole("button", { name: "Path Point at 16.7207,121.6897" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7208,121.6898],[16.721,121.69]]");
+  });
+
+  it("converts a saved Path Point after metadata entry and saves both replacement Pathways together", async () => {
+    vi.mocked(services.map.createRouteNode).mockClear();
+    vi.mocked(services.map.createPathway).mockClear();
+    vi.mocked(services.map.pathways).mockResolvedValue([{
+      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b",
+      distance: "40 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway",
+      direction: "Two-way", status: "Open", allowedModes: ["Walking"],
+      pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]],
+    }]);
+    renderEditor();
+    await screen.findByTestId("path-geometry");
+    await choosePathwayEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Convert to Route Node" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Convert Path Point to Route Node" });
+    expect(services.map.convertPathPoint).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText("Replacement Pathway A way type")).toHaveValue("Walkway");
+    expect(within(dialog).getByLabelText("Replacement Pathway B shade")).toHaveValue("Mostly Shaded");
+    expect(within(dialog).getByLabelText("Converted Route Node name")).toHaveValue("Junction near North Entrance");
+    expect(within(dialog).getByLabelText("Converted Route Node type")).toHaveTextContent("Entrance");
+    fireEvent.change(within(dialog).getByLabelText("Converted Route Node name"), { target: { value: "Library Junction" } });
+    fireEvent.change(within(dialog).getByLabelText("Replacement Pathway B way type"), { target: { value: "Road" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Route Node and Pathways" }));
+
+    await waitFor(() => expect(services.map.convertPathPoint).toHaveBeenCalledWith(expect.objectContaining({
+      pathwayId: "path-1", sequenceNo: 1, point: [16.7207, 121.6897],
+      node: expect.objectContaining({ name: "Library Junction", nodeType: "Junction" }),
+      pathways: [expect.objectContaining({ name: "North Walk A", pathPoints: [] }),
+        expect.objectContaining({ name: "North Walk B", type: "Road", pathPoints: [[16.7208, 121.6898]] })],
+    })));
+    expect(services.map.createRouteNode).not.toHaveBeenCalled();
+    expect(services.map.createPathway).not.toHaveBeenCalled();
+  });
+
+  it("reuses a Route Node already at the selected Path Point", async () => {
+    vi.mocked(services.map.nodes).mockResolvedValue([
+      { id: "node-a", name: "North Entrance", nodeType: "Entrance", lat: 16.7205, lng: 121.6895 },
+      { id: "node-b", name: "South Junction", nodeType: "Junction", lat: 16.721, lng: 121.69 },
+      { id: "node-middle", name: "Existing Junction", nodeType: "Junction", lat: 16.7207, lng: 121.6897 },
+    ]);
+    vi.mocked(services.map.pathways).mockResolvedValue([{
+      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b",
+      distance: "40 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway",
+      direction: "Two-way", status: "Open", allowedModes: ["Walking"], pathPoints: [[16.7207, 121.6897]],
+    }]);
+    renderEditor();
+    await screen.findByTestId("path-geometry");
+    await choosePathwayEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Convert to Route Node" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Convert Path Point to Route Node" });
+    expect(within(dialog).getByText("Existing Junction")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Converted Route Node name")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Route Node and Pathways" }));
+    await waitFor(() => expect(services.map.convertPathPoint).toHaveBeenCalledWith(expect.objectContaining({
+      existingNodeId: "node-middle", node: null,
+    })));
   });
 
   it("applies Parent Pathway metadata and selected Path Point geometry as one draft", async () => {
