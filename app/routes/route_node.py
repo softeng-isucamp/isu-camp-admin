@@ -456,6 +456,123 @@ def _apply_pathway(record, values):
     return points
 
 
+def _segment_metrics(coordinates):
+    distance = 0.0
+    for (lat_a, lng_a), (lat_b, lng_b) in zip(coordinates, coordinates[1:]):
+        a, b = math.radians(lat_a), math.radians(lat_b)
+        delta_lat, delta_lng = b - a, math.radians(lng_b - lng_a)
+        arc = math.sin(delta_lat / 2) ** 2 + math.cos(a) * math.cos(b) * math.sin(delta_lng / 2) ** 2
+        distance += 6371000 * 2 * math.atan2(math.sqrt(arc), math.sqrt(1 - arc))
+    if distance <= 0:
+        raise ValidationError("Each replacement Pathway must have positive length")
+    return max(1, round(distance)), max(1, math.ceil(distance / 80))
+
+
+@route_node_bp.route("/pathways/<int:pathway_id>/convert-point", methods=["POST"])
+def convert_path_point(pathway_id):
+    """Replace one saved interior point with a routable node and two paths."""
+    if error := _guard():
+        return error
+    try:
+        data = _body()
+        original = db.session.get(Pathway, pathway_id, with_for_update=True)
+        if original is None:
+            return _error("Pathway not found", 404)
+        if original.status != "active":
+            raise ValidationError("Only an active Pathway can be split")
+        index = _int(data.get("sequence_no"), "sequence_no") - 1
+        points = list(original.path_points)
+        if index >= len(points):
+            raise ValidationError("Selected Path Point no longer exists")
+        selected = points[index]
+        lat, lng = _coordinates(data.get("point", {}))
+        if abs(float(selected.latitude) - lat) > 1e-8 or abs(float(selected.longitude) - lng) > 1e-8:
+            raise ValidationError("Selected Path Point changed; reload the Pathway")
+        metadata = data.get("pathways")
+        if not isinstance(metadata, list) or len(metadata) != 2 or any(not isinstance(item, dict) for item in metadata):
+            raise ValidationError("Metadata for both replacement Pathways is required")
+        source = RouteNode.query.get(original.source_node_id)
+        destination = RouteNode.query.get(original.destination_node_id)
+        if source is None or destination is None:
+            raise ValidationError("Pathway endpoints no longer exist")
+
+        existing_node_id = _int(data.get("existing_node_id"), "existing_node_id", True)
+        if existing_node_id is not None:
+            node = RouteNode.query.get(existing_node_id)
+            if node is None or node.status != "active" or abs(node.latitude - lat) > 1e-8 or abs(node.longitude - lng) > 1e-8:
+                raise ValidationError("Existing Route Node must be active and at the selected point")
+        else:
+            node_data = data.get("node")
+            if not isinstance(node_data, dict):
+                raise ValidationError("Route Node metadata is required")
+            if RouteNode.query.filter_by(latitude=lat, longitude=lng, status="active").first():
+                raise ValidationError("A Route Node already exists at this Path Point; reload the map")
+            values = _node_values({**node_data, "latitude": lat, "longitude": lng})
+            if isinstance(values, tuple):
+                return _error(*values)
+            if values["node_type"] == "entrance" and values["building_id"] is None:
+                raise ValidationError("Entrance Route Nodes require a Building")
+            node = RouteNode(**values)
+            db.session.add(node)
+            db.session.flush()
+
+        parts = (points[:index], points[index + 1:])
+        endpoints = ((source, node), (node, destination))
+        replacements = []
+        for part, (start, end), details in zip(parts, endpoints, metadata):
+            coordinates = [(start.latitude, start.longitude)] + [
+                (float(point.latitude), float(point.longitude)) for point in part
+            ] + [(end.latitude, end.longitude)]
+            distance, minutes = _segment_metrics(coordinates)
+            payload = {
+                "source_node_id": start.node_id,
+                "destination_node_id": end.node_id,
+                "path_type": details.get("path_type", original.path_type),
+                "distance_m": distance,
+                "estimated_minutes": minutes,
+                "name": details.get("name"),
+                "status": details.get("status", "active"),
+                "direction": details.get("direction", original.direction),
+                "shade": details.get("shade", original.shade),
+                "allowed_modes": details.get("allowed_modes", [mode.mode for mode in original.allowed_modes]),
+                "path_points": [
+                    {**point.to_dict(), "sequence_no": sequence_no}
+                    for sequence_no, point in enumerate(part, 1)
+                ],
+            }
+            values = _pathway_values(payload)
+            if isinstance(values, tuple):
+                db.session.rollback()
+                return _error(*values)
+            replacement = Pathway(
+                source_node_id=start.node_id,
+                destination_node_id=end.node_id,
+                path_type=values["path_type"],
+                distance_m=distance,
+                estimated_minutes=minutes,
+            )
+            replacement_points = _apply_pathway(replacement, values)
+            db.session.add(replacement)
+            db.session.flush()
+            _replace_points(replacement, replacement_points)
+            replacements.append(replacement)
+
+        original.status = "inactive"
+        if existing_node_id is None:
+            log_audit("Admin", None, "create", "Route Node", node.node_id, node.name)
+        for replacement in replacements:
+            log_audit("Admin", None, "create", "Pathway", replacement.pathway_id, replacement.name)
+        log_audit("Admin", None, "split", "Pathway", original.pathway_id, original.name)
+        db.session.commit()
+        return jsonify(success=True, route_node=node.to_dict(), pathways=[item.to_dict() for item in replacements]), 201
+    except ValidationError as error:
+        db.session.rollback()
+        return _error(str(error))
+    except Exception:
+        db.session.rollback()
+        return _error("Could not convert Path Point", 500)
+
+
 @route_node_bp.route("/pathways", methods=["POST"])
 def create_pathway():
     if error := _guard():

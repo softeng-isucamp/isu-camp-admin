@@ -62,6 +62,7 @@ import type { NetworkSnapshot } from "../../services/network";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
+import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
 import { createLocalMapFeatureWorkflow } from "./localFeature/LocalMapFeatureWorkflow";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
@@ -84,6 +85,7 @@ import "leaflet/dist/leaflet.css";
 // ============================================================================
 
 type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";
+
 
 function normalizeFloorLabel(raw: string): string {
   const trimmed = raw.trim();
@@ -683,6 +685,7 @@ export function MapEditor() {
   const [pointDraftDirty, setPointDraftDirty] = useState(false);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
+  const [conversionDraft, setConversionDraft] = useState<PathPointConversionDraft | null>(null);
   const [pathPointDragPreview, setPathPointDragPreview] = useState<{
     index: number;
     point: [number, number];
@@ -724,7 +727,7 @@ export function MapEditor() {
     "Entrance" | "Junction" | "Access Point"
   >("Entrance");
   const [placingNodeName, setPlacingNodeName] = useState("");
-  type SaveAction = "route-node" | "position" | "pathway" | "building" | "route-node-metadata" | "pathway-metadata";
+  type SaveAction = "route-node" | "position" | "pathway" | "building" | "route-node-metadata" | "pathway-metadata" | "path-point-conversion";
   const [savingAction, setSavingAction] = useState<SaveAction | null>(null);
   const savingActionRef = useRef<SaveAction | null>(null);
   const beginSaving = (action: SaveAction) => {
@@ -1507,6 +1510,8 @@ export function MapEditor() {
       setDirty(true);
       setPlacingNodeName("");
       setMode("select");
+      setRouteNodeDraft({ ...confirmedNode });
+      setRouteNodeDraftOriginal({ ...confirmedNode });
       setSelected({ type: "node", id: confirmedNode.id });
       completeToolDraft("point");
     } catch (cause) {
@@ -2078,34 +2083,50 @@ export function MapEditor() {
     setPathDraftDirty(true);
   };
 
-  const createJunctionAtCrossing = () => {
+  const createJunctionAtCrossing = async () => {
     const crossing = pathwayCrossings[0];
     if (!crossing) return;
     const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
     const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);
     if (!pathwayA || !pathwayB) return;
-    const junctionId = `junction-${Date.now()}`;
-    const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junctionId);
-    setLocalNodes((current) => [...current.filter((node) => node.id !== junctionId), crossingChange.junction]);
-    setLocalPathways((current) => [
-      ...current.filter((pathway) =>
-        !crossingChange.closedPathways.some((closed) => closed.id === pathway.id)
-        && !crossingChange.replacementPathways.some((replacement) => replacement.id === pathway.id)),
-      ...crossingChange.closedPathways,
-      ...crossingChange.replacementPathways,
-    ]);
-    workingSessionManager.executeBatch(
-      `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
-      "Walking Network",
-      junctionId,
-      crossingChange.operations,
-    );
-    setEditingPathId(null);
-    setPathPoints([]);
-    setSelected({ type: "node", id: junctionId });
-    setMode("select");
-    setDirty(true);
-    completeToolDraft("pathway");
+    if (!beginSaving("route-node")) return;
+    const provisional = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, `pending-junction-${Date.now()}`);
+    try {
+      const junction = await services.map.createRouteNode({
+        name: provisional.junction.name,
+        nodeType: "Junction",
+        associatedPlaceId: null,
+        lat: provisional.junction.lat,
+        lng: provisional.junction.lng,
+      });
+      const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junction.id);
+      setLocalNodes((current) => [...current.filter((node) => node.id !== junction.id), junction]);
+      setLocalPathways((current) => [
+        ...current.filter((pathway) =>
+          !crossingChange.closedPathways.some((closed) => closed.id === pathway.id)
+          && !crossingChange.replacementPathways.some((replacement) => replacement.id === pathway.id)),
+        ...crossingChange.closedPathways,
+        ...crossingChange.replacementPathways,
+      ]);
+      workingSessionManager.executeBatch(
+        `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
+        "Walking Network",
+        junction.id,
+        crossingChange.operations,
+      );
+      setEditingPathId(null);
+      setPathPoints([]);
+      setRouteNodeDraft({ ...junction });
+      setRouteNodeDraftOriginal({ ...junction });
+      setSelected({ type: "node", id: junction.id });
+      setMode("select");
+      setDirty(true);
+      completeToolDraft("pathway");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create the Junction Route Node.");
+    } finally {
+      endSaving();
+    }
   };
 
   const activeTool: ToolType = mode === "place" || mode === "move"
@@ -2699,6 +2720,82 @@ export function MapEditor() {
       || (!pathwayDraftOriginal && provisionalPathwayId === namedPathwayFrame.id)
     ),
   );
+  const startPathPointConversion = () => {
+    if (!activePathway || selectedPathPointIndex === null || !pathPoints[selectedPathPointIndex] || pathwayFrameDirty || pathDraftDirty) return;
+    const index = selectedPathPointIndex;
+    const point = pathPoints[index];
+    const existingNode = currentNodes.find((node) => node.status !== "Inactive"
+      && Math.abs(node.lat - point[0]) <= 1e-8 && Math.abs(node.lng - point[1]) <= 1e-8);
+    const nearestBuilding = currentBuildings
+      .filter((building) => building.points.length >= 3)
+      .map((building) => ({ building, distance: distanceInMeters(point, polygonFeatureAnchor(building.points)) }))
+      .sort((left, right) => left.distance - right.distance)[0]?.building;
+    const campusReference = nearestBuilding?.name
+      ?? currentNodes.find((node) => node.id === activePathway.sourceNodeId)?.name
+      ?? currentNodes.find((node) => node.id === activePathway.destinationNodeId)?.name;
+    const nodeId = existingNode?.id ?? "pending-conversion-node";
+    const segment = (suffix: "A" | "B", pathPoints: [number, number][], sourceNodeId: string, destinationNodeId: string): Pathway => ({
+      ...activePathway,
+      id: `${activePathway.id}-${suffix.toLowerCase()}`,
+      name: `${activePathway.name} ${suffix}`,
+      sourceNodeId,
+      destinationNodeId,
+      pathPoints,
+      allowedModes: activePathway.allowedModes?.length ? activePathway.allowedModes : ["Walking"],
+      status: activePathway.status === "Open" || activePathway.status === "Active" ? activePathway.status : "Active",
+    });
+    setConversionDraft({
+      pathwayId: activePathway.id,
+      index,
+      point: [...point],
+      existingNodeId: existingNode?.id ?? null,
+      node: { name: campusReference ? `Junction near ${campusReference}` : "", nodeType: "Junction", lat: point[0], lng: point[1], status: "Active", associatedPlaceId: null },
+      pathways: [
+        segment("A", pathPoints.slice(0, index), activePathway.sourceNodeId, nodeId),
+        segment("B", pathPoints.slice(index + 1), nodeId, activePathway.destinationNodeId),
+      ],
+    });
+    setError("");
+  };
+  const updateConversionPathway = (index: 0 | 1, change: Partial<Pathway>) => setConversionDraft((draft) => {
+    if (!draft) return draft;
+    const pathways: [Pathway, Pathway] = [...draft.pathways];
+    pathways[index] = { ...pathways[index], ...change };
+    return { ...draft, pathways };
+  });
+  const savePathPointConversion = async () => {
+    if (!conversionDraft || !beginSaving("path-point-conversion")) return;
+    try {
+      const result = await services.map.convertPathPoint({
+        pathwayId: conversionDraft.pathwayId,
+        sequenceNo: conversionDraft.index + 1,
+        point: conversionDraft.point,
+        node: conversionDraft.existingNodeId ? null : conversionDraft.node,
+        existingNodeId: conversionDraft.existingNodeId,
+        pathways: conversionDraft.pathways,
+      });
+      const original = currentPathways.find((item) => item.id === conversionDraft.pathwayId);
+      if (original) setLocalPathways((items) => [
+        ...items.filter((item) => item.id !== original.id && !result.pathways.some((pathway) => pathway.id === item.id)),
+        { ...original, status: "Closed" }, ...result.pathways,
+      ]);
+      if (!conversionDraft.existingNodeId) setLocalNodes((items) => [...items.filter((item) => item.id !== result.node.id), result.node]);
+      setConversionDraft(null);
+      setEditingPathId(null);
+      setPathwayDraft(null);
+      setPathwayDraftOriginal(null);
+      setSelectedPathPointIndex(null);
+      setPathDraftDirty(false);
+      setMode("select");
+      setSelected({ type: "node", id: result.node.id });
+      setError("");
+      await refreshMapData();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not convert Path Point.");
+    } finally {
+      endSaving();
+    }
+  };
   const applyPathwayFrame = async () => {
     if (!namedPathwayFrame || pathwayFrameIssues.length > 0) {
       if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
@@ -3126,6 +3223,7 @@ export function MapEditor() {
               }} />
             </label></div>
             {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
+            {(pathwayFrameDirty || pathDraftDirty) && <p role="status">Update Pathway before converting this Path Point.</p>}
             <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? activePathway?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label><label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
             <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button></div>
           </>
@@ -3139,6 +3237,7 @@ export function MapEditor() {
         overflowActions: [
           { label: "✓ Update Pathway", onSelect: applyPathwayFrame },
           { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
+          { label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: startPathPointConversion },
           {
             label: "↩ Inspect Parent Pathway",
             onSelect: () => {
@@ -4641,6 +4740,18 @@ export function MapEditor() {
         />
       )}
 
+      {conversionDraft && <PathPointConversionModal
+        draft={conversionDraft}
+        parentName={activePathway?.name ?? conversionDraft.pathwayId}
+        nodes={currentNodes}
+        buildings={buildingAssociationOptions}
+        error={error}
+        saving={savingAction === "path-point-conversion"}
+        onClose={() => { if (savingAction !== "path-point-conversion") setConversionDraft(null); }}
+        onNodeChange={(change) => setConversionDraft((draft) => draft ? { ...draft, node: { ...draft.node, ...change } } : draft)}
+        onPathwayChange={updateConversionPathway}
+        onSave={savePathPointConversion}
+      />}
       {addRoomOpen && selectedBuilding && (
         <Modal title="Add Room" subtitle={`Add an indoor Room under ${selectedBuilding.name}.`} size="sm" variant="green" onClose={() => setAddRoomOpen(false)}>
           <label className="block text-xs font-semibold text-[#3f4941]">Name
