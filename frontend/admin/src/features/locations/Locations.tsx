@@ -570,7 +570,7 @@ export function Locations() {
     setLockedParentId(null);
     openDialog("edit");
     if (item.hasPhoto && !item.photo) {
-      void services.locations.getPhoto(item.id).then((blob) => {
+      void services.locations.getPhoto(item.id, item.type).then((blob) => {
         setDraft((current) => ({ ...current, photo: { name: "Location photo", type: blob.type, dataUrl: URL.createObjectURL(blob) }, photoRemoved: false }));
         setPhotoName("Location photo");
       }).catch((cause) => setError(cause instanceof Error ? cause.message : "Unable to load location photo."));
