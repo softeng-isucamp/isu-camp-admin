@@ -90,6 +90,7 @@ vi.mock("../../services/api", () => ({
         pageSize: 50,
       })),
       save: undefined as unknown as typeof services.locations.save,
+      getPhotos: vi.fn(async () => []),
     },
   },
 }));
@@ -308,12 +309,13 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering Hall" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Location" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
 
     await waitFor(() => expect(saveLocation).toHaveBeenCalledWith(expect.objectContaining({
       id: "building-eng",
       type: "Facility",
-    })));
+    }), []));
     expect(await screen.findByRole("region", { name: "Building summary" })).toHaveTextContent("ENG · Facility");
   });
 
@@ -762,6 +764,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     fireEvent.change(screen.getByLabelText("Location name"), { target: { value: "Main Library" } });
     fireEvent.change(screen.getByRole("textbox", { name: /DESCRIPTION/ }), { target: { value: "Campus library services" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Location" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
@@ -822,6 +825,7 @@ describe("Map Editor preview", () => {
     const typeOptions = within(screen.getAllByRole("combobox")[0]).getAllByRole("option");
     expect(typeOptions.map((option) => option.textContent)).toEqual(["Building", "Facility"]);
     fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Location" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
 
     expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
