@@ -466,9 +466,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       "Building",
       "Facility",
     ]);
-    expect(screen.queryByLabelText("Latitude")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Longitude")).not.toBeInTheDocument();
-    expect(screen.getByText("Spatial position is managed in Map Editor.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Latitude")).toHaveValue("Not positioned");
+    expect(screen.getByLabelText("Longitude")).toHaveValue("Not positioned");
+    expect(screen.queryByText("Spatial position is managed in Map Editor.")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
