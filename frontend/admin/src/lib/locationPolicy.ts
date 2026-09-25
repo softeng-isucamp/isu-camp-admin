@@ -64,7 +64,7 @@ export interface LocationPolicyOptions {
   directory: readonly Location[];
   /** New indoor records require a floor; legacy records may omit it. */
   requireFloorLevel?: boolean;
-  /** Bulk imports use the controlled Floor Level vocabulary. */
+  /** Directory records use the controlled Floor Level vocabulary. */
   requireKnownFloorLevel?: boolean;
   /** The record being edited, which is allowed to retain its own code. */
   currentId?: string;

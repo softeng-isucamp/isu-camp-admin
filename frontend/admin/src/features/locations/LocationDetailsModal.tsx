@@ -20,24 +20,52 @@ export function LocationCoordinatesFields({
   lat,
   lng,
   positioned,
-}: Pick<Location, "lat" | "lng" | "positioned">) {
+  onPickOnMap,
+  parentLabel,
+}: Pick<Location, "lat" | "lng" | "positioned"> & {
+  onPickOnMap?: () => void;
+  parentLabel?: string;
+}) {
   return (
-    <div className="form-grid-two">
-      <Field
-        aria-label="Latitude"
-        label="LATITUDE"
-        readOnly
-        title="Read-only coordinate"
-        value={positioned && lat !== null ? lat.toFixed(6) : "Not positioned"}
-      />
-      <Field
-        aria-label="Longitude"
-        label="LONGITUDE"
-        readOnly
-        title="Read-only coordinate"
-        value={positioned && lng !== null ? lng.toFixed(6) : "Not positioned"}
-      />
-    </div>
+    <section className="rounded-2xl border border-[#dbe5df] bg-[#f8fbf9] p-4" aria-label="Map coordinates">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#234333]">Map coordinates</h3>
+          <p className="mt-1 text-[11px] text-[#526359]">
+            {onPickOnMap
+              ? `Coordinates for this indoor location inside ${parentLabel || "its parent building"}.`
+              : "Position inherited from the mapped footprint."}
+          </p>
+        </div>
+        {onPickOnMap && (
+          <Button type="button" variant="subtle" className="shrink-0" onClick={onPickOnMap}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+              <circle cx="12" cy="10" r="2.5" />
+            </svg>
+            Pick on map
+          </Button>
+        )}
+      </div>
+      <div className="form-grid-two">
+        <Field
+          aria-label="Latitude"
+          label="LATITUDE"
+          type="text"
+          readOnly
+          title={onPickOnMap ? "Read-only coordinate. Set it by picking a point on the map." : "Read-only coordinate"}
+          value={positioned && lat !== null ? lat.toFixed(6) : "Not positioned"}
+        />
+        <Field
+          aria-label="Longitude"
+          label="LONGITUDE"
+          type="text"
+          readOnly
+          title={onPickOnMap ? "Read-only coordinate. Set it by picking a point on the map." : "Read-only coordinate"}
+          value={positioned && lng !== null ? lng.toFixed(6) : "Not positioned"}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -91,6 +119,7 @@ interface LocationDetailsModalProps {
   allowedTypes?: LocationType[];
   onClose: () => void;
   onSubmit: (location: Location, photos: LocationPhotoDraft[]) => void | Promise<void>;
+  onPickIndoorLocationOnMap?: () => void;
 }
 
 export function LocationDetailsModal({
@@ -99,6 +128,7 @@ export function LocationDetailsModal({
   allowedTypes,
   onClose,
   onSubmit,
+  onPickIndoorLocationOnMap,
 }: LocationDetailsModalProps) {
   const [draft, setDraft] = useState<Location>({ ...location });
   const [error, setError] = useState("");
@@ -135,7 +165,7 @@ export function LocationDetailsModal({
       : undefined
   );
 
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     const normalized = locationPolicy.normalize(draft, {
       directory,
       previous: location,
@@ -147,11 +177,11 @@ export function LocationDetailsModal({
     });
     if (!normalized.name.trim() || !normalized.code.trim() || !String(normalized.function ?? "").trim()) {
       setError("Location name, code, and description are required.");
-      return;
+      return false;
     }
     if (evaluation.issues.length) {
       setError(evaluation.issues[0].message);
-      return;
+      return false;
     }
     setSubmitting(true);
     setError("");
@@ -159,21 +189,29 @@ export function LocationDetailsModal({
       await onSubmit({
         ...normalized,
         id: location.id,
-        lat: location.lat,
-        lng: location.lng,
-        positioned: location.positioned,
+        lat: draft.lat,
+        lng: draft.lng,
+        positioned: draft.lat !== null && draft.lng !== null,
       }, photos);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save location.");
+      return false;
     } finally {
       setSubmitting(false);
     }
   };
 
+  const saveAndPickOnMap = async () => {
+    if (await save()) onPickIndoorLocationOnMap?.();
+  };
+
   return (
     <Modal
       title="Edit Location"
-      subtitle="Locations owns identity and descriptive fields. Spatial position remains locked to the Map Editor."
+      subtitle={locationPolicy.classify(location.type).kind === "indoor"
+        ? "Edit the room coordinates here or pick its position inside the parent Building on the map."
+        : "Locations owns identity and descriptive fields. Building position comes from its footprint."}
       size="md"
       variant="green"
       onClose={onClose}
@@ -182,10 +220,13 @@ export function LocationDetailsModal({
       <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
       <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} />
       {locationPolicy.classify(draft.type).kind === "indoor" ? (
-        <div className="borrowed-spatial-lock" title="Indoor locations inherit their position from the selected building.">
-          <strong>🔒 Indoor Location</strong>
-          <span>Floor context only · not independently routable</span>
-        </div>
+        <LocationCoordinatesFields
+          lat={draft.lat}
+          lng={draft.lng}
+          positioned={draft.positioned}
+          parentLabel={draft.building}
+          onPickOnMap={onPickIndoorLocationOnMap ? () => { void saveAndPickOnMap(); } : undefined}
+        />
       ) : (
         <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
       )}

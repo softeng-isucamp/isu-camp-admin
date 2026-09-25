@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createLocationsBulkImportTemplate,
   normalizeBackendDashboardSummary,
   normalizeBackendLocationPage,
   services,
@@ -232,13 +231,6 @@ describe("mock service contracts", () => {
       .toEqual({ valid: true, errors: [], groups: [] });
   });
 
-  it("reports invalid import JSON and missing references", async () => {
-    await expect(services.imports.locations({ json: "{bad" })).resolves.toMatchObject({
-      imported: 0,
-      errors: ["Invalid JSON file."],
-    });
-  });
-
   it("supports deterministic injectable save failures", async () => {
     setMockFailure("mapSave", true);
     await expect(services.map.save()).rejects.toThrow("Mock mapSave failed");
@@ -404,35 +396,6 @@ describe("mock service contracts", () => {
     expect(result.total).toBe(result.items.length);
   });
 
-  it("keeps import validation transactional until commit", async () => {
-    const before = (await services.locations.list()).total;
-    const payload = JSON.stringify({
-      id: "loc-preview",
-      name: "Preview Facility",
-      code: "PRE-01",
-      type: "Room",
-      parentId: "osm-location-c5fb7a267a8ca63d",
-      floor: "Ground Floor",
-      status: "Active",
-      lat: null,
-      lng: null,
-    });
-    await expect(services.imports.locations({ json: payload })).resolves.toMatchObject({
-      imported: 1,
-      errors: [],
-    });
-    expect((await services.locations.list()).total).toBe(before);
-    await expect(
-      services.imports.locations({ json: payload, commit: true }),
-    ).resolves.toMatchObject({
-      imported: 1,
-      errors: [],
-    });
-    expect(
-      (await services.locations.list("Preview Facility")).items,
-    ).toHaveLength(1);
-  });
-
   it("enforces unique codes when the local adapter creates a new location", () => {
     const adapter = createLocalAdapter({
       locations: [{
@@ -479,101 +442,6 @@ describe("mock service contracts", () => {
     })).toThrow("Location code must be unique.");
   });
 
-  it("validates bulk imports transactionally with batch parents and field-level errors", async () => {
-    const before = (await services.locations.list()).total;
-    const invalid = JSON.stringify([
-      { id: "bulk-room", name: "Batch room", code: "BATCH-ROOM", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: "Active", lat: null, lng: null },
-      { id: "bulk-room-2", name: "Batch room two", code: "BATCH-ROOM-2", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "1st Floor", status: "Active", lat: null, lng: null },
-      { id: "bad", name: "", code: "", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: "Active", lat: null, lng: null },
-    ]);
-    const result = await services.imports.locations({ json: invalid, commit: true, mode: "add" });
-    expect(result.errors).toEqual(expect.arrayContaining([expect.stringMatching(/^Row 3, name:/), expect.stringMatching(/^Row 3, code:/)]));
-    expect((await services.locations.list()).total).toBe(before);
-
-    const valid = JSON.stringify(JSON.parse(invalid).slice(0, 2));
-    await expect(services.imports.locations({ json: valid, commit: true, mode: "add" })).resolves.toMatchObject({ imported: 2, errors: [] });
-    expect((await services.locations.list()).items.find((item) => item.id === "bulk-room")?.parentId).toBe("osm-location-c5fb7a267a8ca63d");
-    const duplicateResult = await services.imports.locations({ json: valid, mode: "add" });
-    expect(duplicateResult.imported).toBe(0);
-    expect(duplicateResult.errors).toEqual(expect.arrayContaining([expect.stringMatching(/already exists/)]));
-  });
-
-  it("updates bulk records by id first and then code, rejecting unmatched rows", async () => {
-    const original = (await services.locations.list()).items[0];
-    const payload = JSON.stringify([
-      { ...original, name: "Updated by id", code: "A-DIFFERENT-CODE", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", lat: null, lng: null },
-      { id: "unmatched-id", name: "Updated by code", code: original.code, type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: original.status, lat: null, lng: null },
-    ]);
-    await expect(services.imports.locations({ json: payload, commit: true, mode: "update" })).resolves.toMatchObject({ imported: 2, errors: [] });
-    expect((await services.locations.list()).items.find((item) => item.id === original.id)?.name).toBe("Updated by code");
-    const before = (await services.locations.list()).total;
-    await expect(services.imports.locations({ json: JSON.stringify({ id: "missing", name: "Missing", code: "MISSING", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: "Active", lat: null, lng: null }), commit: true, mode: "update" })).resolves.toMatchObject({ imported: 0, errors: [expect.stringMatching(/no existing location/)] });
-    expect((await services.locations.list()).total).toBe(before);
-    const template = createLocationsBulkImportTemplate();
-    const templateRows = JSON.parse(template) as Array<Record<string, unknown>>;
-    const importContractFields = ["id", "name", "code", "type", "parentId", "status", "lat", "lng"];
-    expect(templateRows.every((row) => importContractFields.every((field) => field in row))).toBe(true);
-    expect(templateRows).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor" }),
-    ]));
-  });
-
-  it("restricts imports to existing Buildings and supported Floor Levels", async () => {
-    const before = (await services.locations.list()).total;
-    const building = (await services.locations.list("computer lab")).items.find((item) => item.type === "Building");
-    expect(building).toBeDefined();
-
-    const base = {
-      name: "Import validation row",
-      parentId: building!.id,
-      status: "Active" as const,
-      lat: null,
-      lng: null,
-    };
-    const rows = [
-      { ...base, id: "reject-building", code: "REJECT-BUILDING", type: "Building", parentId: null },
-      { ...base, id: "reject-outdoor", code: "REJECT-OUTDOOR", type: "Outdoor Point Location" },
-      { ...base, id: "reject-facility", code: "REJECT-FACILITY", type: "Facility" },
-      { ...base, id: "reject-floor", code: "REJECT-FLOOR", type: "Floor" },
-      { ...base, id: "reject-unknown", code: "REJECT-UNKNOWN", type: "Unknown" },
-      { ...base, id: "reject-building-ref", code: "REJECT-BUILDING-REF", type: "Room", parentId: "missing-building", floor: "Ground Floor" },
-      { ...base, id: "reject-missing-floor", code: "REJECT-MISSING-FLOOR", type: "Room" },
-      { ...base, id: "reject-unspecified-floor", code: "REJECT-UNSPECIFIED-FLOOR", type: "Room", floor: "Unspecified Floor" },
-      { ...base, id: "reject-invalid-floor", code: "REJECT-INVALID-FLOOR", type: "Room", floor: "Mezzanine" },
-    ];
-
-    const result = await services.imports.locations({ json: JSON.stringify(rows), commit: true });
-    expect(result.imported).toBe(0);
-    expect(result.errors).toHaveLength(9);
-    expect(result.errors).toEqual(expect.arrayContaining([
-      expect.stringContaining("Row 1, type: only Room, Office, Laboratory, and Restroom"),
-      expect.stringContaining("Row 2, type: only Room, Office, Laboratory, and Restroom"),
-      expect.stringContaining("Row 6, parentId: The selected parent Location does not exist."),
-      expect.stringContaining("Row 7, floor: Indoor Locations require a Floor Level."),
-      expect.stringContaining("Row 8, floor: Unspecified Floor is only for legacy records"),
-      expect.stringContaining("Row 9, floor: Floor Level must be one of"),
-    ]));
-    expect((await services.locations.list()).total).toBe(before);
-  });
-
-  it("treats mixed-case duplicate import codes as one code", async () => {
-    const before = (await services.locations.list()).total;
-    const building = (await services.locations.list("computer lab")).items.find((item) => item.type === "Building");
-    expect(building).toBeDefined();
-
-    const result = await services.imports.locations({
-      json: JSON.stringify([
-        { id: "case-code-one", name: "Case Code One", code: "CASE-CODE", type: "Room", parentId: building!.id, floor: "Ground Floor", status: "Active", lat: null, lng: null },
-        { id: "case-code-two", name: "Case Code Two", code: "case-code", type: "Office", parentId: building!.id, floor: "1st Floor", status: "Active", lat: null, lng: null },
-      ]),
-      commit: true,
-    });
-
-    expect(result.imported).toBe(0);
-    expect(result.errors).toEqual(["Row 2, code: duplicates another row in this file."]);
-    expect((await services.locations.list()).total).toBe(before);
-  });
-
   it("keeps legacy indoor records without a floor under Unspecified Floor", async () => {
     const legacy = await services.locations.save({
       id: "legacy-unspecified-floor", name: "Legacy Unspecified Room", code: "LEGACY-UNSPECIFIED",
@@ -611,31 +479,6 @@ describe("mock service contracts", () => {
     expect(remaining.some((item) => item.id === second.id || item.id === secondChild.id)).toBe(true);
   });
 
-  it.skip("uses a code-matched parent's durable ID for batch children and records exact histories", async () => {
-    const parent = await services.locations.save({
-      id: "durable-parent", name: "Durable Parent", code: "DURABLE", type: "Building", parentId: null,
-      status: "Active", lat: null, lng: null, positioned: false,
-    });
-    const child = await services.locations.save({
-      id: "separate-id-target", name: "ID Target", code: "ID-TARGET", type: "Facility", parentId: null,
-      status: "Active", lat: null, lng: null, positioned: false,
-    });
-    const updateRows = JSON.stringify([
-      { id: child.id, name: "Updated by ID", code: "NEW-CODE", type: child.type, parentId: null, status: child.status, lat: null, lng: null },
-      { id: "incoming-parent-id", name: parent.name, code: parent.code, type: parent.type, parentId: null, status: parent.status, lat: null, lng: null },
-      { id: "incoming-child", name: "Imported Child", code: "INCOMING-CHILD", type: "Room", parentId: "incoming-parent-id", floor: "Ground Floor", status: "Active", lat: null, lng: null },
-    ]);
-    await expect(services.imports.locations({ json: updateRows, commit: true, mode: "update" })).resolves.toMatchObject({ imported: 0, errors: [expect.stringMatching(/no existing location/)] });
-
-    await services.locations.save({ id: "incoming-child", name: "Existing Child", code: "INCOMING-CHILD", type: "Room", parentId: parent.id, building: parent.name, status: "Active", lat: null, lng: null, positioned: false });
-    await expect(services.imports.locations({ json: updateRows, commit: true, mode: "update" })).resolves.toMatchObject({ imported: 3, errors: [] });
-    expect((await services.locations.list()).items.find((location) => location.id === child.id)).toMatchObject({ name: "Updated by ID", code: "NEW-CODE" });
-    expect((await services.locations.list()).items.find((location) => location.id === "incoming-child")?.parentId).toBe(parent.id);
-    expect((await services.logs.forLocation(parent.id)).items.some((entry) => entry.action === "Bulk Updated Location")).toBe(true);
-    expect((await services.logs.forLocation("incoming-child")).items.some((entry) => entry.action === "Bulk Updated Location")).toBe(true);
-    expect((await services.logs.forLocation(parent.id)).items.every((entry) => entry.target === parent.name)).toBe(true);
-  });
-
   it("associates save and position audits exactly while keeping targets readable", async () => {
     const precise = await services.locations.save({ id: "audit-exact", name: "Exact Hall", code: "EXACT", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "audit-substring", name: "Exact Hall Annex", code: "ANNEX", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
@@ -653,17 +496,6 @@ describe("mock service contracts", () => {
     expect(history.items).toHaveLength(2);
     expect(history.items.map((entry) => entry.target)).toEqual(expect.arrayContaining(["Original audit name", "Renamed audit name"]));
     expect(history.items.every((entry) => entry.targetId === original.id)).toBe(true);
-  });
-
-  it("rejects invalid bulk coordinate pairs and ranges transactionally", async () => {
-    const totalBefore = (await services.locations.list()).total;
-    const invalidCoordinates = JSON.stringify([
-      { id: "pair-error", name: "Pair error", code: "PAIR", type: "Facility", parentId: null, status: "Active", lat: 16.72, lng: null },
-      { id: "range-error", name: "Range error", code: "RANGE", type: "Facility", parentId: null, status: "Active", lat: 100, lng: 121.69 },
-    ]);
-    const result = await services.imports.locations({ json: invalidCoordinates, commit: true });
-    expect(result.errors).toEqual(expect.arrayContaining([expect.stringMatching(/^Row 1, type:.*only Room/), expect.stringMatching(/^Row 2, type:.*only Room/)]));
-    expect((await services.locations.list()).total).toBe(totalBefore);
   });
 
   it("exposes injectable location save failures", async () => {
@@ -890,6 +722,31 @@ describe("real locations service boundary", () => {
 
     await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/locations", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: saved.name, code: saved.code, type: saved.type, parentId: saved.parentId, building: saved.building, floor: saved.floor, function: saved.function, keywords: saved.keywords, status: saved.status }) }));
+  });
+
+  it("saves an indoor marker through its Building scoped endpoint", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const saved = {
+      id: "8", name: "Reading Room", code: "LIB-R1", type: "Room",
+      parentId: "42", building: "Library", floor: "Ground Floor",
+      status: "Active", lat: 16.7205, lng: 121.6895, positioned: true,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(saved), { status: 200 }),
+    );
+
+    await expect(httpServices.locations.saveIndoorPosition({
+      id: "8", buildingId: "42", lat: 16.7205, lng: 121.6895,
+    })).resolves.toMatchObject(saved);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/map/buildings/42/indoor-locations/8",
+      expect.objectContaining({
+        method: "PATCH", credentials: "include",
+        body: JSON.stringify({ lat: 16.7205, lng: 121.6895 }),
+      }),
+    );
   });
 
   it("creates a Building through the canonical locations endpoint without a client id", async () => {

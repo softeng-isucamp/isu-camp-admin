@@ -1,4 +1,5 @@
 import logging
+import math
 
 from flask import Blueprint, jsonify, request
 
@@ -7,12 +8,15 @@ from extensions import db
 from model.building import Building
 from model.floor import Floor
 from model.location import Location
+from model.location import LOCATION_TYPE_NAMES
 from model.location_photo import LocationPhoto
 from model.route_node import RouteNode
 from model.pathway import Pathway
 from services.audit import log_audit
+from services.floor_lookup import floor_label as _floor_label
 from services.geometry import polygon_error as _polygon_error
 from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
+from services.geometry import point_in_polygon as _point_in_polygon
 
 map_bp = Blueprint("map", __name__, url_prefix="/api/map")
 
@@ -163,6 +167,66 @@ def delete_map_building(building_id):
         db.session.rollback()
         logger.exception("Failed to delete building")
         return jsonify({"success": False, "message": "Failed to delete building."}), 500
+
+
+@map_bp.route("/buildings/<int:building_id>/indoor-locations/<int:location_id>", methods=["PATCH"])
+def set_indoor_location_position(building_id, location_id):
+    """Set or clear an existing indoor location's map marker."""
+    _, error = admin_required()
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "lat" not in data or "lng" not in data:
+        return jsonify({"success": False, "message": "lat and lng are required."}), 400
+
+    lat, lng = data["lat"], data["lng"]
+    if lat is None and lng is None:
+        latitude = longitude = None
+    else:
+        if lat is None or lng is None or isinstance(lat, bool) or isinstance(lng, bool):
+            return jsonify({"success": False, "message": "lat and lng must both be finite numbers or both null."}), 400
+        try:
+            latitude, longitude = float(lat), float(lng)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "lat and lng must both be finite numbers or both null."}), 400
+        if not math.isfinite(latitude) or not math.isfinite(longitude):
+            return jsonify({"success": False, "message": "lat and lng must both be finite numbers or both null."}), 400
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            return jsonify({"success": False, "message": "Coordinates must be valid latitude and longitude values."}), 400
+
+    try:
+        building = Building.query.get(building_id)
+        if building is None:
+            return jsonify({"success": False, "message": "Building not found."}), 404
+        location = Location.query.get(location_id)
+        if location is None or location.building_id != building_id:
+            return jsonify({"success": False, "message": "Indoor location not found for this building."}), 404
+        if location.type_id not in LOCATION_TYPE_NAMES:
+            return jsonify({"success": False, "message": "Location is not an indoor location."}), 400
+
+        if latitude is not None:
+            points = building.polygon_coordinates
+            if not points:
+                return jsonify({"success": False, "message": "Building footprint is required to place an indoor location."}), 400
+            if _polygon_error(points):
+                return jsonify({"success": False, "message": "Building footprint is invalid."}), 400
+            if not _point_in_polygon((latitude, longitude), points):
+                return jsonify({"success": False, "message": "Indoor location must be inside the building footprint."}), 400
+
+        location.latitude = latitude
+        location.longitude = longitude
+        floor = Floor.query.get(location.floor_id) if location.floor_id is not None else None
+        location_dto = location.to_location_dto(
+            building=building.building_name,
+            floor=_floor_label(floor) if floor and floor.building_id == building_id else None,
+        )
+        db.session.commit()
+        return jsonify(location_dto), 200
+    except Exception:
+        db.session.rollback()
+        logger.exception("Failed to update indoor location marker")
+        return jsonify({"success": False, "message": "Failed to update indoor location marker."}), 500
 
 
 # ==========================================

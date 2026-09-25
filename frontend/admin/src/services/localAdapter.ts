@@ -1,5 +1,6 @@
 import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { locationPolicy } from "../lib/locationPolicy";
+import { pointInPolygon } from "../features/map/campusBoundary";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
@@ -53,6 +54,25 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
     },
     locations: {
+      saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {
+        const location = mapData.locations.find((item) => item.id === id);
+        const building = mapData.buildings?.find((item) => item.id === buildingId);
+        if (!location || !["Room", "Office", "Laboratory", "Restroom"].includes(location.type) ||
+            (location.parentId !== buildingId && location.building !== building?.name)) {
+          throw new Error("Indoor Location does not belong to the selected Building.");
+        }
+        if (!building || building.points.length < 3) throw new Error("Building footprint is unavailable.");
+        if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
+        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
+        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
+        if (lat !== null && lng !== null && !pointInPolygon([lat, lng], building.points)) {
+          throw new Error("Indoor marker must be inside the selected Building footprint.");
+        }
+        location.lat = lat;
+        location.lng = lng;
+        location.positioned = lat !== null && lng !== null;
+        return structuredClone(location);
+      },
       savePosition: (id: string, lat: number | null, lng: number | null): Location => {
         const location = mapData.locations.find((item) => item.id === id);
         if (!location) throw new Error("Location not found.");
