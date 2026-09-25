@@ -1,4 +1,5 @@
 from flask import Flask
+import pytest
 
 import map as map_module
 from map import map_bp
@@ -16,7 +17,8 @@ class FakeQuery:
 
     def get(self, record_id):
         return next(
-            (record for record in self.records if record.building_id == record_id),
+            (record for record in self.records if getattr(record, "building_id", None) == record_id
+             or getattr(record, "location_id", None) == record_id),
             None,
         )
 
@@ -143,6 +145,125 @@ def test_map_buildings_returns_polygon_points(monkeypatch):
         "status": "Active",
         "type": "Building",
     }]
+
+
+def test_indoor_location_position_persists_marker_inside_building(monkeypatch):
+    session = FakeSession()
+    building = type("BuildingRecord", (), {
+        "building_id": 4,
+        "building_name": "Engineering Hall",
+        "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
+    })()
+    location = type("LocationRecord", (), {
+        "location_id": 12,
+        "building_id": 4,
+        "type_id": 1,
+        "latitude": None,
+        "longitude": None,
+        "floor_id": None,
+        "to_location_dto": lambda self, building=None, floor=None: {
+            "id": str(self.location_id), "name": "Room 12", "code": "R-12", "type": "Room",
+            "parentId": str(self.building_id), "building": building, "floor": floor,
+            "function": None, "keywords": None, "status": "Active", "lat": self.latitude,
+            "lng": self.longitude, "positioned": self.latitude is not None and self.longitude is not None,
+            "hasPhoto": False,
+        },
+    })()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_map_blueprint().test_client().patch(
+        "/api/map/buildings/4/indoor-locations/12", json={"lat": 16.75, "lng": 121.65}
+    )
+
+    assert response.status_code == 200
+    assert response.json["id"] == "12"
+    assert response.json["parentId"] == "4"
+    assert response.json["building"] == "Engineering Hall"
+    assert response.json["lat"] == 16.75
+    assert response.json["lng"] == 121.65
+    assert response.json["positioned"] is True
+    assert (location.latitude, location.longitude) == (16.75, 121.65)
+    assert session.commits == 1
+
+
+def test_indoor_location_position_accepts_polygon_boundary(monkeypatch):
+    building = type("BuildingRecord", (), {
+        "building_id": 4,
+        "building_name": "Engineering Hall",
+        "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
+    })()
+    location = type("LocationRecord", (), {
+        "location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None,
+        "to_location_dto": lambda self, building=None, floor=None: {"lat": self.latitude, "lng": self.longitude},
+    })()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": FakeSession()}))
+
+    response = app_with_map_blueprint().test_client().patch(
+        "/api/map/buildings/4/indoor-locations/12", json={"lat": 16.7, "lng": 121.65}
+    )
+
+    assert response.status_code == 200
+
+
+def test_indoor_location_position_can_be_cleared(monkeypatch):
+    session = FakeSession()
+    building = type("BuildingRecord", (), {
+        "building_id": 4, "building_name": "Engineering Hall",
+        "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
+    })()
+    location = type("LocationRecord", (), {
+        "location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None,
+        "latitude": 16.75, "longitude": 121.65,
+        "to_location_dto": lambda self, building=None, floor=None: {
+            "id": str(self.location_id), "lat": self.latitude, "lng": self.longitude,
+            "positioned": self.latitude is not None and self.longitude is not None,
+        },
+    })()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+
+    response = app_with_map_blueprint().test_client().patch(
+        "/api/map/buildings/4/indoor-locations/12", json={"lat": None, "lng": None}
+    )
+
+    assert response.status_code == 200
+    assert response.json == {"id": "12", "lat": None, "lng": None, "positioned": False}
+    assert (location.latitude, location.longitude) == (None, None)
+    assert session.commits == 1
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"lat": 16.9, "lng": 121.65}, "must be inside"),
+        ({"lat": None, "lng": 121.65}, "both be finite numbers or both null"),
+    ],
+)
+def test_indoor_location_position_rejects_invalid_marker(monkeypatch, payload, message):
+    building = type("BuildingRecord", (), {
+        "building_id": 4,
+        "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
+    })()
+    location = type("LocationRecord", (), {"location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None})()
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": FakeSession()}))
+
+    response = app_with_map_blueprint().test_client().patch(
+        "/api/map/buildings/4/indoor-locations/12", json=payload
+    )
+
+    assert response.status_code == 400
+    assert message in response.json["message"]
 
 
 def test_map_save_persists_complete_valid_building_polygon(monkeypatch):

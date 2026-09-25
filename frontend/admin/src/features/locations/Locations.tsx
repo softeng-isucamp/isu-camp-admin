@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { API_MODE, createLocationsBulkImportTemplate, locationsBulkImportDescription, services, setMockFailure } from "../../services/api";
+import { API_MODE, services, setMockFailure } from "../../services/api";
 import {
   Button,
   Card,
@@ -15,6 +15,7 @@ import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
+import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 const blankLocation = (): LocationDraft => ({
@@ -69,7 +70,7 @@ export function Locations() {
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
 
   const [dialog, setDialog] = useState<
-    "add" | "import" | "edit" | "history" | "remove" | null
+    "add" | "edit" | "history" | "remove" | null
   >(null);
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -87,13 +88,6 @@ export function Locations() {
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
-  const [importText, setImportText] = useState("");
-  const [importFileName, setImportFileName] = useState("");
-  const [importMode, setImportMode] = useState<"add" | "update">("add");
-  const [importResult, setImportResult] = useState<{
-    imported: number;
-    errors: string[];
-  } | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
@@ -116,19 +110,17 @@ export function Locations() {
     floor?: string;
     mapTargetId: string;
     indoor: boolean;
+    positioned: boolean;
     kind: "added" | "edited";
   } | null>(null);
-  const [importSuccess, setImportSuccess] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [validating, setValidating] = useState(false);
-  const [importing, setImporting] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
   const processedIndoorHandoffRef = useRef<string | null>(null);
   const pendingRef = useRef(false);
-  pendingRef.current = saving || validating || importing || deleting;
+  pendingRef.current = saving || deleting;
 
-  const activeOverlay = success ? "success" : importSuccess !== null ? "import-success" : dialog;
+  const activeOverlay = success ? "success" : dialog;
   const openDialog = (next: NonNullable<typeof dialog>) => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setDialog(next);
@@ -140,7 +132,6 @@ export function Locations() {
     setPhotos([]);
     setDialog(null);
     setSuccess(null);
-    setImportSuccess(null);
   };
 
   useEffect(() => {
@@ -472,7 +463,7 @@ export function Locations() {
     await queryClient.invalidateQueries({ queryKey: ["logs"] });
   };
 
-  const save = async () => {
+  const save = async (): Promise<Location | null> => {
     setError("");
     setFieldErrors([]);
     const adding = dialog === "add";
@@ -490,7 +481,7 @@ export function Locations() {
     ];
     if (validationIssues.length) {
       setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
-      return;
+      return null;
     }
     setSaving(true);
     try {
@@ -500,7 +491,15 @@ export function Locations() {
       if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
         await services.locations.save(handoffParent);
       }
-      const saved = await services.locations.save(normalized, photos);
+      let saved = await services.locations.save(normalized, photos);
+      if (isChildType(saved.type) && saved.parentId && normalized.lat !== null && normalized.lng !== null) {
+        saved = await services.locations.saveIndoorPosition({
+          id: saved.id,
+          buildingId: saved.parentId,
+          lat: normalized.lat ?? null,
+          lng: normalized.lng ?? null,
+        });
+      }
       await refresh();
       releasePhotoPreviews();
       setPhotos([]);
@@ -513,8 +512,10 @@ export function Locations() {
         floor: normalized.floor,
         mapTargetId: isChildType(saved.type) && saved.parentId ? saved.parentId : saved.id,
         indoor: isChildType(saved.type),
+        positioned: saved.positioned,
         kind: adding ? "added" : "edited",
       });
+      return saved;
     } catch (cause) {
       const backendFields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
       if (backendFields) {
@@ -523,9 +524,16 @@ export function Locations() {
       setError(
         cause instanceof Error ? cause.message : "Unable to save location.",
       );
+      return null;
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveAndLocateIndoorLocation = async () => {
+    if (!isChildType(draft.type)) return;
+    const saved = await save();
+    if (saved?.parentId) navigate(`/map-editor?indoorLocation=${encodeURIComponent(saved.id)}`);
   };
 
   const remove = async () => {
@@ -542,40 +550,6 @@ export function Locations() {
     } finally {
       setDeleting(false);
     }
-  };
-
-  const validateImport = async () => {
-    setValidating(true);
-    try {
-      setImportResult(await services.imports.locations({ json: importText, mode: importMode }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to validate locations.");
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const applyImport = async () => {
-    if (!importResult || importResult.errors.length) return;
-    setImporting(true);
-    let committed;
-    try {
-      committed = await services.imports.locations({ json: importText, commit: true, mode: importMode });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to import locations.");
-      setImporting(false);
-      return;
-    }
-    if (committed.errors.length) {
-      setImportResult(committed);
-      setImporting(false);
-      return;
-    }
-    await refresh();
-    setDialog(null);
-    setNotice(`${committed.imported} locations imported successfully.`);
-    setImportSuccess(committed.imported);
-    setImporting(false);
   };
 
   const openEdit = (item: Location) => {
@@ -631,63 +605,6 @@ export function Locations() {
     ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
     : [];
 
-  const renderLocationTypeIcon = (locType: string) => {
-    switch (locType.toLowerCase()) {
-      case "building":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 21h18M4 18h16M6 18V9M10 18V9M14 18V9M18 18V9M12 3l9 4.5H3L12 3z" />
-          </svg>
-        );
-      case "floor":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-            <polyline points="2 17 12 22 22 17" />
-            <polyline points="2 12 12 17 22 12" />
-          </svg>
-        );
-      case "laboratory":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 2v7.5L4.5 19.5A2 2 0 0 0 6.2 22h11.6a2 2 0 0 0 1.7-2.5L14 9.5V2" />
-            <line x1="8.5" y1="2" x2="15.5" y2="2" />
-            <path d="M7 16h10" />
-          </svg>
-        );
-      case "room":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" />
-            <circle cx="15" cy="12" r="1.5" fill="#0c7441" />
-          </svg>
-        );
-      case "office":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-          </svg>
-        );
-      case "restroom":
-      case "restroom / cr":
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="9" cy="4" r="2" />
-            <path d="M6 9h6l-1 9H7L6 9z" />
-            <circle cx="17" cy="4" r="2" />
-            <path d="M15 9h4l1 9h-2l-.5-5-.5 5h-2z" />
-          </svg>
-        );
-      default:
-        return (
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0c7441" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-          </svg>
-        );
-    }
-  };
   const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
 
   return (
@@ -848,32 +765,6 @@ export function Locations() {
             }}
           >
             <Button
-              variant="subtle"
-              style={{
-                height: "46px",
-                borderRadius: "999px",
-                padding: "0 22px",
-                border: "1.5px solid #0c7441",
-                color: "#0c7441",
-                background: "#ffffff",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                fontWeight: 600,
-              }}
-              onClick={() => {
-                setImportText("");
-                setImportFileName("");
-                setImportResult(null);
-                openDialog("import");
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-              </svg>
-              Bulk Import
-            </Button>
-            <Button
               style={{
                 height: "46px",
                 borderRadius: "999px",
@@ -931,32 +822,13 @@ export function Locations() {
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(`/map-editor?location=${success.mapTargetId}`)}>
-                {success.indoor ? "View parent building on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
+              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(success.indoor ? `/map-editor?indoorLocation=${encodeURIComponent(success.id)}` : `/map-editor?location=${encodeURIComponent(success.mapTargetId)}`)}>
+                {success.indoor ? success.positioned ? "View location on map" : "Place location on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
               </Button>
               <Button data-modal-initial variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
                 Done
               </Button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {importSuccess !== null && (
-        <div className="modal-backdrop locations-overlay">
-          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-success-title" aria-describedby="location-import-success-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "480px", maxWidth: "90%", textAlign: "center" }}>
-            <div style={{ width: "54px", height: "54px", background: "#d6ede0", color: "#0c7441", borderRadius: "50%", display: "grid", placeItems: "center", margin: "0 auto 16px" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <h2 id="location-import-success-title" tabIndex={-1} style={{ fontSize: "24px", color: "#191c1d", margin: "0 0 8px" }}>Locations Imported</h2>
-            <p id="location-import-success-description" style={{ color: "#525c57", fontSize: "15px", margin: "0 0 24px" }}>
-              <strong>{importSuccess} locations</strong> were imported into the campus directory successfully.
-            </p>
-            <Button data-modal-initial style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => setImportSuccess(null)}>
-              Done
-            </Button>
           </div>
         </div>
       )}
@@ -1059,7 +931,7 @@ export function Locations() {
                         </button>
                       )}
                       <div className="location-type-symbol" aria-hidden="true" style={{ width: "34px", height: "34px", borderRadius: "10px", background: "#f3f4f6", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0, opacity: 1 }}>
-                        {renderLocationTypeIcon(item.type)}
+                        <LocationTypeIcon type={item.type} />
                       </div>
                       <div>
                         <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
@@ -1126,14 +998,17 @@ export function Locations() {
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
-                              const parent = item.parentId ? allLocations.find((location) => location.id === item.parentId && location.type === "Building") : undefined;
+                              const parent = item.parentId
+                                ? allLocations.find((location) => location.id === item.parentId && location.type === "Building")
+                                  ?? allLocations.find((location) => location.name === item.building && location.type === "Building")
+                                : undefined;
                               if (isChildLocation(item) && !parent) {
                                 setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
                                 setActionMenuId(null);
                                 return;
                               }
-                              const target = isChildLocation(item) && parent ? parent.id : item.id;
-                              navigate(`/map-editor?location=${target}`);
+                              if (isChildLocation(item)) navigate(`/map-editor?indoorLocation=${encodeURIComponent(item.id)}`);
+                              else navigate(`/map-editor?location=${encodeURIComponent(item.id)}`);
                               setActionMenuId(null);
                             }}
                           >
@@ -1260,9 +1135,15 @@ export function Locations() {
                 onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
               />
 
-              {locationPolicy.classify(draft.type).kind !== "indoor" && (
-                <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
-              )}
+              <LocationCoordinatesFields
+                lat={draft.lat}
+                lng={draft.lng}
+                positioned={draft.positioned}
+                parentLabel={draft.building}
+                onPickOnMap={isChildType(draft.type)
+                  ? () => { void saveAndLocateIndoorLocation(); }
+                  : undefined}
+              />
 
               {(isChildType(draft.type) || draft.parentId !== null) && (
                 <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
@@ -1398,181 +1279,6 @@ export function Locations() {
         </div>
       )}
 
-      {/* Bulk Import Modal */}
-      {dialog === "import" && (
-        <div className="modal-backdrop locations-overlay">
-          <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-import-title" aria-describedby="location-import-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
-            <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
-                <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }}>
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 id="location-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Bulk Import Locations</h2>
-                  <p id="location-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    {locationsBulkImportDescription}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Close import dialog"
-                data-modal-initial
-                onClick={closeOverlay}
-                style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", display: "grid", placeItems: "center" }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="locations-modal-body" style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
-              {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>{error}</div>}
-              {/* Dropzone container */}
-              <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                  <div style={{ width: "46px", height: "46px", borderRadius: "12px", background: "#d6ede0", color: "#0c7441", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="12" y1="18" x2="12" y2="12" />
-                      <line x1="9" y1="15" x2="12" y2="12" />
-                      <line x1="15" y1="15" x2="12" y2="12" />
-                    </svg>
-                  </div>
-                  <div>
-                    <strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong>
-                    <p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing indoor location records.</p>
-                    {importFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{importFileName} selected</p>}
-                  </div>
-                </div>
-
-                <label
-                  style={{
-                    border: "1.5px solid #0c7441",
-                    borderRadius: "999px",
-                    padding: "10px 28px",
-                    color: "#0c7441",
-                    fontWeight: 600,
-                    fontSize: "14px",
-                    background: "#fff",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  Browse
-                  <input
-                    aria-label="Choose location JSON file"
-                    type="file"
-                    accept="application/json,.json"
-                    style={{ display: "none" }}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      setImportResult(null);
-                      setImportFileName(file?.name ?? "");
-                      if (!file) return setImportText("");
-                      void file.text().then(setImportText);
-                    }}
-                  />
-                </label>
-              </div>
-
-              {/* Mode Selection */}
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: 700, color: "#525c57", textTransform: "uppercase", letterSpacing: "0.5px" }}>IMPORT MODE</span>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", marginTop: "8px", background: "#edf2ee", padding: "4px", borderRadius: "14px" }}>
-                  <button
-                    type="button"
-                    onClick={() => { setImportMode("add"); setImportResult(null); }}
-                    style={{
-                      padding: "10px",
-                      borderRadius: "10px",
-                      border: "none",
-                      background: importMode === "add" ? "#fff" : "transparent",
-                      boxShadow: importMode === "add" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                      fontWeight: importMode === "add" ? 700 : 500,
-                      fontSize: "14px",
-                      cursor: "pointer",
-                      color: importMode === "add" ? "#005931" : "#525c57",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    Add new
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setImportMode("update"); setImportResult(null); }}
-                    style={{
-                      padding: "10px",
-                      borderRadius: "10px",
-                      border: "none",
-                      background: importMode === "update" ? "#fff" : "transparent",
-                      boxShadow: importMode === "update" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                      fontWeight: importMode === "update" ? 700 : 500,
-                      fontSize: "14px",
-                      cursor: "pointer",
-                      color: importMode === "update" ? "#005931" : "#525c57",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    Update existing
-                  </button>
-                </div>
-              </div>
-
-              {/* Download Template Link */}
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <a
-                  href={`data:application/json;charset=utf-8,${encodeURIComponent(createLocationsBulkImportTemplate())}`}
-                  download="locations-bulk-template.json"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "8px", color: "#0c7441", fontSize: "14px", fontWeight: 600, textDecoration: "none" }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                  Download template
-                </a>
-              </div>
-
-              {importResult && (
-                <div role={importResult.errors.length ? "alert" : "status"} aria-live="polite" style={{ padding: "10px 14px", borderRadius: "10px", background: importResult.errors.length ? "#fee2e2" : "#e6f7ec", color: importResult.errors.length ? "#dc2626" : "#0c7441", fontSize: "13px" }}>
-                  {importResult.errors.length ? <ul style={{ margin: 0, paddingLeft: "18px" }}>{importResult.errors.map((message) => <li key={message}>{message}</li>)}</ul> : `Validation passed for ${importResult.imported} locations.`}
-                </div>
-              )}
-            </div>
-
-            <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={closeOverlay}>
-                Cancel
-              </Button>
-              <Button
-                variant="subtle"
-                style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }}
-                disabled={validating || importing}
-                aria-busy={validating}
-                onClick={validateImport}
-              >
-                {validating ? "Validating…" : "Validate"}
-              </Button>
-              <Button
-                style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }}
-                disabled={validating || importing || !importResult || importResult.errors.length > 0}
-                aria-busy={importing}
-                onClick={applyImport}
-              >
-                {importing ? "Importing…" : "Import Locations"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

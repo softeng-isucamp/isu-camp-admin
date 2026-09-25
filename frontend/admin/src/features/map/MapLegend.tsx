@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LocationTypeIcon } from "../locations/LocationTypeIcon";
 
 const legendItems = [
   { label: "Campus Location", symbolClass: "w-3 h-3 rounded-full bg-[#005931] border-2 border-white ring-1 ring-[#005931]" },
@@ -34,6 +35,24 @@ export function MapLegend() {
               <span>{item.label}</span>
             </div>
           ))}
+          <div className="border-t border-[#dfe8e2] pt-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-[#526359]">Indoor location types</span>
+            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+              {([
+                ["Room", "room"],
+                ["Office", "office"],
+                ["Laboratory", "laboratory"],
+                ["Restroom", "restroom"],
+              ] as const).map(([type, className]) => (
+                <div key={type} className="flex items-center gap-1.5">
+                  <span className={`indoor-map-legend-pin type-${className}`} aria-hidden="true">
+                    <LocationTypeIcon type={type} size={13} />
+                  </span>
+                  <span>{type}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
