@@ -28,6 +28,7 @@ import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
+import { locationTypeIconContents } from "../locations/LocationTypeIcon";
 import {
   normalizeMapLayers,
   type FeatureLinkEntity,
@@ -41,6 +42,7 @@ import {
   echagueCampusBoundary,
   geometryOnCampus,
   paddedCampusBounds,
+  pointInPolygon,
   pointOnCampus,
   type MapPoint,
 } from "./campusBoundary";
@@ -214,6 +216,20 @@ const createLocationPinIcon = (selected = false) =>
     iconSize: [26, 32],
     iconAnchor: [13, 30],
   });
+
+const createIndoorLocationIcon = (type: Location["type"], selected = false) =>
+  L.divIcon({
+    className: `indoor-location-marker-icon type-${type.toLowerCase()}${selected ? " selected" : ""}`,
+    html: `<span class="indoor-location-pin"><span class="indoor-location-type-symbol"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${locationTypeIconContents(type)}</svg></span></span>`,
+    iconSize: [36, 44],
+    iconAnchor: [18, 40],
+  });
+
+const isIndoorLocation = (location: Location) =>
+  location.type === "Room" || location.type === "Office" || location.type === "Laboratory" || location.type === "Restroom";
+
+const belongsToBuilding = (location: Location, building: Building) =>
+  location.parentId === building.id || location.building === building.name;
 
 const createNodeIcon = (selected = false) =>
   L.divIcon({
@@ -430,6 +446,7 @@ interface MapControllerProps {
   frameBounds: [[number, number], [number, number]] | null;
   navigationBounds: [[number, number], [number, number]];
   onViewportChange?: (bounds: L.LatLngBounds | null, zoom: number) => void;
+  flyTargetZoom?: number;
 }
 
 const isPointInBounds = (
@@ -462,6 +479,7 @@ function MapController({
   frameBounds,
   navigationBounds,
   onViewportChange,
+  flyTargetZoom = 19,
 }: MapControllerProps) {
   const map = useMap();
   const onViewportChangeRef = useRef(onViewportChange);
@@ -492,9 +510,9 @@ function MapController({
 
   useEffect(() => {
     if (flyTarget) {
-      map.flyTo(flyTarget, 19, { duration: 0.8 });
+      map.flyTo(flyTarget, flyTargetZoom, { duration: 0.8 });
     }
-  }, [flyTarget, map]);
+  }, [flyTarget, flyTargetZoom, map]);
 
   useEffect(() => {
     if (frameBounds && typeof map.fitBounds === "function") {
@@ -680,6 +698,11 @@ export function MapEditor() {
   const [search, setSearch] = useState("");
   const [networkBrowserOpen, setNetworkBrowserOpen] = useState(false);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
+  const [flyTargetZoom, setFlyTargetZoom] = useState(19);
+  const flyTo = (point: [number, number], zoom = 19) => {
+    setFlyTargetZoom(zoom);
+    setFlyTarget(point);
+  };
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const [temporary, setTemporary] = useState<[number, number] | null>(null);
   const [pointDraftDirty, setPointDraftDirty] = useState(false);
@@ -744,6 +767,8 @@ export function MapEditor() {
     string | null
   >(null);
   const [addRoomOpen, setAddRoomOpen] = useState(false);
+  const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
+  const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string } | null>(null);
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
@@ -1055,11 +1080,22 @@ export function MapEditor() {
     const positioned = currentLocations.filter(isPositionedLocation);
     if (mode === "area") return [];
     return positioned.filter(
-      (loc) => loc.type !== "Building"
+      (loc) => !isIndoorLocation(loc)
+        && loc.type !== "Building"
         && (loc.type !== "Facility" || !currentBuildings.some((building) => building.id === loc.id))
         && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
     );
   }, [currentBuildings, currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
+
+  const visibleIndoorLocations = useMemo(() => {
+    if (currentMapZoom < 20) return [];
+    return buildingContentLocations.filter((location) =>
+      isIndoorLocation(location)
+      && location.lat !== null
+      && location.lng !== null
+      && currentBuildings.some((building) => belongsToBuilding(location, building)),
+    );
+  }, [buildingContentLocations, currentBuildings, currentMapZoom]);
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
@@ -1078,7 +1114,7 @@ export function MapEditor() {
   // legitimately share a database ID, so every derived selection must cross
   // the typed identity seam rather than matching only the ID.
   const selectedLocation = selected?.type === "location"
-    ? currentLocations.find((item) => item.id === selected.id)
+    ? buildingContentLocations.find((item) => item.id === selected.id)
     : undefined;
   const selectedNode = selected?.type === "node"
     ? currentNodes.find((item) => item.id === selected.id)
@@ -1128,6 +1164,34 @@ export function MapEditor() {
   }, [routeLocation.search]);
 
   useEffect(() => {
+    const indoorLocationId = new URLSearchParams(routeLocation.search).get("indoorLocation");
+    if (indoorLocationId) {
+      if (!data) return;
+      const indoorLocation = buildingContentLocations.find((item) => item.id === indoorLocationId && isIndoorLocation(item));
+      const parentBuilding = indoorLocation
+        ? currentBuildings.find((item) => item.id === indoorLocation.parentId || item.name === indoorLocation.building)
+        : undefined;
+      if (!indoorLocation || !parentBuilding) {
+        setError("The indoor location or its parent Building could not be found.");
+        navigate(routeLocation.pathname, { replace: true });
+        return;
+      }
+      setMode("select");
+      setFrameBounds(null);
+      setError("");
+      if (isPositionedLocation(indoorLocation)) {
+        setIndoorPlacement(null);
+        setSelected({ type: "location", id: indoorLocation.id });
+        flyTo([indoorLocation.lat, indoorLocation.lng], 20);
+      } else {
+        setSelected({ type: "building", id: parentBuilding.id });
+        setIndoorPlacement({ locationId: indoorLocation.id, buildingId: parentBuilding.id });
+        flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
+      }
+      navigate(routeLocation.pathname, { replace: true });
+      return;
+    }
+
     const locationId = new URLSearchParams(routeLocation.search).get(
       "location",
     );
@@ -1152,10 +1216,10 @@ export function MapEditor() {
       }
       if (!building && loc && isPositionedLocation(loc)) {
         setFrameBounds(null);
-        setFlyTarget([loc.lat, loc.lng]);
+        flyTo([loc.lat, loc.lng]);
       }
     }
-  }, [currentBuildings, directoryLocations, routeLocation.search]);
+  }, [buildingContentLocations, currentBuildings, data, directoryLocations, navigate, routeLocation.pathname, routeLocation.search]);
 
   useEffect(() => {
     const pathwayId = new URLSearchParams(routeLocation.search).get("pathway");
@@ -1175,7 +1239,7 @@ export function MapEditor() {
     setMode("path");
     setError("");
     const source = currentNodes.find((node) => node.id === pathway.sourceNodeId);
-    if (source) setFlyTarget([source.lat, source.lng]);
+    if (source) flyTo([source.lat, source.lng]);
   }, [currentNodes, data, directoryPathways, localPathways, routeLocation.search]);
 
   const results = useMemo(() => {
@@ -1266,17 +1330,17 @@ export function MapEditor() {
     if (item.kind === "Location") {
       selectObject("location", item.id);
       const loc = directoryLocations.find((l) => l.id === item.id) || localLocations.find((l) => l.id === item.id);
-      if (loc && isPositionedLocation(loc)) setFlyTarget([loc.lat, loc.lng]);
+      if (loc && isPositionedLocation(loc)) flyTo([loc.lat, loc.lng]);
     } else if (item.kind === "Route Node") {
       selectObject("node", item.id);
       const n = directoryNodes.find((node) => node.id === item.id) || localNodes.find((node) => node.id === item.id);
-      if (n) setFlyTarget([n.lat, n.lng]);
+      if (n) flyTo([n.lat, n.lng]);
     } else if (item.kind === "Pathway") {
       selectObject("pathway", item.id);
       const p = currentPathways.find((path) => path.id === item.id);
       if (p) {
         const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || localNodes.find((n) => n.id === p.sourceNodeId);
-        if (src) setFlyTarget([src.lat, src.lng]);
+        if (src) flyTo([src.lat, src.lng]);
       }
     }
     setSearch("");
@@ -1288,7 +1352,7 @@ export function MapEditor() {
       const node = currentNodes.find((item) => item.id === networkSelection.id);
       if (node) {
         setFrameBounds(null);
-        setFlyTarget([node.lat, node.lng]);
+        flyTo([node.lat, node.lng]);
       }
       return;
     }
@@ -1307,7 +1371,43 @@ export function MapEditor() {
     ? { type: selected.type, id: selected.id }
     : null;
 
-  const onMapClick = (point: [number, number]) => {
+  const onMapClick = async (point: [number, number]) => {
+    if (indoorPlacement) {
+      const building = currentBuildings.find((item) => item.id === indoorPlacement.buildingId);
+      const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
+      if (!building || !location) {
+        setError("The selected indoor location or its building is no longer available.");
+        setIndoorPlacement(null);
+        return;
+      }
+      if (currentMapZoom < 20) {
+        setError("Zoom in to level 20 or closer to place an indoor location marker.");
+        return;
+      }
+      if (!pointInPolygon(point, building.points)) {
+        setError(`Place ${location.name} inside ${building.name}'s footprint.`);
+        return;
+      }
+      if (typeof services.locations.saveIndoorPosition !== "function") {
+        setError("Indoor location positioning is unavailable in this environment.");
+        return;
+      }
+      try {
+        const positioned = await services.locations.saveIndoorPosition({
+          id: location.id,
+          buildingId: building.id,
+          lat: point[0],
+          lng: point[1],
+        });
+        setLocalLocations((current) => [...current.filter((item) => item.id !== positioned.id), positioned]);
+        setSelected({ type: "location", id: positioned.id });
+        setIndoorPlacement(null);
+        setError("");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : `Could not place ${location.name}.`);
+      }
+      return;
+    }
     if (mode === "select") {
       setSelected(null);
       setSelectionPopover(null);
@@ -1544,6 +1644,37 @@ export function MapEditor() {
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
     setNewRoom({ name: "", code: "", floor: "" });
+  };
+
+  const beginIndoorLocationPlacement = (building: Building, location: Location) => {
+    if (building.points.length < 3) {
+      setError(`${building.name} needs a footprint before an indoor location can be marked.`);
+      return;
+    }
+    setIndoorLocationChooserOpen(false);
+    setIndoorPlacement({ locationId: location.id, buildingId: building.id });
+    setSelected({ type: "location", id: location.id });
+    setError("");
+    flyTo(polygonFeatureAnchor(building.points), 20);
+  };
+
+  const clearIndoorLocationPosition = async (building: Building, location: Location) => {
+    if (typeof services.locations.saveIndoorPosition !== "function") {
+      setError("Indoor location positioning is unavailable in this environment.");
+      return;
+    }
+    try {
+      const cleared = await services.locations.saveIndoorPosition({
+        id: location.id,
+        buildingId: building.id,
+        lat: null,
+        lng: null,
+      });
+      setLocalLocations((current) => [...current.filter((item) => item.id !== cleared.id), cleared]);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Could not clear ${location.name}'s map marker.`);
+    }
   };
 
   const openIndoorLocationHandoff = (building: Building) => {
@@ -1887,17 +2018,17 @@ export function MapEditor() {
       }
     }
     const positioned = currentLocations.find((item) => item.id === object.id);
-    if (positioned && isPositionedLocation(positioned)) setFlyTarget([positioned.lat, positioned.lng]);
+    if (positioned && isPositionedLocation(positioned)) flyTo([positioned.lat, positioned.lng]);
     const positionedNode = currentNodes.find((item) => item.id === object.id);
-    if (positionedNode) setFlyTarget([positionedNode.lat, positionedNode.lng]);
+    if (positionedNode) flyTo([positionedNode.lat, positionedNode.lng]);
     if (object.type === "pathway") {
       const pathway = currentPathways.find((item) => item.id === object.id);
       const source = pathway && currentNodes.find((item) => item.id === pathway.sourceNodeId);
-      if (source) setFlyTarget([source.lat, source.lng]);
+      if (source) flyTo([source.lat, source.lng]);
     }
     if (object.type === "building") {
       const building = currentBuildings.find((item) => item.id === object.id);
-      if (building?.points[0]) setFlyTarget(building.points[0]);
+      if (building?.points[0]) flyTo(building.points[0]);
     }
   };
 
@@ -2995,6 +3126,7 @@ export function MapEditor() {
         overflowActions: [
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
           ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
+          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: () => { setError(""); setIndoorLocationChooserOpen(true); } }] : []),
           { label: "＋ Add entrance", onSelect: () => { setPlacingNodeType("Entrance"); setPlacingNodeName(`${selectedBuilding.name} Entrance`); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setTemporary(null); setMode("place"); } },
           { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
           { label: "🗑 Delete Building", tone: "danger" as const, onSelect: () => setDeleteConfirmation({ kind: "building", id: selectedBuilding.id, name: selectedBuilding.name }) },
@@ -3403,6 +3535,7 @@ export function MapEditor() {
           <MapController
             onMapClick={onMapClick}
             flyTarget={flyTarget}
+            flyTargetZoom={flyTargetZoom}
             frameBounds={frameBounds}
             navigationBounds={navigationBounds}
             onViewportChange={handleViewportChange}
@@ -3561,6 +3694,29 @@ export function MapEditor() {
                   <br />
                   <small>{loc.type} · {loc.code}</small>
                 </Popup>
+              </Marker>
+            );
+          })}
+
+          {visibleIndoorLocations.map((location) => {
+            const isSelected = selected?.type === "location" && selected.id === location.id;
+            const building = currentBuildings.find((item) => belongsToBuilding(location, item));
+            return (
+              <Marker
+                key={`indoor-location:${location.id}`}
+                position={[location.lat!, location.lng!]}
+                icon={createIndoorLocationIcon(location.type, isSelected)}
+                eventHandlers={{
+                  click: () => {
+                    setSelectionPopover(null);
+                    setSelected({ type: "location", id: location.id });
+                  },
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -12]} className="map-label">
+                  <div className="font-bold text-xs">{location.name}</div>
+                  <div className="text-[10px] text-gray-500 font-normal">{building?.name ?? location.building} · {location.type}</div>
+                </Tooltip>
               </Marker>
             );
           })}
@@ -3819,6 +3975,13 @@ export function MapEditor() {
             />
           )}
         </MapContainer>
+
+        {indoorPlacement && (
+          <div className="absolute left-1/2 top-4 z-[1000] flex w-[min(92%,34rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 text-xs text-[#234333] shadow-lg" role="status">
+            <span>Click inside the building footprint to place {buildingContentLocations.find((location) => location.id === indoorPlacement.locationId)?.name ?? "the indoor location"}. {currentMapZoom < 20 ? "Zoom to level 20 or closer." : ""}</span>
+            <button type="button" className="shrink-0 rounded-full border border-[#dbe0e2] px-3 py-1.5 font-bold" onClick={() => { setIndoorPlacement(null); setError(""); }}>Cancel</button>
+          </div>
+        )}
 
         {isOverviewZoom && mode !== "select" && (
           <div role="status" className="pointer-events-none absolute bottom-5 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-xs font-semibold text-[#234333] shadow-lg">
@@ -4698,6 +4861,14 @@ export function MapEditor() {
           directory={currentLocations}
           allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
+          onPickIndoorLocationOnMap={selectedLocation && isIndoorLocation(selectedLocation)
+            ? () => {
+                const parent = currentBuildings.find((item) => item.id === selectedLocation.parentId || item.name === selectedLocation.building);
+                setOwnerModal(null);
+                if (parent) beginIndoorLocationPlacement(parent, selectedLocation);
+                else setError("The parent Building footprint could not be found.");
+              }
+            : undefined}
           onSubmit={async (updated, photos) => {
             if (selectedBuilding) {
               const savedLocation = typeof services.locations.save === "function"
@@ -4714,9 +4885,17 @@ export function MapEditor() {
               updateLocation({ ...savedLocation, id: selectedBuildingLocation?.id ?? savedLocation.id });
               recordPropertyOperation("Locations", selectedBuilding.id, selectedBuilding, updatedBuilding, `Edit ${selectedBuilding.name} details`);
             } else if (selectedLocation) {
-              const savedLocation = typeof services.locations.save === "function"
+              const savedRecord = typeof services.locations.save === "function"
                 ? await services.locations.save(updated, photos)
                 : updated;
+              const savedLocation = isIndoorLocation(updated) && updated.parentId && typeof services.locations.saveIndoorPosition === "function"
+                ? await services.locations.saveIndoorPosition({
+                    id: savedRecord.id,
+                    buildingId: updated.parentId,
+                    lat: updated.lat,
+                    lng: updated.lng,
+                  })
+                : savedRecord;
               updateLocation(savedLocation);
               recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);
             }
@@ -4766,6 +4945,40 @@ export function MapEditor() {
             <input aria-label="New room floor" value={newRoom.floor} onChange={(e) => setNewRoom({ ...newRoom, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
           </label>
           <div className="modal-actions"><Button variant="subtle" onClick={() => setAddRoomOpen(false)}>Cancel</Button><Button disabled={!newRoom.name.trim() || !newRoom.code.trim()} onClick={handleSaveNewRoom}>Add Room</Button></div>
+        </Modal>
+      )}
+
+      {indoorLocationChooserOpen && selectedBuilding && (
+        <Modal
+          title="Mark indoor location"
+          subtitle={`Choose an existing indoor location in ${selectedBuilding.name}, then click its position inside the building footprint.`}
+          size="md"
+          variant="green"
+          onClose={() => setIndoorLocationChooserOpen(false)}
+        >
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+            {buildingContentLocations.filter((location) => isIndoorLocation(location) && belongsToBuilding(location, selectedBuilding)).map((location) => {
+              const positioned = location.lat !== null && location.lng !== null;
+              return (
+                <div key={location.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#dbe0e2] p-3">
+                  <div className="min-w-0">
+                    <strong className="block truncate text-sm text-[#191c1d]">{location.name}</strong>
+                    <span className="text-xs text-[#526359]">{location.floor ? `${location.floor} · ` : ""}{location.type} · {location.code}</span>
+                    <span className="block text-[10px] text-[#526359]">{positioned ? "Marker placed" : "No map marker"}</span>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <Button onClick={() => beginIndoorLocationPlacement(selectedBuilding, location)}>{positioned ? "Reposition" : "Place marker"}</Button>
+                    <Button variant="subtle" disabled={!positioned} onClick={() => clearIndoorLocationPosition(selectedBuilding, location)}>Clear</Button>
+                  </div>
+                </div>
+              );
+            })}
+            {!buildingContentLocations.some((location) => isIndoorLocation(location) && belongsToBuilding(location, selectedBuilding)) && (
+              <p className="rounded-xl bg-[#f8faf9] p-4 text-sm text-[#526359]">This building has no Room, Office, Laboratory, or Restroom records yet. Use “Add indoor location” to create one first.</p>
+            )}
+          </div>
+          {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
+          <div className="modal-actions"><Button variant="subtle" onClick={() => setIndoorLocationChooserOpen(false)}>Close</Button></div>
         </Modal>
       )}
 

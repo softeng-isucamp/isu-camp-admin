@@ -277,7 +277,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const icon = row.querySelector(".location-type-symbol");
     expect(icon).toHaveStyle({ background: "#f3f4f6", opacity: "1" });
     expect(icon).not.toHaveStyle({ filter: "grayscale(1)" });
-    expect(icon?.querySelector("svg")).toHaveAttribute("stroke", "#0c7441");
+    expect(icon?.querySelector("svg")).toHaveAttribute("stroke", "currentColor");
     expect(screen.queryByText("Not positioned")).not.toBeInTheDocument();
   });
 
@@ -322,6 +322,11 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByLabelText(/status/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location code \/ id/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "Pick on map" })).toBeInTheDocument();
 
     // Cancel modal
     const cancelButton = screen.getByRole("button", { name: /cancel/i });
@@ -483,8 +488,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     const indoorTypeOptions = Array.from((await screen.findByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text);
     expect(indoorTypeOptions).not.toContain("Facility");
-    expect(screen.queryByLabelText("Latitude")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Longitude")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Latitude")).toHaveAttribute("type", "text");
+    expect(screen.getByLabelText("Longitude")).toHaveAttribute("type", "text");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Facility" } });
@@ -508,57 +515,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
   });
 
-  it("opens the Bulk Import modal with a file input and template", async () => {
+  it("does not expose bulk location import in the directory", async () => {
     renderLocations();
-    const bulkImportButton = await screen.findByRole("button", { name: /bulk import/i }, { timeout: 4000 });
-    fireEvent.click(bulkImportButton);
-
-    expect(await screen.findByRole("heading", { name: /bulk import locations/i })).toBeInTheDocument();
-    expect(screen.getByText(/validate campus location records before importing/i)).toBeInTheDocument();
-    expect(screen.getByText(/upload json file/i)).toBeInTheDocument();
-    const dialog = screen.getByRole("dialog", { name: /bulk import locations/i });
-    const fileInput = screen.getByLabelText(/choose location json file/i);
-    expect(fileInput).toHaveAttribute("type", "file");
-    expect(fileInput).toHaveAttribute("accept", "application/json,.json");
-    expect(dialog.querySelector("textarea")).toBeNull();
-    expect(screen.getByRole("link", { name: /download template/i })).toHaveAttribute("download", "locations-bulk-template.json");
-    expect(screen.getByText(/add new/i)).toBeInTheDocument();
-    expect(screen.getByText(/update existing/i)).toBeInTheDocument();
-  });
-
-  it("rejects outdoor and legacy types during import before mutation", async () => {
-    renderLocations();
-    fireEvent.click(await screen.findByRole("button", { name: /bulk import/i }));
-    const importRows = JSON.stringify([{ id: "rejected-outdoor", name: "Rejected outdoor", code: "REJECTED-OUTDOOR", type: "Facility", parentId: null, status: "Active", lat: 16.72, lng: 121.69 }]);
-    const importFile = { name: "locations.json", text: () => Promise.resolve(importRows) } as File;
-    fireEvent.change(screen.getByLabelText(/choose location json file/i), { target: { files: [importFile] } });
-    expect(await screen.findByText("locations.json selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/only Room, Office, Laboratory, and Restroom/i);
-    expect((await services.locations.list("Rejected outdoor")).items).toHaveLength(0);
-  });
-
-  it("reads a selected file, validates before commit, and clears validation when mode changes", async () => {
-    renderLocations();
-    fireEvent.click(await screen.findByRole("button", { name: /bulk import/i }));
-    const importRows = JSON.stringify([{ id: "file-import-test", name: "File import test", code: "FILE-TEST", type: "Room", parentId: "osm-location-c5fb7a267a8ca63d", floor: "Ground Floor", status: "Active", lat: null, lng: null }]);
-    const importFile = { name: "locations.json", text: () => Promise.resolve(importRows) } as File;
-    fireEvent.change(screen.getByLabelText(/choose location json file/i), { target: { files: [importFile] } });
-    expect(await screen.findByText("locations.json selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    expect(await screen.findByText(/Validation passed for 1 locations/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Update existing" }));
-    expect(screen.queryByText(/Validation passed/i)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add new" }));
-    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    await screen.findByText(/Validation passed for 1 locations/i);
-    fireEvent.click(screen.getByRole("button", { name: "Import Locations" }));
-    expect(await screen.findByText(/locations imported successfully/i)).toBeInTheDocument();
-    await waitFor(async () => {
-      expect((await services.locations.list("File import test")).items).toEqual([
-        expect.objectContaining({ id: "file-import-test", name: "File import test" }),
-      ]);
-    });
+    await screen.findByRole("button", { name: /add location/i });
+    expect(screen.queryByRole("button", { name: /bulk import/i })).not.toBeInTheDocument();
   });
 
   it("saves description and keywords to their independent directory columns", async () => {

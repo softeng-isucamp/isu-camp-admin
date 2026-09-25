@@ -79,6 +79,22 @@ def _point_in_polygon(point, polygon):
     return inside
 
 
+def point_in_polygon(point, polygon):
+    """Return whether a latitude/longitude point is inside or on a polygon.
+
+    Polygon vertices and points are represented as ``(latitude, longitude)``.
+    Treating the boundary as included makes placing a marker on a footprint
+    edge valid while still rejecting points outside it.
+    """
+    if not polygon:
+        return False
+    for index, start in enumerate(polygon):
+        end = polygon[(index + 1) % len(polygon)]
+        if _distance_to_segment(point, start, end) <= 1e-12:
+            return True
+    return _point_in_polygon(point, polygon)
+
+
 def _distance_to_segment(point, start, end):
     latitude_delta = end[0] - start[0]
     longitude_delta = end[1] - start[1]
