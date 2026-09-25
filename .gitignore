@@ -16,3 +16,7 @@ mock-backend/
 # Local planning and generated data (not tracked)
 .scratch/
 reference/
+
+# Local database migrations and feature specifications.
+/migrations/
+/docs/specs/
