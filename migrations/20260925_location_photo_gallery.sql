@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS public.location_photo (
     is_cover BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+-- Photos are served only by the admin Locations API. Supabase grants API roles
+-- access to new public tables by default, so deny direct table access.
+ALTER TABLE public.location_photo ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE public.location_photo
+    FROM PUBLIC, anon, authenticated, service_role;
+
 CREATE INDEX IF NOT EXISTS location_photo_owner_order
     ON public.location_photo (owner_type, owner_id, position);
 CREATE UNIQUE INDEX IF NOT EXISTS location_photo_one_cover

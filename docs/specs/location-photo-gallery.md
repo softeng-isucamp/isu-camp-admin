@@ -10,4 +10,4 @@ The Admin App's Locations form stores up to ten photos for each Campus Location.
 - Adding, removing, and cover changes are saved with the Location form. Cancel leaves stored photos unchanged.
 - A description field is not required for photos.
 
-Apply `migrations/20260925_location_photo_gallery.sql` before deploying the API. The migration preserves existing photo bytes and can be rerun safely.
+Apply `migrations/20260925_location_photo_gallery.sql` before deploying the API. The migration preserves existing photo bytes and can be rerun safely. It enables row level security and revokes direct Supabase API access to the gallery table; photos are served through the authenticated admin Locations API.
