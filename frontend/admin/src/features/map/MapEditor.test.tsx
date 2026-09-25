@@ -814,14 +814,19 @@ describe("Map Editor preview", () => {
 
   it("edits Location details from the object card and records a Working Session operation", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services" },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services", keywords: "books, study", floor: "Ground Floor" },
     ]);
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
     fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
 
-    expect(screen.getByRole("complementary", { name: "Library object details" })).toHaveTextContent("[Locations]");
+    const locationCard = screen.getByRole("complementary", { name: "Library object details" });
+    expect(locationCard).toHaveTextContent("[Locations]");
+    expect(locationCard).toHaveTextContent("Campus library services");
+    expect(locationCard).toHaveTextContent("books, study");
+    expect(locationCard).toHaveTextContent("16.720500, 121.689500");
+    expect(locationCard).toHaveTextContent("Active");
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     const typeOptions = within(screen.getAllByRole("combobox")[0]).getAllByRole("option");
@@ -832,6 +837,22 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+  });
+
+  it("omits parent building and spatial source from indoor location cards", async () => {
+    vi.mocked(services.map.locations).mockResolvedValue([
+      { id: "room-113", name: "Room 113", code: "ADM-113", type: "Room", parentId: "admin-building", building: "Administration Building", floor: "1st Floor", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Classroom" },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Room 113" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Room 113 Location/ }));
+
+    const locationCard = screen.getByRole("complementary", { name: "Room 113 object details" });
+    expect(locationCard).toHaveTextContent("1st Floor");
+    expect(locationCard).toHaveTextContent("Classroom");
+    expect(locationCard).not.toHaveTextContent("Parent building");
+    expect(locationCard).not.toHaveTextContent("Spatial source");
   });
 
   it("does not render imported local map features", async () => {

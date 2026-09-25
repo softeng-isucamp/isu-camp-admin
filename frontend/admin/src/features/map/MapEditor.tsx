@@ -3085,6 +3085,25 @@ export function MapEditor() {
     }
     if (selectedLocation) {
       const isFootprintOwner = selectedLocation.type === "Building" || selectedLocation.type === "Facility";
+      const parentBuilding = selectedLocation.parentId
+        ? currentBuildings.find((building) => building.id === selectedLocation.parentId)
+          ?? currentLocations.find((location) => location.id === selectedLocation.parentId)
+        : null;
+      const locationSummary: InspectorCardModel["summary"] = [
+        { label: "Code", value: selectedLocation.code },
+        { label: "Type", value: selectedLocation.type },
+        ...(!isFootprintOwner && !isIndoorLocation(selectedLocation) ? [{ label: "Parent building", value: selectedLocation.building || parentBuilding?.name || "—" }] : []),
+        ...(!isFootprintOwner ? [{ label: "Floor", value: selectedLocation.floor || "—" }] : []),
+        ...(selectedLocation.function ? [{ label: "Function", value: selectedLocation.function }] : []),
+        ...(selectedLocation.keywords ? [{ label: "Keywords", value: selectedLocation.keywords }] : []),
+        ...(selectedLocation.lat !== null && selectedLocation.lng !== null
+          ? [{ label: "Coordinates", value: `${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}` }]
+          : []),
+        { label: "Lifecycle", value: selectedLocation.status },
+        ...(isFootprintOwner || !isIndoorLocation(selectedLocation)
+          ? [{ label: "Spatial source", value: isFootprintOwner ? "Linked Building Footprint" : "Inherited from parent Building" }]
+          : []),
+      ];
       return {
         id: selectedLocation.id,
         kind: isFootprintOwner ? "building" : "campus_location",
@@ -3093,11 +3112,7 @@ export function MapEditor() {
         status: isFootprintOwner
           ? "Campus Location · footprint geometry managed in Map Editor"
           : "Campus Location",
-        summary: [
-          { label: "Code", value: selectedLocation.code },
-          { label: "Type", value: selectedLocation.type },
-          { label: "Spatial source", value: isFootprintOwner ? "Linked Building Footprint" : "Inherited from parent Building" },
-        ],
+        summary: locationSummary,
         overflowActions: [
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
         ],
