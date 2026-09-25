@@ -90,6 +90,7 @@ vi.mock("../../services/api", () => ({
         pageSize: 50,
       })),
       save: undefined as unknown as typeof services.locations.save,
+      saveIndoorPosition: vi.fn(),
       getPhotos: vi.fn(async () => []),
     },
   },
@@ -118,6 +119,7 @@ describe("Map Editor preview", () => {
     mapVisibleBounds = undefined;
     services.map.saveDraft = undefined;
     services.locations.save = undefined as unknown as typeof services.locations.save;
+    vi.mocked(services.locations.saveIndoorPosition).mockReset();
     vi.mocked(services.map.removeBuilding).mockResolvedValue(undefined);
     vi.mocked(services.map.createRouteNode).mockImplementation(async (node) => ({ ...node, id: "created-node" }));
     vi.mocked(services.map.updateRouteNode).mockImplementation(async (node) => node);
@@ -1445,6 +1447,43 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("region", { name: "Building content" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Walking access" })).toBeInTheDocument();
     expect(screen.queryByText(/Move footprint/i)).not.toBeInTheDocument();
+  });
+
+  it("previews an indoor location point and saves coordinates only from the position sidecard", async () => {
+    const building = { id: "placement-building", name: "Placement Hall", code: "PH", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690], [16.720, 121.690]] as [number, number][] };
+    const room = { id: "placement-room", name: "Room 204", code: "204", type: "Room" as const, parentId: building.id, building: building.name, floor: "2nd Floor", function: "Classroom", status: "Active" as const, lat: null, lng: null, positioned: false };
+    mapZoom = 20;
+    mapVisibleBounds = { getSouth: () => 16.719, getNorth: () => 16.722, getWest: () => 121.688, getEast: () => 121.691 };
+    vi.mocked(services.map.buildings).mockResolvedValue([building]);
+    vi.mocked(services.map.locations).mockResolvedValue([room]);
+    vi.mocked(services.locations.list).mockResolvedValue({ items: [room], total: 1, page: 1, pageSize: 100 });
+    vi.mocked(services.locations.saveIndoorPosition).mockImplementation(async (request) => ({
+      ...room,
+      parentId: request.buildingId,
+      lat: request.lat,
+      lng: request.lng,
+      positioned: request.lat !== null && request.lng !== null,
+    }));
+    renderEditor(["/map-editor?indoorLocation=placement-room&place=1"]);
+
+    const sidecard = await screen.findByRole("complementary", { name: "Indoor location position editor" });
+    expect(sidecard).toHaveTextContent("Room 204");
+    expect(sidecard).toHaveTextContent("Click inside the building footprint");
+    expect(screen.getByRole("button", { name: "Save Position" })).toBeDisabled();
+    expect(services.locations.saveIndoorPosition).not.toHaveBeenCalled();
+
+    clickMap(16.7205, 121.6895);
+    await waitFor(() => expect(sidecard).toHaveTextContent("16.720500"));
+    expect(services.locations.saveIndoorPosition).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
+
+    await waitFor(() => expect(services.locations.saveIndoorPosition).toHaveBeenCalledWith({
+      id: room.id,
+      buildingId: building.id,
+      lat: 16.7205,
+      lng: 121.6895,
+    }));
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Indoor location position editor" })).not.toBeInTheDocument());
   });
 
   it("locates a Building when its database ID collides with an Indoor Location ID", async () => {
