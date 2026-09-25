@@ -10,7 +10,6 @@ type NetworkBrowserProps = {
   selected: NetworkBrowserSelection;
   onSelect: (selection: NonNullable<NetworkBrowserSelection>) => void;
   onDismiss: () => void;
-  onImportWalkingNetwork?: () => void;
   className?: string;
 };
 
@@ -27,7 +26,7 @@ const knownAndObservedValues = (known: readonly string[], observed: readonly str
 ];
 const nodeStatus = (node: RouteNode) => node.status ?? "Active";
 
-export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect, onDismiss, onImportWalkingNetwork, className = "" }: NetworkBrowserProps) {
+export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect, onDismiss, className = "" }: NetworkBrowserProps) {
   const [tab, setTab] = useState<"pathways" | "nodes">("pathways");
   const [query, setQuery] = useState("");
   const [pathStatus, setPathStatus] = useState("all");
@@ -85,7 +84,6 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
     <div className="space-y-2 border-b border-[#dbe6df] px-3 pb-3">
       <label className="sr-only" htmlFor="network-browser-search">Search {tab === "pathways" ? "Pathways" : "Route Nodes"}</label>
       <input id="network-browser-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "pathways" ? "Search Pathways" : "Search Route Nodes"} className="w-full rounded-xl border border-[#cbd9d1] bg-white/90 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#005931]" />
-      {tab === "pathways" && onImportWalkingNetwork && <button type="button" onClick={onImportWalkingNetwork} className="w-full rounded-xl border border-[#005931] bg-[#005931] px-3 py-2 text-left text-xs font-extrabold text-white outline-none hover:bg-[#004727] focus-visible:ring-2 focus-visible:ring-[#005931]">Import Walking Network</button>}
       {tab === "pathways" ? <div className="grid grid-cols-2 gap-2">
         <Filter label="Status" value={pathStatus} onChange={setPathStatus} values={knownAndObservedValues(pathwayFilterOptions.status, pathways.map((pathway) => pathway.status))} />
         <Filter label="Type" value={pathType} onChange={setPathType} values={knownAndObservedValues(pathwayFilterOptions.type, pathways.map((pathway) => pathway.type))} />

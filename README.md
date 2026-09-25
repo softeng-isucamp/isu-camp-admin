@@ -57,3 +57,6 @@ If you prefer isolated logs or independent control:
 
 See `frontend/admin/README.md` for demo credentials and verification commands.
 
+## Database prerequisites
+
+The Map Editor's indoor-location markers require the `public.location` schema to support nullable latitude and longitude values. Coordinates must be stored as a complete pair and stay within the valid latitude and longitude ranges. Apply the database migration through the database team's deployment process before using indoor marker placement; the application does not alter the schema at startup.

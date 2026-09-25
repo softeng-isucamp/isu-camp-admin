@@ -1,21 +1,28 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
+
+function LocationRouteProbe() {
+  const location = useLocation();
+  return <output data-testid="location-route">{location.pathname}{location.search}</output>;
+}
 
 function renderLocations(initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
         <Locations />
+        <LocationRouteProbe />
       </MemoryRouter>
     </QueryClientProvider>
   );
+  return { ...rendered, queryClient };
 }
 
 describe("Locations screen table and hierarchy toggle validation", () => {
@@ -453,6 +460,27 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
     expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
+  });
+
+  it("opens Map Editor directly from an existing indoor location without saving its modal draft", async () => {
+    const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
+    const room = { id: "fast-pick-room", name: "Fast Pick Room", code: "FP-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", keywords: "class", status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
+    const page = { items: [building, room], total: 2, page: 1, pageSize: 50 };
+    vi.spyOn(services.locations, "list").mockResolvedValue(page);
+    const saveLocation = vi.spyOn(services.locations, "save").mockResolvedValue(room);
+    const { queryClient } = renderLocations();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: room!.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${room!.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const coordinates = screen.getByRole("region", { name: "Map coordinates" });
+    fireEvent.click(within(coordinates).getByRole("button", { name: "Pick on map" }));
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Edit Location" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("location-route")).toHaveTextContent(`/map-editor?indoorLocation=${room.id}&place=1`);
+    expect(saveLocation).not.toHaveBeenCalled();
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
   it("offers only Building and Facility when editing a Building and excludes Facility for indoor locations", async () => {
