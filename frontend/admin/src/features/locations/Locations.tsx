@@ -463,7 +463,7 @@ export function Locations() {
     await queryClient.invalidateQueries({ queryKey: ["logs"] });
   };
 
-  const save = async (): Promise<Location | null> => {
+  const save = async (options: { refreshAfterSave?: boolean } = {}): Promise<Location | null> => {
     setError("");
     setFieldErrors([]);
     const adding = dialog === "add";
@@ -500,7 +500,7 @@ export function Locations() {
           lng: normalized.lng ?? null,
         });
       }
-      await refresh();
+      if (options.refreshAfterSave !== false) await refresh();
       releasePhotoPreviews();
       setPhotos([]);
       setDialog(null);
@@ -532,8 +532,19 @@ export function Locations() {
 
   const saveAndLocateIndoorLocation = async () => {
     if (!isChildType(draft.type)) return;
-    const saved = await save();
+    const saved = await save({ refreshAfterSave: false });
     if (saved?.parentId) navigate(`/map-editor?indoorLocation=${encodeURIComponent(saved.id)}`);
+  };
+
+  const pickIndoorLocationOnMap = () => {
+    if (!isChildType(draft.type)) return;
+    if (dialog === "edit" && selected) {
+      closeOverlay();
+      navigate(`/map-editor?indoorLocation=${encodeURIComponent(selected.id)}&place=1`);
+      return;
+    }
+    // A new location must exist before Map Editor can persist its coordinates.
+    void saveAndLocateIndoorLocation();
   };
 
   const remove = async () => {
@@ -1140,8 +1151,9 @@ export function Locations() {
                 lng={draft.lng}
                 positioned={draft.positioned}
                 parentLabel={draft.building}
+                busy={saving}
                 onPickOnMap={isChildType(draft.type)
-                  ? () => { void saveAndLocateIndoorLocation(); }
+                  ? pickIndoorLocationOnMap
                   : undefined}
               />
 
@@ -1205,7 +1217,7 @@ export function Locations() {
               <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button disabled={saving || loadingPhotos || photoLoadFailed} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={save}>
+              <Button disabled={saving || loadingPhotos || photoLoadFailed} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
                 {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>
