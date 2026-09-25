@@ -35,6 +35,47 @@ class FakeColumn:
         return next((record for record in self.records if record.building_id == int(identifier)), None)
 
 
+class FakePhotoColumn:
+    """Records the criteria the route builds instead of comparing values."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, value):
+        return (self.name, "==", value)
+
+    def in_(self, values):
+        return (self.name, "in", list(values))
+
+
+class FakePhotoDelete:
+    def __init__(self, journal, criteria):
+        self.journal = journal
+        self.criteria = criteria
+
+    def delete(self, synchronize_session=None):
+        self.journal.append(self.criteria)
+
+
+class FakePhotoQuery:
+    def __init__(self, journal):
+        self.journal = journal
+
+    def filter(self, *criteria):
+        return FakePhotoDelete(self.journal, criteria)
+
+    def filter_by(self, **criteria):
+        return FakePhotoDelete(self.journal, criteria)
+
+
+def fake_photo_model(journal):
+    return type("LocationPhotoModel", (), {
+        "query": FakePhotoQuery(journal),
+        "owner_type": FakePhotoColumn("owner_type"),
+        "owner_id": FakePhotoColumn("owner_id"),
+    })
+
+
 class FakeSession:
     def __init__(self):
         self.commits = 0
@@ -264,10 +305,12 @@ def test_delete_map_building_deletes_indoor_locations_and_audits_in_one_transact
     indoor_location = type("LocationRecord", (), {"location_id": 12, "building_id": 4})()
     floor = type("FloorRecord", (), {"floor_id": 9, "building_id": 4})()
     audits = []
+    photo_deletes = []
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([indoor_location])}))
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([floor])}))
+    monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes))
     monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
@@ -289,6 +332,7 @@ def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([])}))
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
+    monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model([]))
     monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
@@ -298,3 +342,49 @@ def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
     assert session.rollbacks == 1
     assert session.deleted == []
     assert audits == [("Admin", None, "delete", "Building", 4, "Engineering Hall")]
+
+
+def test_delete_map_building_purges_gallery_photos_for_the_building_and_its_locations(monkeypatch):
+    """location_photo.owner_id is polymorphic, so no database cascade removes
+    these rows; the route has to purge both owner kinds itself."""
+    session = FakeSession()
+    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    rooms = [
+        type("LocationRecord", (), {"location_id": 12, "building_id": 4})(),
+        type("LocationRecord", (), {"location_id": 13, "building_id": 4})(),
+    ]
+    photo_deletes = []
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery(rooms)}))
+    monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
+    monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
+
+    response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
+
+    assert response.status_code == 200
+    assert photo_deletes == [
+        (("owner_type", "==", "location"), ("owner_id", "in", [12, 13])),
+        {"owner_type": "building", "owner_id": 4},
+    ]
+    assert session.commits == 1
+
+
+def test_delete_map_building_without_indoor_locations_only_purges_its_own_photos(monkeypatch):
+    session = FakeSession()
+    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    photo_deletes = []
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
+    monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([])}))
+    monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
+    monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes))
+    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
+
+    response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
+
+    assert response.status_code == 200
+    assert photo_deletes == [{"owner_type": "building", "owner_id": 4}]

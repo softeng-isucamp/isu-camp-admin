@@ -487,9 +487,12 @@ const canonicalNetwork = createCanonicalNetworkStore(
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const isMultipart = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
+    // `init` is spread first so a caller's own headers merge with the defaults
+    // below instead of replacing them: the session cookie and the JSON
+    // Content-Type must survive every call.
+    ...init,
     credentials: "include",
     headers: { ...(isMultipart ? {} : { "Content-Type": "application/json" }), ...(init?.headers ?? {}) },
-    ...init,
   });
   const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
   if (!response.ok) {
@@ -502,8 +505,8 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
 
 const apiBlob = async (path: string, init?: RequestInit): Promise<Blob> => {
   const response = await fetch(`${API_URL}${path}`, {
-    credentials: "include",
     ...init,
+    credentials: "include",
   });
   if (!response.ok) {
     // Failures still come back as the standard JSON error envelope.

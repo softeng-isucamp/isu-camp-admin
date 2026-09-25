@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import type { Location } from "../../types";
@@ -20,7 +20,7 @@ const location: Location = {
 describe("borrowed owner module forms", () => {
   afterEach(cleanup);
 
-  it("submits canonical Location details without changing spatial coordinates", () => {
+  it("submits canonical Location details without changing spatial coordinates", async () => {
     const onSubmit = vi.fn();
     render(
       <LocationDetailsModal
@@ -31,14 +31,19 @@ describe("borrowed owner module forms", () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library Plaza" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    // Save stays disabled until the existing photo gallery has loaded.
+    const saveLocation = screen.getByRole("button", { name: "Save Location" });
+    await waitFor(() => expect(saveLocation).toBeEnabled());
 
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+    fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library Plaza" } });
+    fireEvent.click(saveLocation);
+
+    // onSubmit receives the location plus the gallery drafts it was opened with.
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       name: "Main Library Plaza",
       lat: 16.7205,
       lng: 121.6895,
-    }));
+    }), []));
   });
 
   it("shows latitude and longitude as greyed-out coordinate fields without a read-only notice", () => {
