@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   Marker,
@@ -59,8 +59,6 @@ import {
   segmentMidpoints,
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
-import { createWalkingNetworkImportTemplate, previewWalkingNetworkImport, walkingNetworkImportDescription, type WalkingNetworkImportPreview } from "../../services/walkingNetworkImport";
-import type { NetworkSnapshot } from "../../services/network";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
@@ -768,7 +766,8 @@ export function MapEditor() {
   >(null);
   const [addRoomOpen, setAddRoomOpen] = useState(false);
   const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
-  const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string } | null>(null);
+  const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string; position: MapPoint | null } | null>(null);
+  const [indoorPositionSaving, setIndoorPositionSaving] = useState(false);
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
@@ -793,12 +792,6 @@ export function MapEditor() {
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
   const [currentMapZoom, setCurrentMapZoom] = useState(18);
   const isOverviewZoom = currentMapZoom < 18;
-  const [walkingNetworkImport, setWalkingNetworkImport] = useState<WalkingNetworkImportPreview | null>(null);
-  const [importAdvisoriesAcknowledged, setImportAdvisoriesAcknowledged] = useState(false);
-  const [walkingNetworkImportText, setWalkingNetworkImportText] = useState("");
-  const [walkingNetworkImportFileName, setWalkingNetworkImportFileName] = useState("");
-  const [walkingNetworkImportDialogOpen, setWalkingNetworkImportDialogOpen] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
 
   const refreshMapData = useCallback(async () => {
     await Promise.all([
@@ -1176,16 +1169,21 @@ export function MapEditor() {
         navigate(routeLocation.pathname, { replace: true });
         return;
       }
+      const shouldPlace = new URLSearchParams(routeLocation.search).get("place") === "1";
       setMode("select");
       setFrameBounds(null);
       setError("");
-      if (isPositionedLocation(indoorLocation)) {
+      if (isPositionedLocation(indoorLocation) && !shouldPlace) {
         setIndoorPlacement(null);
         setSelected({ type: "location", id: indoorLocation.id });
         flyTo([indoorLocation.lat, indoorLocation.lng], 20);
       } else {
-        setSelected({ type: "building", id: parentBuilding.id });
-        setIndoorPlacement({ locationId: indoorLocation.id, buildingId: parentBuilding.id });
+        setSelected({ type: "location", id: indoorLocation.id });
+        setIndoorPlacement({
+          locationId: indoorLocation.id,
+          buildingId: parentBuilding.id,
+          position: isPositionedLocation(indoorLocation) ? [indoorLocation.lat, indoorLocation.lng] : null,
+        });
         flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
       }
       navigate(routeLocation.pathname, { replace: true });
@@ -1392,20 +1390,8 @@ export function MapEditor() {
         setError("Indoor location positioning is unavailable in this environment.");
         return;
       }
-      try {
-        const positioned = await services.locations.saveIndoorPosition({
-          id: location.id,
-          buildingId: building.id,
-          lat: point[0],
-          lng: point[1],
-        });
-        setLocalLocations((current) => [...current.filter((item) => item.id !== positioned.id), positioned]);
-        setSelected({ type: "location", id: positioned.id });
-        setIndoorPlacement(null);
-        setError("");
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : `Could not place ${location.name}.`);
-      }
+      setIndoorPlacement((current) => current ? { ...current, position: point } : current);
+      setError("");
       return;
     }
     if (mode === "select") {
@@ -1652,10 +1638,50 @@ export function MapEditor() {
       return;
     }
     setIndoorLocationChooserOpen(false);
-    setIndoorPlacement({ locationId: location.id, buildingId: building.id });
+    setIndoorPlacement({
+      locationId: location.id,
+      buildingId: building.id,
+      position: isPositionedLocation(location) ? [location.lat, location.lng] : null,
+    });
     setSelected({ type: "location", id: location.id });
     setError("");
     flyTo(polygonFeatureAnchor(building.points), 20);
+  };
+
+  const saveIndoorLocationPosition = async () => {
+    if (!indoorPlacement?.position || indoorPositionSaving) return;
+    const building = currentBuildings.find((item) => item.id === indoorPlacement.buildingId);
+    const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
+    if (!building || !location) {
+      setError("The selected indoor location or its building is no longer available.");
+      return;
+    }
+    if (!pointInPolygon(indoorPlacement.position, building.points)) {
+      setError(`Place ${location.name} inside ${building.name}'s footprint.`);
+      return;
+    }
+    if (typeof services.locations.saveIndoorPosition !== "function") {
+      setError("Indoor location positioning is unavailable in this environment.");
+      return;
+    }
+    setIndoorPositionSaving(true);
+    setError("");
+    try {
+      const positioned = await services.locations.saveIndoorPosition({
+        id: location.id,
+        buildingId: building.id,
+        lat: indoorPlacement.position[0],
+        lng: indoorPlacement.position[1],
+      });
+      setLocalLocations((current) => [...current.filter((item) => item.id !== positioned.id), positioned]);
+      setSelected({ type: "location", id: positioned.id });
+      setIndoorPlacement(null);
+      flyTo([positioned.lat!, positioned.lng!], 20);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Could not save ${location.name}'s position.`);
+    } finally {
+      setIndoorPositionSaving(false);
+    }
   };
 
   const clearIndoorLocationPosition = async (building: Building, location: Location) => {
@@ -2120,82 +2146,6 @@ export function MapEditor() {
     setSelected(null);
     setPathDraftDirty(false);
     setMode("path");
-  };
-
-  const networkSnapshotForImport = (): NetworkSnapshot => ({
-    buildings: currentBuildings.map((building) => ({
-      id: building.id,
-      name: building.name,
-      code: building.code,
-      geometry: building.points.map(([latitude, longitude]) => ({ latitude, longitude })),
-      status: building.status === "Inactive" ? "inactive" : "active",
-    })),
-    routeNodes: currentNodes.map((node) => ({
-      id: node.id, name: node.name, latitude: node.lat, longitude: node.lng,
-      status: node.status === "Inactive" ? "inactive" : "active",
-      type: node.nodeType === "Entrance" ? "entrance" : node.nodeType === "Access Point" ? "access_point" : "junction",
-      buildingId: node.nodeType === "Entrance" ? node.associatedPlaceId ?? null : null,
-    } as NetworkSnapshot["routeNodes"][number])),
-    pathways: currentPathways.map((pathway) => ({
-      id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
-      pathSequence: { points: pathway.pathPoints.map(([latitude, longitude]) => ({ latitude, longitude })) },
-      distanceMeters: null, estimatedTimeSeconds: null, type: pathway.type, shade: pathway.shade,
-      direction: pathway.direction === "One-way" ? "one_way" : pathway.direction === "Two-way" ? "two_way" : null,
-      status: pathway.status === "Closed" ? "closed" : "active",
-      allowedModes: (pathway.allowedModes ?? ["Walking"]).map((mode) => mode === "Vehicle" ? "vehicle" : "walking"),
-    })),
-  });
-
-  const beginWalkingNetworkImport = () => {
-    setWalkingNetworkImportDialogOpen(true);
-  };
-
-  const handleWalkingNetworkFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setWalkingNetworkImport(null);
-    setImportAdvisoriesAcknowledged(false);
-    setWalkingNetworkImportFileName(file.name);
-    setWalkingNetworkImportText(await file.text());
-  };
-
-  const validateWalkingNetworkImport = () => {
-    if (!walkingNetworkImportText.trim()) return;
-    setWalkingNetworkImport(previewWalkingNetworkImport(walkingNetworkImportText, networkSnapshotForImport(), campusBoundary));
-    setImportAdvisoriesAcknowledged(false);
-  };
-
-  const applyWalkingNetworkImport = () => {
-    if (!walkingNetworkImport || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking")
-      || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)) return;
-    const nodes = walkingNetworkImport.routeNodes.map((node) => ({
-      id: node.id, name: node.name, nodeType: node.type === "entrance" ? "Entrance" : node.type === "access_point" ? "Access Point" : "Junction",
-      associatedPlaceId: node.buildingId, lat: node.latitude, lng: node.longitude,
-    } as RouteNode));
-    const pathways = walkingNetworkImport.pathways.map((pathway) => ({
-      id: pathway.id, name: pathway.name, sourceNodeId: pathway.sourceNodeId, destinationNodeId: pathway.destinationNodeId,
-      pathPoints: pathway.pathSequence.points.map((point) => [point.latitude, point.longitude] as [number, number]),
-      // Was hardcoded to "Unknown", discarding distance/time metadata carried by the imported network snapshot.
-      // NOTE: this assumes `pathway.distanceMeters` / `pathway.estimatedTimeSeconds` exist on the
-      // WalkingNetworkImportPreview pathway shape (mirroring NetworkSnapshot, per networkSnapshotForImport()
-      // above). If services/walkingNetworkImport.ts uses different field names, adjust accordingly.
-      distance: pathway.distanceMeters != null ? `${Math.round(pathway.distanceMeters)}m` : "Unknown",
-      time: pathway.estimatedTimeSeconds != null ? `${Math.round(pathway.estimatedTimeSeconds / 60)} min` : "Unknown",
-      shade: (pathway.shade ?? "Unknown") as Pathway["shade"], type: pathway.type ?? "Walkway",
-      direction: pathway.direction === "one_way" ? "One-way" : "Two-way", status: pathway.status === "closed" ? "Closed" : "Active",
-      allowedModes: pathway.allowedModes?.map((mode) => mode === "vehicle" ? "Vehicle" : "Walking"),
-    } as Pathway));
-    setLocalNodes((items) => [...items, ...nodes]);
-    setLocalPathways((items) => [...items, ...pathways]);
-    workingSessionManager.executeBatch("Import Walking Network", "Walking Network", "walking-network-import", walkingNetworkImport.operations.map((operation) => ({
-      ...operation,
-      after: (pathways.find((pathway) => pathway.id === operation.entityId) ?? nodes.find((node) => node.id === operation.entityId)) as unknown as Record<string, unknown>,
-    })));
-    setDirty(true);
-    setWalkingNetworkImport(null);
-    setWalkingNetworkImportDialogOpen(false);
-    setNetworkBrowserOpen(true);
   };
 
   const insertPathPoint = (segmentIndex: number) => {
@@ -3135,6 +3085,25 @@ export function MapEditor() {
     }
     if (selectedLocation) {
       const isFootprintOwner = selectedLocation.type === "Building" || selectedLocation.type === "Facility";
+      const parentBuilding = selectedLocation.parentId
+        ? currentBuildings.find((building) => building.id === selectedLocation.parentId)
+          ?? currentLocations.find((location) => location.id === selectedLocation.parentId)
+        : null;
+      const locationSummary: InspectorCardModel["summary"] = [
+        { label: "Code", value: selectedLocation.code },
+        { label: "Type", value: selectedLocation.type },
+        ...(!isFootprintOwner && !isIndoorLocation(selectedLocation) ? [{ label: "Parent building", value: selectedLocation.building || parentBuilding?.name || "—" }] : []),
+        ...(!isFootprintOwner ? [{ label: "Floor", value: selectedLocation.floor || "—" }] : []),
+        ...(selectedLocation.function ? [{ label: "Function", value: selectedLocation.function }] : []),
+        ...(selectedLocation.keywords ? [{ label: "Keywords", value: selectedLocation.keywords }] : []),
+        ...(selectedLocation.lat !== null && selectedLocation.lng !== null
+          ? [{ label: "Coordinates", value: `${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}` }]
+          : []),
+        { label: "Lifecycle", value: selectedLocation.status },
+        ...(isFootprintOwner || !isIndoorLocation(selectedLocation)
+          ? [{ label: "Spatial source", value: isFootprintOwner ? "Linked Building Footprint" : "Inherited from parent Building" }]
+          : []),
+      ];
       return {
         id: selectedLocation.id,
         kind: isFootprintOwner ? "building" : "campus_location",
@@ -3143,11 +3112,7 @@ export function MapEditor() {
         status: isFootprintOwner
           ? "Campus Location · footprint geometry managed in Map Editor"
           : "Campus Location",
-        summary: [
-          { label: "Code", value: selectedLocation.code },
-          { label: "Type", value: selectedLocation.type },
-          { label: "Spatial source", value: isFootprintOwner ? "Linked Building Footprint" : "Inherited from parent Building" },
-        ],
+        summary: locationSummary,
         overflowActions: [
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
         ],
@@ -3699,6 +3664,7 @@ export function MapEditor() {
           })}
 
           {visibleIndoorLocations.map((location) => {
+            if (indoorPlacement?.locationId === location.id) return null;
             const isSelected = selected?.type === "location" && selected.id === location.id;
             const building = currentBuildings.find((item) => belongsToBuilding(location, item));
             return (
@@ -3720,6 +3686,15 @@ export function MapEditor() {
               </Marker>
             );
           })}
+
+          {indoorPlacement?.position && (() => {
+            const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
+            return location ? <Marker
+              key={`indoor-placement-preview:${location.id}`}
+              position={indoorPlacement.position}
+              icon={createIndoorLocationIcon(location.type, true)}
+            /> : null;
+          })()}
 
           {filteredNodes.map((node) => {
             if (mode === "move" && movingId === node.id) return null;
@@ -3977,10 +3952,28 @@ export function MapEditor() {
         </MapContainer>
 
         {indoorPlacement && (
-          <div className="absolute left-1/2 top-4 z-[1000] flex w-[min(92%,34rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-white/95 px-4 py-3 text-xs text-[#234333] shadow-lg" role="status">
-            <span>Click inside the building footprint to place {buildingContentLocations.find((location) => location.id === indoorPlacement.locationId)?.name ?? "the indoor location"}. {currentMapZoom < 20 ? "Zoom to level 20 or closer." : ""}</span>
-            <button type="button" className="shrink-0 rounded-full border border-[#dbe0e2] px-3 py-1.5 font-bold" onClick={() => { setIndoorPlacement(null); setError(""); }}>Cancel</button>
-          </div>
+          <aside className="absolute right-4 top-4 z-[1000] flex max-h-[calc(100%-2rem)] w-[min(24rem,calc(100%-2rem))] flex-col gap-4 overflow-auto rounded-2xl border border-[#dbe6df] bg-white/95 p-5 text-[#234333] shadow-xl backdrop-blur" aria-label="Indoor location position editor">
+            <div>
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#426257]">INDOOR LOCATION</p>
+              <h2 className="mt-1 text-lg font-extrabold text-[#191c1d]">{buildingContentLocations.find((location) => location.id === indoorPlacement.locationId)?.name ?? "Position location"}</h2>
+              <p className="mt-1 text-xs text-[#526359]">{currentBuildings.find((building) => building.id === indoorPlacement.buildingId)?.name ?? "Parent Building"}</p>
+            </div>
+            <p role="status" className="rounded-xl bg-[#eff6f1] px-3 py-2.5 text-xs leading-relaxed">
+              {indoorPlacement.position
+                ? "Position preview selected. Click another point inside the building to change it."
+                : "Click inside the building footprint to choose this location's position."}
+              {currentMapZoom < 20 ? " Zoom to level 20 or closer." : ""}
+            </p>
+            {indoorPlacement.position && <dl className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg bg-[#f7f9f8] p-2"><dt className="font-bold text-[#526359]">Latitude</dt><dd className="mt-1 font-mono">{indoorPlacement.position[0].toFixed(6)}</dd></div>
+              <div className="rounded-lg bg-[#f7f9f8] p-2"><dt className="font-bold text-[#526359]">Longitude</dt><dd className="mt-1 font-mono">{indoorPlacement.position[1].toFixed(6)}</dd></div>
+            </dl>}
+            {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
+            <div className="flex justify-end gap-2 border-t border-[#e6ece8] pt-3">
+              <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoorPositionSaving} onClick={() => { setIndoorPlacement(null); setError(""); }}>Cancel</button>
+              <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoorPositionSaving} onClick={() => { void saveIndoorLocationPosition(); }}>{indoorPositionSaving ? "Saving Position…" : "Save Position"}</button>
+            </div>
+          </aside>
         )}
 
         {isOverviewZoom && mode !== "select" && (
@@ -3999,30 +3992,6 @@ export function MapEditor() {
             onDismiss={() => setNetworkBrowserOpen(false)}
             className=""
           />
-        )}
-
-        {walkingNetworkImportDialogOpen && (
-          <div className="modal-backdrop locations-overlay" role="dialog" aria-modal="true" aria-labelledby="walking-network-import-title" aria-describedby="walking-network-import-description">
-            <div className="modal-card locations-modal-card" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "560px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
-              <div style={{ background: "#005931", color: "#fff", padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
-                  <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "grid", placeItems: "center" }} aria-hidden="true">⇧</div>
-                  <div><h2 id="walking-network-import-title" tabIndex={-1} style={{ fontSize: "20px", fontWeight: "bold", margin: 0, color: "#fff" }}>Import Walking Network</h2><p id="walking-network-import-description" style={{ margin: "2px 0 0", color: "#d6ede0", fontSize: "13px" }}>{walkingNetworkImportDescription}</p></div>
-                </div>
-                <button type="button" aria-label="Close import dialog" onClick={() => { setWalkingNetworkImportDialogOpen(false); setWalkingNetworkImport(null); }} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", borderRadius: "50%", width: "34px", height: "34px", cursor: "pointer", fontSize: "20px" }}>×</button>
-              </div>
-              <div className="locations-modal-body" style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: "20px" }}>
-                <div style={{ border: "1.5px dashed #c2d6cb", borderRadius: "20px", padding: "20px 24px", background: "#f8faf9", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
-                  <div><strong style={{ fontSize: "16px", color: "#191c1d", display: "block" }}>Upload JSON file</strong><p style={{ color: "#525c57", fontSize: "13px", margin: "3px 0 0" }}>Choose a .json file containing Route Nodes and Pathways.</p>{walkingNetworkImportFileName && <p style={{ color: "#0c7441", fontSize: "12px", margin: "6px 0 0", fontWeight: 600 }}>{walkingNetworkImportFileName} selected</p>}</div>
-                  <button type="button" onClick={() => importInputRef.current?.click()} style={{ border: "1.5px solid #0c7441", borderRadius: "999px", padding: "10px 28px", color: "#0c7441", fontWeight: 600, fontSize: "14px", background: "#fff", cursor: "pointer", flexShrink: 0 }}>Browse</button>
-                </div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}><a href={`data:application/json;charset=utf-8,${encodeURIComponent(createWalkingNetworkImportTemplate())}`} download="walking-network-template.json" style={{ color: "#0c7441", fontSize: "14px", fontWeight: 600, textDecoration: "none" }}>⇩&nbsp; Download template</a></div>
-                {walkingNetworkImport && <div role={walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "alert" : "status"} aria-live="polite" style={{ padding: "10px 14px", borderRadius: "10px", background: walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "#fee2e2" : "#e6f7ec", color: walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") ? "#dc2626" : "#0c7441", fontSize: "13px" }}>{walkingNetworkImport.findings.length === 0 ? `Validation passed for ${walkingNetworkImport.routeNodes.length} Route Nodes and ${walkingNetworkImport.pathways.length} Pathways.` : walkingNetworkImport.findings.map((finding, index) => <div key={`${finding.row}-${finding.entityId ?? "row"}-${index}`} style={{ marginBottom: index < walkingNetworkImport.findings.length - 1 ? "8px" : 0 }}><strong>{finding.severity === "blocking" ? "Blocking" : "Advisory"} · Row {finding.row}</strong><div>{finding.message}{finding.entityId ? ` (${finding.entityId})` : ""}</div></div>)}</div>}
-                {walkingNetworkImport && walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") && <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "13px", fontWeight: 600, color: "#3f4941" }}><input type="checkbox" checked={importAdvisoriesAcknowledged} onChange={(event) => setImportAdvisoriesAcknowledged(event.target.checked)} /> I reviewed the advisory findings and acknowledge importing these objects.</label>}
-              </div>
-              <div style={{ padding: "18px 28px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}><Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1px solid #d1d5db", color: "#191c1d" }} onClick={() => { setWalkingNetworkImportDialogOpen(false); setWalkingNetworkImport(null); }}>Cancel</Button><Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px", height: "46px", border: "1.5px solid #0c7441", color: "#0c7441", fontWeight: 600 }} disabled={!walkingNetworkImportText.trim()} onClick={validateWalkingNetworkImport}>Validate</Button><Button style={{ borderRadius: "999px", padding: "0 24px", height: "46px", background: "#005931", color: "#fff", fontWeight: 600 }} disabled={!walkingNetworkImport || walkingNetworkImport.operations.length === 0 || walkingNetworkImport.findings.some((finding) => finding.severity === "blocking") || (walkingNetworkImport.findings.some((finding) => finding.severity === "advisory") && !importAdvisoriesAcknowledged)} onClick={applyWalkingNetworkImport}>Import Walking Network</Button></div>
-            </div>
-          </div>
         )}
 
         {selectionPopover && (
@@ -4112,7 +4081,6 @@ export function MapEditor() {
           suspendedDrafts={workingSessionState.suspendedDrafts}
           onResumeDraft={requestDraftResume}
         />
-        <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleWalkingNetworkFile} className="hidden" aria-label="Import Walking Network file" />
 
         {pendingToolRequest && workingSessionState.activeDraft && (
           <ToolInterruptionDialog

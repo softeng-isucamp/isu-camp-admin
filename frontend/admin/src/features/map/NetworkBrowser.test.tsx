@@ -59,17 +59,9 @@ describe("NetworkBrowser", () => {
     expect(screen.getByRole("button", { name: /Library Entrance/ })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("places Import Walking Network immediately below Pathways search", () => {
-    const onImport = vi.fn();
-    render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} onImportWalkingNetwork={onImport} />);
+  it("does not expose a walking-network bulk import action", () => {
+    render(<NetworkBrowser pathways={pathways} nodes={nodes} buildings={[]} selected={null} onSelect={vi.fn()} onDismiss={vi.fn()} />);
 
-    const search = screen.getByPlaceholderText("Search Pathways");
-    const importButton = screen.getByRole("button", { name: "Import Walking Network" });
-    const filters = screen.getByLabelText("Status");
-
-    expect(search.compareDocumentPosition(importButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(importButton.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(importButton);
-    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /import walking network/i })).not.toBeInTheDocument();
   });
 });

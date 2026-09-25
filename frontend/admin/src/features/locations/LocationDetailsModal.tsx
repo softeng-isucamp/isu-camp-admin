@@ -21,9 +21,11 @@ export function LocationCoordinatesFields({
   lng,
   positioned,
   onPickOnMap,
+  busy = false,
   parentLabel,
 }: Pick<Location, "lat" | "lng" | "positioned"> & {
   onPickOnMap?: () => void;
+  busy?: boolean;
   parentLabel?: string;
 }) {
   return (
@@ -38,12 +40,12 @@ export function LocationCoordinatesFields({
           </p>
         </div>
         {onPickOnMap && (
-          <Button type="button" variant="subtle" className="shrink-0" onClick={onPickOnMap}>
+          <Button type="button" variant="subtle" className="shrink-0" disabled={busy} onClick={onPickOnMap}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
               <circle cx="12" cy="10" r="2.5" />
             </svg>
-            Pick on map
+            {busy ? "Saving…" : "Pick on map"}
           </Button>
         )}
       </div>
@@ -202,10 +204,6 @@ export function LocationDetailsModal({
     }
   };
 
-  const saveAndPickOnMap = async () => {
-    if (await save()) onPickIndoorLocationOnMap?.();
-  };
-
   return (
     <Modal
       title="Edit Location"
@@ -225,7 +223,7 @@ export function LocationDetailsModal({
           lng={draft.lng}
           positioned={draft.positioned}
           parentLabel={draft.building}
-          onPickOnMap={onPickIndoorLocationOnMap ? () => { void saveAndPickOnMap(); } : undefined}
+          onPickOnMap={onPickIndoorLocationOnMap}
         />
       ) : (
         <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
