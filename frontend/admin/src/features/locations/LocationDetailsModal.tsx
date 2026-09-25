@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
+import { services } from "../../services/api";
 import { locationPolicy } from "../../lib/locationPolicy";
-import type { Location, LocationDraft, LocationType } from "../../types";
+import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
+import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 interface LocationDetailsFieldsProps {
   draft: LocationDraft;
@@ -88,7 +90,7 @@ interface LocationDetailsModalProps {
   directory: Location[];
   allowedTypes?: LocationType[];
   onClose: () => void;
-  onSubmit: (location: Location) => void | Promise<void>;
+  onSubmit: (location: Location, photos: LocationPhotoDraft[]) => void | Promise<void>;
 }
 
 export function LocationDetailsModal({
@@ -101,6 +103,32 @@ export function LocationDetailsModal({
   const [draft, setDraft] = useState<Location>({ ...location });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [photos, setPhotos] = useState<LocationPhotoDraft[]>([]);
+  const photosRef = useRef<LocationPhotoDraft[]>(photos);
+  photosRef.current = photos;
+  const [loadingPhotos, setLoadingPhotos] = useState(true);
+  const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+  const updateDraft = useCallback((next: Location) => setDraft(next), []);
+
+  useEffect(() => {
+    let active = true;
+    void services.locations.getPhotos(location.id, location.type).then((loaded) => {
+      if (active) setPhotos(loaded);
+      else loaded.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
+    }).catch((cause) => {
+      if (active) {
+        setPhotoLoadFailed(true);
+        setError(cause instanceof Error ? cause.message : "Unable to load location photos.");
+      }
+    }).finally(() => {
+      if (active) setLoadingPhotos(false);
+    });
+    return () => {
+      active = false;
+      photosRef.current.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
+    };
+  // Modal mounts for one selected Location and is unmounted on close.
+  }, [location.id, location.type]);
   const effectiveAllowedTypes = allowedTypes ?? (
     location.type === "Building" || location.type === "Facility"
       ? ["Building", "Facility"]
@@ -134,7 +162,7 @@ export function LocationDetailsModal({
         lat: location.lat,
         lng: location.lng,
         positioned: location.positioned,
-      });
+      }, photos);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save location.");
     } finally {
@@ -152,6 +180,7 @@ export function LocationDetailsModal({
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
+      <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} />
       {locationPolicy.classify(draft.type).kind === "indoor" ? (
         <div className="borrowed-spatial-lock" title="Indoor locations inherit their position from the selected building.">
           <strong>🔒 Indoor Location</strong>
@@ -162,7 +191,7 @@ export function LocationDetailsModal({
       )}
       <div className="modal-actions">
         <Button variant="subtle" disabled={submitting} onClick={onClose}>Cancel</Button>
-        <Button disabled={submitting} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
+        <Button disabled={submitting || loadingPhotos || photoLoadFailed} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
       </div>
     </Modal>
   );

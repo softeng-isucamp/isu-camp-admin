@@ -2683,7 +2683,9 @@ export function MapEditor() {
     status: selectedBuildingLocation?.status ?? selectedBuilding.status ?? "Active",
     lat: selectedBuildingLocation?.lat ?? null,
     lng: selectedBuildingLocation?.lng ?? null,
-    positioned: true,
+    positioned: selectedBuildingLocation?.positioned ?? (selectedBuildingLocation?.lat != null && selectedBuildingLocation?.lng != null),
+    hasPhoto: selectedBuildingLocation?.hasPhoto,
+    photo: selectedBuildingLocation?.photo,
   } : null);
 
   const initializeBuildingFootprintEdit = (
@@ -4696,10 +4698,10 @@ export function MapEditor() {
           directory={currentLocations}
           allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
           onClose={() => setOwnerModal(null)}
-          onSubmit={async (updated) => {
+          onSubmit={async (updated, photos) => {
             if (selectedBuilding) {
               const savedLocation = typeof services.locations.save === "function"
-                ? await services.locations.save(updated)
+                ? await services.locations.save(updated, photos)
                 : updated;
               const updatedBuilding: Building = {
                 ...selectedBuilding,
@@ -4709,11 +4711,11 @@ export function MapEditor() {
                 status: savedLocation.status,
               };
               updateBuilding(updatedBuilding);
-              if (selectedBuildingLocation) updateLocation({ ...savedLocation, id: selectedBuildingLocation.id });
+              updateLocation({ ...savedLocation, id: selectedBuildingLocation?.id ?? savedLocation.id });
               recordPropertyOperation("Locations", selectedBuilding.id, selectedBuilding, updatedBuilding, `Edit ${selectedBuilding.name} details`);
             } else if (selectedLocation) {
               const savedLocation = typeof services.locations.save === "function"
-                ? await services.locations.save(updated)
+                ? await services.locations.save(updated, photos)
                 : updated;
               updateLocation(savedLocation);
               recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);

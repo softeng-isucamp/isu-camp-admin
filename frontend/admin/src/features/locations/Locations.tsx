@@ -14,7 +14,7 @@ import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "
 import { locations as initialLocations } from "../../services/mockData";
 import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
-import { LocationDetailsFields } from "./LocationDetailsModal";
+import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 const blankLocation = (): LocationDraft => ({
@@ -1260,6 +1260,10 @@ export function Locations() {
                 onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
               />
 
+              {locationPolicy.classify(draft.type).kind !== "indoor" && (
+                <LocationCoordinatesFields lat={draft.lat} lng={draft.lng} positioned={draft.positioned} />
+              )}
+
               {(isChildType(draft.type) || draft.parentId !== null) && (
                 <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <SelectField
@@ -1307,11 +1311,9 @@ export function Locations() {
                 </div>
               )}
 
-              <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
-                {locationPolicy.classify(draft.type).kind === "indoor"
-                  ? "Indoor Locations inherit map position and routing from their selected Building."
-                  : "Spatial position is managed in Map Editor."}
-              </p>
+              {locationPolicy.classify(draft.type).kind === "indoor" && <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
+                Indoor Locations inherit map position and routing from their selected Building.
+              </p>}
 
               {/* Upload Box */}
               <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} error={errorFor("photo")} />
