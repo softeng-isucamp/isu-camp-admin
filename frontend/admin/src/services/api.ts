@@ -723,7 +723,6 @@ const localAuditEntries: AuditEntry[] = [];
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
-  "Bulk Imported Location", "Bulk Updated Location",
 ]);
 
 const enrichLegacyLocationAuditIds = () => {
