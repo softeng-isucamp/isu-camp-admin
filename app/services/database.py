@@ -166,6 +166,7 @@ CORS(
                 "GET",
                 "POST",
                 "PUT",
+                "PATCH",
                 "DELETE",
                 "OPTIONS"
             ],
@@ -198,7 +199,7 @@ def add_cors_headers(response):
             "Content-Type, Authorization"
         )
         response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, DELETE, OPTIONS"
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         )
         response.headers["Access-Control-Expose-Headers"] = "Retry-After"
 
