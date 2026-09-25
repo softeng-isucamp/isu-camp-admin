@@ -1553,7 +1553,7 @@ export const services: Services = {
     convertPathPoint: async ({ pathwayId, sequenceNo, point, node, existingNodeId, pathways: replacements }) => {
       if (!USE_HTTP_API) {
         const savedNode = existingNodeId
-          ? mapNodes.find((item) => item.id === existingNodeId)
+          ? mapNodes.find((item: { id: string; }) => item.id === existingNodeId)
           : node ? { ...node, id: `node-${Date.now()}` } : undefined;
         if (!savedNode) throw new Error("Route Node is unavailable.");
         const savedPaths = replacements.map((pathway, index) => ({ ...pathway, id: `pathway-${Date.now()}-${index}` })) as [Pathway, Pathway];
