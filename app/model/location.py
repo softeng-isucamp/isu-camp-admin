@@ -35,6 +35,11 @@ class Location(db.Model):
         nullable=True
     )
 
+    # Optional map position for indoor locations. These coordinates are
+    # independent of the containing building's footprint anchor.
+    latitude = db.Column(db.Numeric, nullable=True)
+    longitude = db.Column(db.Numeric, nullable=True)
+
     type_id = db.Column(
         db.BigInteger,
         nullable=False
@@ -137,8 +142,8 @@ class Location(db.Model):
             "function": self.description,
             "keywords": self.keywords,
             "status": "Active",
-            "lat": None,
-            "lng": None,
-            "positioned": False,
+            "lat": float(self.latitude) if self.latitude is not None else None,
+            "lng": float(self.longitude) if self.longitude is not None else None,
+            "positioned": self.latitude is not None and self.longitude is not None,
             "hasPhoto": self.photo is not None,
         }

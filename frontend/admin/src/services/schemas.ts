@@ -30,7 +30,7 @@ export const resetPasswordSchema = resetSchema
     message: "Passwords do not match.",
     path: ["confirmPassword"],
   });
-const locationImportFields = z.object({
+const locationFields = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   code: z.string().min(1),
@@ -42,8 +42,7 @@ const locationImportFields = z.object({
   lat: z.number().nullable(),
   lng: z.number().nullable(),
 });
-export const locationImportSchema = locationImportFields;
-export const locationSchema = locationImportFields.extend({
+export const locationSchema = locationFields.extend({
   building: z.string().optional(),
   floor: z.string().optional(),
   function: z.string().optional(),

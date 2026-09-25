@@ -188,41 +188,6 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Bulk Import" })
-    .first()
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Bulk Import Locations" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("location-import-dialog.png", {
-    animations: "disabled",
-  });
-  await page.getByLabel("Choose location JSON file").setInputFiles({
-    name: "invalid-locations.json",
-    mimeType: "application/json",
-    buffer: Buffer.from("{bad"),
-  });
-  await page.getByRole("button", { name: "Validate" }).click();
-  await expect(page.getByText("Invalid JSON file.")).toBeVisible();
-  await expect(page).toHaveScreenshot("location-import-invalid.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page
-    .getByRole("button", { name: "Bulk Import" })
-    .first()
-    .click();
-  await page.getByLabel("Choose location JSON file").setInputFiles({
-    name: "unsupported-location.json",
-    mimeType: "application/json",
-    buffer: Buffer.from(
-      '{"id":"loc-imported","name":"Imported Facility","code":"IMP-01","type":"Facility","parentId":null,"status":"Active","lat":16.72,"lng":121.69}',
-    ),
-  });
-  await page.getByRole("button", { name: "Validate" }).click();
-  await expect(page.getByText(/only Room, Office, Laboratory, and Restroom records can be imported/)).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
   await page.getByRole("button", { name: /Actions for/i }).first().click();
   await page.getByRole("menuitem", { name: /Locate on map/ }).click();
   await expect(page).toHaveURL(/\/map-editor\?location=/);
