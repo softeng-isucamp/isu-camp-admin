@@ -15,6 +15,11 @@ from services.floor_lookup import floor_number_from_label as _floor_number_from_
 from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
 from services.location_photos import apply_gallery, list_photos, read_gallery_change
+from services.security import (
+    harden_media_response,
+    image_mime_from_content,
+    verified_image_mime,
+)
 
 actions_bp = Blueprint(
     "actions",
@@ -88,38 +93,30 @@ def _photo_upload():
     content = upload.read(PHOTO_MAX_BYTES + 1)
     if len(content) > PHOTO_MAX_BYTES:
         return None, None, _validation_error({"photo": "Photo must be 5 MB or smaller."})
-    return content, upload.mimetype, None
-
-
-# Magic numbers for the three formats the uploader accepts.
-PHOTO_MAGIC_NUMBERS = (
-    (bytes.fromhex("89504e470d0a1a0a"), "image/png"),
-    (bytes.fromhex("ffd8ff"), "image/jpeg"),
-)
-
-
-def _sniff_photo_mime_type(content):
-    """Recover a Content-Type for rows written before photo_mime_type existed.
-
-    Only the formats the uploader accepts are probed; anything else falls back
-    to a generic binary type rather than guessing wrongly.
-    """
-    for signature, mime_type in PHOTO_MAGIC_NUMBERS:
-        if content.startswith(signature):
-            return mime_type
-    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
-        return "image/webp"
-    return "application/octet-stream"
+    # The declared Content-Type comes from the client. Confirm the file really
+    # is the image format it claims, so nothing else can be stored and later
+    # served back to a browser under an image type.
+    mime_type = verified_image_mime(content, upload.mimetype)
+    if mime_type is None:
+        return None, None, _validation_error({"photo": "Choose a PNG, JPEG, or WebP image."})
+    return content, mime_type, None
 
 
 def _photo_response(content, mime_type):
-    resolved = mime_type if mime_type in PHOTO_MIME_TYPES else _sniff_photo_mime_type(content)
+    """Serve stored image bytes under the type those bytes actually are.
+
+    The stored photo_mime_type is not consulted: rows written before uploads
+    were verified, or before the column existed at all, could hold something
+    that is not an image. Serving that under an image type is how a stored file
+    turns into stored XSS, so anything unrecognized goes out as an opaque blob.
+    """
+    resolved = image_mime_from_content(content) or "application/octet-stream"
     response = Response(content, mimetype=resolved)
     response.headers["Content-Length"] = str(len(content))
     # Photos are replaced in place on the same id, so revalidate every time
     # rather than letting a stale image stick in the browser cache.
     response.headers["Cache-Control"] = "no-cache, private"
-    return response
+    return harden_media_response(response)
 
 
 def _validation_error(fields=None, relationships=None):

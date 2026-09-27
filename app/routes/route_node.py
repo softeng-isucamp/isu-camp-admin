@@ -1,4 +1,5 @@
 """Transaction-safe walking-network API."""
+import logging
 import math
 
 from flask import Blueprint, jsonify, request
@@ -19,6 +20,8 @@ DIRECTIONS = {"Two-way", "One-way", "Unknown"}
 NODE_TYPES = {"intersection", "entrance", "access_point"}
 STATUSES = {"active", "inactive"}
 
+logger = logging.getLogger(__name__)
+
 
 class ValidationError(ValueError):
     pass
@@ -26,6 +29,16 @@ class ValidationError(ValueError):
 
 def _error(message, code=400):
     return jsonify({"success": False, "message": message}), code
+
+
+def _server_error(message):
+    """Log the exception for the operator and return no internal detail.
+
+    Driver and ORM messages name tables, columns and connection strings, so
+    they belong in the server log rather than in an HTTP response.
+    """
+    logger.exception(message)
+    return jsonify({"success": False, "message": message}), 500
 
 
 def _guard():
@@ -182,6 +195,8 @@ def _sequence_conflict(pathway_id, sequence_no, current=None):
 
 @route_node_bp.route("/route-nodes", methods=["GET"])
 def get_route_nodes():
+    if error := _guard():
+        return error
     try:
         records = RouteNode.query.order_by(RouteNode.node_id.asc()).all()
         return jsonify(
@@ -190,26 +205,20 @@ def get_route_nodes():
             route_nodes=[record.to_dict() for record in records],
         )
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve route nodes",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve route nodes")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["GET"])
 def get_route_node(node_id):
+    if error := _guard():
+        return error
     try:
         record = RouteNode.query.get(node_id)
         if not record:
             return _error("Route node not found", 404)
         return jsonify(success=True, route_node=record.to_dict()), 200
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve route node",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve route node")
 
 
 def _node_values(data, current=None):
@@ -271,11 +280,7 @@ def create_route_node():
         return _error(str(error))
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not create route node",
-            error=str(error),
-        ), 500
+        return _server_error("Could not create route node")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["PUT"])
@@ -311,11 +316,7 @@ def update_route_node(node_id):
         return _error(str(error))
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not update route node",
-            error=str(error),
-        ), 500
+        return _server_error("Could not update route node")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["DELETE"])
@@ -339,15 +340,13 @@ def delete_route_node(node_id):
         return jsonify(success=True, message="Route node deleted successfully")
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete route node",
-            error=str(error),
-        ), 500
+        return _server_error("Could not delete route node")
 
 
 @route_node_bp.route("/pathways", methods=["GET"])
 def get_pathways():
+    if error := _guard():
+        return error
     try:
         records = Pathway.query.order_by(Pathway.pathway_id.asc()).all()
         return jsonify(
@@ -356,26 +355,20 @@ def get_pathways():
             pathways=[record.to_dict() for record in records],
         )
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve pathways",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve pathways")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["GET"])
 def get_pathway(pathway_id):
+    if error := _guard():
+        return error
     try:
         record = Pathway.query.get(pathway_id)
         if not record:
             return _error("Pathway not found", 404)
         return jsonify(success=True, pathway=record.to_dict()), 200
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve pathway",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve pathway")
 
 
 def _pathway_values(data, current=None):
@@ -604,11 +597,7 @@ def create_pathway():
         return _error(str(error))
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not create pathway",
-            error=str(error),
-        ), 500
+        return _server_error("Could not create pathway")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["PUT"])
@@ -636,11 +625,7 @@ def update_pathway(pathway_id):
         return _error(str(error))
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not update pathway",
-            error=str(error),
-        ), 500
+        return _server_error("Could not update pathway")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["DELETE"])
@@ -664,15 +649,13 @@ def delete_pathway(pathway_id):
         return jsonify(success=True, message="Pathway deleted successfully")
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete pathway",
-            error=str(error),
-        ), 500
+        return _server_error("Could not delete pathway")
 
 
 @route_node_bp.route("/path-points", methods=["GET"])
 def get_path_points():
+    if error := _guard():
+        return error
     try:
         records = PathPoint.query.order_by(PathPoint.pathway_id.asc(), PathPoint.sequence_no.asc()).all()
         return jsonify(
@@ -681,26 +664,20 @@ def get_path_points():
             path_points=[record.to_dict() for record in records],
         )
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve path points",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve path points")
 
 
 @route_node_bp.route("/path-points/<int:point_id>", methods=["GET"])
 def get_path_point(point_id):
+    if error := _guard():
+        return error
     try:
         record = PathPoint.query.get(point_id)
         if not record:
             return _error("Path point not found", 404)
         return jsonify(success=True, path_point=record.to_dict()), 200
     except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve path point",
-            error=str(error),
-        ), 500
+        return _server_error("Could not retrieve path point")
 
 
 def _point_values(data, current=None):
@@ -785,11 +762,7 @@ def _point_write(point_id=None):
         return _error(str(error))
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message=f"Could not {'update' if point_id else 'create'} path point",
-            error=str(error),
-        ), 500
+        return _server_error(f"Could not {'update' if point_id else 'create'} path point")
 
 
 @route_node_bp.route("/path-points", methods=["POST"])
@@ -816,8 +789,4 @@ def delete_path_point(point_id):
         return jsonify(success=True, message="Path point deleted successfully")
     except Exception as error:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete path point",
-            error=str(error),
-        ), 500
+        return _server_error("Could not delete path point")

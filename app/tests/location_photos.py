@@ -5,6 +5,11 @@ from flask import Flask, request
 from model.building import Building
 from services import location_photos as gallery
 
+# Uploads are accepted on the strength of their leading bytes, so fixtures use
+# real format signatures rather than placeholder text.
+PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"body"
+JPEG_BYTES = bytes.fromhex("ffd8ff") + b"body"
+
 
 class Session:
     def __init__(self):
@@ -52,8 +57,8 @@ def test_gallery_rejects_invalid_file_and_accepts_multiple_valid_uploads():
     app = Flask(__name__)
     with app.test_request_context("/photos", method="POST", data={
         "photos": [
-            (io.BytesIO(b"png"), "front.png", "image/png"),
-            (io.BytesIO(b"jpeg"), "side.jpg", "image/jpeg"),
+            (io.BytesIO(PNG_BYTES), "front.png", "image/png"),
+            (io.BytesIO(JPEG_BYTES), "side.jpg", "image/jpeg"),
         ],
         "coverIndex": "1",
         "removePhotoIds": "[]",
@@ -65,6 +70,14 @@ def test_gallery_rejects_invalid_file_and_accepts_multiple_valid_uploads():
 
     with app.test_request_context("/photos", method="POST", data={
         "photos": (io.BytesIO(b"pdf"), "notes.pdf", "application/pdf"),
+        "removePhotoIds": "[]",
+    }):
+        _, error = gallery.read_gallery_change(request)
+        assert error == "Choose PNG, JPEG, or WebP images."
+
+    # A file that only claims to be an image is refused on its contents.
+    with app.test_request_context("/photos", method="POST", data={
+        "photos": (io.BytesIO(b"<script>alert(1)</script>"), "xss.png", "image/png"),
         "removePhotoIds": "[]",
     }):
         _, error = gallery.read_gallery_change(request)

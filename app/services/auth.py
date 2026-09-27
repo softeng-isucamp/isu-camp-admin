@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import logging
 import math
 import time
 
@@ -8,11 +9,20 @@ from dotenv import load_dotenv
 
 from extensions import db, mail
 from services.audit import log_audit
+from services.security import (
+    burn_password_comparison,
+    hash_password,
+    password_policy_error,
+    verify_password,
+)
 
 import secrets
 from datetime import datetime, timedelta
 
 load_dotenv()
+
+
+logger = logging.getLogger(__name__)
 
 
 # ==========================================
@@ -32,6 +42,46 @@ auth_bp = Blueprint(
 
 reset_otps = {}
 
+# Codes live in process memory, so cap the store and drop expired entries
+# instead of letting an attacker grow it one username at a time.
+RESET_OTP_MAX_ENTRIES = 1_000
+
+# A code is discarded once this many wrong guesses have been made against it,
+# so rate limiting is not the only thing standing between a guesser and a
+# six-digit secret.
+RESET_OTP_MAX_ATTEMPTS = 5
+
+GENERIC_RESET_REQUEST_MESSAGE = (
+    "If the username matches an admin account, a verification code has been "
+    "sent to its registered Gmail."
+)
+
+
+def _prune_reset_otps():
+    now = datetime.utcnow()
+    for username in [key for key, value in reset_otps.items() if value["expires_at"] <= now]:
+        reset_otps.pop(username, None)
+    while len(reset_otps) > RESET_OTP_MAX_ENTRIES:
+        reset_otps.pop(next(iter(reset_otps)), None)
+
+
+def _active_reset(username):
+    """Return the live OTP record for a username, clearing it once expired."""
+    reset = reset_otps.get(username)
+
+    if not reset or datetime.utcnow() > reset["expires_at"]:
+        reset_otps.pop(username, None)
+        return None
+    return reset
+
+
+def _record_failed_reset_attempt(username, reset):
+    """Count a wrong code and burn the OTP once too many have been tried."""
+    reset["attempts"] = reset.get("attempts", 0) + 1
+
+    if reset["attempts"] >= RESET_OTP_MAX_ATTEMPTS:
+        reset_otps.pop(username, None)
+
 
 # These buckets are intentionally small and local to the backend process. They
 # protect the current deployment without adding a new infrastructure service;
@@ -39,9 +89,25 @@ reset_otps = {}
 RATE_LIMIT_WINDOW_SECONDS = 60
 rate_limit_buckets = defaultdict(deque)
 
+# Every distinct client key allocates a bucket, so a flood of spoofed keys
+# would otherwise grow the dict without bound. Sweep dead buckets whenever the
+# store gets large rather than on a timer.
+RATE_LIMIT_MAX_BUCKETS = 10_000
+
+
+def _prune_rate_limit_buckets(cutoff):
+    stale = [key for key, bucket in rate_limit_buckets.items() if not bucket or bucket[-1] <= cutoff]
+    for key in stale:
+        del rate_limit_buckets[key]
+
 
 def _rate_limited(scope, key, limit, message):
     now = time.monotonic()
+    cutoff_all = now - RATE_LIMIT_WINDOW_SECONDS
+
+    if len(rate_limit_buckets) > RATE_LIMIT_MAX_BUCKETS:
+        _prune_rate_limit_buckets(cutoff_all)
+
     bucket = rate_limit_buckets[(scope, key)]
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
     while bucket and bucket[0] <= cutoff:
@@ -124,22 +190,49 @@ def login():
                 "message": "Username and password are required"
             }), 400
 
+        # A per-IP limit alone lets a botnet spread guesses for one account
+        # across many addresses, so the targeted username is throttled too.
+        limited = _rate_limited(
+            "login-username",
+            str(username).strip().lower(),
+            10,
+            "Too many authentication requests. Please try again later.",
+        )
+        if limited:
+            return limited
+
         admin = Admin.query.filter_by(
             username=username
         ).first()
 
         if not admin:
+
+            # Spend the same work as a real password check so a missing
+            # account is not distinguishable by response time.
+            burn_password_comparison(password)
+
             return jsonify({
                 "success": False,
                 "message": "Invalid username or password"
             }), 401
 
-        if admin.password != password:
+        matches, needs_rehash = verify_password(admin.password, password)
+
+        if not matches:
             return jsonify({
                 "success": False,
                 "message": "Invalid username or password"
             }), 401
 
+        if needs_rehash:
+            # The row still held a plaintext password. Replace it with a hash
+            # now that the correct password has been proven once.
+            admin.password = hash_password(password)
+
+        # Drop anything a pre-login visitor may have put in the session so a
+        # fixated cookie value cannot be reused as an authenticated one.
+        session.clear()
+        session.permanent = True
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
         log_audit("System", admin, "login", "Admin", admin.id, "Admin login successful")
@@ -154,14 +247,16 @@ def login():
             }
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOGIN ERROR:", e)
+        db.session.rollback()
+
+        # Logged for the operator; the client gets no internal detail.
+        logger.exception("Login failed")
 
         return jsonify({
             "success": False,
-            "message": "Login failed",
-            "error": str(e)
+            "message": "Login failed"
         }), 500
 
 
@@ -289,23 +384,28 @@ def request_reset():
             username=username
         ).first()
 
-        if not admin:
-            return jsonify({
-                "success": False,
-                "message": "Admin account not found"
-            }), 404
+        # The same answer is returned whether or not the account exists, and
+        # whether or not it has an email on file. Telling an anonymous caller
+        # which usernames are real hands them the first half of a login.
+        if not admin or not admin.gmail:
 
-        if not admin.gmail:
+            logger.info(
+                "Password reset requested for an unusable account; no mail sent"
+            )
+
             return jsonify({
-                "success": False,
-                "message": "No Gmail address is registered for this account"
-            }), 400
+                "success": True,
+                "message": GENERIC_RESET_REQUEST_MESSAGE
+            }), 200
+
+        _prune_reset_otps()
 
         otp = f"{secrets.randbelow(1000000):06d}"
 
         reset_otps[username] = {
             "otp": otp,
-            "expires_at": datetime.utcnow() + timedelta(minutes=10)
+            "expires_at": datetime.utcnow() + timedelta(minutes=10),
+            "attempts": 0
         }
 
         message = Message(
@@ -333,17 +433,16 @@ ISU-CAMP Admin System
 
         return jsonify({
             "success": True,
-            "message": "Verification code sent to the registered Gmail."
+            "message": GENERIC_RESET_REQUEST_MESSAGE
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("PASSWORD RESET EMAIL ERROR:", e)
+        logger.exception("Password reset email failed")
 
         return jsonify({
             "success": False,
-            "message": "Failed to send verification code",
-            "error": str(e)
+            "message": "Failed to send verification code"
         }), 500
 
 
@@ -370,13 +469,17 @@ def verify_reset_code():
     if not username or not otp:
         return jsonify({"success": False, "message": "Username and verification code are required"}), 400
 
-    reset = reset_otps.get(username)
-    if not reset or datetime.utcnow() > reset["expires_at"]:
-        reset_otps.pop(username, None)
+    reset = _active_reset(username)
+    if not reset:
         return jsonify({"success": False, "message": "Verification code has expired"}), 400
 
     if not secrets.compare_digest(str(reset["otp"]), otp):
+        _record_failed_reset_attempt(username, reset)
         return jsonify({"success": False, "message": "Invalid verification code"}), 400
+
+    # A correct code is deliberately not consumed here: the final reset call
+    # is the one that spends it, so the two-step UI keeps working.
+    reset["attempts"] = 0
 
     return jsonify({"success": True, "message": "Verification code accepted"}), 200
 
@@ -417,17 +520,17 @@ def reset_password():
                 "message": "Username, verification code, and new password are required"
             }), 400
 
-        if len(password) < 8:
+        policy_error = password_policy_error(password, username)
+
+        if policy_error:
             return jsonify({
                 "success": False,
-                "message": "Password must be at least 8 characters"
+                "message": policy_error
             }), 400
 
-        reset = reset_otps.get(username)
+        reset = _active_reset(username)
 
-        if not reset or datetime.utcnow() > reset["expires_at"]:
-
-            reset_otps.pop(username, None)
+        if not reset:
 
             return jsonify({
                 "success": False,
@@ -438,6 +541,8 @@ def reset_password():
             str(reset["otp"]),
             str(otp)
         ):
+            _record_failed_reset_attempt(username, reset)
+
             return jsonify({
                 "success": False,
                 "message": "Invalid verification code"
@@ -456,7 +561,16 @@ def reset_password():
                 "message": "Admin account not found"
             }), 404
 
-        admin.password = password
+        admin.password = hash_password(password)
+
+        log_audit(
+            "System",
+            admin,
+            "reset-password",
+            "Admin",
+            getattr(admin, "id", None),
+            "Admin password reset via verification code"
+        )
 
         db.session.commit()
 
@@ -467,12 +581,13 @@ def reset_password():
             "message": "Password reset successful"
         }), 200
 
-    except Exception as e:
+    except Exception:
 
         db.session.rollback()
 
+        logger.exception("Password reset failed")
+
         return jsonify({
             "success": False,
-            "message": "Password reset failed",
-            "error": str(e)
+            "message": "Password reset failed"
         }), 500

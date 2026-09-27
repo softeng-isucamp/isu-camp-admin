@@ -62,6 +62,10 @@ if (-not (Test-Path $NodeModules)) {
 $env:VITE_API_MODE = "local"
 $env:VITE_MAP_FIXTURE = "osm"
 
+# Mark this as a development run: the backend then tolerates a missing
+# SECRET_KEY and serves its session cookie over plain http://localhost.
+$env:ISUCAMP_ENV = "development"
+
 Write-Host "[SETUP] Checking database connection..." -ForegroundColor Yellow
 & $VenvPython (Join-Path $ProjectRoot "app\services\check_db.py")
 if ($LASTEXITCODE -ne 0) {

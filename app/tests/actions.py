@@ -1,3 +1,5 @@
+import io
+
 from flask import Flask
 
 import actions as actions_module
@@ -456,6 +458,44 @@ def test_photo_content_type_is_sniffed_when_the_stored_type_is_missing(monkeypat
 
     assert response.status_code == 200
     assert response.mimetype == "image/jpeg"
+
+
+def test_a_stored_non_image_is_never_served_under_an_image_type(monkeypatch):
+    """A legacy row could hold markup mislabeled as an image; do not render it."""
+    client = _photo_app(
+        monkeypatch,
+        location=_photo_record(b"<script>alert(1)</script>", "image/png"),
+    )
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/octet-stream"
+
+
+def test_served_photos_carry_the_no_sniff_hardening_headers(monkeypatch):
+    client = _photo_app(monkeypatch, location=_photo_record(PNG_BYTES, "image/png"))
+
+    response = client.get("/api/actions/locations/42/photo")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Content-Disposition"] == "inline"
+    assert "default-src 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_photo_upload_rejects_a_non_image_claiming_an_image_content_type():
+    app = Flask(__name__)
+
+    with app.test_request_context("/upload", method="POST", data={
+        "photo": (io.BytesIO(b"<script>alert(1)</script>"), "payload.png", "image/png"),
+    }):
+        content, mime_type, error = actions_module._photo_upload()
+
+    assert content is None
+    assert mime_type is None
+    assert error is not None
+    assert error[1] == 400
+    assert error[0].json["fields"]["photo"] == "Choose a PNG, JPEG, or WebP image."
 
 
 def test_photo_request_for_a_row_without_an_image_is_not_found(monkeypatch):

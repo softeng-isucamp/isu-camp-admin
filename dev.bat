@@ -46,6 +46,10 @@ if not exist "frontend\admin\node_modules" (
 set "VITE_API_MODE=local"
 set "VITE_MAP_FIXTURE=osm"
 
+:: Mark this as a development run: the backend then tolerates a missing
+:: SECRET_KEY and serves its session cookie over plain http://localhost.
+set "ISUCAMP_ENV=development"
+
 :: Start Backend in the background of this same window
 echo [1/2] Starting Flask Backend on http://127.0.0.1:5000...
 start "" /b "venv\Scripts\python.exe" app\services\database.py

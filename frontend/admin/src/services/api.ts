@@ -18,6 +18,31 @@ import type {
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
 import { z } from "zod";
+export const locationsBulkImportDescription = "Import indoor locations from a JSON file. Supported types: Room, Office, Laboratory, and Restroom.";
+export const createLocationsBulkImportTemplate = () => JSON.stringify([
+  { name: "Sample Room", code: "ROOM-101", type: "Room", parentId: "", floor: "1", lat: null, lng: null },
+], null, 2);
+
+export type LocationImportRequest = {
+  json: string;
+  commit?: boolean;
+  mode?: "add" | "update";
+};
+
+const locationImportSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().trim().min(1, "Name is required."),
+  code: z.string().trim().min(1, "Code is required."),
+  type: z.enum(["Room", "Office", "Laboratory", "Restroom"]),
+  parentId: z.union([z.string(), z.null()])
+    .transform((value) => value?.trim() || null)
+    .default(null),
+  building: z.string().optional(),
+  floor: z.string().optional(),
+  status: z.enum(["Active", "Inactive", "Open", "Closed", "Unknown"]).default("Active"),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+});
 
 import {
   buildings,
@@ -484,12 +509,9 @@ const canonicalNetwork = createCanonicalNetworkStore(
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const isMultipart = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
-    // `init` is spread first so a caller's own headers merge with the defaults
-    // below instead of replacing them: the session cookie and the JSON
-    // Content-Type must survive every call.
-    ...init,
     credentials: "include",
     headers: { ...(isMultipart ? {} : { "Content-Type": "application/json" }), ...(init?.headers ?? {}) },
+    ...init,
   });
   const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
   if (!response.ok) {
@@ -502,8 +524,8 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
 
 const apiBlob = async (path: string, init?: RequestInit): Promise<Blob> => {
   const response = await fetch(`${API_URL}${path}`, {
-    ...init,
     credentials: "include",
+    ...init,
   });
   if (!response.ok) {
     // Failures still come back as the standard JSON error envelope.
@@ -623,8 +645,6 @@ export interface Services {
 
     savePosition(position: LocationPosition): Promise<Location>;
 
-    saveIndoorPosition(position: LocationPosition & { buildingId: string }): Promise<Location>;
-
     getPhoto(id: string, type?: LocationType): Promise<Blob>;
 
     remove(id: string, type?: LocationType): Promise<void>;
@@ -695,6 +715,15 @@ export interface Services {
     saveDraft?(command: SaveDraftCommand): Promise<SaveDraftResult>;
   };
 
+  imports: {
+    locations(
+      request: LocationImportRequest
+    ): Promise<{
+      imported: number;
+      errors: string[];
+    }>;
+
+  };
 }
 
 
@@ -1260,24 +1289,6 @@ export const services: Services = {
       return wait(clone(location));
     },
 
-    saveIndoorPosition: async ({ id, buildingId, lat, lng }) => {
-      if (USE_HTTP_API) {
-        const buildingNumber = Number(buildingId);
-        const locationNumber = Number(id);
-        if (!Number.isSafeInteger(buildingNumber) || !Number.isSafeInteger(locationNumber)) {
-          throw new Error("Indoor Location and Building must be saved before positioning.");
-        }
-        const response = await apiJson<unknown>(`/api/map/buildings/${buildingNumber}/indoor-locations/${locationNumber}`, {
-          method: "PATCH",
-          body: JSON.stringify({ lat, lng }),
-        });
-        return normalizeBackendLocationMutation(response);
-      }
-      const location = localAdapter.locations.saveIndoorPosition(id, buildingId, lat, lng);
-      addAudit(lat === null ? "Cleared Indoor Marker" : "Positioned Indoor Location", location.name, "Admin", location.id);
-      return wait(location);
-    },
-
     getPhoto: async (id, type) => {
       if (USE_HTTP_API) {
         const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
@@ -1553,7 +1564,7 @@ export const services: Services = {
     convertPathPoint: async ({ pathwayId, sequenceNo, point, node, existingNodeId, pathways: replacements }) => {
       if (!USE_HTTP_API) {
         const savedNode = existingNodeId
-          ? mapNodes.find((item) => item.id === existingNodeId)
+          ? mapNodes.find((item: { id: string; }) => item.id === existingNodeId)
           : node ? { ...node, id: `node-${Date.now()}` } : undefined;
         if (!savedNode) throw new Error("Route Node is unavailable.");
         const savedPaths = replacements.map((pathway, index) => ({ ...pathway, id: `pathway-${Date.now()}-${index}` })) as [Pathway, Pathway];
@@ -1968,5 +1979,161 @@ export const services: Services = {
   },
 
 
+  // ========================================
+  // IMPORTS
+  // ========================================
 
+  imports: {
+
+    // --------------------------------------
+    // Locations Import
+    // --------------------------------------
+
+    locations: async ({ json, commit = false, mode = "add" }) => {
+
+      let parsed: unknown;
+
+      try {
+
+        parsed =
+          JSON.parse(json);
+
+      } catch {
+
+        return {
+          imported: 0,
+          errors: [
+            "Invalid JSON file.",
+          ],
+        };
+      }
+
+
+      const rows =
+        Array.isArray(parsed)
+          ? parsed
+          : [parsed];
+
+      const errors: string[] = [];
+      const validRows: Array<{ row: z.infer<typeof locationImportSchema>; index: number }> = [];
+
+      rows.forEach((row, index) => {
+        // Give unsupported types a domain-level error even when the type is
+        // not part of the legacy schema.
+        const importedType = row && typeof row === "object" && "type" in row
+          ? (row as { type?: unknown }).type
+          : undefined;
+        if (typeof importedType !== "string" ||
+            !indoorLocationTypes.includes(importedType as typeof indoorLocationTypes[number])) {
+          errors.push(`Row ${index + 1}, type: only Room, Office, Laboratory, and Restroom records can be imported.`);
+          return;
+        }
+        const result = locationImportSchema.safeParse(row);
+        if (!result.success) {
+          result.error.issues.forEach((issue: { path: any[]; message: any; }) => {
+            const field = issue.path.join(".") || "record";
+            errors.push(`Row ${index + 1}, ${field}: ${issue.message}`);
+          });
+          return;
+        }
+        validRows.push({ row: result.data, index });
+      });
+
+      const seenIds = new Set<string>();
+      const seenCodes = new Set<string>();
+      const pending: Array<{ location: Location; existingIndex: number | null; rowIndex: number }> = [];
+
+      validRows.forEach(({ row, index }) => {
+        const matchedById = row.id ? locations.findIndex((location) => location.id === row.id) : -1;
+        const matchedByCode = locations.findIndex((location) => location.code.trim().toLowerCase() === row.code.trim().toLowerCase());
+        const existingIndex = matchedById >= 0 ? matchedById : matchedByCode;
+        const id = row.id || `loc-import-${Date.now()}-${index}`;
+
+        if (seenIds.has(id)) errors.push(`Row ${index + 1}, id: duplicates another row in this file.`);
+        const normalizedCode = row.code.trim().toLowerCase();
+        if (seenCodes.has(normalizedCode)) errors.push(`Row ${index + 1}, code: duplicates another row in this file.`);
+        seenIds.add(id);
+        seenCodes.add(normalizedCode);
+
+        if (mode === "add" && existingIndex >= 0) {
+          errors.push(`Row ${index + 1}, ${matchedById >= 0 ? "id" : "code"}: already exists.`);
+        }
+        if (mode === "update" && existingIndex < 0) {
+          errors.push(`Row ${index + 1}, id/code: no existing location matches this row.`);
+        }
+        const existing = existingIndex >= 0 ? locations[existingIndex] : undefined;
+        pending.push({
+          existingIndex: existingIndex >= 0 ? existingIndex : null,
+          rowIndex: index,
+          location: {
+            ...existing,
+            ...row,
+            id: mode === "update" && existing ? existing.id : id,
+            function: existing?.function ?? "",
+            keywords: existing?.keywords ?? "",
+            building: row.building ?? existing?.building,
+            floor: row.floor ?? existing?.floor,
+            positioned: row.lat !== null && row.lng !== null,
+          },
+        });
+      });
+
+      pending.forEach((entry) => {
+        const existing = entry.existingIndex === null ? undefined : locations[entry.existingIndex];
+        const parent = locations.find((candidate) => candidate.id === entry.location.parentId);
+        const candidate = parent?.type === "Building"
+          ? { ...entry.location, building: parent.name }
+          : entry.location;
+        const evaluation = locationPolicy.evaluate(candidate, {
+          context: "record",
+          // File-local duplicates are reported above. Keeping pending rows
+          // out of this directory avoids reporting the same violation twice.
+          directory: locations,
+          requireFloorLevel: true,
+          requireKnownFloorLevel: true,
+          currentId: entry.location.id,
+        });
+        if (!evaluation.valid) {
+          evaluation.issues.forEach((issue) => errors.push(`Row ${entry.rowIndex + 1}, ${issue.field}: ${issue.message}`));
+          return;
+        }
+        entry.location = locationPolicy.normalize(candidate, {
+          directory: locations,
+          previous: existing ?? candidate,
+        }) as Location;
+      });
+
+
+      if (
+        commit &&
+        errors.length === 0
+      ) {
+
+        pending.forEach(({ location, existingIndex }) => {
+          if (existingIndex === null) locations.push(clone(location));
+          else locations[existingIndex] = clone(location);
+        });
+
+        pending.forEach(({ location }) => addAudit(
+          mode === "update" ? "Bulk Updated Location" : "Bulk Imported Location",
+          location.name,
+          "Admin",
+          location.id,
+        ));
+      }
+
+
+      return wait({
+
+        imported:
+          errors.length === 0
+            ? pending.length
+            : 0,
+
+        errors,
+      });
+    },
+
+
+  },
 };

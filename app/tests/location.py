@@ -7,6 +7,11 @@ import location as location_module
 from location import location_bp
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
+# Uploads are accepted on the strength of their leading bytes, so fixtures use
+# real format signatures rather than placeholder text.
+PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"body"
+WEBP_BYTES = b"RIFF" + bytes(4) + b"WEBP" + b"body"
+
 
 class FakeRecord:
     def __init__(self, identifier, name, code, type_id, building_id=None, floor_id=None):
@@ -610,12 +615,12 @@ def test_building_and_facility_photo_uploads_are_persisted(monkeypatch):
     client, _, _ = make_mutation_client(monkeypatch)
     building = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png", "image/png")},
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(PNG_BYTES), "library.png", "image/png")},
         content_type="multipart/form-data",
     )
     facility = client.post(
         "/api/locations",
-        data={"name": "Health Center", "code": "HC", "type": "Facility", "photo": (io.BytesIO(b"png-bytes"), "health-center.png", "image/png")},
+        data={"name": "Health Center", "code": "HC", "type": "Facility", "photo": (io.BytesIO(PNG_BYTES), "health-center.png", "image/png")},
         content_type="multipart/form-data",
     )
 
@@ -628,13 +633,13 @@ def test_building_photo_upload_records_the_uploaded_mime_type(monkeypatch):
     client, _, session = make_mutation_client(monkeypatch)
     response = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"webp-bytes"), "library.webp", "image/webp")},
+        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(WEBP_BYTES), "library.webp", "image/webp")},
         content_type="multipart/form-data",
     )
 
     assert response.status_code == 201
     saved = session.buildings[-1]
-    assert saved.photo == b"webp-bytes"
+    assert saved.photo == WEBP_BYTES
     assert saved.photo_mime_type == "image/webp"
 
 

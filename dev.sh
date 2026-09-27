@@ -72,6 +72,10 @@ fi
 export VITE_API_MODE=local
 export VITE_MAP_FIXTURE=osm
 
+# Mark this as a development run: the backend then tolerates a missing
+# SECRET_KEY and serves its session cookie over plain http://localhost.
+export ISUCAMP_ENV=development
+
 echo "[SETUP] Checking database connection..."
 venv/bin/python app/services/check_db.py
 

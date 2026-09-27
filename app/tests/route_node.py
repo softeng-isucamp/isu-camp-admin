@@ -75,6 +75,54 @@ def authenticated_admin(monkeypatch):
     monkeypatch.setattr(route_node_module, "admin_required", lambda: (object(), None), raising=False)
 
 
+@pytest.mark.parametrize(
+    "method, path",
+    [
+        ("get", "/api/route-nodes"),
+        ("get", "/api/route-nodes/4"),
+        ("get", "/api/pathways"),
+        ("get", "/api/pathways/9"),
+        ("get", "/api/path-points"),
+        ("get", "/api/path-points/2"),
+    ],
+)
+def test_walking_network_reads_require_an_administrator(monkeypatch, method, path):
+    """The map network describes the campus layout; it is not public data."""
+    monkeypatch.setattr(
+        route_node_module,
+        "admin_required",
+        lambda: (None, ({"success": False, "message": "Authentication required"}, 401)),
+        raising=False,
+    )
+
+    client = app_with_route_node_blueprint().test_client()
+    response = getattr(client, method)(path)
+
+    assert response.status_code == 401
+    assert response.json["message"] == "Authentication required"
+
+
+def test_walking_network_errors_do_not_leak_internal_detail(monkeypatch):
+    monkeypatch.setattr(
+        route_node_module,
+        "RouteNode",
+        type("RouteNodeModel", (), {
+            "query": property(lambda self: (_ for _ in ()).throw(
+                RuntimeError('relation "public.route_node" does not exist')
+            )),
+        })(),
+    )
+
+    response = app_with_route_node_blueprint().test_client().get("/api/route-nodes")
+
+    assert response.status_code == 500
+    assert response.json == {
+        "success": False,
+        "message": "Could not retrieve route nodes",
+    }
+    assert "public.route_node" not in response.get_data(as_text=True)
+
+
 def test_walking_network_mutations_require_an_administrator(monkeypatch):
     monkeypatch.setattr(
         route_node_module,

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from extensions import db
 from model.building import Building
 from model.location_photo import LocationPhoto
+from services.security import verified_image_mime
 
 MAX_PHOTOS = 10
 MAX_BYTES = 5 * 1024 * 1024
@@ -52,7 +53,13 @@ def read_gallery_change(request):
         content = upload.read(MAX_BYTES + 1)
         if len(content) > MAX_BYTES:
             return None, "Each photo must be 5 MB or smaller."
-        prepared.append((upload.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:255], upload.mimetype, content))
+        # The browser's Content-Type is not evidence. Store the type the file's
+        # own bytes prove, and reject anything that is not one of the three
+        # accepted image formats.
+        mime_type = verified_image_mime(content, upload.mimetype)
+        if mime_type is None:
+            return None, "Choose PNG, JPEG, or WebP images."
+        prepared.append((upload.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:255], mime_type, content))
     return GalleryChange(prepared, removed, cover_index), None
 
 

@@ -18,13 +18,18 @@ export const loginSchema = z.object({
 export const resetRequestSchema = z.object({
   username: z.string().min(1, "Username is required."),
 });
+// Mirrors the backend password policy in app/services/security.py so a weak
+// password is caught inline instead of on the round trip.
 export const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code."),
-  password: z.string().min(8, "Password must be at least 8 characters."),
+  password: z.string()
+    .min(10, "Password must be at least 10 characters.")
+    .regex(/[a-zA-Z]/, "Password must include at least one letter.")
+    .regex(/\d/, "Password must include at least one number."),
 });
 export const resetPasswordSchema = resetSchema
   .extend({
-    confirmPassword: z.string().min(8, "Confirm your new password."),
+    confirmPassword: z.string().min(1, "Confirm your new password."),
   })
   .refine((value) => value.password === value.confirmPassword, {
     message: "Passwords do not match.",

@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import timedelta
 
 # Add app and services folder to Python path
 SERVICES_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -13,6 +14,8 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 
+import logging
+import secrets
 from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify, request
@@ -21,9 +24,13 @@ from dotenv import load_dotenv
 
 from extensions import db, mail
 from auth import auth_bp
-from model.location import Location
-from model.app_user import AppUser
-from model.audit_log import AuditLog
+from services.security import allowed_origins, is_production
+
+# Imported for their side effect: each module registers its table with the
+# shared SQLAlchemy metadata.
+from model.location import Location  # noqa: F401
+from model.app_user import AppUser  # noqa: F401
+from model.audit_log import AuditLog  # noqa: F401
 
 from routes.actions import actions_bp
 from routes.location import location_bp
@@ -53,9 +60,65 @@ app = Flask(__name__)
 # Flask Configuration
 # ==========================================
 
-app.config["SECRET_KEY"] = os.getenv(
-    "SECRET_KEY",
-    "dev-secret-key"
+logger = logging.getLogger(__name__)
+
+PRODUCTION = is_production()
+
+
+def _flag(name, default):
+    return os.getenv(name, default).strip().lower() in ("true", "1", "yes")
+
+
+# Session cookies are signed with this key, so a shared or guessable value
+# lets anyone mint an authenticated admin cookie. Deployments must supply one;
+# a development run gets a fresh random key per process instead of a constant.
+secret_key = os.getenv("SECRET_KEY")
+
+if not secret_key:
+
+    if PRODUCTION:
+        raise RuntimeError(
+            "SECRET_KEY is missing. Set it in .env to a long random value "
+            "(for example: python -c \"import secrets; print(secrets.token_hex(32))\")."
+        )
+
+    secret_key = secrets.token_hex(32)
+
+    logger.warning(
+        "SECRET_KEY is not set; using a random development key. "
+        "Sessions will not survive a restart."
+    )
+
+app.config["SECRET_KEY"] = secret_key
+
+
+# ==========================================
+# Session Cookie Hardening
+# ==========================================
+
+# HttpOnly keeps the cookie out of reach of any script that lands on the page;
+# SameSite=Lax stops another site from driving a state change with the admin's
+# own cookie; Secure keeps it off plaintext HTTP. Secure is opt-out only so a
+# local http://localhost run still works.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+app.config["SESSION_COOKIE_SECURE"] = _flag(
+    "SESSION_COOKIE_SECURE",
+    "True" if PRODUCTION else "False"
+)
+app.config["SESSION_COOKIE_NAME"] = "isucamp_admin_session"
+
+# Idle sessions expire instead of staying valid indefinitely. The lifetime is
+# refreshed on each request, so it acts as an inactivity timeout.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+    minutes=int(os.getenv("SESSION_IDLE_MINUTES", "60"))
+)
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+
+# Reject oversized bodies before they are buffered. Photo uploads cap at 5 MB
+# each and up to ten per request, so allow a little over that ceiling.
+app.config["MAX_CONTENT_LENGTH"] = int(
+    os.getenv("MAX_CONTENT_LENGTH_BYTES", str(56 * 1024 * 1024))
 )
 
 
@@ -154,14 +217,17 @@ db.init_app(app)
 # CORS
 # ==========================================
 
+# The allowlist comes from ADMIN_ALLOWED_ORIGINS so a deployment is not stuck
+# trusting localhost. Flask-CORS applies these headers by itself; the
+# hand-written after_request duplicate that used to follow this block attached
+# credentialed CORS headers to every route, /api or not, and is gone.
+ALLOWED_ORIGINS = allowed_origins()
+
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": [
-                "http://localhost:5173",
-                "http://localhost:5174"
-            ],
+            "origins": list(ALLOWED_ORIGINS),
             "methods": [
                 "GET",
                 "POST",
@@ -181,24 +247,71 @@ CORS(
 
 
 # ==========================================
-# CORS Preflight / Headers
+# Cross-Site Request Forgery Guard
+# ==========================================
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+@app.before_request
+def reject_cross_site_writes():
+    """Refuse a state-changing call that a browser reports as cross-site.
+
+    The session cookie is SameSite=Lax, which already blocks the common
+    form-submission attack. This is the second layer: browsers attach an Origin
+    header to cross-origin writes, so a value outside the allowlist is a
+    forgery attempt regardless of what the cookie policy allowed. Requests with
+    no Origin at all (curl, server-to-server, the test client) are left alone,
+    since only a browser-driven request can carry the admin's cookie.
+    """
+    if request.method in SAFE_METHODS:
+        return None
+
+    origin = request.headers.get("Origin")
+
+    if origin is None:
+        return None
+    if origin.rstrip("/") in ALLOWED_ORIGINS:
+        return None
+
+    return jsonify({
+        "success": False,
+        "message": "Request blocked: untrusted origin"
+    }), 403
+
+
+# ==========================================
+# Security Response Headers
 # ==========================================
 
 @app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin")
+def add_security_headers(response):
+    """Apply the headers that keep API responses from being misused."""
 
-    if origin in [
-        "http://localhost:5173",
-        "http://localhost:5174"
-    ]:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization"
+    # Never let a browser second-guess a declared Content-Type: that is what
+    # turns an uploaded file into a script.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+
+    # The API is not meant to be framed, and nothing here should execute or
+    # load a subresource.
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'"
+    )
+
+    # Keep admin URLs out of Referer headers sent to third parties.
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "same-site")
+
+    if PRODUCTION:
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains"
         )
         response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, DELETE, OPTIONS"
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         )
         response.headers["Access-Control-Expose-Headers"] = "Retry-After"
 
@@ -233,119 +346,13 @@ def home():
 
 
 # ==========================================
-# Test Database
+# Database Connectivity Check
 # ==========================================
 
-@app.route("/api/test-db", methods=["GET"])
-def test_db():
-
-    try:
-
-        with db.engine.connect() as connection:
-
-            result = connection.execute(
-                db.text("SELECT 1")
-            )
-
-            value = result.scalar()
-
-        return jsonify({
-            "success": True,
-            "message": "Connected to Supabase!",
-            "test_query": value
-        }), 200
-
-    except Exception as e:
-
-        print("DATABASE CONNECTION ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Database connection failed",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# TEST LOCATION TABLE
-# ==========================================
-
-@app.route("/api/test-location-table", methods=["GET"])
-def test_location_table():
-
-    try:
-
-        with db.engine.connect() as connection:
-
-            result = connection.execute(
-                db.text("""
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM information_schema.tables
-                        WHERE table_schema = 'public'
-                        AND table_name = 'location'
-                    )
-                """)
-            )
-
-            exists = result.scalar()
-
-        if not exists:
-
-            return jsonify({
-                "success": False,
-                "message": "The public.location table does not exist."
-            }), 404
-
-        return jsonify({
-            "success": True,
-            "message": "The public.location table exists."
-        }), 200
-
-    except Exception as e:
-
-        print("LOCATION TABLE ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not check location table",
-            "error": str(e)
-        }), 500
-
-
-# ==========================================
-# Test Location Table
-# ==========================================
-
-@app.route("/api/test-location", methods=["GET"])
-def test_location():
-
-    try:
-
-        locations = Location.query.limit(10).all()
-
-        return jsonify({
-            "success": True,
-            "message": "Location table queried successfully",
-            "count": len(locations),
-            "locations": [
-                location.to_dict()
-                for location in locations
-            ]
-        }), 200
-
-    except Exception as e:
-
-        print("LOCATION ERROR:")
-        print(e)
-
-        return jsonify({
-            "success": False,
-            "message": "Could not query location table",
-            "error": str(e)
-        }), 500
+# The /api/test-db, /api/test-location-table and /api/test-location endpoints
+# that used to live here were unauthenticated and echoed raw driver errors and
+# location rows to any caller. Use `flask shell` or the Supabase console for
+# connectivity checks instead of shipping a public one.
 
 
 # ==========================================
@@ -354,8 +361,10 @@ def test_location():
 
 if __name__ == "__main__":
 
+    # The Werkzeug debugger exposes an interactive console on any traceback, so
+    # it stays off unless a developer opts in for this run.
     app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=True
+        host=os.getenv("FLASK_RUN_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLASK_RUN_PORT", "5000")),
+        debug=_flag("FLASK_DEBUG", "False")
     )

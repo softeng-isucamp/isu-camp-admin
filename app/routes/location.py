@@ -16,6 +16,7 @@ from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
 from services.geometry import polygon_error as _polygon_error
 from services.location_listing import list_location_page
 from services.location_photos import apply_gallery, read_gallery_change
+from services.security import verified_image_mime
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
@@ -131,7 +132,22 @@ def _photo_upload():
             )
         )
 
-    return content, upload.mimetype, None
+    # The declared Content-Type is client-supplied, so confirm the bytes match
+    # the format claimed before this is stored and later served to a browser.
+    mime_type = verified_image_mime(content, upload.mimetype)
+
+    if mime_type is None:
+        return (
+            None,
+            None,
+            _validation_error(
+                {
+                    "photo": "Choose a PNG, JPEG, or WebP image."
+                }
+            )
+        )
+
+    return content, mime_type, None
 
 
 def _validation_error(fields=None, relationships=None):
