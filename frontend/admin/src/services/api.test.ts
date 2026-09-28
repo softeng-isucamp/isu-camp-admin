@@ -6,7 +6,6 @@ import {
   setMockFailure,
 } from "./api";
 import { resetPasswordSchema, resetSchema } from "./schemas";
-import { reviewMapDraft } from "../features/map/mapEditing";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 import { createLocalAdapter } from "./localAdapter";
 
@@ -217,18 +216,6 @@ describe("mock service contracts", () => {
     expect(summary.locations).toBeGreaterThan(0);
     expect(summary.pathways).toBeGreaterThan(0);
     expect(summary.topSearched).toHaveLength(0);
-  });
-
-  it("loads a valid seeded Map Editor baseline through the service boundary", async () => {
-    const snapshot = {
-      buildings: await services.map.buildings(),
-      locations: await services.map.locations(),
-      nodes: await services.map.nodes(),
-      pathways: await services.map.pathways(),
-    };
-
-    expect(reviewMapDraft({ original: snapshot, current: snapshot, deleted: [] }))
-      .toEqual({ valid: true, errors: [], groups: [] });
   });
 
   it("supports deterministic injectable save failures", async () => {

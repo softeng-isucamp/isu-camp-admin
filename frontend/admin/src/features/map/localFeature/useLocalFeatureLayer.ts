@@ -2,11 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { overlayChanges } from "../mapEditing";
 import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 
-const withReplacement = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
-  value === null
-    ? items.filter((item) => item.id !== entityId)
-    : [...items.filter((item) => item.id !== entityId), value as unknown as T];
-
 /**
  * Working-session overlay for Local Map Features and their Feature Links:
  * unsaved feature changes, new links, and links unlinked in this session.
@@ -32,15 +27,6 @@ export function useLocalFeatureLayer(directoryFeatureLinks: FeatureLinkEntity[])
     setUnlinkedFeatureLinkIds((ids) => unlinked ? [...new Set([...ids, linkId])] : ids.filter((id) => id !== linkId));
   }, []);
 
-  /** Applies an undo/redo projection; `null` removes the entity from the overlay. */
-  const projectFeature = useCallback((entityId: string, value: Record<string, unknown> | null) => {
-    setFeatureChanges((items) => withReplacement(items, entityId, value));
-  }, []);
-
-  const projectFeatureLink = useCallback((entityId: string, value: Record<string, unknown> | null) => {
-    setAddedFeatureLinks((items) => withReplacement(items, entityId, value));
-  }, []);
-
   const reset = useCallback(() => {
     setFeatureChanges([]);
     setAddedFeatureLinks([]);
@@ -59,8 +45,6 @@ export function useLocalFeatureLayer(directoryFeatureLinks: FeatureLinkEntity[])
     putFeature,
     putBuildingLink,
     setLinkUnlinked,
-    projectFeature,
-    projectFeatureLink,
     reset,
   };
 }

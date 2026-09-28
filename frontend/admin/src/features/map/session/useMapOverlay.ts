@@ -50,26 +50,6 @@ export function useMapOverlay(directoryBuildings: readonly Building[] | undefine
     setDeletedPathwayIds((ids) => [...new Set([...ids, id])]);
   }, []);
 
-  /** Applies an undo/redo projection; `null` removes the entity. Building values merge onto the known record. */
-  const project = useCallback((collection: OverlayCollection, entityId: string, value: Record<string, unknown> | null) => {
-    const replace = <T extends Identified>(items: T[]) =>
-      value === null ? without(items, entityId) : [...without(items, entityId), value as unknown as T];
-    if (collection === "locations") setLocations(replace);
-    else if (collection === "nodes") setNodes(replace);
-    else if (collection === "pathways") {
-      setPathways(replace);
-      setDeletedPathwayIds((ids) => value === null ? [...new Set([...ids, entityId])] : ids.filter((id) => id !== entityId));
-    } else {
-      setBuildings((items) => {
-        if (value === null) return without(items, entityId);
-        const existing = items.find((item) => item.id === entityId)
-          ?? directoryBuildings?.find((item) => item.id === entityId);
-        const merged = existing ? { ...existing, ...value } : value;
-        return [...without(items, entityId), merged as unknown as Building];
-      });
-    }
-  }, [directoryBuildings]);
-
   const reset = useCallback(() => {
     setLocations([]);
     setNodes([]);
@@ -95,7 +75,6 @@ export function useMapOverlay(directoryBuildings: readonly Building[] | undefine
     removeBuilding,
     dropPathway,
     deletePathway,
-    project,
     reset,
   };
 }

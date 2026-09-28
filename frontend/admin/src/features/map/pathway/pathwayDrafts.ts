@@ -1,9 +1,4 @@
-import type { Pathway, RouteNode } from "../../../types";
-
-export const routeNodePoint = (nodes: RouteNode[], id: string): [number, number] => {
-  const node = nodes.find((candidate) => candidate.id === id);
-  return node ? [node.lat, node.lng] : [NaN, NaN];
-};
+import type { Pathway } from "../../../types";
 
 export const isPathwayDraft = (value: unknown): value is Pathway => {
   if (!value || typeof value !== "object") return false;
