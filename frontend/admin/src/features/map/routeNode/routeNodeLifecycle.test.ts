@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Building, Pathway, RouteNode } from "../../types";
+import type { Building, Pathway, RouteNode } from "../../../types";
 import { buildLifecycleChange, calculateLifecycleImpact } from "./routeNodeLifecycle";
 
 const node = (id: string): RouteNode => ({
