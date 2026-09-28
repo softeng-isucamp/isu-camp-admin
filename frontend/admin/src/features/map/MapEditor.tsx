@@ -16,7 +16,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { isPointInBounds, overlayChanges, polygonFeatureAnchor, reviewMapDraft, suggestedPathwayName, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -48,7 +48,7 @@ import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
-import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
+import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSavingAction } from "./session/useSavingAction";
@@ -60,13 +60,6 @@ import {
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
-import {
-  detectBuildingFootprintOverlap,
-  getBuildingAttachmentEligibility,
-  validateBuildingFootprintGeometry,
-  validateBuildingIdentityDetails,
-  type BuildingIdentityInput,
-} from "./building/buildingFootprint";
 import { projectWorkingSessionOperation, type ProjectedCollection } from "./workingSessionUndoProjection";
 import {
   createIndoorLocationIcon,
@@ -131,19 +124,6 @@ export function MapEditor() {
     adapter: services.map,
     workingSession: workingSessionManager,
   }), [workingSessionManager]);
-  const buildingFootprintWorkflow = useMemo(() => createBuildingFootprintWorkflow({
-    adapter: {
-      createBuilding: async (draft) => {
-        if (typeof services.locations.save === "function") return services.locations.save(draft);
-        return { ...draft, id: draft.id ?? `building-${Date.now()}` } as Location;
-      },
-      saveFootprint: async (building, footprintPoints) => {
-        await services.map.save({ buildings: [{ ...building, points: [...footprintPoints] }] });
-      },
-    },
-    workingSession: workingSessionManager,
-  }), [workingSessionManager]);
-
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
       "mockFailure",
@@ -202,32 +182,8 @@ export function MapEditor() {
     setFlyTarget(point);
   };
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
-  const [points, setPoints] = useState<[number, number][]>([]);
-  const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
-  const [polygonClosed, setPolygonClosed] = useState(false);
-  const [buildingWorkflowMode, setBuildingWorkflowMode] = useState<"create" | "attach">("create");
-  const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
-  const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
-  const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
-  const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
-  const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
-  const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>({
-    name: "",
-    code: "",
-    function: "",
-    keywords: "",
-    status: "Active",
-  });
-  const buildingName = buildingForm.name;
-  const buildingCode = buildingForm.code;
-  const buildingFunction = buildingForm.function ?? "";
-  const buildingKeywords = buildingForm.keywords ?? "";
-  const resetBuildingForm = () => {
-    setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
-    setBuildingClassification("Building");
-  };
   const saving = useSavingAction();
-  const { savingAction, beginSaving, endSaving } = saving;
+  const { savingAction } = saving;
   const [addRoomOpen, setAddRoomOpen] = useState(false);
   const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
   const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string; position: MapPoint | null } | null>(null);
@@ -235,9 +191,7 @@ export function MapEditor() {
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
-  const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
-  const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ kind: "building" | "route_node" | "pathway"; id: string; name: string; impact?: DeleteImpact } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -391,27 +345,74 @@ export function MapEditor() {
     }
     return Array.from(buildingMap.values()).sort((left, right) => left.name.localeCompare(right.name));
   }, [allSessionBuildings, locationDirectory]);
-  const buildingAttachmentEligibility = (building: Building) =>
-    getBuildingAttachmentEligibility(building, currentFeatureLinks);
-  const selectedAttachBuilding = buildingAssociationOptions.find((b) => b.id === selectedAttachBuildingId);
-  const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
-  const attachCandidateBuildings = useMemo(() => {
-    const query = attachBuildingSearch.trim().toLowerCase();
-    return buildingAssociationOptions.filter((building) => {
-      if (building.id === "pending-building" || building.id === editingBuildingId) return false;
-      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
-      if (!eligibility.eligible) return false;
-      return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
-    });
-  }, [attachBuildingSearch, buildingAssociationOptions, currentFeatureLinks, editingBuildingId]);
-  const currentBuildings = useMemo(() => {
-    const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
-    if (mode !== "area" || points.length === 0) return validMerged;
-    const pending: Building = { id: editingBuildingId ?? "pending-building", name: buildingName, code: buildingCode, points };
-    return editingBuildingId && validMerged.some((building) => building.id === editingBuildingId)
-      ? validMerged.map((building) => building.id === editingBuildingId ? pending : building)
-      : [...validMerged, pending];
-  }, [buildingCode, buildingName, editingBuildingId, mode, points, sessionBuildings]);
+  const buildingEditor = useBuildingFootprintEditing({
+    workingSession: workingSessionManager,
+    layers: { overlay, localFeatures: localFeatureLayer },
+    saving,
+    context: {
+      sessionBuildings,
+      associationOptions: buildingAssociationOptions,
+      locations: currentLocations,
+      nodes: currentNodes,
+      featureLinks: currentFeatureLinks,
+      campusBoundary,
+    },
+    drawing: mode === "area",
+    refreshMapData,
+    onError: setError,
+    onFinished: (outcome) => {
+      setMode("select");
+      if (outcome.kind !== "cancelled") setSelected({ type: "building", id: outcome.buildingId });
+      if (outcome.kind === "placed") pointTool.setPlacingAssociatedBuildingId(outcome.buildingId);
+      completeToolDraft("polygon");
+    },
+  });
+  const {
+    points,
+    setPoints,
+    polygonInteraction,
+    setPolygonInteraction,
+    polygonClosed,
+    setPolygonClosed,
+    polygonInvalid,
+    buildingWorkflowMode,
+    setBuildingWorkflowMode,
+    buildingDetailsModalOpen,
+    setBuildingDetailsModalOpen,
+    buildingClassification,
+    setBuildingClassification,
+    attachBuildingSearch,
+    setAttachBuildingSearch,
+    selectedAttachBuildingId,
+    setSelectedAttachBuildingId,
+    nonRoutableBuildingId,
+    setNonRoutableBuildingId,
+    buildingForm,
+    setBuildingForm,
+    buildingName,
+    buildingCode,
+    buildingFunction,
+    buildingKeywords,
+    resetBuildingForm,
+    editingBuildingId,
+    setEditingBuildingId,
+    selectedAttachEligibility,
+    attachCandidateBuildings,
+    currentBuildings,
+    footprintGeometryIssues,
+    footprintOverlapWarning,
+    canFinishFootprint,
+    canSaveBuilding,
+    closePolygon,
+    updatePolygonVertex,
+    insertPolygonVertex,
+    deletePolygonVertex,
+    movePolygon,
+    cancelDraft: cancelBuildingDraft,
+    closeDetailsModal: closeBuildingDetailsModal,
+    createBuilding: handleCreateBuilding,
+    attachBuilding: handleAttachBuilding,
+  } = buildingEditor;
   const pointTool = useRouteNodePointTool({
     workflow: routeNodeWorkflow,
     overlay,
@@ -484,28 +485,6 @@ export function MapEditor() {
   }, [applyWorkingSessionOperation, workingSessionManager]);
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
-  const footprintGeometryIssues = useMemo(
-    () => mode === "area" ? validateBuildingFootprintGeometry(points, campusBoundary) : [],
-    [campusBoundary, mode, points],
-  );
-  const footprintOverlapWarning = useMemo(
-    () => mode === "area"
-      ? detectBuildingFootprintOverlap(points, currentBuildings, editingBuildingId ?? "pending-building")
-      : null,
-    [currentBuildings, editingBuildingId, mode, points],
-  );
-  const buildingIdentityIssues = useMemo(
-    () => mode === "area" && (polygonClosed || points.length >= 3) && buildingWorkflowMode === "create"
-      ? validateBuildingIdentityDetails(
-          { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
-          currentLocations,
-          editingBuildingId,
-        )
-      : [],
-    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingWorkflowMode, currentLocations, editingBuildingId, mode, points.length, polygonClosed],
-  );
-  const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
-  const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
   const navigationBounds = useMemo(() => {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
@@ -893,61 +872,6 @@ export function MapEditor() {
     }
   };
 
-  const closePolygon = useCallback(() => {
-    if (mode !== "area" || points.length < 3) return;
-    const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
-    if (geometryIssues.length > 0) {
-      setError(geometryIssues[0].message);
-      return;
-    }
-    setPolygonClosed(true);
-    setPolygonInteraction("draw");
-    if (buildingWorkflowMode === "create") setBuildingDetailsModalOpen(true);
-    setError("");
-  }, [buildingWorkflowMode, campusBoundary, mode, points]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Enter") closePolygon();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closePolygon]);
-
-  const updatePolygonVertex = (index: number, point: [number, number]) => {
-    setPoints((current) => {
-      const next = current.map((candidate, candidateIndex) => candidateIndex === index ? point : candidate);
-      if (!geometryOnCampus(next, campusBoundary)) {
-        setError("The building footprint must stay inside the ISU Echague campus boundary.");
-        return current;
-      }
-      setError("");
-      return next;
-    });
-  };
-
-  const insertPolygonVertex = (index: number) => {
-    setPoints((current) => {
-      const next = current[(index + 1) % current.length];
-      const point: [number, number] = [(current[index][0] + next[0]) / 2, (current[index][1] + next[1]) / 2];
-      return [...current.slice(0, index + 1), point, ...current.slice(index + 1)];
-    });
-  };
-
-  const deletePolygonVertex = (index: number) => {
-    if (points.length <= 3) return;
-    setPoints((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
-  };
-
-  const movePolygon = (point: [number, number]) => {
-    if (!points.length) return;
-    const anchor = polygonFeatureAnchor(points);
-    const delta: [number, number] = [point[0] - anchor[0], point[1] - anchor[1]];
-    const translated = translatePolygon(points, delta);
-    if (geometryOnCampus(translated, campusBoundary)) setPoints(translated);
-    else setError("The building footprint must stay inside the ISU Echague campus boundary.");
-  };
-
   const handleStartMoveNode = () => {
     if (!selectedNode) return;
     pointTool.startMove(selectedNode);
@@ -1160,160 +1084,14 @@ export function MapEditor() {
     }
   };
 
-  const cancelBuildingDraft = () => {
-    setPoints([]);
-    resetBuildingForm();
-    setEditingBuildingId(null);
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
-    setPolygonClosed(false);
-    setPolygonInteraction("draw");
-    setMode("select");
-    setError("");
-    setBuildingDetailsModalOpen(false);
-    completeToolDraft("polygon");
-  };
+  const handleSaveBuilding = () => buildingEditor.saveBuilding(currentLocalFeatures);
 
-  const closeBuildingDetailsModal = () => {
-    setBuildingDetailsModalOpen(false);
-    setError("");
-  };
-
-  const handleSaveBuilding = async () => {
-    if (editingBuildingId) {
-      if (!canFinishFootprint) return;
-      if (!beginSaving("building")) return;
-      const footprintLink = currentFeatureLinks.find((link) =>
-        link.targetDomain === "Locations"
-        && link.targetEntityId === editingBuildingId
-        && link.linkType === "building_footprint",
-      );
-      const footprint = currentLocalFeatures.find((feature) =>
-        feature.id === footprintLink?.featureId
-        || (feature.family === "building_footprint"
-          && (feature.linkedBuildingId === editingBuildingId || feature.id === `feat-poly-${editingBuildingId}`)),
-      );
-      if (!footprintLink || !footprint) {
-        setError("This Building has no linked footprint to reshape. Open Building details to review its ownership.");
-        endSaving();
-        return;
-      }
-      const buildingForSave = currentBuildings.find((building) => building.id === editingBuildingId);
-      if (!buildingForSave) {
-        setError("This Building is no longer available. Reload the map and retry the footprint update.");
-        endSaving();
-        return;
-      }
-      const result = await buildingFootprintWorkflow.finalize({
-        kind: "reshape",
-        building: buildingForSave,
-        footprint,
-        link: footprintLink,
-        points: [...points],
-        context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
-      });
-      if (!result.ok) {
-        setError(result.message);
-        endSaving();
-        return;
-      }
-      localFeatureLayer.putFeature(result.footprint);
-      overlay.refreshBuilding(result.building);
-      void refreshMapData();
-      cancelBuildingDraft();
-      setSelected({ type: "building", id: editingBuildingId });
-      endSaving();
-    } else {
-      if (!canSaveBuilding) return;
-      handleCreateBuilding();
-    }
-  };
-
-  const completeBuildingWorkflow = (
-    result: Extract<Awaited<ReturnType<typeof buildingFootprintWorkflow.finalize>>, { ok: true }>,
+  const initializeBuildingFootprintEdit = (
+    building: Building,
+    interaction: "draw" | "reshape" | "move" = "draw",
   ) => {
-    if (result.location) {
-      overlay.putLocation(result.location!);
-    }
-    overlay.putBuilding(result.building);
-    localFeatureLayer.putFeature(result.footprint);
-    localFeatureLayer.putBuildingLink(result.link);
-    setPoints([]);
-    resetBuildingForm();
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
-    setPolygonClosed(false);
-    setPolygonInteraction("draw");
-    setMode("select");
-    setSelected({ type: "building", id: result.building.id });
-    pointTool.setPlacingAssociatedBuildingId(result.building.id);
-    const hasActiveEntrance = currentNodes.some((node) =>
-      node.nodeType === "Entrance"
-      && node.associatedPlaceId === result.building.id
-      && node.status !== "Inactive",
-    );
-    setNonRoutableBuildingId(hasActiveEntrance ? null : result.building.id);
-    completeToolDraft("polygon");
-  };
-
-  const handleCreateBuilding = async () => {
-    if (!canSaveBuilding) {
-      setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
-      return;
-    }
-    if (!beginSaving("building")) return;
-    const result = await buildingFootprintWorkflow.finalize({
-      kind: "create",
-      identity: {
-        name: buildingName,
-        code: buildingCode,
-        type: buildingClassification,
-        function: buildingFunction,
-        keywords: buildingKeywords,
-        status: "Active",
-      },
-      points: [...points],
-      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
-    });
-    if (!result.ok) {
-      setError(result.message);
-      endSaving();
-      return;
-    }
-    setError("");
-    setBuildingDetailsModalOpen(false);
-    completeBuildingWorkflow(result);
-    try {
-      await refreshMapData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
-    }
-    endSaving();
-  };
-
-  const handleAttachBuilding = async () => {
-    const existing = buildingAssociationOptions.find((building) => building.id === selectedAttachBuildingId);
-    if (!existing) return;
-    if (!beginSaving("building")) return;
-    const result = await buildingFootprintWorkflow.finalize({
-      kind: "attach",
-      building: existing,
-      points: [...points],
-      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
-    });
-    if (!result.ok) {
-      setError(result.message);
-      endSaving();
-      return;
-    }
-    completeBuildingWorkflow(result);
-    try {
-      await refreshMapData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
-    } finally {
-      endSaving();
-    }
+    buildingEditor.initializeFootprintEdit(building, interaction);
+    setMode("area");
   };
 
   const startGuidedEntranceDraft = () => {
@@ -1864,23 +1642,6 @@ export function MapEditor() {
     photo: selectedBuildingLocation?.photo,
   } : null);
 
-  const initializeBuildingFootprintEdit = (
-    building: Building,
-    interaction: "draw" | "reshape" | "move" = "draw",
-  ) => {
-    setEditingBuildingId(building.id);
-    setBuildingForm({
-      name: building.name,
-      code: building.code,
-      function: "",
-      keywords: "",
-      status: building.status ?? "Active",
-    });
-    setPoints([...building.points]);
-    setPolygonInteraction(interaction);
-    setPolygonClosed(true);
-    setMode("area");
-  };
 
 
   const startSelectedBuildingGeometryEdit = () => {
