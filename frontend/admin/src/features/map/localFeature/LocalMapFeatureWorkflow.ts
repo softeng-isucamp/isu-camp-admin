@@ -6,7 +6,7 @@ import {
   buildRetireLocalFeatureOperation,
   EDITABLE_LOCAL_FEATURE_FAMILIES,
   normalizeCuratedLocalFeatureProperties,
-} from "../localFeatures";
+} from "./localFeatures";
 import type { WorkingOperation } from "../types";
 import { WorkingSessionManager, updatePropertiesOperation } from "../WorkingSessionManager";
 
