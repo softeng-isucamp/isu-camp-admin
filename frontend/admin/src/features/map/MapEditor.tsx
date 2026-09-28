@@ -16,7 +16,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, pathwayWithSuggestedName, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validatePathwayDraft, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { isPointInBounds, overlayChanges, polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, reviewMapDraft, suggestedPathwayName, translatePolygon, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -41,19 +41,13 @@ import {
   nudgePoint,
   type PointSnapTarget,
 } from "./pointInteractions";
-import {
-  findPathwayCrossings,
-  insertPathPointAtSegmentMidpoint,
-  pathwayConnectionError,
-  segmentMidpoints,
-} from "./pathway/pathwayTopology";
-import { createRoutableCrossing } from "./pathway/pathwayCommands";
+import { pathwayConnectionError, segmentMidpoints } from "./pathway/pathwayTopology";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
-import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
-import { PathPointConversionModal, type PathPointConversionDraft } from "./pathway/PathPointConversionModal";
+import { usePathwayEditing } from "./pathway/usePathwayEditing";
+import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useMapOverlay } from "./session/useMapOverlay";
@@ -137,10 +131,6 @@ export function MapEditor() {
     adapter: services.map,
     workingSession: workingSessionManager,
   }), [workingSessionManager]);
-  const pathwayWorkflow = useMemo(() => createPathwayWorkflow({
-    adapter: services.map,
-    workingSession: workingSessionManager,
-  }), [workingSessionManager]);
   const buildingFootprintWorkflow = useMemo(() => createBuildingFootprintWorkflow({
     adapter: {
       createBuilding: async (draft) => {
@@ -212,13 +202,6 @@ export function MapEditor() {
     setFlyTarget(point);
   };
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
-  const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
-  const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
-  const [conversionDraft, setConversionDraft] = useState<PathPointConversionDraft | null>(null);
-  const [pathPointDragPreview, setPathPointDragPreview] = useState<{
-    index: number;
-    point: [number, number];
-  } | null>(null);
   const [points, setPoints] = useState<[number, number][]>([]);
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
@@ -252,12 +235,6 @@ export function MapEditor() {
   const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
-  const [editingPathId, setEditingPathId] = useState<string | null>(null);
-  const [pathwayDraft, setPathwayDraft] = useState<Pathway | null>(null);
-  const [pathwayDraftOriginal, setPathwayDraftOriginal] = useState<Pathway | null>(null);
-  const [provisionalPathwayId, setProvisionalPathwayId] = useState<string | null>(null);
-  const [pathStartNodeId, setPathStartNodeId] = useState<string | null>(null);
-  const [pathDraftDirty, setPathDraftDirty] = useState(false);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
@@ -300,6 +277,13 @@ export function MapEditor() {
   const directoryNodes = data?.nodes || [];
   const directoryPathways = data?.pathways || [];
   const directoryBuildings = (data?.buildings || []).filter((building) => building.points.length >= 3);
+  // Local map features are retained by the data/service layer for compatibility,
+  // but are intentionally not rendered in this editor. The campus boundary is
+  // still used below for validation and navigation bounds.
+  const campusBoundary = useMemo(
+    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
+    [directoryBuildings],
+  );
   const directoryMapLayers = useMemo(() => normalizeMapLayers({
     buildings: data?.buildings || [],
     locations: data?.locations || [],
@@ -320,17 +304,47 @@ export function MapEditor() {
     return Array.from(locationsById.values());
   }, [currentLocations, locationDirectory]);
   const currentNodes = useMemo(() => overlayChanges(directoryNodes, overlay.nodes), [directoryNodes, overlay.nodes]);
-  const currentPathways = useMemo(() => {
-    const merged = overlayChanges(directoryPathways, overlay.pathways);
-    const visible = merged.filter((item) => !overlay.deletedPathwayIds.includes(item.id));
-    return editingPathId ? visible.map((item) => item.id === editingPathId
-      ? { ...item, ...(pathwayDraft?.id === editingPathId ? pathwayDraft : {}), pathPoints }
-      : item) : visible;
-  }, [overlay.deletedPathwayIds, directoryPathways, editingPathId, overlay.pathways, pathwayDraft, mode, pathPoints]);
-  const pathwayCrossings = useMemo(
-    () => findPathwayCrossings(currentPathways, currentNodes),
-    [currentNodes, currentPathways],
-  );
+  const pathway = usePathwayEditing({
+    workingSession: workingSessionManager,
+    overlay,
+    saving,
+    network: { directoryPathways, directoryNodes, nodes: currentNodes, campusBoundary },
+    selectedPathId: selected?.type === "pathway" ? selected.id : null,
+    refreshMapData,
+    onError: setError,
+  });
+  const {
+    currentPathways,
+    pathwayCrossings,
+    selectedPath,
+    activePathway,
+    pathwayFrame,
+    pathwayFrameIssues,
+    pathwayFrameDirty,
+    editingPathId,
+    setEditingPathId,
+    pathwayDraft,
+    setPathwayDraft,
+    setPathwayDraftOriginal,
+    provisionalPathwayId,
+    setProvisionalPathwayId,
+    pathPoints,
+    setPathPoints,
+    selectedPathPointIndex,
+    setSelectedPathPointIndex,
+    pathStartNodeId,
+    setPathStartNodeId,
+    pathDraftDirty,
+    setPathDraftDirty,
+    conversionDraft,
+    setConversionDraft,
+    pathPointDragPreview,
+    setPathPointDragPreview,
+    adoptSuggestedPathwayName,
+    insertPathPoint,
+    switchEndpoints: switchPathwayEndpoints,
+    updateConversionPathway,
+  } = pathway;
   const sessionBuildings = useMemo(() => {
     return overlayChanges(data?.buildings || [], overlay.buildings);
   }, [data?.buildings, overlay.buildings]);
@@ -398,13 +412,6 @@ export function MapEditor() {
       ? validMerged.map((building) => building.id === editingBuildingId ? pending : building)
       : [...validMerged, pending];
   }, [buildingCode, buildingName, editingBuildingId, mode, points, sessionBuildings]);
-  // Local map features are retained by the data/service layer for compatibility,
-  // but are intentionally not rendered in this editor. The campus boundary is
-  // still used below for validation and navigation bounds.
-  const campusBoundary = useMemo(
-    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
-    [directoryBuildings],
-  );
   const pointTool = useRouteNodePointTool({
     workflow: routeNodeWorkflow,
     overlay,
@@ -582,9 +589,6 @@ export function MapEditor() {
     refreshMapData,
     onError: setError,
   });
-  const selectedPath = selected?.type === "pathway"
-    ? currentPathways.find((item) => item.id === selected.id)
-    : undefined;
   const selectedBuilding = selected?.type === "building"
     ? currentBuildings.find((item) => item.id === selected.id)
     : undefined;
@@ -1113,52 +1117,47 @@ export function MapEditor() {
     setSelected({ type: "building", id: building.id });
   };
 
-  const handleSavePathShape = async () => {
-    if (!editingPathId) return;
-    if (!beginSaving("pathway")) return;
-    const target = overlay.pathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
-    if (target) {
-      const draft = {
-        ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
-        pathPoints,
-      };
-      const result = provisionalPathwayId === target.id
-        ? await pathwayWorkflow.finalize({
-            kind: "create",
-            draft,
-            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
-            description: `Create ${draft.name}`,
-          })
-        : await pathwayWorkflow.finalize({
-            kind: "update",
-            before: target,
-            after: draft,
-            context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
-            description: `Reshape ${target.name}`,
-          });
-      if (!result.ok) {
-        setError(result.message);
-        endSaving();
-        return;
-      }
-      const persistedPath = result.pathway;
-      overlay.putPathways([persistedPath], [editingPathId, target.id]);
-      setPathwayDraft({ ...persistedPath });
-      setPathwayDraftOriginal({ ...persistedPath });
-      try {
-        await refreshMapData();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
-        endSaving();
-        return;
-      }
-      const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
-      const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
-      overlay.ensureNodes([src, dst].filter((node): node is RouteNode => Boolean(node)));
-    }
+
+  const finishPathwayTool = () => {
     setMode("select");
     completeToolDraft("pathway");
-    endSaving();
+  };
+
+  const handleSavePathShape = async () => {
+    if (await pathway.saveShape()) finishPathwayTool();
+  };
+
+  const startNewPathway = () => {
+    pathway.startNew();
+    setSelected(null);
+    setMode("path");
+  };
+
+  const createJunctionAtCrossing = () => pathway.createJunctionAtCrossing((junction) => {
+    nodeFrame.load(junction);
+    setSelected({ type: "node", id: junction.id });
+    finishPathwayTool();
+  });
+
+  const startPathPointConversion = () => pathway.startConversion(currentBuildings);
+
+  const savePathPointConversion = () => pathway.saveConversion((nodeId) => {
+    setMode("select");
+    setSelected({ type: "node", id: nodeId });
+  });
+
+  const applyPathwayFrame = async () => {
+    if (await pathway.applyFrame()) finishPathwayTool();
+  };
+
+  const cancelPathwayFrame = () => {
+    const outcome = pathway.cancelFrame();
+    if (outcome.discarded) {
+      setSelected(null);
+      finishPathwayTool();
+    } else {
+      setSelected({ type: "pathway", id: outcome.pathwayId });
+    }
   };
 
   const cancelBuildingDraft = () => {
@@ -1443,80 +1442,9 @@ export function MapEditor() {
     }
   };
 
-  const activePathway = currentPathways.find((p) => p.id === editingPathId);
 
-  const adoptSuggestedPathwayName = (pathway: Pathway | null | undefined) => {
-    if (!pathway) return;
-    const suggestion = suggestedPathwayName(pathway, currentNodes);
-    if (!suggestion) return;
-    setPathwayDraft((current) => current && !current.name.trim() ? { ...current, name: suggestion } : current);
-  };
 
-  const startNewPathway = () => {
-    setEditingPathId(null);
-    setPathwayDraft(null);
-    setPathwayDraftOriginal(null);
-    setProvisionalPathwayId(null);
-    setPathStartNodeId(null);
-    setPathPoints([]);
-    setSelected(null);
-    setPathDraftDirty(false);
-    setMode("path");
-  };
 
-  const insertPathPoint = (segmentIndex: number) => {
-    if (!activePathway) return;
-    const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
-    const destination = currentNodes.find((node) => node.id === activePathway.destinationNodeId);
-    if (!source || !destination) return;
-    const coordinates = [
-      { latitude: source.lat, longitude: source.lng },
-      ...pathPoints.map(([latitude, longitude]) => ({ latitude, longitude })),
-      { latitude: destination.lat, longitude: destination.lng },
-    ];
-    const withMidpoint = insertPathPointAtSegmentMidpoint(coordinates, segmentIndex);
-    setPathPoints(withMidpoint.slice(1, -1).map(({ latitude, longitude }) => [latitude, longitude]));
-    setSelectedPathPointIndex(segmentIndex);
-    setPathDraftDirty(true);
-  };
-
-  const createJunctionAtCrossing = async () => {
-    const crossing = pathwayCrossings[0];
-    if (!crossing) return;
-    const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
-    const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);
-    if (!pathwayA || !pathwayB) return;
-    if (!beginSaving("route-node")) return;
-    const provisional = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, `pending-junction-${Date.now()}`);
-    try {
-      const junction = await services.map.createRouteNode({
-        name: provisional.junction.name,
-        nodeType: "Junction",
-        associatedPlaceId: null,
-        lat: provisional.junction.lat,
-        lng: provisional.junction.lng,
-      });
-      const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junction.id);
-      overlay.putNode(junction);
-      overlay.putPathways([...crossingChange.closedPathways, ...crossingChange.replacementPathways]);
-      workingSessionManager.executeBatch(
-        `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
-        "Walking Network",
-        junction.id,
-        crossingChange.operations,
-      );
-      setEditingPathId(null);
-      setPathPoints([]);
-      nodeFrame.load(junction);
-      setSelected({ type: "node", id: junction.id });
-      setMode("select");
-      completeToolDraft("pathway");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the Junction Route Node.");
-    } finally {
-      endSaving();
-    }
-  };
 
   const activeTool: ToolType = mode === "place" || mode === "move"
     ? "point"
@@ -1954,167 +1882,6 @@ export function MapEditor() {
     setMode("area");
   };
 
-  const pathwayFrame = selectedPath && pathwayDraft?.id === selectedPath.id
-    ? { ...pathwayDraft, pathPoints: editingPathId === selectedPath.id ? pathPoints : pathwayDraft.pathPoints }
-    : selectedPath ?? activePathway;
-  const namedPathwayFrame = pathwayFrame ? pathwayWithSuggestedName(pathwayFrame, currentNodes) : null;
-  const pathwayFrameIssues = namedPathwayFrame
-    ? validatePathwayDraft(namedPathwayFrame, currentNodes, campusBoundary, {
-      existingPathways: currentPathways.filter((pathway) => pathway.id !== namedPathwayFrame.id),
-      requireActiveEndpoints: true,
-    })
-    : [];
-  const pathwayFrameDirty = Boolean(
-    namedPathwayFrame && (
-      (pathwayDraftOriginal && JSON.stringify(namedPathwayFrame) !== JSON.stringify(pathwayDraftOriginal))
-      || (!pathwayDraftOriginal && provisionalPathwayId === namedPathwayFrame.id)
-    ),
-  );
-  const startPathPointConversion = () => {
-    if (!activePathway || selectedPathPointIndex === null || !pathPoints[selectedPathPointIndex] || pathwayFrameDirty || pathDraftDirty) return;
-    const index = selectedPathPointIndex;
-    const point = pathPoints[index];
-    const existingNode = currentNodes.find((node) => node.status !== "Inactive"
-      && Math.abs(node.lat - point[0]) <= 1e-8 && Math.abs(node.lng - point[1]) <= 1e-8);
-    const nearestBuilding = currentBuildings
-      .filter((building) => building.points.length >= 3)
-      .map((building) => ({ building, distance: distanceInMeters(point, polygonFeatureAnchor(building.points)) }))
-      .sort((left, right) => left.distance - right.distance)[0]?.building;
-    const campusReference = nearestBuilding?.name
-      ?? currentNodes.find((node) => node.id === activePathway.sourceNodeId)?.name
-      ?? currentNodes.find((node) => node.id === activePathway.destinationNodeId)?.name;
-    const nodeId = existingNode?.id ?? "pending-conversion-node";
-    const segment = (suffix: "A" | "B", pathPoints: [number, number][], sourceNodeId: string, destinationNodeId: string): Pathway => ({
-      ...activePathway,
-      id: `${activePathway.id}-${suffix.toLowerCase()}`,
-      name: `${activePathway.name} ${suffix}`,
-      sourceNodeId,
-      destinationNodeId,
-      pathPoints,
-      allowedModes: activePathway.allowedModes?.length ? activePathway.allowedModes : ["Walking"],
-      status: activePathway.status === "Open" || activePathway.status === "Active" ? activePathway.status : "Active",
-    });
-    setConversionDraft({
-      pathwayId: activePathway.id,
-      index,
-      point: [...point],
-      existingNodeId: existingNode?.id ?? null,
-      node: { name: campusReference ? `Junction near ${campusReference}` : "", nodeType: "Junction", lat: point[0], lng: point[1], status: "Active", associatedPlaceId: null },
-      pathways: [
-        segment("A", pathPoints.slice(0, index), activePathway.sourceNodeId, nodeId),
-        segment("B", pathPoints.slice(index + 1), nodeId, activePathway.destinationNodeId),
-      ],
-    });
-    setError("");
-  };
-  const updateConversionPathway = (index: 0 | 1, change: Partial<Pathway>) => setConversionDraft((draft) => {
-    if (!draft) return draft;
-    const pathways: [Pathway, Pathway] = [...draft.pathways];
-    pathways[index] = { ...pathways[index], ...change };
-    return { ...draft, pathways };
-  });
-  const savePathPointConversion = async () => {
-    if (!conversionDraft || !beginSaving("path-point-conversion")) return;
-    try {
-      const result = await services.map.convertPathPoint({
-        pathwayId: conversionDraft.pathwayId,
-        sequenceNo: conversionDraft.index + 1,
-        point: conversionDraft.point,
-        node: conversionDraft.existingNodeId ? null : conversionDraft.node,
-        existingNodeId: conversionDraft.existingNodeId,
-        pathways: conversionDraft.pathways,
-      });
-      const original = currentPathways.find((item) => item.id === conversionDraft.pathwayId);
-      if (original) overlay.putPathways([{ ...original, status: "Closed" }, ...result.pathways]);
-      if (!conversionDraft.existingNodeId) overlay.putNode(result.node);
-      setConversionDraft(null);
-      setEditingPathId(null);
-      setPathwayDraft(null);
-      setPathwayDraftOriginal(null);
-      setSelectedPathPointIndex(null);
-      setPathDraftDirty(false);
-      setMode("select");
-      setSelected({ type: "node", id: result.node.id });
-      setError("");
-      await refreshMapData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not convert Path Point.");
-    } finally {
-      endSaving();
-    }
-  };
-  const applyPathwayFrame = async () => {
-    if (!namedPathwayFrame || pathwayFrameIssues.length > 0) {
-      if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
-      return;
-    }
-    if (!pathwayFrameDirty) return;
-    if (!pathwayDraftOriginal && provisionalPathwayId === namedPathwayFrame.id) {
-      await handleSavePathShape();
-      return;
-    }
-    if (!beginSaving("pathway-metadata")) return;
-    const before = pathwayDraftOriginal!;
-    const result = await pathwayWorkflow.finalize({
-      kind: "update",
-      before,
-      after: namedPathwayFrame,
-      context: { nodes: currentNodes, existingPathways: currentPathways, campusBoundary },
-      description: `Edit ${namedPathwayFrame.name}`,
-    });
-    if (!result.ok) {
-      setError(result.message);
-      endSaving();
-      return;
-    }
-    const persisted = result.pathway;
-    overlay.putPathways([persisted]);
-    setPathwayDraftOriginal({ ...persisted });
-    setPathwayDraft({ ...persisted });
-    setPathPoints([...persisted.pathPoints]);
-    try {
-      await refreshMapData();
-      setPathDraftDirty(false);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
-    } finally {
-      endSaving();
-    }
-  };
-  const switchPathwayEndpoints = () => {
-    if (!pathwayFrame) return;
-    const reversedPoints = [...pathwayFrame.pathPoints].reverse();
-    const currentDraft = pathwayDraft?.id === pathwayFrame.id ? pathwayDraft : pathwayFrame;
-    setPathwayDraft({
-      ...currentDraft,
-      sourceNodeId: currentDraft.destinationNodeId,
-      destinationNodeId: currentDraft.sourceNodeId,
-      pathPoints: reversedPoints,
-    });
-    setPathwayDraftOriginal((current) => current?.id === pathwayFrame.id ? current : { ...pathwayFrame });
-    if (editingPathId === pathwayFrame.id) setPathPoints(reversedPoints);
-  };
-  const cancelPathwayFrame = () => {
-    if (!pathwayDraftOriginal) {
-      if (provisionalPathwayId) overlay.dropPathway(provisionalPathwayId);
-      setPathwayDraft(null);
-      setPathwayDraftOriginal(null);
-      setProvisionalPathwayId(null);
-      setEditingPathId(null);
-      setPathPoints([]);
-      setSelected(null);
-      setMode("select");
-      completeToolDraft("pathway");
-      return;
-    }
-    setPathwayDraft({ ...pathwayDraftOriginal });
-    setPathPoints([...pathwayDraftOriginal.pathPoints]);
-    setPathDraftDirty(false);
-    setSelectedPathPointIndex(null);
-    setSelected({ type: "pathway", id: pathwayDraftOriginal.id });
-    setError("");
-  };
 
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
