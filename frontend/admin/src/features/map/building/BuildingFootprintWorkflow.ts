@@ -9,7 +9,7 @@ import {
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
   type BuildingValidationIssue,
-} from "../buildingFootprint";
+} from "./buildingFootprint";
 import type { WorkingOperation } from "../types";
 import { WorkingSessionManager, updateGeometryOperation } from "../WorkingSessionManager";
 

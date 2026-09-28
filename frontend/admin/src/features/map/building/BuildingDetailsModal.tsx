@@ -1,4 +1,4 @@
-import { Button, Field, Modal, SelectField } from "../../components/UI";
+import { Button, Field, Modal, SelectField } from "../../../components/UI";
 import type { BuildingIdentityInput } from "./buildingFootprint";
 
 interface BuildingDetailsModalProps {

@@ -125,7 +125,7 @@ export interface MapSnapshot {
   buildings: Building[];
 }
 
-import { findBuildingFootprintOverlaps } from "./buildingFootprint";
+import { findBuildingFootprintOverlaps } from "./building/buildingFootprint";
 
 export interface MapObjectReference {
   type: MapObjectType;

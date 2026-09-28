@@ -21,7 +21,7 @@ import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
-import { BuildingDetailsModal } from "./BuildingDetailsModal";
+import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
@@ -66,7 +66,7 @@ import {
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
-} from "./buildingFootprint";
+} from "./building/buildingFootprint";
 import { projectWorkingSessionOperation, type ProjectedCollection } from "./workingSessionUndoProjection";
 import {
   createIndoorLocationIcon,

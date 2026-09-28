@@ -1,15 +1,15 @@
-import type { Building, Location, RecordStatus } from "../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapLayers";
-import type { WorkingOperation } from "./types";
+import type { Building, Location, RecordStatus } from "../../../types";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
+import type { WorkingOperation } from "../types";
 import {
   geometryOnCampus,
   pointInPolygon,
   type MapPoint,
-} from "./campusBoundary";
+} from "../campusBoundary";
 import {
   polygonIsNonDegenerate,
   polygonSelfIntersects,
-} from "./mapEditing";
+} from "../mapEditing";
 
 export interface BuildingIdentityInput {
   name: string;
