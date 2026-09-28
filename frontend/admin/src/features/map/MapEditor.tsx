@@ -50,6 +50,8 @@ import {
 import { createRoutableCrossing } from "./pathwayCommands";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
+import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
+import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
 import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
@@ -210,8 +212,6 @@ export function MapEditor() {
     setFlyTarget(point);
   };
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
-  const [temporary, setTemporary] = useState<[number, number] | null>(null);
-  const [pointDraftDirty, setPointDraftDirty] = useState(false);
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
   const [conversionDraft, setConversionDraft] = useState<PathPointConversionDraft | null>(null);
@@ -243,20 +243,8 @@ export function MapEditor() {
     setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
     setBuildingClassification("Building");
   };
-  const [movingId, setMovingId] = useState<string | null>(null);
-  const [moveOrigin, setMoveOrigin] = useState<MapPoint | null>(null);
-  const [lastValidMovePosition, setLastValidMovePosition] = useState<MapPoint | null>(null);
-  const [isPointDragging, setIsPointDragging] = useState(false);
-  const [pointIsSnapped, setPointIsSnapped] = useState(false);
-  const [moveDropRejected, setMoveDropRejected] = useState(false);
-  const [placingNodeType, setPlacingNodeType] = useState<
-    "Entrance" | "Junction" | "Access Point"
-  >("Entrance");
-  const [placingNodeName, setPlacingNodeName] = useState("");
-  const { savingAction, beginSaving, endSaving } = useSavingAction();
-  const [placingAssociatedBuildingId, setPlacingAssociatedBuildingId] = useState<
-    string | null
-  >(null);
+  const saving = useSavingAction();
+  const { savingAction, beginSaving, endSaving } = saving;
   const [addRoomOpen, setAddRoomOpen] = useState(false);
   const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
   const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string; position: MapPoint | null } | null>(null);
@@ -270,8 +258,6 @@ export function MapEditor() {
   const [provisionalPathwayId, setProvisionalPathwayId] = useState<string | null>(null);
   const [pathStartNodeId, setPathStartNodeId] = useState<string | null>(null);
   const [pathDraftDirty, setPathDraftDirty] = useState(false);
-  const [routeNodeDraft, setRouteNodeDraft] = useState<RouteNode | null>(null);
-  const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
@@ -295,7 +281,7 @@ export function MapEditor() {
 
   const completeToolDraft = (toolType: Exclude<ToolType, "select">) => {
     const completionHandlers: Record<Exclude<ToolType, "select">, () => void> = {
-      point: () => setPointDraftDirty(false),
+      point: () => pointTool.setDraftDirty(false),
       polygon: () => undefined,
       pathway: () => {
         setPathDraftDirty(false);
@@ -412,6 +398,21 @@ export function MapEditor() {
       ? validMerged.map((building) => building.id === editingBuildingId ? pending : building)
       : [...validMerged, pending];
   }, [buildingCode, buildingName, editingBuildingId, mode, points, sessionBuildings]);
+  // Local map features are retained by the data/service layer for compatibility,
+  // but are intentionally not rendered in this editor. The campus boundary is
+  // still used below for validation and navigation bounds.
+  const campusBoundary = useMemo(
+    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
+    [directoryBuildings],
+  );
+  const pointTool = useRouteNodePointTool({
+    workflow: routeNodeWorkflow,
+    overlay,
+    saving,
+    context: { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, campusBoundary },
+    refreshMapData,
+    onError: setError,
+  });
   const pointSnapTargets = useMemo<PointSnapTarget[]>(() => [
     ...currentBuildings.flatMap((building) => building.points.map((point, index) => ({
       kind: "building_perimeter" as const,
@@ -422,16 +423,16 @@ export function MapEditor() {
       const source = currentNodes.find((node) => node.id === pathway.sourceNodeId);
       const destination = currentNodes.find((node) => node.id === pathway.destinationNodeId);
       return [
-        ...(source && !(mode === "move" && source.id === movingId)
+        ...(source && !(mode === "move" && source.id === pointTool.movingId)
           ? [[source.lat, source.lng] as MapPoint]
           : []),
         ...pathway.pathPoints,
-        ...(destination && !(mode === "move" && destination.id === movingId)
+        ...(destination && !(mode === "move" && destination.id === pointTool.movingId)
           ? [[destination.lat, destination.lng] as MapPoint]
           : []),
       ].map((point) => ({ kind: "pathway_vertex" as const, point }));
     }),
-  ], [currentBuildings, currentNodes, currentPathways, mode, movingId]);
+  ], [currentBuildings, currentNodes, currentPathways, mode, pointTool.movingId]);
   const normalizedLocalFeatures = useMemo(
     () => normalizeMapLayers({
       buildings: currentBuildings,
@@ -474,13 +475,6 @@ export function MapEditor() {
     window.addEventListener("keydown", onWorkingSessionShortcut);
     return () => window.removeEventListener("keydown", onWorkingSessionShortcut);
   }, [applyWorkingSessionOperation, workingSessionManager]);
-  // Local map features are retained by the data/service layer for compatibility,
-  // but are intentionally not rendered in this editor. The campus boundary is
-  // still used below for validation and navigation bounds.
-  const campusBoundary = useMemo(
-    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
-    [directoryBuildings],
-  );
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
   const footprintGeometryIssues = useMemo(
@@ -580,6 +574,14 @@ export function MapEditor() {
   const selectedNode = selected?.type === "node"
     ? currentNodes.find((item) => item.id === selected.id)
     : undefined;
+  const nodeFrame = useRouteNodeFrame(selectedNode, {
+    workflow: routeNodeWorkflow,
+    saving,
+    context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+    onNodeSaved: overlay.putNode,
+    refreshMapData,
+    onError: setError,
+  });
   const selectedPath = selected?.type === "pathway"
     ? currentPathways.find((item) => item.id === selected.id)
     : undefined;
@@ -591,10 +593,10 @@ export function MapEditor() {
     : undefined;
   const movingObjectName = selectedNode?.name ?? "Route Node";
   const movingOutsideBoundary = Boolean(
-    mode === "move" && temporary && !pointOnCampus(temporary, campusBoundary),
+    mode === "move" && pointTool.position && !pointOnCampus(pointTool.position, campusBoundary),
   );
-  const moveDistanceMeters = moveOrigin && temporary
-    ? distanceInMeters(moveOrigin, temporary)
+  const moveDistanceMeters = pointTool.moveOrigin && pointTool.position
+    ? distanceInMeters(pointTool.moveOrigin, pointTool.position)
     : 0;
   const selectedBuildingLocation = selectedBuilding && currentLocations.find((location) =>
     (location.type === "Building" || location.type === "Facility")
@@ -755,11 +757,10 @@ export function MapEditor() {
       if (type === "node") {
         const node = currentNodes.find((candidate) => candidate.id === id);
         if (node) {
-          setRouteNodeDraft({ ...node });
-          setRouteNodeDraftOriginal({ ...node });
+          nodeFrame.load(node);
         }
       }
-      setTemporary(null);
+      pointTool.setPosition(null);
     },
     [currentNodes, currentPathways],
   );
@@ -881,9 +882,7 @@ export function MapEditor() {
       const nextPoints = [...points, point];
       setPoints(nextPoints);
     } else if (mode === "place" || mode === "move") {
-      setTemporary(point);
-      setPointIsSnapped(false);
-      setPointDraftDirty(true);
+      pointTool.placeAt(point);
     } else if (mode === "path" && editingPathId) {
       setPathPoints((current) => [...current, point]);
       setPathDraftDirty(true);
@@ -947,128 +946,34 @@ export function MapEditor() {
 
   const handleStartMoveNode = () => {
     if (!selectedNode) return;
-    setMovingId(selectedNode.id);
-    const origin: MapPoint = [selectedNode.lat, selectedNode.lng];
-    setMoveOrigin(origin);
-    setLastValidMovePosition(origin);
-    setTemporary(origin);
-    setPointIsSnapped(false);
-    setMoveDropRejected(false);
-    setPointDraftDirty(false);
+    pointTool.startMove(selectedNode);
     setMode("move");
   };
 
-  const updateMovePosition = (point: MapPoint, snapped = false) => {
-    setTemporary(point);
-    if (pointOnCampus(point, campusBoundary)) setLastValidMovePosition(point);
-    setPointIsSnapped(snapped);
-    setMoveDropRejected(false);
-    setPointDraftDirty(true);
-    setError("");
-  };
-
-  const handleRejectedPointDrop = () => {
-    setTemporary(lastValidMovePosition ?? moveOrigin);
-    setPointIsSnapped(false);
-    setMoveDropRejected(true);
-    setError("");
-  };
-
   const handleCancelMove = () => {
-    setTemporary(null);
-    setMoveOrigin(null);
-    setLastValidMovePosition(null);
-    setPointIsSnapped(false);
-    setMoveDropRejected(false);
-    setIsPointDragging(false);
-    setPointDraftDirty(false);
-    setError("");
+    pointTool.cancelMove();
     setMode("select");
     workingSessionManager.discardActiveDraft();
   };
 
   const handleSavePosition = async () => {
-    if (!temporary) return;
-    if (!beginSaving("position")) return;
-    if (movingId) {
-      const existing = currentNodes.find((node) => node.id === movingId);
-      if (existing) {
-        const updated = { ...existing, lat: temporary[0], lng: temporary[1] };
-        const result = await routeNodeWorkflow.finalize({
-          kind: "update",
-          before: existing,
-          after: updated,
-          context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-          description: `Move ${updated.name}`,
-        });
-        if (!result.ok) {
-          setError(result.message);
-          endSaving();
-          return;
-        }
-        const persisted = result.node;
-        overlay.putNode(persisted);
-        try {
-          await refreshMapData();
-        } catch (cause) {
-          setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
-          endSaving();
-          return;
-        }
-      }
-      setMode("select");
-      setSelected({ type: "node", id: movingId });
-      completeToolDraft("point");
-    }
-    setTemporary(null);
-    setMoveOrigin(null);
-    setPointIsSnapped(false);
-    setIsPointDragging(false);
-    endSaving();
+    const movedId = await pointTool.savePosition();
+    if (!movedId) return;
+    setMode("select");
+    setSelected({ type: "node", id: movedId });
+    completeToolDraft("point");
   };
 
   const handleSavePlacedNode = async () => {
-    if (!temporary || !placingNodeName.trim()) return;
-    if (!beginSaving("route-node")) return;
-    const newNodeId = `pending-node-${Date.now()}`;
-    const newNode: RouteNode = {
-      id: newNodeId,
-      name: placingNodeName.trim(),
-      nodeType: placingNodeType,
-      associatedPlaceId: placingNodeType === "Entrance" ? placingAssociatedBuildingId || null : null,
-      lat: temporary[0],
-      lng: temporary[1],
-    };
-    const { id: _pendingId, ...draft } = newNode;
-    const result = await routeNodeWorkflow.finalize({
-      kind: "create",
-      draft,
-      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-      description: `Place ${newNode.name}`,
-    });
-    if (!result.ok) {
-      setError(result.message);
-      endSaving();
-      return;
+    const placed = await pointTool.savePlacedNode();
+    if (!placed) return;
+    if (placed.draft.nodeType === "Entrance" && placed.draft.associatedPlaceId === nonRoutableBuildingId) {
+      setNonRoutableBuildingId(null);
     }
-    const confirmedNode = result.node;
-    try {
-      overlay.putNode(confirmedNode);
-      await refreshMapData();
-      if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
-        setNonRoutableBuildingId(null);
-      }
-      setPlacingNodeName("");
-      setMode("select");
-      setRouteNodeDraft({ ...confirmedNode });
-      setRouteNodeDraftOriginal({ ...confirmedNode });
-      setSelected({ type: "node", id: confirmedNode.id });
-      completeToolDraft("point");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
-    } finally {
-      endSaving();
-    }
+    setMode("select");
+    nodeFrame.load(placed.node);
+    setSelected({ type: "node", id: placed.node.id });
+    completeToolDraft("point");
   };
 
   const handleSaveNewRoom = () => {
@@ -1342,7 +1247,7 @@ export function MapEditor() {
     setPolygonInteraction("draw");
     setMode("select");
     setSelected({ type: "building", id: result.building.id });
-    setPlacingAssociatedBuildingId(result.building.id);
+    pointTool.setPlacingAssociatedBuildingId(result.building.id);
     const hasActiveEntrance = currentNodes.some((node) =>
       node.nodeType === "Entrance"
       && node.associatedPlaceId === result.building.id
@@ -1415,11 +1320,7 @@ export function MapEditor() {
   const startGuidedEntranceDraft = () => {
     const building = currentBuildings.find((candidate) => candidate.id === nonRoutableBuildingId);
     if (!building) return;
-    setPlacingNodeType("Entrance");
-    setPlacingNodeName(`${building.name} Entrance`);
-    setPlacingAssociatedBuildingId(building.id);
-    setTemporary(null);
-    setPointDraftDirty(false);
+    pointTool.beginEntrancePlacement(`${building.name} Entrance`, building.id);
     setMode("place");
   };
 
@@ -1430,8 +1331,7 @@ export function MapEditor() {
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
     setNewRoom({ name: "", code: "", floor: "" });
-    setTemporary(null);
-    setPointDraftDirty(false);
+    pointTool.reset();
     setPoints([]);
     setPolygonClosed(false);
     setBuildingWorkflowMode("create");
@@ -1442,8 +1342,7 @@ export function MapEditor() {
     setPathPoints([]);
     setPathwayDraft(null);
     setPathwayDraftOriginal(null);
-    setRouteNodeDraft(null);
-    setRouteNodeDraftOriginal(null);
+    nodeFrame.load(null);
     setEditingPathId(null);
     setProvisionalPathwayId(null);
     setPathStartNodeId(null);
@@ -1608,8 +1507,7 @@ export function MapEditor() {
       );
       setEditingPathId(null);
       setPathPoints([]);
-      setRouteNodeDraft({ ...junction });
-      setRouteNodeDraftOriginal({ ...junction });
+      nodeFrame.load(junction);
       setSelected({ type: "node", id: junction.id });
       setMode("select");
       completeToolDraft("pathway");
@@ -1631,18 +1529,15 @@ export function MapEditor() {
     type DraftSnapshot = Omit<ActiveToolDraft, "id" | "isSuspended">;
     const snapshotBuilders: Record<ToolType, () => DraftSnapshot | null> = {
       select: () => null,
-      point: () => temporary && pointDraftDirty ? ({
+      point: () => pointTool.position && pointTool.draftDirty ? ({
         toolType: "point",
         label: "Route Node draft",
         provisionalGeometry: {
-          points: [{ x: temporary[1], y: temporary[0], lat: temporary[0], lng: temporary[1] }],
+          points: [{ x: pointTool.position[1], y: pointTool.position[0], lat: pointTool.position[0], lng: pointTool.position[1] }],
         },
         nestedRecords: {
           editorMode: mode,
-          placingNodeType,
-          placingNodeName,
-          placingAssociatedBuildingId,
-          movingId,
+          ...pointTool.draftRecords,
           selected,
         },
       }) : null,
@@ -1704,21 +1599,21 @@ export function MapEditor() {
     editingPathId,
     overlay.pathways,
     mode,
-    movingId,
+    pointTool.movingId,
     pathDraftDirty,
     pathPoints,
     polygonClosed,
     buildingDetailsModalOpen,
     pathStartNodeId,
-    pointDraftDirty,
-    placingAssociatedBuildingId,
-    placingNodeName,
-    placingNodeType,
+    pointTool.draftDirty,
+    pointTool.placingAssociatedBuildingId,
+    pointTool.placingNodeName,
+    pointTool.placingNodeType,
     points,
     provisionalPathwayId,
     selected,
     selectedPathPointIndex,
-    temporary,
+    pointTool.position,
   ]);
 
   useEffect(() => {
@@ -1738,10 +1633,7 @@ export function MapEditor() {
 
   const clearDraftGeometry = (toolType: Exclude<ToolType, "select">) => {
     const clearHandlers: Record<Exclude<ToolType, "select">, () => void> = {
-      point: () => {
-        setTemporary(null);
-        setPointDraftDirty(false);
-      },
+      point: () => pointTool.reset(),
       polygon: () => {
         setPoints([]);
         setPolygonClosed(false);
@@ -1771,16 +1663,12 @@ export function MapEditor() {
     const activationHandlers: Record<ToolType, () => void> = {
       select: () => {
         setMode("select");
-        setTemporary(null);
-        setPointDraftDirty(false);
+        pointTool.reset();
       },
       point: () => {
         setMode("place");
         setSelected(null);
-        setPlacingNodeType("Entrance");
-        setPlacingNodeName("");
-        setPlacingAssociatedBuildingId(null);
-        setPointDraftDirty(false);
+        pointTool.activatePlacement();
       },
       polygon: () => {
         setMode("area");
@@ -1835,17 +1723,8 @@ export function MapEditor() {
 
     const restoreHandlers: Record<ActiveToolDraft["toolType"], () => void> = {
       point: () => {
-        setTemporary(restoredPoints[0] ?? null);
-        setPointDraftDirty(true);
+        pointTool.restoreDraft(restoredPoints[0] ?? null, records);
         setMode(records.editorMode === "move" ? "move" : "place");
-        if (records.placingNodeType === "Entrance" || records.placingNodeType === "Junction" || records.placingNodeType === "Access Point") setPlacingNodeType(records.placingNodeType);
-        if (typeof records.placingNodeName === "string") setPlacingNodeName(records.placingNodeName);
-        if (typeof records.placingAssociatedBuildingId === "string" || records.placingAssociatedBuildingId === null) {
-          setPlacingAssociatedBuildingId(records.placingAssociatedBuildingId);
-        } else if (typeof records.placingAssociatedPlaceId === "string" || records.placingAssociatedPlaceId === null) {
-          setPlacingAssociatedBuildingId(records.placingAssociatedPlaceId);
-        }
-        setMovingId(typeof records.movingId === "string" ? records.movingId : null);
         const restoredSelection = records.selected;
         if (
           restoredSelection
@@ -1952,7 +1831,8 @@ export function MapEditor() {
   };
 
   useEffect(() => {
-    if (mode !== "move" || !temporary) return;
+    const position = pointTool.position;
+    if (mode !== "move" || !position) return;
     const handlePointMoveKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -1963,7 +1843,7 @@ export function MapEditor() {
       if (event.key === "Enter") {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (pointOnCampus(temporary, campusBoundary)) handleSavePosition();
+        if (pointOnCampus(position, campusBoundary)) handleSavePosition();
         return;
       }
       if (["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement | null)?.tagName ?? "")) return;
@@ -1976,11 +1856,11 @@ export function MapEditor() {
       const direction = directions[event.key as keyof typeof directions];
       if (!direction) return;
       event.preventDefault();
-      updateMovePosition(nudgePoint(temporary, direction, event.shiftKey ? 5 : 0.5));
+      pointTool.updateMovePosition(nudgePoint(position, direction, event.shiftKey ? 5 : 0.5));
     };
     window.addEventListener("keydown", handlePointMoveKey);
     return () => window.removeEventListener("keydown", handlePointMoveKey);
-  }, [campusBoundary, mode, temporary]);
+  }, [campusBoundary, mode, pointTool.position]);
 
   useEffect(() => {
     const onEscape = (event: KeyboardEvent) => {
@@ -2017,47 +1897,6 @@ export function MapEditor() {
       description,
     });
   };
-  const routeNodeFrame = selectedNode && routeNodeDraft?.id === selectedNode.id ? routeNodeDraft : selectedNode;
-  const routeNodeFrameDirty = Boolean(routeNodeDraft && routeNodeDraftOriginal
-    && JSON.stringify(routeNodeDraft) !== JSON.stringify(routeNodeDraftOriginal));
-  const applyRouteNodeFrame = async () => {
-    if (!routeNodeDraft || !routeNodeDraftOriginal || !routeNodeFrameDirty) return;
-    if (!beginSaving("route-node-metadata")) return;
-    const result = await routeNodeWorkflow.finalize({
-      kind: "update",
-      before: routeNodeDraftOriginal,
-      after: routeNodeDraft,
-      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-      description: `Edit ${routeNodeDraft.name}`,
-    });
-    if (!result.ok) {
-      setError(result.message);
-      const issue = result.issues?.[0];
-      if (issue) {
-        window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${issue.field === "name" ? "Route Node name" : issue.field === "nodeType" ? "Route Node type" : issue.field === "association" ? "Route Node association" : "Route Node latitude"}"]`)?.focus());
-      }
-      endSaving();
-      return;
-    }
-    const persisted = result.node;
-    updateNode(persisted);
-    setRouteNodeDraft({ ...persisted });
-    setRouteNodeDraftOriginal({ ...persisted });
-    try {
-      await refreshMapData();
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.");
-    } finally {
-      endSaving();
-    }
-  };
-  const cancelRouteNodeFrame = () => {
-    if (!routeNodeDraftOriginal) return;
-    setRouteNodeDraft({ ...routeNodeDraftOriginal });
-    setError("");
-  };
-
   const confirmDelete = async () => {
     if (!deleteConfirmation) return;
     try {
@@ -2349,7 +2188,7 @@ export function MapEditor() {
                   : <p>No active Entrance Route Node.</p>}
               </section>
               <div className="inspector-inline-actions">
-                <button type="button" onClick={() => { setPlacingNodeType("Entrance"); setPlacingNodeName(`${selectedBuilding.name} Entrance`); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setTemporary(null); setMode("place"); }}>＋ Add entrance</button>
+                <button type="button" onClick={() => { pointTool.beginEntrancePlacement(`${selectedBuilding.name} Entrance`, selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); }}>＋ Add entrance</button>
                 <button type="button" onClick={() => setLinkingBuildingEntrance((open) => !open)}>↔ Link existing entrance</button>
               </div>
               {linkingBuildingEntrance && (
@@ -2370,7 +2209,7 @@ export function MapEditor() {
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
           ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
           ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: () => { setError(""); setIndoorLocationChooserOpen(true); } }] : []),
-          { label: "＋ Add entrance", onSelect: () => { setPlacingNodeType("Entrance"); setPlacingNodeName(`${selectedBuilding.name} Entrance`); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setTemporary(null); setMode("place"); } },
+          { label: "＋ Add entrance", onSelect: () => { pointTool.beginEntrancePlacement(`${selectedBuilding.name} Entrance`, selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); } },
           { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
           { label: "🗑 Delete Building", tone: "danger" as const, onSelect: () => setDeleteConfirmation({ kind: "building", id: selectedBuilding.id, name: selectedBuilding.name }) },
         ],
@@ -2413,7 +2252,7 @@ export function MapEditor() {
     }
     if (selectedNode) {
       const stageRouteNodeEdit = (updated: RouteNode) => {
-        setRouteNodeDraft(updated);
+        nodeFrame.stage(updated);
       };
       const connectedPathways = currentPathways.filter((pathway) => pathway.sourceNodeId === selectedNode.id || pathway.destinationNodeId === selectedNode.id);
       const connectedPaths = connectedPathways.length;
@@ -2446,24 +2285,24 @@ export function MapEditor() {
             <h3>Route Node metadata</h3>
             <div className="inspector-edit-fields">
               <label> Name
-                <input aria-label="Route Node name" value={routeNodeFrame?.name ?? selectedNode.name} onChange={(event) => {
+                <input aria-label="Route Node name" value={nodeFrame.frame?.name ?? selectedNode.name} onChange={(event) => {
                   const name = event.target.value;
-                  stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), name });
+                  stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), name });
                 }} />
               </label>
               <label> Node type
-                <select aria-label="Route Node type" value={routeNodeFrame?.nodeType ?? selectedNode.nodeType} onChange={(event) => {
+                <select aria-label="Route Node type" value={nodeFrame.frame?.nodeType ?? selectedNode.nodeType} onChange={(event) => {
                   const nodeType = event.target.value as RouteNode["nodeType"];
-                  stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? routeNodeFrame?.associatedPlaceId ?? null : null });
+                  stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? nodeFrame.frame?.associatedPlaceId ?? null : null });
                 }}>
                   <option>Entrance</option><option>Junction</option><option>Access Point</option>
                 </select>
               </label>
-              {(routeNodeFrame?.nodeType ?? selectedNode.nodeType) === "Entrance" && (
+              {(nodeFrame.frame?.nodeType ?? selectedNode.nodeType) === "Entrance" && (
                 <label> Building association
-                  <select aria-label="Route Node association" value={routeNodeFrame?.associatedPlaceId ?? ""} onChange={(event) => {
+                  <select aria-label="Route Node association" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => {
                     const associatedPlaceId = event.target.value || null;
-                    stageRouteNodeEdit({ ...(routeNodeFrame ?? selectedNode), associatedPlaceId });
+                    stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), associatedPlaceId });
                   }}>
                     <option value="">No Building association</option>
                     {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
@@ -2473,8 +2312,8 @@ export function MapEditor() {
               )}
             </div>
             <div className="inspector-inline-actions">
-              <button type="button" onClick={cancelRouteNodeFrame} disabled={!routeNodeFrameDirty}>Cancel</button>
-              <button type="button" onClick={applyRouteNodeFrame} disabled={!routeNodeFrameDirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
+              <button type="button" onClick={nodeFrame.cancel} disabled={!nodeFrame.dirty}>Cancel</button>
+              <button type="button" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
             </div>
           </section>
         ),
@@ -2498,8 +2337,7 @@ export function MapEditor() {
                 }
                 const confirmed = result.node;
                 updateNode(confirmed);
-                setRouteNodeDraft({ ...confirmed });
-                setRouteNodeDraftOriginal({ ...confirmed });
+                nodeFrame.load(confirmed);
                 setError("");
               });
             },
@@ -2942,7 +2780,7 @@ export function MapEditor() {
           })()}
 
           {filteredNodes.map((node) => {
-            if (mode === "move" && movingId === node.id) return null;
+            if (mode === "move" && pointTool.movingId === node.id) return null;
             const isSelected = selected?.type === "node" && selected?.id === node.id;
             if (isOverviewZoom && !isSelected) return null;
             return (
@@ -3156,37 +2994,36 @@ export function MapEditor() {
             />
           )}
 
-          {!isOverviewZoom && mode === "move" && moveOrigin && temporary && (
+          {!isOverviewZoom && mode === "move" && pointTool.moveOrigin && pointTool.position && (
             <PointMoveLayer
-              origin={moveOrigin}
-              position={temporary}
+              origin={pointTool.moveOrigin}
+              position={pointTool.position}
               snapTargets={pointSnapTargets}
               campusBoundary={campusBoundary}
               outsideBoundary={movingOutsideBoundary}
               distanceMeters={moveDistanceMeters}
-              snapped={pointIsSnapped}
-              onPositionChange={updateMovePosition}
-              onDropRejected={handleRejectedPointDrop}
-              onDraggingChange={setIsPointDragging}
+              snapped={pointTool.snapped}
+              onPositionChange={pointTool.updateMovePosition}
+              onDropRejected={pointTool.rejectDrop}
+              onDraggingChange={pointTool.setDragging}
             />
           )}
 
-          {!isOverviewZoom && temporary && mode !== "move" && (
+          {!isOverviewZoom && pointTool.position && mode !== "move" && (
             <Marker
-              position={temporary}
+              position={pointTool.position}
               icon={createTempIcon()}
               draggable={mode === "place"}
               eventHandlers={{
                 drag: (event) => {
                   const next = (event.target as L.Marker).getLatLng();
-                  setTemporary([next.lat, next.lng]);
-                  setPointDraftDirty(true);
+                  pointTool.editPosition([next.lat, next.lng]);
                 },
                 dragend: (event) => {
                   const next = (event.target as L.Marker).getLatLng();
                   const point: MapPoint = [next.lat, next.lng];
                   if (pointOnCampus(point, campusBoundary)) {
-                    setTemporary(point);
+                    pointTool.setPosition(point);
                   } else {
                     setError("The new position must stay inside the ISU Echague campus boundary.");
                   }
@@ -3375,7 +3212,7 @@ export function MapEditor() {
           )}
         </div>
 
-        {mode === "move" && temporary && (
+        {mode === "move" && pointTool.position && (
           <section
             className={`point-move-hud${movingOutsideBoundary ? " outside-boundary" : ""}`}
             role="region"
@@ -3387,22 +3224,22 @@ export function MapEditor() {
                 <strong>{movingObjectName}</strong>
               </div>
               <div className="point-move-distance" aria-live="polite">
-                Δ {moveDistanceMeters.toFixed(1)}m {pointIsSnapped && <em>(Snapped)</em>}
+                Δ {moveDistanceMeters.toFixed(1)}m {pointTool.snapped && <em>(Snapped)</em>}
               </div>
             </div>
-            <PointCoordinateInputs position={temporary} onChange={updateMovePosition} />
+            <PointCoordinateInputs position={pointTool.position} onChange={pointTool.updateMovePosition} />
             {movingOutsideBoundary && (
               <div className="point-move-warning" role="alert">
                 Position is outside the ISU Echague Campus Boundary. Drop and save are blocked.
               </div>
             )}
-            {moveDropRejected && (
+            {pointTool.dropRejected && (
               <div className="point-move-warning" role="alert">
                 Point drop was blocked outside the ISU Echague Campus Boundary. The marker returned to its last valid position.
               </div>
             )}
             <div className="point-move-hud-footer">
-              <span>{isPointDragging ? "Dragging · release to preview" : "Arrow keys 0.5m · Shift + Arrow 5.0m · Enter save · Esc cancel"}</span>
+              <span>{pointTool.dragging ? "Dragging · release to preview" : "Arrow keys 0.5m · Shift + Arrow 5.0m · Enter save · Esc cancel"}</span>
               <div>
                 <button type="button" onClick={handleCancelMove}>Cancel</button>
                 <button type="button" className="primary" disabled={movingOutsideBoundary || savingAction === "position"} onClick={handleSavePosition}>{savingAction === "position" ? "Saving Position…" : "Save Position"}</button>
@@ -3643,8 +3480,8 @@ export function MapEditor() {
                   <label className="text-xs font-semibold text-[#3f4941]">Route Node type</label>
                   <select
                     aria-label="Route Node type"
-                    value={placingNodeType}
-                    onChange={(e) => setPlacingNodeType(e.target.value as "Entrance" | "Junction" | "Access Point")}
+                    value={pointTool.placingNodeType}
+                    onChange={(e) => pointTool.setPlacingNodeType(e.target.value as "Entrance" | "Junction" | "Access Point")}
                     className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                   >
                     <option>Entrance</option>
@@ -3658,8 +3495,8 @@ export function MapEditor() {
                     type="text"
                     aria-label="Route Node name"
                     placeholder="e.g. CAS Entrance"
-                    value={placingNodeName}
-                    onChange={(e) => setPlacingNodeName(e.target.value)}
+                    value={pointTool.placingNodeName}
+                    onChange={(e) => pointTool.setPlacingNodeName(e.target.value)}
                     className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                   />
                 </div>
@@ -3667,9 +3504,9 @@ export function MapEditor() {
                   <label className="text-xs font-semibold text-[#3f4941]">Building association</label>
                   <select
                     aria-label="Route Node association"
-                    value={placingAssociatedBuildingId ?? ""}
-                    onChange={(e) => setPlacingAssociatedBuildingId(e.target.value || null)}
-                    disabled={placingNodeType !== "Entrance"}
+                    value={pointTool.placingAssociatedBuildingId ?? ""}
+                    onChange={(e) => pointTool.setPlacingAssociatedBuildingId(e.target.value || null)}
+                    disabled={pointTool.placingNodeType !== "Entrance"}
                     className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
                   >
                     <option value="">No Building association</option>
@@ -3680,15 +3517,15 @@ export function MapEditor() {
                   <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Save action.</span>
                 </div>
                 <div className="my-2 text-xs text-[#3f4941]">
-                  {temporary
-                    ? `Preview position: ${temporary[0].toFixed(5)}, ${temporary[1].toFixed(5)}`
+                  {pointTool.position
+                    ? `Preview position: ${pointTool.position[0].toFixed(5)}, ${pointTool.position[1].toFixed(5)}`
                     : "Click the map to position this Route Node."}
                 </div>
                 <label className="block text-xs font-semibold text-[#3f4941]">Latitude
-                  <input aria-label="Placement latitude" type="number" step="any" value={temporary?.[0] ?? ""} onChange={(e) => { setTemporary([Number(e.target.value), temporary?.[1] ?? campusCenter[1]]); setPointDraftDirty(true); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                  <input aria-label="Placement latitude" type="number" step="any" value={pointTool.position?.[0] ?? ""} onChange={(e) => pointTool.editPosition([Number(e.target.value), pointTool.position?.[1] ?? campusCenter[1]])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
                 </label>
                 <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
-                  <input aria-label="Placement longitude" type="number" step="any" value={temporary?.[1] ?? ""} onChange={(e) => { setTemporary([temporary?.[0] ?? campusCenter[0], Number(e.target.value)]); setPointDraftDirty(true); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+                  <input aria-label="Placement longitude" type="number" step="any" value={pointTool.position?.[1] ?? ""} onChange={(e) => pointTool.editPosition([pointTool.position?.[0] ?? campusCenter[0], Number(e.target.value)])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
                 </label>
                 <div className="flex items-center gap-2 mt-4">
                   <button
@@ -3700,7 +3537,7 @@ export function MapEditor() {
                   </button>
                   <button
                     type="button"
-                    disabled={!temporary || !placingNodeName.trim() || savingAction === "route-node"}
+                    disabled={!pointTool.position || !pointTool.placingNodeName.trim() || savingAction === "route-node"}
                     onClick={handleSavePlacedNode}
                     className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
                   >
@@ -3883,7 +3720,7 @@ export function MapEditor() {
                   })()}
                 </section>
                 <section aria-label="Building entrances" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
-                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { setPlacingNodeType("Entrance"); setPlacingNodeName(""); setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); }}>＋ Place Entrance</button></div>
+                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { pointTool.setPlacingNodeType("Entrance"); pointTool.setPlacingNodeName(""); pointTool.setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); }}>＋ Place Entrance</button></div>
                   {selectedBuildingEntrances.length ? selectedBuildingEntrances.map((node) => <div key={node.id} className="flex justify-between gap-2 py-1 text-xs"><span>{node.name}</span><span className="text-[#6b7280]">{node.status === "Inactive" ? "Inactive" : "Active"}</span></div>) : <p className="mt-2 text-xs text-amber-700">No active Entrance Route Node. Add one to make this Building routable.</p>}
                 </section>
                 <div className="mt-4">
@@ -3931,15 +3768,15 @@ export function MapEditor() {
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Route Node</div>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node name
-                  <input aria-label="Route Node name" value={routeNodeFrame?.name ?? selectedNode.name} onChange={(event) => setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
+                  <input aria-label="Route Node name" value={nodeFrame.frame?.name ?? selectedNode.name} onChange={(event) => nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
                 </label>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node type
-                  <select aria-label="Route Node type" value={routeNodeFrame?.nodeType ?? selectedNode.nodeType} onChange={(event) => { const nodeType = event.target.value as RouteNode["nodeType"]; setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? routeNodeFrame?.associatedPlaceId ?? null : null }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
+                  <select aria-label="Route Node type" value={nodeFrame.frame?.nodeType ?? selectedNode.nodeType} onChange={(event) => { const nodeType = event.target.value as RouteNode["nodeType"]; nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? nodeFrame.frame?.associatedPlaceId ?? null : null }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
                     <option>Entrance</option><option>Junction</option><option>Access Point</option>
                   </select>
                 </label>
                 <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Associated Building
-                  <select aria-label="Associated Building" value={routeNodeFrame?.associatedPlaceId ?? ""} onChange={(event) => setRouteNodeDraft({ ...(routeNodeFrame ?? selectedNode), associatedPlaceId: event.target.value || null })} disabled={(routeNodeFrame?.nodeType ?? selectedNode.nodeType) !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
+                  <select aria-label="Associated Building" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), associatedPlaceId: event.target.value || null })} disabled={(nodeFrame.frame?.nodeType ?? selectedNode.nodeType) !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
                     <option value="">None</option>
                     {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
                       <option value={selectedNode.associatedPlaceId}>Missing Building ({selectedNode.associatedPlaceId})</option>
