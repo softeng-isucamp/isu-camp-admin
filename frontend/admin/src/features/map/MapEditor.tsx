@@ -191,7 +191,7 @@ export function MapEditor() {
   const [localBuildings, setLocalBuildings] = useState<Building[]>([]);
   const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
 
-  const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move" | "local_feature">(
+  const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move">(
     "select",
   );
   const [selected, setSelected] = useState<{
@@ -320,7 +320,6 @@ export function MapEditor() {
         setPathDraftDirty(false);
         setProvisionalPathwayId(null);
       },
-      local_feature: () => undefined,
     };
     completionHandlers[toolType]();
     workingSessionManager.discardActiveDraft();
@@ -917,8 +916,6 @@ export function MapEditor() {
       if (polygonInteraction !== "draw" || polygonClosed) return;
       const nextPoints = [...points, point];
       setPoints(nextPoints);
-    } else if (mode === "local_feature") {
-      localFeatures.addPoint(point);
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
       setPointIsSnapped(false);
@@ -1478,7 +1475,6 @@ export function MapEditor() {
     setDeletedPathwayIds([]);
     setLocalBuildings([]);
     localFeatureLayer.reset();
-    localFeatures.resetDraft();
     setOwnerModal(null);
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
@@ -1760,7 +1756,6 @@ export function MapEditor() {
             : null,
         },
       }) : null,
-      local_feature: () => localFeatures.draftSnapshot,
     };
     return snapshotBuilders[activeTool]();
   }, [
@@ -1775,7 +1770,6 @@ export function MapEditor() {
     selectedAttachBuildingId,
     editingPathId,
     localPathways,
-    localFeatures.draftSnapshot,
     mode,
     movingId,
     pathDraftDirty,
@@ -1836,7 +1830,6 @@ export function MapEditor() {
         setSelectedPathPointIndex(null);
         setPathDraftDirty(false);
       },
-      local_feature: () => localFeatures.clearPoints(),
     };
     clearHandlers[toolType]();
   };
@@ -1874,11 +1867,6 @@ export function MapEditor() {
             setSelected({ type: "pathway", id: first.id });
           }
         }
-      },
-      local_feature: () => {
-        setMode("local_feature");
-        setSelected(null);
-        localFeatures.clearPoints();
       },
     };
     activationHandlers[toolType]();
@@ -2000,10 +1988,6 @@ export function MapEditor() {
         }
         setPathDraftDirty(true);
         setMode("path");
-      },
-      local_feature: () => {
-        localFeatures.restoreDraft(records, restoredPoints);
-        setMode("local_feature");
       },
     };
     restoreHandlers[draft.toolType]();
@@ -3434,7 +3418,7 @@ export function MapEditor() {
           />
         )}
 
-        <div className={`${mode === "local_feature" ? "hidden " : ""}map-glass-panel absolute right-4 top-4 z-[900] w-72 rounded-[20px] p-2`}>
+        <div className={`map-glass-panel absolute right-4 top-4 z-[900] w-72 rounded-[20px] p-2`}>
           <div className="relative flex items-center">
             <svg className="w-4 h-4 absolute left-3 text-[#3f4941]/60 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -3508,7 +3492,7 @@ export function MapEditor() {
           </section>
         )}
 
-        {mode !== "select" && mode !== "move" && mode !== "local_feature" && selected?.type !== "path_point"
+        {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
           && !networkBrowserOpen && (
           <aside className="map-glass-panel absolute right-4 top-20 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto rounded-[28px] p-5">
             {error && (
