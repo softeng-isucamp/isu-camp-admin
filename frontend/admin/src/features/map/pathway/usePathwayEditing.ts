@@ -50,7 +50,7 @@ export function usePathwayEditing({
 
   const pathwayWorkflow = useMemo(() => createPathwayWorkflow({
     adapter: services.map,
-    workingSession: workingSession,
+    workingSession,
   }), [workingSession]);
 
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
