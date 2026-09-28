@@ -9,66 +9,12 @@ import type {
   SourceProvenance,
 } from "../types";
 import { echagueCampusBoundary } from "../features/map/campusBoundary";
+import type { LocalFeatureFamily, SpatialDomain } from "../features/map/types";
+
+export type { LocalFeatureFamily, SpatialDomain };
 
 // ============================================================================
-// 1. Spatial Domains & Core Operation Types
-// ============================================================================
-
-export type SpatialDomain = "Locations" | "Walking Network" | "Local Map Data";
-
-export type SpatialObjectType =
-  | "building"
-  | "outdoor_location"
-  | "route_node"
-  | "entrance_route_node"
-  | "pathway"
-  | "path_point"
-  | "local_map_feature";
-
-export type LocalFeatureFamily =
-  | "building_footprint"
-  | "parking_area"
-  | "cartographic_walkway"
-  | "vehicle_path"
-  | "campus_boundary"
-  | "readonly_basemap";
-
-export type OperationType =
-  | "create_entity"
-  | "update_geometry"
-  | "update_properties"
-  | "retire_entity"
-  | "restore_entity"
-  | "link_feature"
-  | "unlink_feature"
-  | "compound_batch";
-
-export interface WorkingOperation {
-  id: string;
-  type: OperationType;
-  domain: SpatialDomain;
-  entityId: string;
-  before: Record<string, unknown> | null;
-  after: Record<string, unknown> | null;
-  nestedOperations?: WorkingOperation[];
-  description?: string;
-}
-
-export interface ActiveToolDraft {
-  id: string;
-  toolType: "point" | "polygon" | "pathway" | "local_feature";
-  provisionalGeometry: {
-    points?: Array<{ x: number; y: number; lat?: number; lng?: number }>;
-    isClosed?: boolean;
-    startNodeId?: string;
-    endNodeId?: string;
-  };
-  nestedRecords?: Record<string, unknown>;
-  isSuspended: boolean;
-}
-
-// ============================================================================
-// 2. Normalized Map Editor Entities
+// 1. Normalized Map Editor Entities
 // ============================================================================
 
 export interface BuildingEntity {
@@ -182,7 +128,7 @@ export interface MapEditorLayers {
 }
 
 // ============================================================================
-// 3. Normalization Helpers
+// 2. Normalization Helpers
 // ============================================================================
 
 export interface RawSeedSources {

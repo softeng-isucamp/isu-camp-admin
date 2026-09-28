@@ -27,7 +27,7 @@ import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
-import { locationIdentityKey, standardFloorLevels } from "../../lib/locationPolicy";
+import { locationIdentityKey } from "../../lib/locationPolicy";
 import {
   echagueCampusBoundary,
   geometryOnCampus,
@@ -241,9 +241,6 @@ export function MapEditor() {
   const buildingCode = buildingForm.code;
   const buildingFunction = buildingForm.function ?? "";
   const buildingKeywords = buildingForm.keywords ?? "";
-  const updateBuildingField = (field: keyof BuildingIdentityInput, value: string) => {
-    setBuildingForm((current) => ({ ...current, [field]: value }));
-  };
   const resetBuildingForm = () => {
     setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
     setBuildingClassification("Building");
@@ -291,9 +288,7 @@ export function MapEditor() {
   const [routeNodeDraftOriginal, setRouteNodeDraftOriginal] = useState<RouteNode | null>(null);
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
 
-  const distinctBuildingPointCount = new Set(points.map((point) => point.join(","))).size;
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
-  const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ kind: "building" | "route_node" | "pathway"; id: string; name: string; impact?: DeleteImpact } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -345,7 +340,6 @@ export function MapEditor() {
     workingSession: workingSessionManager,
     layer: localFeatureLayer,
     onError: setError,
-    onDirty: () => setDirty(true),
   });
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const buildingContentLocations = useMemo(() => {
@@ -497,7 +491,6 @@ export function MapEditor() {
     }).forEach((projection) => {
       handlers[projection.collection](projection.entityId, projection.value);
     });
-    setDirty(workingSessionManager.getIsDirty());
   }, [currentFeatureLinks, currentLocalFeatures, data?.buildings, localFeatureLayer.projectFeature, localFeatureLayer.projectFeatureLink, workingSessionManager]);
 
   useEffect(() => {
@@ -1052,7 +1045,6 @@ export function MapEditor() {
           return;
         }
       }
-      setDirty(true);
       setMode("select");
       setSelected({ type: "node", id: movingId });
       completeToolDraft("point");
@@ -1095,7 +1087,6 @@ export function MapEditor() {
       if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
         setNonRoutableBuildingId(null);
       }
-      setDirty(true);
       setPlacingNodeName("");
       setMode("select");
       setRouteNodeDraft({ ...confirmedNode });
@@ -1128,7 +1119,6 @@ export function MapEditor() {
     setLocalLocations((current) => [...current, location]);
     workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
       before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
-    setDirty(true);
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
     setNewRoom({ name: "", code: "", floor: "" });
@@ -1291,7 +1281,6 @@ export function MapEditor() {
       if (src && !localNodes.some((n) => n.id === src.id)) setLocalNodes((c) => [...c, src]);
       if (dst && !localNodes.some((n) => n.id === dst.id)) setLocalNodes((c) => [...c, dst]);
     }
-    setDirty(true);
     setMode("select");
     completeToolDraft("pathway");
     endSaving();
@@ -1358,7 +1347,6 @@ export function MapEditor() {
       setLocalBuildings((current) => current.map((building) =>
         building.id === editingBuildingId ? result.building : building,
       ));
-      setDirty(true);
       void refreshMapData();
       cancelBuildingDraft();
       setSelected({ type: "building", id: editingBuildingId });
@@ -1378,7 +1366,6 @@ export function MapEditor() {
     setLocalBuildings((current) => [...current.filter((item) => item.id !== result.building.id), result.building]);
     localFeatureLayer.putFeature(result.footprint);
     localFeatureLayer.putBuildingLink(result.link);
-    setDirty(true);
     setPoints([]);
     resetBuildingForm();
     setAttachBuildingSearch("");
@@ -1479,7 +1466,6 @@ export function MapEditor() {
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
     setNewRoom({ name: "", code: "", floor: "" });
-    setDirty(false);
     setTemporary(null);
     setPointDraftDirty(false);
     setPoints([]);
@@ -1509,8 +1495,8 @@ export function MapEditor() {
     if (workingSessionKey) workingSessionJournal.clear(workingSessionKey);
   };
 
-  const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
-  const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
+  const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
   const updatePathway = (updated: Pathway): boolean => {
     const connectionError = pathwayConnectionError(
       updated.sourceNodeId,
@@ -1522,11 +1508,10 @@ export function MapEditor() {
       return false;
     }
     setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]);
-    setDirty(true);
     setError("");
     return true;
   };
-  const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); setDirty(true); };
+  const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
   const focusObject = (object: MapObjectReference, fieldLabel?: string) => {
     setPreviewOpen(false);
     setSelected({ type: object.type, id: object.id });
@@ -1554,14 +1539,6 @@ export function MapEditor() {
       const building = currentBuildings.find((item) => item.id === object.id);
       if (building?.points[0]) flyTo(building.points[0]);
     }
-  };
-
-  const openSaveReview = () => {
-    if (!draftReview.valid) {
-      setPreviewOpen(true);
-      return;
-    }
-    setConfirm("save");
   };
 
   const commit = async () => {
@@ -1594,7 +1571,6 @@ export function MapEditor() {
         queryClient.invalidateQueries({ queryKey: ["nodes"] }),
       ]);
       workingSessionManager.markSaved();
-      setDirty(false);
       setConfirm(null);
       setError("");
     } catch (cause) {
@@ -1678,7 +1654,6 @@ export function MapEditor() {
       setRouteNodeDraftOriginal({ ...junction });
       setSelected({ type: "node", id: junction.id });
       setMode("select");
-      setDirty(true);
       completeToolDraft("pathway");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not create the Junction Route Node.");
@@ -2086,7 +2061,6 @@ export function MapEditor() {
       after: after as Record<string, unknown>,
       description,
     });
-    setDirty(true);
   };
   const routeNodeFrame = selectedNode && routeNodeDraft?.id === selectedNode.id ? routeNodeDraft : selectedNode;
   const routeNodeFrameDirty = Boolean(routeNodeDraft && routeNodeDraftOriginal
@@ -2311,7 +2285,6 @@ export function MapEditor() {
     try {
       await refreshMapData();
       setPathDraftDirty(false);
-      setDirty(true);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
@@ -2356,11 +2329,6 @@ export function MapEditor() {
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
     initializeBuildingFootprintEdit(selectedBuilding, "reshape");
-  };
-
-  const startSelectedBuildingMove = () => {
-    if (!selectedBuilding) return;
-    initializeBuildingFootprintEdit(selectedBuilding, "move");
   };
 
   const inspectorModel = (() => {

@@ -1,12 +1,12 @@
 import type { Building, Location, RecordStatus } from "../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity, WorkingOperation } from "../../services/mapLayers";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapLayers";
+import type { WorkingOperation } from "./types";
 import {
   geometryOnCampus,
   pointInPolygon,
   type MapPoint,
 } from "./campusBoundary";
 import {
-  polygonFeatureAnchor,
   polygonIsNonDegenerate,
   polygonSelfIntersects,
 } from "./mapEditing";
