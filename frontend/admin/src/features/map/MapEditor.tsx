@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   Marker,
@@ -54,6 +54,8 @@ import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
 import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
+import { useMapOverlay } from "./session/useMapOverlay";
+import { useSavingAction } from "./session/useSavingAction";
 import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
 import { localFeatureInspectorModel } from "./localFeature/localFeatureInspectorModel";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
@@ -184,11 +186,7 @@ export function MapEditor() {
     retry: false,
   });
 
-  const [localLocations, setLocalLocations] = useState<Location[]>([]);
-  const [localNodes, setLocalNodes] = useState<RouteNode[]>([]);
-  const [localPathways, setLocalPathways] = useState<Pathway[]>([]);
-  const [deletedPathwayIds, setDeletedPathwayIds] = useState<string[]>([]);
-  const [localBuildings, setLocalBuildings] = useState<Building[]>([]);
+  const overlay = useMapOverlay(data?.buildings);
   const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
 
   const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move">(
@@ -255,19 +253,7 @@ export function MapEditor() {
     "Entrance" | "Junction" | "Access Point"
   >("Entrance");
   const [placingNodeName, setPlacingNodeName] = useState("");
-  type SaveAction = "route-node" | "position" | "pathway" | "building" | "route-node-metadata" | "pathway-metadata" | "path-point-conversion";
-  const [savingAction, setSavingAction] = useState<SaveAction | null>(null);
-  const savingActionRef = useRef<SaveAction | null>(null);
-  const beginSaving = (action: SaveAction) => {
-    if (savingActionRef.current) return false;
-    savingActionRef.current = action;
-    setSavingAction(action);
-    return true;
-  };
-  const endSaving = () => {
-    savingActionRef.current = null;
-    setSavingAction(null);
-  };
+  const { savingAction, beginSaving, endSaving } = useSavingAction();
   const [placingAssociatedBuildingId, setPlacingAssociatedBuildingId] = useState<
     string | null
   >(null);
@@ -341,27 +327,27 @@ export function MapEditor() {
     layer: localFeatureLayer,
     onError: setError,
   });
-  const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
+  const currentLocations = useMemo(() => overlayChanges(directoryLocations, overlay.locations), [directoryLocations, overlay.locations]);
   const buildingContentLocations = useMemo(() => {
     const locationsById = new Map((locationDirectory ?? []).map((location) => [locationIdentityKey(location), location]));
     for (const location of currentLocations) locationsById.set(locationIdentityKey(location), location);
     return Array.from(locationsById.values());
   }, [currentLocations, locationDirectory]);
-  const currentNodes = useMemo(() => overlayChanges(directoryNodes, localNodes), [directoryNodes, localNodes]);
+  const currentNodes = useMemo(() => overlayChanges(directoryNodes, overlay.nodes), [directoryNodes, overlay.nodes]);
   const currentPathways = useMemo(() => {
-    const merged = overlayChanges(directoryPathways, localPathways);
-    const visible = merged.filter((item) => !deletedPathwayIds.includes(item.id));
+    const merged = overlayChanges(directoryPathways, overlay.pathways);
+    const visible = merged.filter((item) => !overlay.deletedPathwayIds.includes(item.id));
     return editingPathId ? visible.map((item) => item.id === editingPathId
       ? { ...item, ...(pathwayDraft?.id === editingPathId ? pathwayDraft : {}), pathPoints }
       : item) : visible;
-  }, [deletedPathwayIds, directoryPathways, editingPathId, localPathways, pathwayDraft, mode, pathPoints]);
+  }, [overlay.deletedPathwayIds, directoryPathways, editingPathId, overlay.pathways, pathwayDraft, mode, pathPoints]);
   const pathwayCrossings = useMemo(
     () => findPathwayCrossings(currentPathways, currentNodes),
     [currentNodes, currentPathways],
   );
   const sessionBuildings = useMemo(() => {
-    return overlayChanges(data?.buildings || [], localBuildings);
-  }, [data?.buildings, localBuildings]);
+    return overlayChanges(data?.buildings || [], overlay.buildings);
+  }, [data?.buildings, overlay.buildings]);
   const allSessionBuildings = useMemo(() => {
     const buildingMap = new Map<string, Building>();
     for (const loc of currentLocations) {
@@ -462,26 +448,11 @@ export function MapEditor() {
 
   const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
     if (!operation) return;
-    const replaceProjection = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
-      value === null
-        ? items.filter((item) => item.id !== entityId)
-        : [...items.filter((item) => item.id !== entityId), value as unknown as T];
     const handlers: Record<ProjectedCollection, (entityId: string, value: Record<string, unknown> | null) => void> = {
-      locations: (entityId, value) => setLocalLocations((items) => replaceProjection(items, entityId, value)),
-      nodes: (entityId, value) => setLocalNodes((items) => replaceProjection(items, entityId, value)),
-      pathways: (entityId, value) => {
-        setLocalPathways((items) => replaceProjection(items, entityId, value));
-        setDeletedPathwayIds((ids) => value === null
-          ? [...new Set([...ids, entityId])]
-          : ids.filter((id) => id !== entityId));
-      },
-      buildings: (entityId, value) => setLocalBuildings((items) => {
-        if (value === null) return items.filter((item) => item.id !== entityId);
-        const existing = items.find((item) => item.id === entityId)
-          ?? data?.buildings?.find((item) => item.id === entityId);
-        const merged = existing ? { ...existing, ...value } : value;
-        return [...items.filter((item) => item.id !== entityId), merged as unknown as Building];
-      }),
+      locations: (entityId, value) => overlay.project("locations", entityId, value),
+      nodes: (entityId, value) => overlay.project("nodes", entityId, value),
+      pathways: (entityId, value) => overlay.project("pathways", entityId, value),
+      buildings: (entityId, value) => overlay.project("buildings", entityId, value),
       localFeatures: localFeatureLayer.projectFeature,
       featureLinks: localFeatureLayer.projectFeatureLink,
     };
@@ -491,7 +462,7 @@ export function MapEditor() {
     }).forEach((projection) => {
       handlers[projection.collection](projection.entityId, projection.value);
     });
-  }, [currentFeatureLinks, currentLocalFeatures, data?.buildings, localFeatureLayer.projectFeature, localFeatureLayer.projectFeatureLink, workingSessionManager]);
+  }, [currentFeatureLinks, currentLocalFeatures, localFeatureLayer.projectFeature, localFeatureLayer.projectFeatureLink, overlay.project, workingSessionManager]);
 
   useEffect(() => {
     const onWorkingSessionShortcut = (event: KeyboardEvent) => {
@@ -720,7 +691,7 @@ export function MapEditor() {
     const pathwayId = new URLSearchParams(routeLocation.search).get("pathway");
     if (!pathwayId) return;
     if (!data) return;
-    const pathway = localPathways.find((item) => item.id === pathwayId)
+    const pathway = overlay.pathways.find((item) => item.id === pathwayId)
       ?? directoryPathways.find((item) => item.id === pathwayId);
     if (!pathway) {
       setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
@@ -735,13 +706,13 @@ export function MapEditor() {
     setError("");
     const source = currentNodes.find((node) => node.id === pathway.sourceNodeId);
     if (source) flyTo([source.lat, source.lng]);
-  }, [currentNodes, data, directoryPathways, localPathways, routeLocation.search]);
+  }, [currentNodes, data, directoryPathways, overlay.pathways, routeLocation.search]);
 
   const results = useMemo(() => {
     if (!search.trim()) return [];
     const q = search.trim().toLowerCase();
-    const allLocs = directoryLocations.length ? directoryLocations : localLocations;
-    const allNodes = directoryNodes.length ? directoryNodes : localNodes;
+    const allLocs = directoryLocations.length ? directoryLocations : overlay.locations;
+    const allNodes = directoryNodes.length ? directoryNodes : overlay.nodes;
     const allPaths = currentPathways;
 
     const matchedLocs = allLocs
@@ -754,7 +725,7 @@ export function MapEditor() {
       .filter((p) => p.name.toLowerCase().includes(q) || p.shade.toLowerCase().includes(q))
       .map((item) => ({ ...item, kind: "Pathway" as const }));
     return [...matchedLocs, ...matchedNodes, ...matchedPaths].slice(0, 8);
-  }, [currentPathways, directoryLocations, directoryNodes, localLocations, localNodes, search]);
+  }, [currentPathways, directoryLocations, directoryNodes, overlay.locations, overlay.nodes, search]);
 
   const selectObject = useCallback(
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
@@ -824,17 +795,17 @@ export function MapEditor() {
   }) => {
     if (item.kind === "Location") {
       selectObject("location", item.id);
-      const loc = directoryLocations.find((l) => l.id === item.id) || localLocations.find((l) => l.id === item.id);
+      const loc = directoryLocations.find((l) => l.id === item.id) || overlay.locations.find((l) => l.id === item.id);
       if (loc && isPositionedLocation(loc)) flyTo([loc.lat, loc.lng]);
     } else if (item.kind === "Route Node") {
       selectObject("node", item.id);
-      const n = directoryNodes.find((node) => node.id === item.id) || localNodes.find((node) => node.id === item.id);
+      const n = directoryNodes.find((node) => node.id === item.id) || overlay.nodes.find((node) => node.id === item.id);
       if (n) flyTo([n.lat, n.lng]);
     } else if (item.kind === "Pathway") {
       selectObject("pathway", item.id);
       const p = currentPathways.find((path) => path.id === item.id);
       if (p) {
-        const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || localNodes.find((n) => n.id === p.sourceNodeId);
+        const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || overlay.nodes.find((n) => n.id === p.sourceNodeId);
         if (src) flyTo([src.lat, src.lng]);
       }
     }
@@ -1036,7 +1007,7 @@ export function MapEditor() {
           return;
         }
         const persisted = result.node;
-        setLocalNodes((current) => [...current.filter((n) => n.id !== movingId), persisted]);
+        overlay.putNode(persisted);
         try {
           await refreshMapData();
         } catch (cause) {
@@ -1082,7 +1053,7 @@ export function MapEditor() {
     }
     const confirmedNode = result.node;
     try {
-      setLocalNodes((current) => [...current, confirmedNode]);
+      overlay.putNode(confirmedNode);
       await refreshMapData();
       if (newNode.nodeType === "Entrance" && newNode.associatedPlaceId === nonRoutableBuildingId) {
         setNonRoutableBuildingId(null);
@@ -1116,7 +1087,7 @@ export function MapEditor() {
       lng: null,
       positioned: false,
     };
-    setLocalLocations((current) => [...current, location]);
+    overlay.putLocation(location);
     workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
       before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
     setAddRoomOpen(false);
@@ -1165,7 +1136,7 @@ export function MapEditor() {
         lat: indoorPlacement.position[0],
         lng: indoorPlacement.position[1],
       });
-      setLocalLocations((current) => [...current.filter((item) => item.id !== positioned.id), positioned]);
+      overlay.putLocation(positioned);
       setSelected({ type: "location", id: positioned.id });
       setIndoorPlacement(null);
       flyTo([positioned.lat!, positioned.lng!], 20);
@@ -1188,7 +1159,7 @@ export function MapEditor() {
         lat: null,
         lng: null,
       });
-      setLocalLocations((current) => [...current.filter((item) => item.id !== cleared.id), cleared]);
+      overlay.putLocation(cleared);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Could not clear ${location.name}'s map marker.`);
@@ -1240,7 +1211,7 @@ export function MapEditor() {
   const handleSavePathShape = async () => {
     if (!editingPathId) return;
     if (!beginSaving("pathway")) return;
-    const target = localPathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
+    const target = overlay.pathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
       const draft = {
         ...(pathwayDraft?.id === target.id ? pathwayDraft : target),
@@ -1266,7 +1237,7 @@ export function MapEditor() {
         return;
       }
       const persistedPath = result.pathway;
-      setLocalPathways((current) => [...current.filter((p) => p.id !== editingPathId && p.id !== target.id), persistedPath]);
+      overlay.putPathways([persistedPath], [editingPathId, target.id]);
       setPathwayDraft({ ...persistedPath });
       setPathwayDraftOriginal({ ...persistedPath });
       try {
@@ -1278,8 +1249,7 @@ export function MapEditor() {
       }
       const src = directoryNodes.find((n) => n.id === target.sourceNodeId);
       const dst = directoryNodes.find((n) => n.id === target.destinationNodeId);
-      if (src && !localNodes.some((n) => n.id === src.id)) setLocalNodes((c) => [...c, src]);
-      if (dst && !localNodes.some((n) => n.id === dst.id)) setLocalNodes((c) => [...c, dst]);
+      overlay.ensureNodes([src, dst].filter((node): node is RouteNode => Boolean(node)));
     }
     setMode("select");
     completeToolDraft("pathway");
@@ -1344,9 +1314,7 @@ export function MapEditor() {
         return;
       }
       localFeatureLayer.putFeature(result.footprint);
-      setLocalBuildings((current) => current.map((building) =>
-        building.id === editingBuildingId ? result.building : building,
-      ));
+      overlay.refreshBuilding(result.building);
       void refreshMapData();
       cancelBuildingDraft();
       setSelected({ type: "building", id: editingBuildingId });
@@ -1361,9 +1329,9 @@ export function MapEditor() {
     result: Extract<Awaited<ReturnType<typeof buildingFootprintWorkflow.finalize>>, { ok: true }>,
   ) => {
     if (result.location) {
-      setLocalLocations((current) => [...current.filter((item) => item.id !== result.location!.id), result.location!]);
+      overlay.putLocation(result.location!);
     }
-    setLocalBuildings((current) => [...current.filter((item) => item.id !== result.building.id), result.building]);
+    overlay.putBuilding(result.building);
     localFeatureLayer.putFeature(result.footprint);
     localFeatureLayer.putBuildingLink(result.link);
     setPoints([]);
@@ -1456,11 +1424,7 @@ export function MapEditor() {
   };
 
   const resetDraft = () => {
-    setLocalLocations([]);
-    setLocalNodes([]);
-    setLocalPathways([]);
-    setDeletedPathwayIds([]);
-    setLocalBuildings([]);
+    overlay.reset();
     localFeatureLayer.reset();
     setOwnerModal(null);
     setAddRoomOpen(false);
@@ -1495,8 +1459,8 @@ export function MapEditor() {
     if (workingSessionKey) workingSessionJournal.clear(workingSessionKey);
   };
 
-  const updateLocation = (updated: Location) => { setLocalLocations((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
-  const updateNode = (updated: RouteNode) => { setLocalNodes((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
+  const updateLocation = overlay.putLocation;
+  const updateNode = overlay.putNode;
   const updatePathway = (updated: Pathway): boolean => {
     const connectionError = pathwayConnectionError(
       updated.sourceNodeId,
@@ -1507,11 +1471,11 @@ export function MapEditor() {
       setError(connectionError);
       return false;
     }
-    setLocalPathways((items) => [...items.filter((item) => item.id !== updated.id), updated]);
+    overlay.putPathways([updated]);
     setError("");
     return true;
   };
-  const updateBuilding = (updated: Building) => { setLocalBuildings((items) => [...items.filter((item) => item.id !== updated.id), updated]); };
+  const updateBuilding = overlay.putBuilding;
   const focusObject = (object: MapObjectReference, fieldLabel?: string) => {
     setPreviewOpen(false);
     setSelected({ type: object.type, id: object.id });
@@ -1548,7 +1512,7 @@ export function MapEditor() {
     }
     try {
       const pathwaysToSave = currentPathways
-        .filter((pathway) => localPathways.some((draft) => draft.id === pathway.id) || pathway.id === editingPathId)
+        .filter((pathway) => overlay.pathways.some((draft) => draft.id === pathway.id) || pathway.id === editingPathId)
         .map((pathway) => ({
           ...pathway,
           pathPoints: withoutEndpointPathPoints(
@@ -1560,9 +1524,9 @@ export function MapEditor() {
       await services.map.save({
         selected: selected ?? undefined,
         areaPoints: points.length >= 3 ? points : undefined,
-        locations: localLocations,
-        nodes: localNodes,
-        buildings: localBuildings,
+        locations: overlay.locations,
+        nodes: overlay.nodes,
+        buildings: overlay.buildings,
         pathways: pathwaysToSave,
       });
       await Promise.all([
@@ -1634,14 +1598,8 @@ export function MapEditor() {
         lng: provisional.junction.lng,
       });
       const crossingChange = createRoutableCrossing(pathwayA, pathwayB, currentNodes, crossing.point, junction.id);
-      setLocalNodes((current) => [...current.filter((node) => node.id !== junction.id), junction]);
-      setLocalPathways((current) => [
-        ...current.filter((pathway) =>
-          !crossingChange.closedPathways.some((closed) => closed.id === pathway.id)
-          && !crossingChange.replacementPathways.some((replacement) => replacement.id === pathway.id)),
-        ...crossingChange.closedPathways,
-        ...crossingChange.replacementPathways,
-      ]);
+      overlay.putNode(junction);
+      overlay.putPathways([...crossingChange.closedPathways, ...crossingChange.replacementPathways]);
       workingSessionManager.executeBatch(
         `Create Junction and split ${pathwayA.name} with ${pathwayB.name}`,
         "Walking Network",
@@ -1727,7 +1685,7 @@ export function MapEditor() {
           selectedPathPointIndex,
           provisionalPathwayId,
           provisionalPathway: provisionalPathwayId
-            ? localPathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
+            ? overlay.pathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
             : null,
         },
       }) : null,
@@ -1744,7 +1702,7 @@ export function MapEditor() {
     polygonInteraction,
     selectedAttachBuildingId,
     editingPathId,
-    localPathways,
+    overlay.pathways,
     mode,
     movingId,
     pathDraftDirty,
@@ -1796,7 +1754,7 @@ export function MapEditor() {
       },
       pathway: () => {
         if (provisionalPathwayId) {
-          setLocalPathways((pathways) => pathways.filter((pathway) => pathway.id !== provisionalPathwayId));
+          overlay.dropPathway(provisionalPathwayId);
         }
         setPathPoints([]);
         setPathStartNodeId(null);
@@ -1832,8 +1790,8 @@ export function MapEditor() {
       pathway: () => {
         setMode("path");
         setNetworkBrowserOpen(false);
-        if (!editingPathId && (directoryPathways.length || localPathways.length)) {
-          const first = localPathways[0] || directoryPathways[0];
+        if (!editingPathId && (directoryPathways.length || overlay.pathways.length)) {
+          const first = overlay.pathways[0] || directoryPathways[0];
           if (first?.status === "Open") {
             setEditingPathId(first.id);
             setPathwayDraft({ ...first });
@@ -1956,10 +1914,7 @@ export function MapEditor() {
           : null;
         setProvisionalPathwayId(typeof records.provisionalPathwayId === "string" ? records.provisionalPathwayId : null);
         if (restoredProvisionalPathway) {
-          setLocalPathways((pathways) => [
-            ...pathways.filter((pathway) => pathway.id !== restoredProvisionalPathway.id),
-            restoredProvisionalPathway,
-          ]);
+          overlay.putPathways([restoredProvisionalPathway]);
         }
         setPathDraftDirty(true);
         setMode("path");
@@ -2108,15 +2063,14 @@ export function MapEditor() {
     try {
       if (deleteConfirmation.kind === "building") {
         await services.map.removeBuilding(deleteConfirmation.id);
-        setLocalBuildings((items) => items.filter((item) => item.id !== deleteConfirmation.id));
-        setLocalLocations((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+        overlay.removeBuilding(deleteConfirmation.id);
+        overlay.removeLocation(deleteConfirmation.id);
       } else if (deleteConfirmation.kind === "route_node") {
         await services.map.deleteRouteNode(deleteConfirmation.id);
-        setLocalNodes((items) => items.filter((item) => item.id !== deleteConfirmation.id));
+        overlay.removeNode(deleteConfirmation.id);
       } else {
         await services.map.deletePathway(deleteConfirmation.id);
-        setLocalPathways((items) => items.filter((item) => item.id !== deleteConfirmation.id));
-        setDeletedPathwayIds((ids) => [...new Set([...ids, deleteConfirmation.id])]);
+        overlay.deletePathway(deleteConfirmation.id);
       }
       await refreshMapData();
       setSelected(null);
@@ -2232,11 +2186,8 @@ export function MapEditor() {
         pathways: conversionDraft.pathways,
       });
       const original = currentPathways.find((item) => item.id === conversionDraft.pathwayId);
-      if (original) setLocalPathways((items) => [
-        ...items.filter((item) => item.id !== original.id && !result.pathways.some((pathway) => pathway.id === item.id)),
-        { ...original, status: "Closed" }, ...result.pathways,
-      ]);
-      if (!conversionDraft.existingNodeId) setLocalNodes((items) => [...items.filter((item) => item.id !== result.node.id), result.node]);
+      if (original) overlay.putPathways([{ ...original, status: "Closed" }, ...result.pathways]);
+      if (!conversionDraft.existingNodeId) overlay.putNode(result.node);
       setConversionDraft(null);
       setEditingPathId(null);
       setPathwayDraft(null);
@@ -2278,7 +2229,7 @@ export function MapEditor() {
       return;
     }
     const persisted = result.pathway;
-    setLocalPathways((items) => [...items.filter((item) => item.id !== persisted.id), persisted]);
+    overlay.putPathways([persisted]);
     setPathwayDraftOriginal({ ...persisted });
     setPathwayDraft({ ...persisted });
     setPathPoints([...persisted.pathPoints]);
@@ -2307,7 +2258,7 @@ export function MapEditor() {
   };
   const cancelPathwayFrame = () => {
     if (!pathwayDraftOriginal) {
-      if (provisionalPathwayId) setLocalPathways((items) => items.filter((item) => item.id !== provisionalPathwayId));
+      if (provisionalPathwayId) overlay.dropPathway(provisionalPathwayId);
       setPathwayDraft(null);
       setPathwayDraftOriginal(null);
       setProvisionalPathwayId(null);
@@ -3044,7 +2995,7 @@ export function MapEditor() {
                         allowedModes: ["Walking"],
                         pathPoints: [],
                       };
-                      setLocalPathways((current) => [...current, newPath]);
+                      overlay.putPathways([newPath]);
                       setEditingPathId(newPath.id);
                       setProvisionalPathwayId(newPath.id);
                       setPathPoints([]);
@@ -3812,7 +3763,7 @@ export function MapEditor() {
                         value={editingPathId ?? ""}
                         onChange={(e) => {
                           setEditingPathId(e.target.value);
-                          const found = directoryPathways.find((p) => p.id === e.target.value) || localPathways.find((p) => p.id === e.target.value);
+                          const found = directoryPathways.find((p) => p.id === e.target.value) || overlay.pathways.find((p) => p.id === e.target.value);
                           if (found) {
                             setPathPoints(found.pathPoints || []);
                           }
