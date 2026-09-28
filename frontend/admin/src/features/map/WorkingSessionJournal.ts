@@ -30,7 +30,7 @@ const isActiveToolDraft = (value: unknown): value is ActiveToolDraft => {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ActiveToolDraft>;
   return typeof candidate.id === "string"
-    && ["point", "polygon", "pathway", "local_feature"].includes(candidate.toolType ?? "")
+    && ["point", "polygon", "pathway"].includes(candidate.toolType ?? "")
     && Boolean(candidate.provisionalGeometry)
     && typeof candidate.provisionalGeometry === "object"
     && typeof candidate.isSuspended === "boolean";

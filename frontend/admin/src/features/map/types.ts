@@ -43,7 +43,7 @@ export interface WorkingOperation {
 }
 
 // Active Tool Draft & Interruption States
-export type ToolType = "select" | "point" | "polygon" | "pathway" | "local_feature";
+export type ToolType = "select" | "point" | "polygon" | "pathway";
 
 export interface ProvisionalGeometry {
   points?: Array<{ x: number; y: number; lat?: number; lng?: number }>;
@@ -55,7 +55,7 @@ export interface ProvisionalGeometry {
 
 export interface ActiveToolDraft {
   id: string;
-  toolType: "point" | "polygon" | "pathway" | "local_feature";
+  toolType: "point" | "polygon" | "pathway";
   provisionalGeometry: ProvisionalGeometry;
   nestedRecords?: Record<string, unknown>;
   isSuspended: boolean;

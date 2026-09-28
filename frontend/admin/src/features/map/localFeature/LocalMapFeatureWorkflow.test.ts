@@ -13,25 +13,6 @@ const link: FeatureLinkEntity = {
 };
 
 describe("LocalMapFeatureWorkflow", () => {
-  it("validates create geometry before changing history", () => {
-    const workingSession = new WorkingSessionManager();
-    const workflow = createLocalMapFeatureWorkflow({ workingSession });
-    const result = workflow.finalize({ kind: "create", family: "parking_area", name: "Lot", coordinates: [[0, 0]] });
-    expect(result).toMatchObject({ ok: false, reason: "validation" });
-    expect(workingSession.getPastOperations()).toHaveLength(0);
-  });
-
-  it("creates a normalized feature and completes its Tool Draft", () => {
-    const workingSession = new WorkingSessionManager();
-    workingSession.startDraft({ toolType: "local_feature", label: "Parking", provisionalGeometry: {} });
-    const workflow = createLocalMapFeatureWorkflow({ workingSession });
-    const result = workflow.finalize({
-      kind: "create", family: "parking_area", name: " West Lot ", coordinates: [[0, 0], [0, 1], [1, 0]],
-    });
-    expect(result).toMatchObject({ ok: true, feature: { name: "West Lot", surface: "unknown", access: "unknown" }, operation: { type: "create_entity" } });
-    expect(workingSession.getActiveDraft()).toBeNull();
-  });
-
   it("updates curated properties without replacing provenance", () => {
     const workingSession = new WorkingSessionManager();
     const workflow = createLocalMapFeatureWorkflow({ workingSession });
