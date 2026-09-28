@@ -32,7 +32,6 @@ import {
   echagueCampusBoundary,
   geometryOnCampus,
   paddedCampusBounds,
-  pointInPolygon,
   pointOnCampus,
   type MapPoint,
 } from "./campusBoundary";
@@ -73,6 +72,7 @@ import {
 import { PointCoordinateInputs, PointMoveLayer } from "./PointMoveLayer";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
+import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { isPathwayDraft, routeNodePoint } from "./pathway/pathwayDrafts";
 import "leaflet/dist/leaflet.css";
 
@@ -184,9 +184,6 @@ export function MapEditor() {
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const saving = useSavingAction();
   const { savingAction } = saving;
-  const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
-  const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string; position: MapPoint | null } | null>(null);
-  const [indoorPositionSaving, setIndoorPositionSaving] = useState(false);
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
@@ -535,6 +532,12 @@ export function MapEditor() {
       && currentBuildings.some((building) => belongsToBuilding(location, building)),
     );
   }, [buildingContentLocations, currentBuildings, currentMapZoom]);
+  const indoor = useIndoorLocationPlacement(
+    overlay,
+    { buildings: currentBuildings, locations: buildingContentLocations, zoom: currentMapZoom },
+    setError,
+  );
+  const indoorPlacement = indoor.placement;
 
   const filteredNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
@@ -625,16 +628,12 @@ export function MapEditor() {
       setFrameBounds(null);
       setError("");
       if (isPositionedLocation(indoorLocation) && !shouldPlace) {
-        setIndoorPlacement(null);
+        indoor.setPlacement(null);
         setSelected({ type: "location", id: indoorLocation.id });
         flyTo([indoorLocation.lat, indoorLocation.lng], 20);
       } else {
         setSelected({ type: "location", id: indoorLocation.id });
-        setIndoorPlacement({
-          locationId: indoorLocation.id,
-          buildingId: parentBuilding.id,
-          position: isPositionedLocation(indoorLocation) ? [indoorLocation.lat, indoorLocation.lng] : null,
-        });
+        indoor.startPlacement(parentBuilding, indoorLocation);
         flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
       }
       navigate(routeLocation.pathname, { replace: true });
@@ -820,30 +819,7 @@ export function MapEditor() {
     : null;
 
   const onMapClick = async (point: [number, number]) => {
-    if (indoorPlacement) {
-      const building = currentBuildings.find((item) => item.id === indoorPlacement.buildingId);
-      const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
-      if (!building || !location) {
-        setError("The selected indoor location or its building is no longer available.");
-        setIndoorPlacement(null);
-        return;
-      }
-      if (currentMapZoom < 20) {
-        setError("Zoom in to level 20 or closer to place an indoor location marker.");
-        return;
-      }
-      if (!pointInPolygon(point, building.points)) {
-        setError(`Place ${location.name} inside ${building.name}'s footprint.`);
-        return;
-      }
-      if (typeof services.locations.saveIndoorPosition !== "function") {
-        setError("Indoor location positioning is unavailable in this environment.");
-        return;
-      }
-      setIndoorPlacement((current) => current ? { ...current, position: point } : current);
-      setError("");
-      return;
-    }
+    if (indoor.handleMapClick(point)) return;
     if (mode === "select") {
       setSelected(null);
       setSelectionPopover(null);
@@ -903,74 +879,16 @@ export function MapEditor() {
   };
 
   const beginIndoorLocationPlacement = (building: Building, location: Location) => {
-    if (building.points.length < 3) {
-      setError(`${building.name} needs a footprint before an indoor location can be marked.`);
-      return;
-    }
-    setIndoorLocationChooserOpen(false);
-    setIndoorPlacement({
-      locationId: location.id,
-      buildingId: building.id,
-      position: isPositionedLocation(location) ? [location.lat, location.lng] : null,
-    });
+    if (!indoor.begin(building, location)) return;
     setSelected({ type: "location", id: location.id });
-    setError("");
     flyTo(polygonFeatureAnchor(building.points), 20);
   };
 
   const saveIndoorLocationPosition = async () => {
-    if (!indoorPlacement?.position || indoorPositionSaving) return;
-    const building = currentBuildings.find((item) => item.id === indoorPlacement.buildingId);
-    const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
-    if (!building || !location) {
-      setError("The selected indoor location or its building is no longer available.");
-      return;
-    }
-    if (!pointInPolygon(indoorPlacement.position, building.points)) {
-      setError(`Place ${location.name} inside ${building.name}'s footprint.`);
-      return;
-    }
-    if (typeof services.locations.saveIndoorPosition !== "function") {
-      setError("Indoor location positioning is unavailable in this environment.");
-      return;
-    }
-    setIndoorPositionSaving(true);
-    setError("");
-    try {
-      const positioned = await services.locations.saveIndoorPosition({
-        id: location.id,
-        buildingId: building.id,
-        lat: indoorPlacement.position[0],
-        lng: indoorPlacement.position[1],
-      });
-      overlay.putLocation(positioned);
-      setSelected({ type: "location", id: positioned.id });
-      setIndoorPlacement(null);
-      flyTo([positioned.lat!, positioned.lng!], 20);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Could not save ${location.name}'s position.`);
-    } finally {
-      setIndoorPositionSaving(false);
-    }
-  };
-
-  const clearIndoorLocationPosition = async (building: Building, location: Location) => {
-    if (typeof services.locations.saveIndoorPosition !== "function") {
-      setError("Indoor location positioning is unavailable in this environment.");
-      return;
-    }
-    try {
-      const cleared = await services.locations.saveIndoorPosition({
-        id: location.id,
-        buildingId: building.id,
-        lat: null,
-        lng: null,
-      });
-      overlay.putLocation(cleared);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Could not clear ${location.name}'s map marker.`);
-    }
+    const positioned = await indoor.save();
+    if (!positioned) return;
+    setSelected({ type: "location", id: positioned.id });
+    flyTo([positioned.lat!, positioned.lng!], 20);
   };
 
   const openIndoorLocationHandoff = (building: Building) => {
@@ -1708,7 +1626,7 @@ export function MapEditor() {
         overflowActions: [
           { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
           ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
-          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: () => { setError(""); setIndoorLocationChooserOpen(true); } }] : []),
+          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: () => { setError(""); indoor.setChooserOpen(true); } }] : []),
           { label: "＋ Add entrance", onSelect: () => { pointTool.beginEntrancePlacement(`${selectedBuilding.name} Entrance`, selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); } },
           { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
           { label: "🗑 Delete Building", tone: "danger" as const, onSelect: () => setDeleteConfirmation({ kind: "building", id: selectedBuilding.id, name: selectedBuilding.name }) },
@@ -2552,8 +2470,8 @@ export function MapEditor() {
             </dl>}
             {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
             <div className="flex justify-end gap-2 border-t border-[#e6ece8] pt-3">
-              <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoorPositionSaving} onClick={() => { setIndoorPlacement(null); setError(""); }}>Cancel</button>
-              <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoorPositionSaving} onClick={() => { void saveIndoorLocationPosition(); }}>{indoorPositionSaving ? "Saving Position…" : "Save Position"}</button>
+              <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoor.saving} onClick={indoor.cancel}>Cancel</button>
+              <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={() => { void saveIndoorLocationPosition(); }}>{indoor.saving ? "Saving Position…" : "Save Position"}</button>
             </div>
           </aside>
         )}
@@ -3478,13 +3396,13 @@ export function MapEditor() {
         onSave={savePathPointConversion}
       />}
 
-      {indoorLocationChooserOpen && selectedBuilding && (
+      {indoor.chooserOpen && selectedBuilding && (
         <Modal
           title="Mark indoor location"
           subtitle={`Choose an existing indoor location in ${selectedBuilding.name}, then click its position inside the building footprint.`}
           size="md"
           variant="green"
-          onClose={() => setIndoorLocationChooserOpen(false)}
+          onClose={() => indoor.setChooserOpen(false)}
         >
           <div className="max-h-[55vh] space-y-2 overflow-y-auto">
             {buildingContentLocations.filter((location) => isIndoorLocation(location) && belongsToBuilding(location, selectedBuilding)).map((location) => {
@@ -3498,7 +3416,7 @@ export function MapEditor() {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <Button onClick={() => beginIndoorLocationPlacement(selectedBuilding, location)}>{positioned ? "Reposition" : "Place marker"}</Button>
-                    <Button variant="subtle" disabled={!positioned} onClick={() => clearIndoorLocationPosition(selectedBuilding, location)}>Clear</Button>
+                    <Button variant="subtle" disabled={!positioned} onClick={() => indoor.clear(selectedBuilding, location)}>Clear</Button>
                   </div>
                 </div>
               );
@@ -3508,7 +3426,7 @@ export function MapEditor() {
             )}
           </div>
           {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
-          <div className="modal-actions"><Button variant="subtle" onClick={() => setIndoorLocationChooserOpen(false)}>Close</Button></div>
+          <div className="modal-actions"><Button variant="subtle" onClick={() => indoor.setChooserOpen(false)}>Close</Button></div>
         </Modal>
       )}
 
