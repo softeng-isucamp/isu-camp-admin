@@ -24,15 +24,8 @@ import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModa
 import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
-import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeature/localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
-import {
-  normalizeMapLayers,
-  type FeatureLinkEntity,
-  type LocalFeatureFamily,
-  type LocalMapFeatureEntity,
-  type SaveDraftResult,
-} from "../../services/mapEditorApiClient";
+import { normalizeMapLayers } from "../../services/mapEditorApiClient";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
 import { locationIdentityKey, standardFloorLevels } from "../../lib/locationPolicy";
 import {
@@ -60,7 +53,9 @@ import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
 import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
-import { createLocalMapFeatureWorkflow } from "./localFeature/LocalMapFeatureWorkflow";
+import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
+import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
+import { localFeatureInspectorModel } from "./localFeature/localFeatureInspectorModel";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
 import {
   findSelectionCandidates,
@@ -159,9 +154,6 @@ export function MapEditor() {
     },
     workingSession: workingSessionManager,
   }), [workingSessionManager]);
-  const localMapFeatureWorkflow = useMemo(() => createLocalMapFeatureWorkflow({
-    workingSession: workingSessionManager,
-  }), [workingSessionManager]);
 
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
@@ -212,14 +204,7 @@ export function MapEditor() {
   const [localPathways, setLocalPathways] = useState<Pathway[]>([]);
   const [deletedPathwayIds, setDeletedPathwayIds] = useState<string[]>([]);
   const [localBuildings, setLocalBuildings] = useState<Building[]>([]);
-  const [localFeatureChanges, setLocalFeatureChanges] = useState<LocalMapFeatureEntity[]>([]);
-  const [localFeatureLinks, setLocalFeatureLinks] = useState<FeatureLinkEntity[]>([]);
-  const [unlinkedFeatureLinkIds, setUnlinkedFeatureLinkIds] = useState<string[]>([]);
-  const [selectedLocalFeatureFamily, setSelectedLocalFeatureFamily] = useState<Exclude<LocalFeatureFamily, "readonly_basemap">>("parking_area");
-  const [localFeaturePoints, setLocalFeaturePoints] = useState<[number, number][]>([]);
-  const [localFeatureName, setLocalFeatureName] = useState("New Parking Area");
   const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
-  const [localFeatureActionNotice, setLocalFeatureActionNotice] = useState("");
 
   const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move" | "local_feature">(
     "select",
@@ -370,8 +355,14 @@ export function MapEditor() {
     routeNodes: data?.nodes || [],
     pathways: data?.pathways || [],
   }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
-  const currentFeatureLinks = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
-    .filter((link) => !unlinkedFeatureLinkIds.includes(link.id));
+  const localFeatureLayer = useLocalFeatureLayer(directoryMapLayers.featureLinks);
+  const currentFeatureLinks = localFeatureLayer.currentFeatureLinks;
+  const localFeatures = useLocalFeatureEditing({
+    workingSession: workingSessionManager,
+    layer: localFeatureLayer,
+    onError: setError,
+    onDirty: () => setDirty(true),
+  });
   const currentLocations = useMemo(() => overlayChanges(directoryLocations, localLocations), [directoryLocations, localLocations]);
   const buildingContentLocations = useMemo(() => {
     const locationsById = new Map((locationDirectory ?? []).map((location) => [locationIdentityKey(location), location]));
@@ -487,8 +478,8 @@ export function MapEditor() {
     [currentBuildings, currentLocations, currentNodes, currentPathways],
   );
   const currentLocalFeatures = useMemo(
-    () => overlayChanges(normalizedLocalFeatures, localFeatureChanges),
-    [localFeatureChanges, normalizedLocalFeatures],
+    () => localFeatureLayer.withFeatureChanges(normalizedLocalFeatures),
+    [localFeatureLayer.withFeatureChanges, normalizedLocalFeatures],
   );
 
   const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
@@ -513,8 +504,8 @@ export function MapEditor() {
         const merged = existing ? { ...existing, ...value } : value;
         return [...items.filter((item) => item.id !== entityId), merged as unknown as Building];
       }),
-      localFeatures: (entityId, value) => setLocalFeatureChanges((items) => replaceProjection(items, entityId, value)),
-      featureLinks: (entityId, value) => setLocalFeatureLinks((items) => replaceProjection(items, entityId, value)),
+      localFeatures: localFeatureLayer.projectFeature,
+      featureLinks: localFeatureLayer.projectFeatureLink,
     };
     projectWorkingSessionOperation(operation, direction, {
       featureLinks: currentFeatureLinks,
@@ -523,7 +514,7 @@ export function MapEditor() {
       handlers[projection.collection](projection.entityId, projection.value);
     });
     setDirty(workingSessionManager.getIsDirty());
-  }, [currentFeatureLinks, currentLocalFeatures, data?.buildings, workingSessionManager]);
+  }, [currentFeatureLinks, currentLocalFeatures, data?.buildings, localFeatureLayer.projectFeature, localFeatureLayer.projectFeatureLink, workingSessionManager]);
 
   useEffect(() => {
     const onWorkingSessionShortcut = (event: KeyboardEvent) => {
@@ -542,17 +533,6 @@ export function MapEditor() {
     () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
     [directoryBuildings],
   );
-  const selectedLocalFeatureDefinition = EDITABLE_LOCAL_FEATURE_FAMILIES.find(
-    (family) => family.id === selectedLocalFeatureFamily,
-  )!;
-  const localFeatureMinimumPoints = selectedLocalFeatureDefinition.geometryType === "line" ? 2 : 3;
-  const localFeaturePolygonInvalid = mode === "local_feature"
-    && selectedLocalFeatureDefinition.geometryType === "polygon"
-    && localFeaturePoints.length >= 3
-    && validateBuildingFootprintGeometry(localFeaturePoints, campusBoundary).length > 0;
-  const canCreateLocalFeature = selectedLocalFeatureFamily === "building_footprint"
-    || (localFeatureName.trim().length > 0 && localFeaturePoints.length >= localFeatureMinimumPoints
-      && !localFeaturePolygonInvalid);
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
   const footprintGeometryIssues = useMemo(
@@ -803,7 +783,7 @@ export function MapEditor() {
     (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
       setSelected({ type, id });
       setSelectionPopover(null);
-      setLocalFeatureActionNotice("");
+      localFeatures.setActionNotice("");
       if (type === "pathway") {
         const path = currentPathways.find((p) => p.id === id);
         if (path) {
@@ -953,7 +933,7 @@ export function MapEditor() {
       const nextPoints = [...points, point];
       setPoints(nextPoints);
     } else if (mode === "local_feature") {
-      setLocalFeaturePoints((current) => [...current, point]);
+      localFeatures.addPoint(point);
     } else if (mode === "place" || mode === "move") {
       setTemporary(point);
       setPointIsSnapped(false);
@@ -1392,7 +1372,7 @@ export function MapEditor() {
         endSaving();
         return;
       }
-      setLocalFeatureChanges((current) => [...current.filter((feature) => feature.id !== result.footprint.id), result.footprint]);
+      localFeatureLayer.putFeature(result.footprint);
       setLocalBuildings((current) => current.map((building) =>
         building.id === editingBuildingId ? result.building : building,
       ));
@@ -1414,8 +1394,8 @@ export function MapEditor() {
       setLocalLocations((current) => [...current.filter((item) => item.id !== result.location!.id), result.location!]);
     }
     setLocalBuildings((current) => [...current.filter((item) => item.id !== result.building.id), result.building]);
-    setLocalFeatureChanges((current) => [...current.filter((item) => item.id !== result.footprint.id), result.footprint]);
-    setLocalFeatureLinks((current) => [...current.filter((item) => item.targetEntityId !== result.building.id), result.link]);
+    localFeatureLayer.putFeature(result.footprint);
+    localFeatureLayer.putBuildingLink(result.link);
     setDirty(true);
     setPoints([]);
     resetBuildingForm();
@@ -1512,11 +1492,8 @@ export function MapEditor() {
     setLocalPathways([]);
     setDeletedPathwayIds([]);
     setLocalBuildings([]);
-    setLocalFeatureChanges([]);
-    setLocalFeatureLinks([]);
-    setUnlinkedFeatureLinkIds([]);
-    setLocalFeaturePoints([]);
-    setLocalFeatureName("New Parking Area");
+    localFeatureLayer.reset();
+    localFeatures.resetDraft();
     setOwnerModal(null);
     setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
@@ -1819,18 +1796,7 @@ export function MapEditor() {
             : null,
         },
       }) : null,
-      local_feature: () => localFeaturePoints.length > 0 ? ({
-        toolType: "local_feature",
-        label: `${selectedLocalFeatureDefinition.label} draft`,
-        provisionalGeometry: {
-          points: localFeaturePoints.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
-          isClosed: selectedLocalFeatureDefinition.geometryType === "polygon",
-        },
-        nestedRecords: {
-          family: selectedLocalFeatureFamily,
-          name: localFeatureName,
-        },
-      }) : null,
+      local_feature: () => localFeatures.draftSnapshot,
     };
     return snapshotBuilders[activeTool]();
   }, [
@@ -1845,8 +1811,7 @@ export function MapEditor() {
     selectedAttachBuildingId,
     editingPathId,
     localPathways,
-    localFeatureName,
-    localFeaturePoints,
+    localFeatures.draftSnapshot,
     mode,
     movingId,
     pathDraftDirty,
@@ -1861,9 +1826,6 @@ export function MapEditor() {
     points,
     provisionalPathwayId,
     selected,
-    selectedLocalFeatureDefinition.geometryType,
-    selectedLocalFeatureDefinition.label,
-    selectedLocalFeatureFamily,
     selectedPathPointIndex,
     temporary,
   ]);
@@ -1910,50 +1872,9 @@ export function MapEditor() {
         setSelectedPathPointIndex(null);
         setPathDraftDirty(false);
       },
-      local_feature: () => setLocalFeaturePoints([]),
+      local_feature: () => localFeatures.clearPoints(),
     };
     clearHandlers[toolType]();
-  };
-
-  const selectLocalFeatureFamily = (family: Exclude<LocalFeatureFamily, "readonly_basemap">) => {
-    const definition = EDITABLE_LOCAL_FEATURE_FAMILIES.find((candidate) => candidate.id === family)!;
-    setSelectedLocalFeatureFamily(family);
-    setLocalFeatureName(family === "campus_boundary" ? "ISU Echague Campus Perimeter" : `New ${definition.label}`);
-    setLocalFeaturePoints([]);
-  };
-
-  const createSelectedLocalFeature = () => {
-    if (selectedLocalFeatureFamily === "building_footprint") {
-      setLocalFeaturePoints([]);
-      setMode("area");
-      setPolygonInteraction("draw");
-      setPolygonClosed(false);
-      return;
-    }
-    if (!canCreateLocalFeature || !geometryOnCampus(localFeaturePoints, campusBoundary)) {
-      if (canCreateLocalFeature) setError("New or modified geometry must stay inside the ISU Echague campus boundary.");
-      return;
-    }
-    const existingBoundary = selectedLocalFeatureFamily === "campus_boundary"
-      ? currentLocalFeatures.find((feature) => feature.family === "campus_boundary" && feature.status !== "retired")
-      : undefined;
-    const result = localMapFeatureWorkflow.finalize({
-      kind: "create",
-      family: selectedLocalFeatureFamily,
-      name: localFeatureName,
-      coordinates: [...localFeaturePoints],
-      campusBoundary,
-      existingBoundary,
-    });
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
-    setLocalFeaturePoints([]);
-    setDirty(true);
-    setSelected({ type: "local_feature", id: result.feature.id });
-    setMode("select");
   };
 
   const activateTool = (toolType: ToolType) => {
@@ -1993,7 +1914,7 @@ export function MapEditor() {
       local_feature: () => {
         setMode("local_feature");
         setSelected(null);
-        setLocalFeaturePoints([]);
+        localFeatures.clearPoints();
       },
     };
     activationHandlers[toolType]();
@@ -2117,16 +2038,7 @@ export function MapEditor() {
         setMode("path");
       },
       local_feature: () => {
-        const restoredFamily = records.family;
-        if (
-          restoredFamily === "building_footprint"
-          || restoredFamily === "parking_area"
-          || restoredFamily === "cartographic_walkway"
-          || restoredFamily === "vehicle_path"
-          || restoredFamily === "campus_boundary"
-        ) setSelectedLocalFeatureFamily(restoredFamily);
-        if (typeof records.name === "string") setLocalFeatureName(records.name);
-        setLocalFeaturePoints(restoredPoints);
+        localFeatures.restoreDraft(records, restoredPoints);
         setMode("local_feature");
       },
     };
@@ -2503,32 +2415,6 @@ export function MapEditor() {
     initializeBuildingFootprintEdit(selectedBuilding, "move");
   };
 
-  const retireLocalFeature = (feature: LocalMapFeatureEntity) => {
-    const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
-      .find((link) => link.featureId === feature.id);
-    const result = localMapFeatureWorkflow.finalize({ kind: "retire", feature, link: featureLink });
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
-    if (featureLink) setUnlinkedFeatureLinkIds((ids) => [...new Set([...ids, featureLink.id])]);
-    setDirty(true);
-  };
-
-  const restoreLocalFeature = (feature: LocalMapFeatureEntity) => {
-    const featureLink = [...directoryMapLayers.featureLinks, ...localFeatureLinks]
-      .find((link) => link.featureId === feature.id);
-    const result = localMapFeatureWorkflow.finalize({ kind: "restore", feature, link: featureLink });
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
-    if (featureLink) setUnlinkedFeatureLinkIds((ids) => ids.filter((id) => id !== featureLink.id));
-    setDirty(true);
-  };
-
   const inspectorModel = (() => {
     if (!selected) return null;
     if (selectedBuilding) {
@@ -2898,62 +2784,14 @@ export function MapEditor() {
       } satisfies InspectorCardModel;
     }
     if (selectedLocalFeature) {
-      const readOnly = !selectedLocalFeature.isEditable || selectedLocalFeature.family === "readonly_basemap";
-      const retired = selectedLocalFeature.status === "retired";
-      const disabledReason = "Imported basemap context cannot be edited in the Map Editor.";
-      const family = EDITABLE_LOCAL_FEATURE_FAMILIES.find((candidate) => candidate.id === selectedLocalFeature.family);
-      return {
-        id: selectedLocalFeature.id,
-        kind: "local_map_feature",
-        title: selectedLocalFeature.name,
-        domain: "Local Map Data",
-        status: readOnly ? "Imported context feature" : retired ? "Retired in Working Session" : family?.label,
-        readOnly,
-        summary: [
-          { label: "Feature Family", value: selectedLocalFeature.family.replaceAll("_", " ") },
-          { label: "Geometry", value: selectedLocalFeature.geometryType },
-          { label: "Area / Length", value: selectedLocalFeature.areaOrLength ?? "—" },
-          { label: "Lifecycle", value: selectedLocalFeature.status ?? "active" },
-        ],
-        details: (
-          <>
-            {retired && (
-              <div className="inspector-retired-warning" role="alert" aria-label="Retired Local Map Feature">
-                ⚠ This feature is retired in this Working Session. It remains recoverable until save.
-              </div>
-            )}
-            {localFeatureActionNotice && <p className="inspector-action-notice" role="status">{localFeatureActionNotice}</p>}
-          </>
-        ),
-        primaryAction: {
-          label: readOnly
-            ? "▱ Reshape Boundary"
-            : retired
-              ? "⎌ Restore Feature"
-              : `${family?.icon ?? "▱"} Reshape ${family?.label ?? "Feature"}`,
-          disabled: readOnly,
-          disabledReason: readOnly ? disabledReason : undefined,
-          onSelect: retired
-            ? () => restoreLocalFeature(selectedLocalFeature)
-            : () => setLocalFeatureActionNotice(`${family?.label ?? "Local feature"} geometry is ready for reshaping.`),
-        },
-        overflowActions: retired ? [] : [
-          {
-            label: "✎ Edit Details",
-            disabled: readOnly,
-            disabledReason: readOnly ? disabledReason : undefined,
-            onSelect: () => setOwnerModal("local_feature"),
-          },
-          {
-            label: "🗑 Retire Feature",
-            tone: "danger" as const,
-            disabled: readOnly,
-            disabledReason: readOnly ? disabledReason : undefined,
-            onSelect: () => retireLocalFeature(selectedLocalFeature),
-          },
-        ],
-        provenance: selectedLocalFeature.provenance,
-      } satisfies InspectorCardModel;
+      return localFeatureInspectorModel({
+        feature: selectedLocalFeature,
+        actionNotice: localFeatures.actionNotice,
+        onNotice: localFeatures.setActionNotice,
+        onRestore: () => localFeatures.restoreFeature(selectedLocalFeature),
+        onEditDetails: () => setOwnerModal("local_feature"),
+        onRetire: () => localFeatures.retireFeature(selectedLocalFeature),
+      });
     }
     return null;
   })();
@@ -4418,13 +4256,7 @@ export function MapEditor() {
           feature={selectedLocalFeature}
           onClose={() => setOwnerModal(null)}
           onSubmit={(updated) => {
-            const result = localMapFeatureWorkflow.finalize({ kind: "update", before: selectedLocalFeature, after: updated });
-            if (!result.ok) {
-              setError(result.message);
-              return;
-            }
-            setLocalFeatureChanges((items) => [...items.filter((item) => item.id !== result.feature.id), result.feature]);
-            setOwnerModal(null);
+            if (localFeatures.updateFeature(selectedLocalFeature, updated)) setOwnerModal(null);
           }}
         />
       )}
