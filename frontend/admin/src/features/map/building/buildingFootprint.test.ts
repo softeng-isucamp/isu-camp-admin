@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Building, Location } from "../../types";
-import type { FeatureLinkEntity } from "../../services/mapLayers";
-import type { MapPoint } from "./campusBoundary";
+import type { Building, Location } from "../../../types";
+import type { FeatureLinkEntity } from "../../../services/mapLayers";
+import type { MapPoint } from "../campusBoundary";
 import {
   buildAttachBuildingCompoundOperation,
   buildCreateBuildingCompoundOperation,
