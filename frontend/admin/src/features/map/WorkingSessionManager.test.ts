@@ -13,7 +13,7 @@ import {
   traverseApplyOperation,
   handleWorkingSessionKeyboardShortcut,
 } from "./WorkingSessionManager";
-import type { ActiveToolDraft, WorkingOperation } from "./types";
+import type { ActiveToolDraft } from "./types";
 
 describe("WorkingSessionManager", () => {
   let manager: WorkingSessionManager;

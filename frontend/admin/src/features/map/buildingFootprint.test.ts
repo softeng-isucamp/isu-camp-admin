@@ -262,7 +262,7 @@ describe("buildCreateBuildingCompoundOperation", () => {
     expect(batch.type).toBe("compound_batch");
     expect(batch.nestedOperations).toHaveLength(3);
 
-    const [createLoc, createFeat, createLink] = batch.nestedOperations!;
+    const [createLoc, createFeat] = batch.nestedOperations!;
 
     // 1. Campus Location Building (stores NO copied outdoor coordinate)
     expect(createLoc.type).toBe("create_entity");

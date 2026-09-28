@@ -4,7 +4,6 @@ import type {
   InterruptionAction,
   SpatialDomain,
   WorkingOperation,
-  WorkingOperationType,
   WorkingSessionSnapshot,
   WorkingSessionState,
 } from "./types";

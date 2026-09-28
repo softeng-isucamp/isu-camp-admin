@@ -8,11 +8,10 @@ interface UseLocalFeatureEditingOptions {
   workingSession: WorkingSessionManager;
   layer: LocalFeatureLayer;
   onError: (message: string) => void;
-  onDirty: () => void;
 }
 
 /** Local Map Feature lifecycle commands (update, retire, restore) applied to the feature layer. */
-export function useLocalFeatureEditing({ workingSession, layer, onError, onDirty }: UseLocalFeatureEditingOptions) {
+export function useLocalFeatureEditing({ workingSession, layer, onError }: UseLocalFeatureEditingOptions) {
   const workflow = useMemo(() => createLocalMapFeatureWorkflow({ workingSession }), [workingSession]);
   const [actionNotice, setActionNotice] = useState("");
 
@@ -36,7 +35,6 @@ export function useLocalFeatureEditing({ workingSession, layer, onError, onDirty
     }
     layer.putFeature(result.feature);
     if (featureLink) layer.setLinkUnlinked(featureLink.id, retired);
-    onDirty();
   };
 
   return {
