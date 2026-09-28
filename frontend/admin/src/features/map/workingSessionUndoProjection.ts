@@ -1,4 +1,4 @@
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapLayers";
 import type { WorkingOperation } from "./types";
 
 export type ProjectedCollection = "locations" | "nodes" | "pathways" | "buildings" | "localFeatures" | "featureLinks";

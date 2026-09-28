@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
-import type { LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { LocalMapFeatureEntity } from "../../../services/mapLayers";
 import {
   LOCAL_FEATURE_ACCESS,
   LOCAL_FEATURE_DIRECTIONS,

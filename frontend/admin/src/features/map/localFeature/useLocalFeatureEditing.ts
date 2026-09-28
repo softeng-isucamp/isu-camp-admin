@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { LocalFeatureFamily, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { LocalFeatureFamily, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { ActiveToolDraft } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
 import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";

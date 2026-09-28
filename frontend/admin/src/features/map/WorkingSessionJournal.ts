@@ -8,7 +8,6 @@ export interface WorkingSessionKey {
 
 export interface StoredWorkingSession {
   schemaVersion: 1;
-  adminDraftVersion: number | null;
   snapshot: WorkingSessionSnapshot;
 }
 
@@ -41,7 +40,6 @@ const isStoredWorkingSession = (value: unknown): value is StoredWorkingSession =
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<StoredWorkingSession>;
   return candidate.schemaVersion === 1
-    && (candidate.adminDraftVersion === null || typeof candidate.adminDraftVersion === "number")
     && candidate.snapshot?.schemaVersion === 1
     && Array.isArray(candidate.snapshot.pastOperations)
     && Array.isArray(candidate.snapshot.futureOperations)

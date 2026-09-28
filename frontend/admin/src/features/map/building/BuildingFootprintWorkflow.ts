@@ -1,5 +1,5 @@
 import type { Building, Location, LocationDraft } from "../../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { MapPoint } from "../campusBoundary";
 import {
   buildAttachBuildingCompoundOperation,

@@ -1,4 +1,4 @@
-import type { FeatureLinkEntity, LocalFeatureFamily, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalFeatureFamily, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { MapPoint } from "../campusBoundary";
 import { geometryOnCampus } from "../campusBoundary";
 import {

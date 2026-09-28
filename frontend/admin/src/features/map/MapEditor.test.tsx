@@ -78,7 +78,6 @@ vi.mock("../../services/api", () => ({
       updatePathway: vi.fn(async (pathway) => pathway),
       deletePathway: vi.fn(async () => undefined),
       save: vi.fn(),
-      saveDraft: undefined as unknown as typeof services.map.saveDraft,
     },
     locations: {
       list: vi.fn(async () => ({
@@ -117,7 +116,6 @@ describe("Map Editor preview", () => {
     mapFitBounds = vi.fn();
     mapFlyTo = vi.fn();
     mapVisibleBounds = undefined;
-    services.map.saveDraft = undefined;
     services.locations.save = undefined as unknown as typeof services.locations.save;
     vi.mocked(services.locations.saveIndoorPosition).mockReset();
     vi.mocked(services.map.removeBuilding).mockResolvedValue(undefined);
@@ -1024,8 +1022,7 @@ describe("Map Editor preview", () => {
   });
 
   it("shows canonical Buildings for an Entrance association without persisting the selection", async () => {
-    const saveDraft = vi.fn();
-    services.map.saveDraft = saveDraft;
+    vi.mocked(services.map.save).mockClear();
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "map-only-building", name: "Unregistered Map Shape", code: "MAP-ONLY", points: [] },
     ]);
@@ -1047,7 +1044,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(association, { target: { value: "building-42" } });
 
     expect(association).toHaveValue("building-42");
-    expect(saveDraft).not.toHaveBeenCalled();
+    expect(services.map.save).not.toHaveBeenCalled();
   });
 
   it.skip("moves a point through the precision HUD with nudging, commit, and cancel", async () => {
