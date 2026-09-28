@@ -1,6 +1,6 @@
-import { Button, Field, Modal, SelectField } from "../../components/UI";
-import type { Pathway, RouteNode } from "../../types";
-import { distanceInMeters } from "./pointInteractions";
+import { Button, Field, Modal, SelectField } from "../../../components/UI";
+import type { Pathway, RouteNode } from "../../../types";
+import { distanceInMeters } from "../pointInteractions";
 
 export type PathPointConversionDraft = {
   pathwayId: string;

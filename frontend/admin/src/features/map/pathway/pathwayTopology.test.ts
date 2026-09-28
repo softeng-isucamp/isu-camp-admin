@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Pathway, RouteNode } from "../../types";
+import type { Pathway, RouteNode } from "../../../types";
 import {
   createJunctionSplit,
   findPathwayCrossings,
