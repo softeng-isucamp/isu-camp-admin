@@ -1,5 +1,5 @@
-import type { Building, Pathway, RouteNode } from "../../types";
-import type { WorkingOperation } from "./types";
+import type { Building, Pathway, RouteNode } from "../../../types";
+import type { WorkingOperation } from "../types";
 
 export type LifecycleAction = "close_pathway" | "reopen_pathway" | "deactivate_node" | "reactivate_node";
 export interface LifecycleFinding { severity: "blocking" | "advisory"; objectId: string; message: string; correctiveAction: string; }

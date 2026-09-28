@@ -48,7 +48,7 @@ import {
   segmentMidpoints,
 } from "./pathwayTopology";
 import { createRoutableCrossing } from "./pathwayCommands";
-import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
+import { calculateDeleteImpact, type DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
 import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
