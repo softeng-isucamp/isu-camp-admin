@@ -2,15 +2,15 @@ import type {
   FeatureLinkEntity,
   LocalFeatureFamily,
   LocalMapFeatureEntity,
-} from "../../services/mapEditorApiClient";
+} from "../../../services/mapEditorApiClient";
 import {
   compoundBatchOperation,
   linkFeatureOperation,
   restoreEntityOperation,
   retireEntityOperation,
   unlinkFeatureOperation,
-} from "./WorkingSessionManager";
-import type { WorkingOperation } from "./types";
+} from "../WorkingSessionManager";
+import type { WorkingOperation } from "../types";
 
 export const LOCAL_FEATURE_SURFACES = [
   "unknown",

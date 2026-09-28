@@ -1,4 +1,4 @@
-import type { LocalFeatureFamily } from "../../services/mapEditorApiClient";
+import type { LocalFeatureFamily } from "../../../services/mapEditorApiClient";
 import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
 
 interface LocalFeatureFamilyPaletteProps {

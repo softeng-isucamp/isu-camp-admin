@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
 import {
   EDITABLE_LOCAL_FEATURE_FAMILIES,
   buildRetireLocalFeatureOperation,

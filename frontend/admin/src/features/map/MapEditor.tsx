@@ -20,11 +20,11 @@ import { isPointInBounds, overlayChanges, pathwayWithSuggestedName, polygonFeatu
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
-import { LocalFeatureDetailsModal } from "./LocalFeatureDetailsModal";
+import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
-import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
+import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeature/localFeatures";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import {
   normalizeMapLayers,
