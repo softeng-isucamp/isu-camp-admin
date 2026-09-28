@@ -1,5 +1,5 @@
 import type { Building, Location, RecordStatus } from "../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity, WorkingOperation } from "../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity, WorkingOperation } from "../../services/mapLayers";
 import {
   geometryOnCampus,
   pointInPolygon,

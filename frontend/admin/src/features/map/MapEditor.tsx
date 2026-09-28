@@ -25,7 +25,7 @@ import { BuildingDetailsModal } from "./BuildingDetailsModal";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
-import { normalizeMapLayers } from "../../services/mapEditorApiClient";
+import { normalizeMapLayers } from "../../services/mapLayers";
 import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
 import { locationIdentityKey, standardFloorLevels } from "../../lib/locationPolicy";
 import {
@@ -94,14 +94,10 @@ export function MapEditor() {
   const routeLocation = useLocation();
   const [workingSessionManager] = useState(() => new WorkingSessionManager());
   const [workingSessionJournal] = useState(() => createWorkingSessionJournal(window.localStorage));
-  const [draftVersion, setDraftVersion] = useState(1);
-  const draftVersionRef = useRef(draftVersion);
-  draftVersionRef.current = draftVersion;
   const workingSessionKey = useMemo<WorkingSessionKey | null>(() => session ? ({
     administratorId: session.id,
     projectId: MAP_EDITOR_PROJECT_ID,
   }) : null, [session?.id]);
-  const saveRequestId = useRef(`map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const [, setWorkingSessionRevision] = useState(0);
   const [pendingToolRequest, setPendingToolRequest] = useState<{
     toolType: ToolType;
@@ -127,7 +123,6 @@ export function MapEditor() {
 
     const saveRecovery = () => workingSessionJournal.save(workingSessionKey, {
       schemaVersion: 1,
-      adminDraftVersion: draftVersionRef.current,
       snapshot: workingSessionManager.exportSnapshot(),
     });
     saveRecovery();
@@ -175,12 +170,6 @@ export function MapEditor() {
       pathways: await services.map.pathways(),
     }),
   });
-  const { data: draftBootstrap } = useQuery({
-    queryKey: ["map-editor-bootstrap", "proj-echague"],
-    queryFn: () => services.map.getMapEditorBootstrap!(MAP_EDITOR_PROJECT_ID),
-    enabled: false,
-    retry: false,
-  });
   const { data: locationDirectory } = useQuery({
     queryKey: ["locations", "map-directory"],
     queryFn: async () => {
@@ -194,10 +183,6 @@ export function MapEditor() {
     },
     retry: false,
   });
-
-  useEffect(() => {
-    if (draftBootstrap) setDraftVersion(draftBootstrap.adminDraft.draftVersion);
-  }, [draftBootstrap]);
 
   const [localLocations, setLocalLocations] = useState<Location[]>([]);
   const [localNodes, setLocalNodes] = useState<RouteNode[]>([]);
@@ -1599,41 +1584,20 @@ export function MapEditor() {
             routeNodePoint(currentNodes, pathway.destinationNodeId),
           ),
         }));
-      const operations = workingSessionManager.getUncommittedOperations();
-      // The draft gateway is retained only for the test harness. Runtime saves
-      // use the concrete map service because Flask does not expose that route.
-      if (import.meta.env.MODE === "test" && services.map.saveDraft) {
-        const gatewayResult = await services.map.saveDraft({
-          projectId: "proj-echague",
-          baseDraftVersion: draftVersion,
-          requestId: saveRequestId.current,
-          operations,
-        });
-        if (!gatewayResult.success) {
-          const saveErrorMessage = gatewayResult.errorType === "CONCURRENCY_CONFLICT"
-            ? "This draft changed on the server while you were editing. Refresh the map and try saving again."
-            : gatewayResult.message;
-          setError(saveErrorMessage);
-          return;
-        }
-        setDraftVersion(gatewayResult.newDraftVersion);
-      } else {
-        await services.map.save({
-          selected: selected ?? undefined,
-          areaPoints: points.length >= 3 ? points : undefined,
-          locations: localLocations,
-          nodes: localNodes,
-          buildings: localBuildings,
-          pathways: pathwaysToSave,
-        });
-      }
+      await services.map.save({
+        selected: selected ?? undefined,
+        areaPoints: points.length >= 3 ? points : undefined,
+        locations: localLocations,
+        nodes: localNodes,
+        buildings: localBuildings,
+        pathways: pathwaysToSave,
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["map"] }),
         queryClient.invalidateQueries({ queryKey: ["locations"] }),
         queryClient.invalidateQueries({ queryKey: ["nodes"] }),
       ]);
       workingSessionManager.markSaved();
-      saveRequestId.current = `map-save-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       setDirty(false);
       setConfirm(null);
       setError("");

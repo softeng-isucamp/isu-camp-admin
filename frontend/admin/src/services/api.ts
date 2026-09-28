@@ -36,93 +36,8 @@ import { createLocalAdapter } from "./localAdapter";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
-import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult, type WorkingOperation } from "./mapEditorApiClient";
 
-const flattenWorkingOperations = (operations: WorkingOperation[]): WorkingOperation[] => operations.flatMap((operation) =>
-  operation.type === "compound_batch" && operation.nestedOperations
-    ? flattenWorkingOperations(operation.nestedOperations)
-    : [operation],
-);
 
-type LegacyMapReadCollections = {
-  locations: Location[];
-  buildings: Building[];
-  nodes: RouteNode[];
-  pathways: Pathway[];
-};
-
-const mirrorMapEditorOperationsToLegacyReads = (
-  operations: WorkingOperation[],
-  collectionSets: LegacyMapReadCollections[] = [{ locations, buildings, nodes: routeNodes, pathways }],
-) => {
-  const flatOperations = flattenWorkingOperations(operations);
-  const findOperation = (predicate: (operation: WorkingOperation) => boolean) => flatOperations.find(predicate);
-
-  for (const collections of collectionSets) {
-    const { locations: legacyLocations, buildings: legacyBuildings, nodes: legacyNodes, pathways: legacyPathways } = collections;
-    const upsert = <T extends { id: string }>(collection: T[], value: T) => {
-      const index = collection.findIndex((item) => item.id === value.id);
-      if (index === -1) collection.push(value);
-      else collection[index] = { ...collection[index], ...value };
-    };
-
-    for (const operation of flatOperations) {
-      const after = operation.after;
-      if (!after) continue;
-
-      if (operation.domain === "Locations") {
-        const location = after as unknown as Location;
-        if (operation.type === "create_entity" || operation.type === "update_properties" || operation.type === "update_geometry" || operation.type === "restore_entity" || operation.type === "retire_entity") {
-          upsert(legacyLocations, location);
-          if (location.type === "Building" || location.type === "Facility") {
-            const link = findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "link_feature" && candidate.after?.targetEntityId === location.id);
-            const featureId = typeof link?.after?.featureId === "string" ? link.after.featureId : undefined;
-            const feature = featureId
-              ? findOperation((candidate) => candidate.entityId === featureId)
-              : findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "create_entity" && candidate.after?.linkedBuildingId === location.id);
-            const previousBuilding = legacyBuildings.find((candidate) => candidate.id === location.id);
-            const points = Array.isArray(feature?.after?.coordinates)
-              ? feature.after.coordinates as [number, number][]
-              : previousBuilding?.points ?? [];
-            upsert(legacyBuildings, {
-              id: location.id,
-              name: location.name,
-              code: location.code,
-              points,
-              status: location.status,
-              type: location.type,
-            });
-          }
-        }
-        continue;
-      }
-
-      if (operation.domain === "Walking Network") {
-        if (operation.entityId.startsWith("node-") || "nodeType" in after || "associatedPlaceId" in after) {
-          upsert(legacyNodes, after as unknown as RouteNode);
-        } else if ("sourceNodeId" in after || "destinationNodeId" in after || "pathPoints" in after) {
-          upsert(legacyPathways, after as unknown as Pathway);
-        }
-        continue;
-      }
-
-      if (operation.domain === "Local Map Data" && (after.family === "building_footprint" || typeof after.linkedBuildingId === "string")) {
-        const buildingId = typeof after.linkedBuildingId === "string" ? after.linkedBuildingId : undefined;
-        const points = Array.isArray(after.coordinates) ? after.coordinates as [number, number][] : [];
-        if (buildingId) {
-          const building = legacyBuildings.find((candidate) => candidate.id === buildingId);
-          if (building) building.points = points;
-        }
-      }
-
-      if (operation.domain === "Local Map Data" && operation.type === "link_feature" && typeof after.targetEntityId === "string") {
-        const feature = findOperation((candidate) => candidate.entityId === after.featureId);
-        const building = legacyBuildings.find((candidate) => candidate.id === after.targetEntityId);
-        if (building && Array.isArray(feature?.after?.coordinates)) building.points = feature.after.coordinates as [number, number][];
-      }
-    }
-  }
-};
 
 
 // ==========================================
@@ -654,7 +569,6 @@ export interface Services {
   };
 
   map: {
-    getMapEditorBootstrap?(projectId: string): Promise<MapEditorBootstrap>;
     buildings(): Promise<typeof buildings>;
 
     removeBuilding(id: string): Promise<void>;
@@ -692,7 +606,6 @@ export interface Services {
       edit?: MapSavePayload
     ): Promise<void>;
 
-    saveDraft?(command: SaveDraftCommand): Promise<SaveDraftResult>;
   };
 
 }
@@ -1450,8 +1363,6 @@ export const services: Services = {
   // ========================================
 
   map: {
-    getMapEditorBootstrap: (projectId) => mapEditorApiClient.getMapEditorBootstrap(projectId),
-
     buildings: async () => {
       if (!USE_HTTP_API) return wait(localAdapter.buildings.list());
       const response = await apiJson<unknown>("/api/map/buildings");
@@ -1948,21 +1859,6 @@ export const services: Services = {
       );
 
       return wait(undefined);
-    },
-    saveDraft: async (command) => {
-      const result = await mapEditorApiClient.saveDraft(command);
-      if (result.success && !USE_HTTP_API) {
-        mirrorMapEditorOperationsToLegacyReads(command.operations, [
-          { locations, buildings, nodes: routeNodes, pathways },
-          {
-            locations,
-            buildings,
-            nodes: routeNodes,
-            pathways,
-          },
-        ]);
-      }
-      return result;
     },
   },
 

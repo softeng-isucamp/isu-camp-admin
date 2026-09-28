@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Building, Location } from "../../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import { WorkingSessionManager } from "../WorkingSessionManager";
 import { createBuildingFootprintWorkflow } from "./BuildingFootprintWorkflow";
 

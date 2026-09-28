@@ -1,4 +1,4 @@
-import type { LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { EDITABLE_LOCAL_FEATURE_FAMILIES } from "./localFeatures";
 

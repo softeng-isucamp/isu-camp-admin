@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { overlayChanges } from "../mapEditing";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 
 const withReplacement = <T extends { id: string }>(items: T[], entityId: string, value: Record<string, unknown> | null) =>
   value === null

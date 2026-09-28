@@ -24,7 +24,6 @@ describe("WorkingSessionJournal", () => {
     const key = { administratorId: "admin-1", projectId: "echague" };
     const stored = {
       schemaVersion: 1 as const,
-      adminDraftVersion: 4,
       snapshot: manager.exportSnapshot(),
     };
 
@@ -43,7 +42,6 @@ describe("WorkingSessionJournal", () => {
     const second = { administratorId: "admin-2", projectId: "echague" };
     const stored = {
       schemaVersion: 1 as const,
-      adminDraftVersion: null,
       snapshot: manager.exportSnapshot(),
     };
     journal.save(first, stored);
@@ -67,7 +65,6 @@ describe("WorkingSessionJournal", () => {
     const storage = createMemoryStorage();
     storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
       schemaVersion: 1,
-      adminDraftVersion: 1,
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],
@@ -86,7 +83,6 @@ describe("WorkingSessionJournal", () => {
     const storage = createMemoryStorage();
     storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
       schemaVersion: 1,
-      adminDraftVersion: 1,
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],

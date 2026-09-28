@@ -2,7 +2,7 @@ import type {
   FeatureLinkEntity,
   LocalFeatureFamily,
   LocalMapFeatureEntity,
-} from "../../../services/mapEditorApiClient";
+} from "../../../services/mapLayers";
 import {
   compoundBatchOperation,
   linkFeatureOperation,

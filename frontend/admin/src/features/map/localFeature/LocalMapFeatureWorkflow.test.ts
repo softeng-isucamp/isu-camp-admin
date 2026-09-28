@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
+import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import { WorkingSessionManager } from "../WorkingSessionManager";
 import { createLocalMapFeatureWorkflow } from "./LocalMapFeatureWorkflow";
 
