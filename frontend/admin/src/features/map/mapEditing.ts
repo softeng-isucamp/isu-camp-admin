@@ -1,3 +1,4 @@
+import type L from "leaflet";
 import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
 import { locationPolicy } from "../../lib/locationPolicy";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
@@ -451,3 +452,22 @@ export function reviewMapDraft(input: {
     groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []),
   };
 }
+
+export const isPointInBounds = (
+  lat: number,
+  lng: number,
+  bounds: L.LatLngBounds | null,
+  margin = 0.002
+) => {
+  if (!bounds || typeof bounds.getSouth !== "function") return true;
+  const south = bounds.getSouth() - margin;
+  const north = bounds.getNorth() + margin;
+  const west = bounds.getWest() - margin;
+  const east = bounds.getEast() + margin;
+  return lat >= south && lat <= north && lng >= west && lng <= east;
+};
+
+export const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
+  const changes = new Map(changed.map((item) => [item.id, item]));
+  return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
+};
