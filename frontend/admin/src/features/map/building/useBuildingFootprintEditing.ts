@@ -80,7 +80,7 @@ export function useBuildingFootprintEditing({
         await services.map.save({ buildings: [{ ...building, points: [...footprintPoints] }] });
       },
     },
-    workingSession: workingSession,
+    workingSession,
   }), [workingSession]);
 
   const [points, setPoints] = useState<[number, number][]>([]);
