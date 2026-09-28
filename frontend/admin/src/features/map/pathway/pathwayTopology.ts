@@ -1,4 +1,4 @@
-import type { Pathway, RouteNode } from "../../types";
+import type { Pathway, RouteNode } from "../../../types";
 
 export interface GeographicCoordinate {
   latitude: number;

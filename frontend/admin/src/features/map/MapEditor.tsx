@@ -46,14 +46,14 @@ import {
   insertPathPointAtSegmentMidpoint,
   pathwayConnectionError,
   segmentMidpoints,
-} from "./pathwayTopology";
-import { createRoutableCrossing } from "./pathwayCommands";
+} from "./pathway/pathwayTopology";
+import { createRoutableCrossing } from "./pathway/pathwayCommands";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { createPathwayWorkflow } from "./pathway/PathwayWorkflow";
-import { PathPointConversionModal, type PathPointConversionDraft } from "./PathPointConversionModal";
+import { PathPointConversionModal, type PathPointConversionDraft } from "./pathway/PathPointConversionModal";
 import { createBuildingFootprintWorkflow } from "./building/BuildingFootprintWorkflow";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useMapOverlay } from "./session/useMapOverlay";

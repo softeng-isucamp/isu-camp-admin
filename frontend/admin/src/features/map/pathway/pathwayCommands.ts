@@ -1,5 +1,5 @@
-import type { Pathway, RouteNode } from "../../types";
-import type { WorkingOperation } from "./types";
+import type { Pathway, RouteNode } from "../../../types";
+import type { WorkingOperation } from "../types";
 import { createJunctionSplit, type GeographicCoordinate } from "./pathwayTopology";
 
 export function createRoutableCrossing(
