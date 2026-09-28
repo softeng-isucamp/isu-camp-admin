@@ -16,9 +16,9 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, polygonFeatureAnchor, reviewMapDraft, suggestedPathwayName, validateRouteNodeDraft, withoutEndpointPathPoints, type MapObjectReference } from "./mapEditing";
+import { isPointInBounds, overlayChanges, polygonFeatureAnchor, suggestedPathwayName, validateRouteNodeDraft } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
-import { handleWorkingSessionKeyboardShortcut, WorkingSessionManager } from "./WorkingSessionManager";
+import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
@@ -26,7 +26,7 @@ import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
-import type { ActiveToolDraft, SpatialDomain, ToolType, WorkingOperation } from "./types";
+import type { ActiveToolDraft, SpatialDomain, ToolType } from "./types";
 import { locationIdentityKey } from "../../lib/locationPolicy";
 import {
   echagueCampusBoundary,
@@ -46,6 +46,7 @@ import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
+import { isPathwayDraft } from "./pathway/pathwayDrafts";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
@@ -59,7 +60,6 @@ import {
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
-import { projectWorkingSessionOperation, type ProjectedCollection } from "./workingSessionUndoProjection";
 import {
   createIndoorLocationIcon,
   createLocationPinIcon,
@@ -73,7 +73,6 @@ import { PointCoordinateInputs, PointMoveLayer } from "./PointMoveLayer";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
-import { isPathwayDraft, routeNodePoint } from "./pathway/pathwayDrafts";
 import "leaflet/dist/leaflet.css";
 
 const MAP_EDITOR_PROJECT_ID = "proj-echague";
@@ -187,9 +186,7 @@ export function MapEditor() {
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
-  const [confirm, setConfirm] = useState<"save" | "discard" | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ kind: "building" | "route_node" | "pathway"; id: string; name: string; impact?: DeleteImpact } | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
@@ -450,47 +447,12 @@ export function MapEditor() {
     [localFeatureLayer.withFeatureChanges, normalizedLocalFeatures],
   );
 
-  const applyWorkingSessionOperation = useCallback((operation: WorkingOperation | null, direction: "undo" | "redo") => {
-    if (!operation) return;
-    const handlers: Record<ProjectedCollection, (entityId: string, value: Record<string, unknown> | null) => void> = {
-      locations: (entityId, value) => overlay.project("locations", entityId, value),
-      nodes: (entityId, value) => overlay.project("nodes", entityId, value),
-      pathways: (entityId, value) => overlay.project("pathways", entityId, value),
-      buildings: (entityId, value) => overlay.project("buildings", entityId, value),
-      localFeatures: localFeatureLayer.projectFeature,
-      featureLinks: localFeatureLayer.projectFeatureLink,
-    };
-    projectWorkingSessionOperation(operation, direction, {
-      featureLinks: currentFeatureLinks,
-      localFeatures: currentLocalFeatures,
-    }).forEach((projection) => {
-      handlers[projection.collection](projection.entityId, projection.value);
-    });
-  }, [currentFeatureLinks, currentLocalFeatures, localFeatureLayer.projectFeature, localFeatureLayer.projectFeatureLink, overlay.project, workingSessionManager]);
-
-  useEffect(() => {
-    const onWorkingSessionShortcut = (event: KeyboardEvent) => {
-      handleWorkingSessionKeyboardShortcut(event, workingSessionManager, {
-        onUndo: (operation) => applyWorkingSessionOperation(operation, "undo"),
-        onRedo: (operation) => applyWorkingSessionOperation(operation, "redo"),
-      });
-    };
-    window.addEventListener("keydown", onWorkingSessionShortcut);
-    return () => window.removeEventListener("keydown", onWorkingSessionShortcut);
-  }, [applyWorkingSessionOperation, workingSessionManager]);
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
   const navigationBounds = useMemo(() => {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
   }, [campusBoundary]);
-  const draftReview = useMemo(() => reviewMapDraft({
-    original: { locations: directoryLocations, nodes: directoryNodes, pathways: directoryPathways, buildings: directoryBuildings },
-    current: { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
-    deleted: [],
-    campusBoundary,
-  }), [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways, directoryBuildings, directoryLocations, directoryNodes, directoryPathways]);
-
   const outsideBoundaryCount = useMemo(() => {
     const locations = currentLocations.filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
     const nodes = currentNodes.filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
@@ -993,38 +955,6 @@ export function MapEditor() {
     setMode("place");
   };
 
-  const resetDraft = () => {
-    overlay.reset();
-    localFeatureLayer.reset();
-    setOwnerModal(null);
-    setLinkingBuildingEntrance(false);
-    pointTool.reset();
-    setPoints([]);
-    setPolygonClosed(false);
-    setBuildingWorkflowMode("create");
-    setBuildingDetailsModalOpen(false);
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
-    setNonRoutableBuildingId(null);
-    setPathPoints([]);
-    setPathwayDraft(null);
-    setPathwayDraftOriginal(null);
-    nodeFrame.load(null);
-    setEditingPathId(null);
-    setProvisionalPathwayId(null);
-    setPathStartNodeId(null);
-    setPathDraftDirty(false);
-    setEditingBuildingId(null);
-    setConfirm(null);
-    setDeleteConfirmation(null);
-    setPreviewOpen(false);
-    setError("");
-    setMode("select");
-    setSelected(null);
-    workingSessionManager.reset();
-    if (workingSessionKey) workingSessionJournal.clear(workingSessionKey);
-  };
-
   const updateLocation = overlay.putLocation;
   const updateNode = overlay.putNode;
   const updatePathway = (updated: Pathway): boolean => {
@@ -1042,73 +972,7 @@ export function MapEditor() {
     return true;
   };
   const updateBuilding = overlay.putBuilding;
-  const focusObject = (object: MapObjectReference, fieldLabel?: string) => {
-    setPreviewOpen(false);
-    setSelected({ type: object.type, id: object.id });
-    if (fieldLabel) {
-      if (object.type === "building" || object.type === "location") setOwnerModal("location");
-      window.setTimeout(() => document.querySelector<HTMLElement>(`[aria-label="${fieldLabel}"]`)?.focus());
-    }
-    if (object.type === "pathway") {
-      const pathway = currentPathways.find((item) => item.id === object.id);
-      if (pathway) {
-        setEditingPathId(pathway.id);
-        setPathPoints(pathway.pathPoints);
-      }
-    }
-    const positioned = currentLocations.find((item) => item.id === object.id);
-    if (positioned && isPositionedLocation(positioned)) flyTo([positioned.lat, positioned.lng]);
-    const positionedNode = currentNodes.find((item) => item.id === object.id);
-    if (positionedNode) flyTo([positionedNode.lat, positionedNode.lng]);
-    if (object.type === "pathway") {
-      const pathway = currentPathways.find((item) => item.id === object.id);
-      const source = pathway && currentNodes.find((item) => item.id === pathway.sourceNodeId);
-      if (source) flyTo([source.lat, source.lng]);
-    }
-    if (object.type === "building") {
-      const building = currentBuildings.find((item) => item.id === object.id);
-      if (building?.points[0]) flyTo(building.points[0]);
-    }
-  };
 
-  const commit = async () => {
-    if (confirm === "discard") {
-      resetDraft();
-      return;
-    }
-    try {
-      const pathwaysToSave = currentPathways
-        .filter((pathway) => overlay.pathways.some((draft) => draft.id === pathway.id) || pathway.id === editingPathId)
-        .map((pathway) => ({
-          ...pathway,
-          pathPoints: withoutEndpointPathPoints(
-            pathway.id === editingPathId ? pathPoints : pathway.pathPoints,
-            routeNodePoint(currentNodes, pathway.sourceNodeId),
-            routeNodePoint(currentNodes, pathway.destinationNodeId),
-          ),
-        }));
-      await services.map.save({
-        selected: selected ?? undefined,
-        areaPoints: points.length >= 3 ? points : undefined,
-        locations: overlay.locations,
-        nodes: overlay.nodes,
-        buildings: overlay.buildings,
-        pathways: pathwaysToSave,
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["map"] }),
-        queryClient.invalidateQueries({ queryKey: ["locations"] }),
-        queryClient.invalidateQueries({ queryKey: ["nodes"] }),
-      ]);
-      workingSessionManager.markSaved();
-      setConfirm(null);
-      setError("");
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Unable to save map changes.",
-      );
-    }
-  };
 
 
 
@@ -1934,42 +1798,6 @@ export function MapEditor() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span
-            role="status"
-            aria-label="Working Session changes"
-            className="rounded-full bg-[#edf3ef] px-3 py-2 text-[11px] font-bold text-[#365047]"
-          >
-            {workingSessionState.uncommittedCount} {workingSessionState.uncommittedCount === 1 ? "change" : "changes"}
-          </span>
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="px-4 py-2 border border-[#005931] rounded-full text-xs font-bold text-[#005931] hover:bg-emerald-50 transition cursor-pointer"
-          >
-            Preview Map
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Use the active tool's Cancel button to discard its draft."
-            className="px-4 py-2 border border-[#dbe0e2] rounded-full text-xs font-bold text-[#3f4941] hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-          >
-            Discard
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Use the active tool's Save, Update, Add, or Delete button to commit changes."
-            className="px-5 py-2 bg-[#005931] hover:bg-[#004727] rounded-full text-xs font-bold text-white shadow disabled:opacity-40 transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-            </svg>
-            <span>Save Changes</span>
-          </button>
-          <span className="text-[11px] text-[#526359]">Use the active tool’s Save, Update, Add, or Delete button. Map-wide save and discard are unavailable.</span>
-        </div>
       </div>
 
       <div className="relative flex-1 rounded-[28px] overflow-hidden border border-[#e1e3e4] shadow-sm bg-[#dce8e2] min-h-[500px]">
@@ -3430,46 +3258,6 @@ export function MapEditor() {
         </Modal>
       )}
 
-      {confirm && (
-        <Modal
-          title={
-            confirm === "save" ? "Save map changes?" : "Discard changes?"
-          }
-          subtitle={
-            confirm === "save"
-              ? "Save this Working Session to the Admin Draft gateway."
-              : "Discard uncommitted marker and shape drafts."
-          }
-          size="sm"
-          variant={confirm === "save" ? "green" : "danger"}
-          onClose={() => setConfirm(null)}
-        >
-          <p className="text-xs text-[#3f4941] my-2">
-            {confirm === "save"
-              ? "This fixture-backed Admin Draft simulation saves the complete finalized session; it does not publish the map."
-              : "Unsaved marker, node, and pathway edits will be lost."}
-          </p>
-          {error && (
-            <div className="p-2 my-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
-              {error}
-            </div>
-          )}
-          <div className="modal-actions">
-            <Button
-              variant="subtle"
-              onClick={() => setConfirm(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={commit}
-              variant={confirm === "save" ? "primary" : "danger"}
-            >
-              {confirm === "save" ? "Save Changes" : "Discard"}
-            </Button>
-          </div>
-        </Modal>
-      )}
       {deleteConfirmation && (
         <Modal
           title={`Delete ${deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}?`}
@@ -3493,80 +3281,6 @@ export function MapEditor() {
             >
               Delete {deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}
             </Button>
-          </div>
-        </Modal>
-      )}
-      {previewOpen && (
-        <Modal
-          title="Preview Map"
-          subtitle="Validate pending map output and review changes before saving."
-          size="md"
-          variant={draftReview.valid ? "green" : "danger"}
-          onClose={() => setPreviewOpen(false)}
-        >
-          {draftReview.errors.length > 0 ? (
-            <div className="space-y-2 my-3">
-              <div role="alert" className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl">
-                Correct {draftReview.errors.length} validation {draftReview.errors.length === 1 ? "error" : "errors"} before saving.
-              </div>
-              {draftReview.errors.map((validationError, index) => (
-                <button
-                  key={`${validationError.object.type}-${validationError.object.id}-${index}`}
-                  type="button"
-                  onClick={() => focusObject(
-                    validationError.object,
-                    validationError.message === "Associated Building does not exist."
-                      ? "Associated Building"
-                      : validationError.message === "Building code is required."
-                        ? "Building code"
-                        : validationError.message === "Building name is required."
-                          ? "Building name"
-                        : undefined,
-                  )}
-                  className="w-full text-left p-3 border border-red-100 rounded-xl hover:bg-red-50"
-                >
-                  <span className="block text-xs font-bold text-[#191c1d]">{validationError.object.label}</span>
-                  <span className="block text-xs text-red-700 mt-1">{validationError.message}</span>
-                </button>
-              ))}
-            </div>
-          ) : draftReview.groups.length === 0 ? (
-            <p className="my-4 text-sm text-[#3f4941]">No pending changes.</p>
-          ) : (
-            <div className="space-y-3 my-3">
-              {draftReview.warnings && draftReview.warnings.length > 0 && (
-                <div className="space-y-1 my-2">
-                  <div role="status" className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl font-medium">
-                    Advisory review: {draftReview.warnings.length} {draftReview.warnings.length === 1 ? "warning" : "warnings"} (non-blocking).
-                  </div>
-                  {draftReview.warnings.map((warning, index) => (
-                    <div key={`warn-${index}`} className="p-2 border border-amber-100 rounded-xl bg-amber-50/50 text-xs text-amber-800">
-                      <span className="font-bold">{warning.object.label}</span>: {warning.message}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {draftReview.groups.map((group) => (
-                <section key={group.kind}>
-                  <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#005931]">{group.kind} ({group.objects.length})</h3>
-                  <ul className="mt-1 space-y-1">
-                    {group.objects.map((object) => (
-                      <li key={`${group.kind}-${object.type}-${object.id}`}>
-                        <button type="button" onClick={() => focusObject(object)} className="text-xs text-left text-[#191c1d] hover:underline">
-                          {object.label} <span className="text-[#3f4941]">· {object.type}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
-          )}
-          <div className="modal-actions">
-            <Button variant="subtle" onClick={() => setPreviewOpen(false)}>Close</Button>
-            {draftReview.valid && draftReview.groups.length > 0 && (
-              <Button onClick={() => { setPreviewOpen(false); setConfirm("save"); }}>Continue to Save</Button>
-            )}
           </div>
         </Modal>
       )}

@@ -16,10 +16,6 @@ test("seeded administrator previews the unchanged Map Editor baseline", async ({
   });
   await page.goto("/map-editor");
   await expect(page.getByRole("heading", { name: "Interactive Map Editor" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Preview Map" }).click();
-  await expect(page.getByRole("dialog", { name: "Preview Map" })).toContainText("No pending changes.");
-  await expect(page.getByRole("dialog", { name: "Preview Map" })).not.toContainText("Associated Location does not exist.");
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
 });

@@ -354,7 +354,6 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
       buildings: [expect.objectContaining({ id: "building-eng" })],
     })));
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
   });
 
   it("restores an in-progress polygon draft after a browser refresh", async () => {
@@ -442,12 +441,6 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByTestId("path-point-marker")).toHaveAttribute("data-draggable", "true");
     expect(screen.getByLabelText("Path Point latitude")).toHaveValue(16.7209);
-  });
-
-  it("reports that an unchanged map has no pending changes", async () => {
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-    expect(screen.getByText("No pending changes.")).toBeInTheDocument();
   });
 
   it("offers an anchored candidate popover for overlapping spatial features", async () => {
@@ -666,9 +659,8 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6895" } });
     fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
 
-    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent(`${generatedMapFixture.pathways[0].name} · pathway`);
+    await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ id: generatedMapFixture.pathways[0].id })));
   });
 
   it("lets Reshape Pathway drag a point immediately and recomputes unknown distance before saving", async () => {
@@ -729,33 +721,6 @@ describe("Map Editor preview", () => {
     expect(services.map.updatePathway).not.toHaveBeenCalled();
   });
 
-  it("retains building geometry validation for an imported building", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { ...generatedMapFixture.buildings[0], points: [generatedMapFixture.buildings[0].points[0], generatedMapFixture.buildings[0].points[1], generatedMapFixture.buildings[0].points[0]] },
-      ...generatedMapFixture.buildings.slice(1),
-    ]);
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-
-    expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
-  });
-
-  it.skip("blocks a missing Route Node association and focuses its correction field", async () => {
-    vi.mocked(services.map.nodes).mockResolvedValue([
-      { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "missing-location", lat: 16.7205, lng: 121.6895 },
-    ]);
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-    const guidance = await screen.findByRole("button", { name: /Associated Building does not exist/ });
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
-    fireEvent.click(guidance);
-
-    await waitFor(() => expect(screen.getByLabelText("Associated Building")).toBeInTheDocument());
-  });
-
   it("preserves a Location rename while mapped geometry remains read-only", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
@@ -767,9 +732,6 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save Location" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("renamed (1)");
-    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("Main Library · location");
   });
 
   it("persists a newly added Route Node's moved position", async () => {
@@ -834,7 +796,6 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
 
     expect(screen.getByRole("complementary", { name: "Main Library object details" })).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
   it("omits parent building and spatial source from indoor location cards", async () => {
@@ -892,7 +853,6 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByLabelText("Route Node name")).toHaveValue("North Gate");
     expect(screen.queryByLabelText("Route Node association")).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
     fireEvent.click(screen.getByRole("button", { name: "Update Route Node" }));
     await waitFor(() => expect(services.map.updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
       id: "node-a",
@@ -901,7 +861,6 @@ describe("Map Editor preview", () => {
       associatedPlaceId: null,
     })));
     expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction Route Node");
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
   it("persists converting an Entrance to a Junction and restores truthful UI when persistence fails", async () => {
@@ -1133,30 +1092,6 @@ describe("Map Editor preview", () => {
     expect(screen.queryAllByRole("button", { name: "North Walk Pathway" })).toHaveLength(0);
   });
 
-  it.skip("undoes and redoes Route Node deactivation with connected Pathways as one operation", async () => {
-    vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
-    ]);
-    renderEditor();
-
-    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
-    fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Deactivate Route Node/ }));
-
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
-
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
-    fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click((await screen.findAllByRole("button", { name: "North Walk Pathway" }))[0]);
-    expect(screen.getByRole("complementary", { name: "North Walk object details" })).toHaveTextContent("Two-way · Open");
-
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
-    expect(screen.queryAllByRole("button", { name: "North Walk Pathway" })).toHaveLength(0);
-  });
-
   it("confirms, cancels, and hard-deletes a Pathway with its Path Point warning", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-lib", name: "Library", code: "LIB", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
@@ -1207,7 +1142,7 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.deleteRouteNode).toHaveBeenCalledTimes(2));
   });
 
-  it("saves an Area polygon as the named Building shown in Preview", async () => {
+  it("saves an Area polygon as the named Building", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
     clickMap(16.720, 121.689);
@@ -1219,16 +1154,11 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
+    expect(await screen.findByRole("complementary", { name: "Science Annex object details" })).toBeInTheDocument();
 
     expect(Array.from(document.querySelectorAll('[data-testid="saved-map-marker"]')).some((marker) =>
       marker.getAttribute("data-position")?.startsWith("16.720666"),
     )).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    const preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).toHaveTextContent("added (2)");
-    expect(preview).toHaveTextContent("Science Annex · building");
   });
 
   it("closes a Building Footprint from V1 without showing a separate closure overlay", async () => {
@@ -1358,11 +1288,10 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
       buildings: [expect.objectContaining({ id: "building-open" })],
     })));
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-    expect(screen.getByRole("alert", { name: "Building is not routable" })).toBeInTheDocument();
+    expect(await screen.findByRole("alert", { name: "Building is not routable" })).toBeInTheDocument();
   });
 
-  it("creates the feature, Building, and link as one compound Working Session change", async () => {
+  it("creates the feature, Building, and link together", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
     clickMap(16.720, 121.689);
@@ -1374,9 +1303,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("Science Annex · building");
+    expect(await screen.findByRole("complementary", { name: "Science Annex object details" })).toBeInTheDocument();
   });
 
   it("launches a guided Entrance Route Node draft for the completed Building", async () => {
@@ -1569,40 +1496,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("complementary", { name: "Renamed Active Walk object details" })).toBeInTheDocument();
   });
 
-  it("focuses Building code correction guidance for an invalid saved footprint", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "Science Annex", code: "", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-    fireEvent.click(screen.getByRole("button", { name: /Building code is required/ }));
-
-    await waitFor(() => expect(screen.getByLabelText("Building code")).toHaveFocus());
-  });
-
-  it("focuses Building name correction guidance for an invalid saved footprint", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "", code: "SCI-ANN", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-    fireEvent.click(screen.getByRole("button", { name: /Building name is required/ }));
-
-    await waitFor(() => expect(screen.getByLabelText("Building name")).toHaveFocus());
-  });
-
-  it("blocks malformed Building geometry in the review", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-1", name: "Science Annex", code: "SCI-ANN", points: [[16.720, 121.689], [16.721, 121.689], [16.720, 121.689]] },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Preview Map" }));
-
-    expect(screen.getByRole("button", { name: /Building geometry requires at least 3 distinct points/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
-  });
-
-  it("adjusts a selected Path Point with coordinates and preserves it in Preview", async () => {
+  it("adjusts a selected Path Point with coordinates", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
       { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
@@ -1616,8 +1510,6 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    expect(screen.getByRole("dialog", { name: "Preview Map" })).toHaveTextContent("North Walk · pathway");
   });
 
   it("moves a selected Path Point immediately while reshaping", async () => {
@@ -1731,7 +1623,6 @@ describe("Map Editor preview", () => {
     expect(screen.getByLabelText("Pathway shade")).toHaveValue("Unshaded");
     expect(screen.getByText("Unshaded · Walkway · One-way · Open")).toBeInTheDocument();
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6897],[16.7208,121.6898],[16.721,121.69]]");
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
   it("switches a selected Pathway's endpoints and reverses its Path Sequence", async () => {
@@ -1825,7 +1716,7 @@ describe("Map Editor preview", () => {
     )).toBe(true);
   });
 
-  it("prompts for a visual crossing and commits a Junction split as one Working Session change", async () => {
+  it("prompts for a visual crossing and commits a Junction split", async () => {
     vi.mocked(services.map.createRouteNode).mockImplementation(async (node) => ({ ...node, id: "42" }));
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "A", nodeType: "Junction", lat: 16.72, lng: 121.689 },
@@ -1847,7 +1738,6 @@ describe("Map Editor preview", () => {
       lat: expect.any(Number),
       lng: expect.any(Number),
     })));
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
     await waitFor(() => expect(screen.queryByRole("alert", { name: "Non-routable pathway crossing" })).not.toBeInTheDocument());
 
     fireEvent.change(await screen.findByLabelText("Route Node name"), { target: { value: "Central Crossing" } });
@@ -1904,13 +1794,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByText(/no copied outdoor coordinate stored on Building/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
-
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
+    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toBeInTheDocument();
   });
 
   it("does not report the in-progress polygon as an overlapping building", async () => {
@@ -1947,7 +1831,7 @@ describe("Map Editor preview", () => {
     expect(saveBtn).not.toBeDisabled();
     fireEvent.click(saveBtn);
 
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
+    expect(await screen.findByRole("complementary", { name: "New Overlapping Hall object details" })).toBeInTheDocument();
   });
 
   it("attaches footprint to eligible existing building without creating new location record", async () => {
@@ -1973,12 +1857,6 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
       buildings: [expect.objectContaining({ id: "bld-eligible" })],
     })));
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    const preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).toHaveTextContent("Eligible Building · building");
-    expect(preview).not.toHaveTextContent("Eligible Building · location");
   });
 
   it("suspends and restores polygon draft with all fields preserved", async () => {
@@ -2079,75 +1957,6 @@ describe("Map Editor preview", () => {
     expect(createdBuilding?.lat).toBeNull();
     expect(createdBuilding?.lng).toBeNull();
     expect(createdBuilding?.positioned).toBe(false);
-  });
-
-  it("undoes and redoes compound Create New Building operation atomically as one action", async () => {
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Atomic Lab" } });
-    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ATM-LAB" } });
-    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Laboratory" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
-
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-
-    // Preview should show the added building
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    let preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).toHaveTextContent("Atomic Lab");
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-
-    // Undo: compound batch is undone as ONE step
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
-
-    // Building should be removed from preview
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).not.toHaveTextContent("Atomic Lab");
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-
-    // Redo: compound batch is reapplied as ONE step
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
-    fireEvent.click(screen.getByRole("button", { name: "Preview Map" }));
-    preview = screen.getByRole("dialog", { name: "Preview Map" });
-    expect(preview).toHaveTextContent("Atomic Lab");
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  });
-
-  it("undoes and redoes compound Attach Existing Building operation atomically as one action", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "bld-attachable", name: "Attachable Hall", code: "ATT-01", points: [] },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Attachable Hall/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
-
-    await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
-      buildings: [expect.objectContaining({ id: "bld-attachable" })],
-    })));
-    await waitFor(() => expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change"));
-
-    // Undo: footprint is detached as ONE step
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("0 changes");
-
-    // Redo: footprint is re-attached as ONE step
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
-    expect(screen.getByRole("status", { name: "Working Session changes" })).toHaveTextContent("1 change");
   });
 
   it("sources attach candidates from unpositioned Buildings in locations query", async () => {

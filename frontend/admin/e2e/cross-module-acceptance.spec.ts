@@ -15,8 +15,6 @@ test("Map Editor remains usable at a narrow viewport", async ({ page }) => {
 
   await page.goto("/map-editor");
   await expect(page.getByRole("heading", { name: "Interactive Map Editor" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Preview Map" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save Changes" })).toBeVisible();
 });
 
 test("Locations keeps outdoor creation guidance passive", async ({ page }) => {

@@ -436,38 +436,5 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page).toHaveScreenshot("map-area-drawn.png", {
     animations: "disabled",
   });
-  await page.getByRole("button", { name: "Save Changes" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Save map changes?" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("map-save-confirmation.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "Discard" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Discard changes?" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("map-discard-confirmation.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page.goto("/map-editor?mockFailure=mapSave");
-  await page.getByPlaceholder("Search campus places...").fill("Laboratory");
-  await page.getByRole("button", { name: /Computer Lab 1/ }).click();
-  await page.getByRole("button", { name: "Move Marker" }).click();
-  await page
-    .locator(".leaflet-container")
-    .click({ position: { x: 400, y: 245 } });
-  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Save Changes", exact: true })
-    .last()
-    .click();
-  await expect(page.getByRole("alert")).toContainText("Mock mapSave failed");
-  await expect(page).toHaveScreenshot("map-save-failure.png", {
-    animations: "disabled",
-    maxDiffPixels: 200,
-  });
   }
 });
