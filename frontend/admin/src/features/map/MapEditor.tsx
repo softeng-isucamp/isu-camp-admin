@@ -72,7 +72,7 @@ import {
 } from "./mapIcons";
 import { PointCoordinateInputs, PointMoveLayer } from "./PointMoveLayer";
 import { MapController } from "./MapController";
-import { belongsToBuilding, isIndoorLocation, isPositionedLocation, normalizeFloorLabel } from "./indoorLocation/indoorLocations";
+import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { isPathwayDraft, routeNodePoint } from "./pathway/pathwayDrafts";
 import "leaflet/dist/leaflet.css";
 
@@ -184,11 +184,9 @@ export function MapEditor() {
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const saving = useSavingAction();
   const { savingAction } = saving;
-  const [addRoomOpen, setAddRoomOpen] = useState(false);
   const [indoorLocationChooserOpen, setIndoorLocationChooserOpen] = useState(false);
   const [indoorPlacement, setIndoorPlacement] = useState<{ locationId: string; buildingId: string; position: MapPoint | null } | null>(null);
   const [indoorPositionSaving, setIndoorPositionSaving] = useState(false);
-  const [newRoom, setNewRoom] = useState({ name: "", code: "", floor: "" });
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
@@ -904,30 +902,6 @@ export function MapEditor() {
     completeToolDraft("point");
   };
 
-  const handleSaveNewRoom = () => {
-    if (!selectedBuilding || (selectedBuilding.type ?? selectedBuildingLocation?.type) !== "Building" || !newRoom.name.trim() || !newRoom.code.trim()) return;
-    const location: Location = {
-      id: `location-${Date.now()}`,
-      name: newRoom.name.trim(),
-      code: newRoom.code.trim(),
-      type: "Room",
-      status: "Active",
-      parentId: selectedBuilding.id,
-      building: selectedBuilding.name,
-      floor: newRoom.floor.trim() ? normalizeFloorLabel(newRoom.floor) : undefined,
-      function: "",
-      lat: null,
-      lng: null,
-      positioned: false,
-    };
-    overlay.putLocation(location);
-    workingSessionManager.executeOperation({ type: "create_entity", domain: "Locations", entityId: location.id,
-      before: null, after: location as unknown as Record<string, unknown>, description: `Create ${location.name}` });
-    setAddRoomOpen(false);
-    setLinkingBuildingEntrance(false);
-    setNewRoom({ name: "", code: "", floor: "" });
-  };
-
   const beginIndoorLocationPlacement = (building: Building, location: Location) => {
     if (building.points.length < 3) {
       setError(`${building.name} needs a footprint before an indoor location can be marked.`);
@@ -1105,9 +1079,7 @@ export function MapEditor() {
     overlay.reset();
     localFeatureLayer.reset();
     setOwnerModal(null);
-    setAddRoomOpen(false);
     setLinkingBuildingEntrance(false);
-    setNewRoom({ name: "", code: "", floor: "" });
     pointTool.reset();
     setPoints([]);
     setPolygonClosed(false);
@@ -3505,20 +3477,6 @@ export function MapEditor() {
         onPathwayChange={updateConversionPathway}
         onSave={savePathPointConversion}
       />}
-      {addRoomOpen && selectedBuilding && (
-        <Modal title="Add Room" subtitle={`Add an indoor Room under ${selectedBuilding.name}.`} size="sm" variant="green" onClose={() => setAddRoomOpen(false)}>
-          <label className="block text-xs font-semibold text-[#3f4941]">Name
-            <input aria-label="New room name" value={newRoom.name} onChange={(e) => setNewRoom({ ...newRoom, name: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-          </label>
-          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Code
-            <input aria-label="New room code" value={newRoom.code} onChange={(e) => setNewRoom({ ...newRoom, code: e.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-          </label>
-          <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Floor
-            <input aria-label="New room floor" value={newRoom.floor} onChange={(e) => setNewRoom({ ...newRoom, floor: e.target.value })} placeholder="2nd Floor" className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm" />
-          </label>
-          <div className="modal-actions"><Button variant="subtle" onClick={() => setAddRoomOpen(false)}>Cancel</Button><Button disabled={!newRoom.name.trim() || !newRoom.code.trim()} onClick={handleSaveNewRoom}>Add Room</Button></div>
-        </Modal>
-      )}
 
       {indoorLocationChooserOpen && selectedBuilding && (
         <Modal
