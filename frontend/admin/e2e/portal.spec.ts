@@ -329,7 +329,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
 
   // Map Editor behavior is covered by the dedicated consolidation specs.
-  // The former inline map flow exercised removed local-feature and point-placement UI.
+  // The former inline map flow exercised removed point-placement UI.
   if (false) {
   await page.goto("/map-editor");
   await page.goto("/map-editor");

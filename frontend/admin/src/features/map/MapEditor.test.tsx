@@ -31,7 +31,6 @@ describe("Map Editor preview", () => {
       "aria-pressed",
       "true",
     );
-
   });
 
   it("opens the requested creation tool from a Locations handoff", async () => {
