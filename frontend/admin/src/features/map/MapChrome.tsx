@@ -1,3 +1,5 @@
+import { TileLayer } from "react-leaflet";
+
 /** The Map Editor page header. */
 export function MapPageHeader() {
   return (
@@ -80,5 +82,31 @@ export function NonRoutableBuildingNotice({ onAddEntrance }: { onAddEntrance: ()
         🚪 Add Entrance Route Node Now
       </button>
     </div>
+  );
+}
+
+interface BasemapTileLayerProps {
+  basemap: "street" | "satellite";
+  displaysOsmOverlays: boolean;
+}
+
+/** The street or satellite tiles, with attribution for any displayed OpenStreetMap overlays. */
+export function BasemapTileLayer({ basemap, displaysOsmOverlays }: BasemapTileLayerProps) {
+  return (
+    <TileLayer
+      key={basemap}
+      maxNativeZoom={basemap === "satellite" ? 18 : 19}
+      maxZoom={22}
+      attribution={
+        basemap === "satellite"
+          ? `© Esri${displaysOsmOverlays ? " · © OpenStreetMap contributors" : ""}`
+          : "© OpenStreetMap contributors"
+      }
+      url={
+        basemap === "satellite"
+          ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      }
+    />
   );
 }

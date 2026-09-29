@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer } from "react-leaflet";
+import { MapContainer } from "react-leaflet";
 import L from "leaflet";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -13,12 +13,10 @@ import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
-import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
 import { mapInspectorModel } from "./inspector/mapInspectorModel";
 import { useEntranceLinking } from "./building/useEntranceLinking";
 import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
-import { RouteNodeMarkersLayer, RouteNodeMoveLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
@@ -31,7 +29,6 @@ import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
-import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
@@ -49,15 +46,14 @@ import { useMapSearch } from "./selection/useMapSearch";
 import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
-import { BasemapToggle, MapPageHeader, NonRoutableBuildingNotice, OutsideBoundaryNotice, OverviewZoomNotice } from "./MapChrome";
+import { BasemapTileLayer, BasemapToggle, MapPageHeader, NonRoutableBuildingNotice, OutsideBoundaryNotice, OverviewZoomNotice } from "./MapChrome";
+import { MapLayers } from "./MapLayers";
 import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
 import { belongsToBuilding, indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
-import { IndoorLocationMapLayers } from "./indoorLocation/IndoorLocationMapLayers";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
-import { LocationMapLayer } from "./location/LocationMapLayer";
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
 import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
@@ -741,21 +737,7 @@ export function MapEditor() {
           zoomControl={false}
           className="w-full h-full"
         >
-          <TileLayer
-            key={basemap}
-            maxNativeZoom={basemap === "satellite" ? 18 : 19}
-            maxZoom={22}
-            attribution={
-              basemap === "satellite"
-                ? `© Esri${displaysOsmOverlays ? " · © OpenStreetMap contributors" : ""}`
-                : "© OpenStreetMap contributors"
-            }
-            url={
-              basemap === "satellite"
-                ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            }
-          />
+          <BasemapTileLayer basemap={basemap} displaysOsmOverlays={displaysOsmOverlays} />
           <MapController
             onMapClick={onMapClick}
             flyTarget={flyTarget}
@@ -765,94 +747,30 @@ export function MapEditor() {
             onViewportChange={handleViewportChange}
           />
 
-          <BuildingFootprintLayer
-            buildings={visible.buildings}
-            selectedBuildingId={selected?.type === "building" ? selected.id : null}
-            mode={mode}
-            editingBuildingId={editingBuildingId}
-            featureLinks={currentFeatureLinks}
-            localFeatures={currentLocalFeatures}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onSelectBuilding={(buildingId, anchor) => selectCanvasObject("building", buildingId, anchor)}
-            onSelectLocalFeature={(featureId) => selectObject("local_feature", featureId)}
-          />
-
-          <PathwaysLayer
-            pathway={pathway}
-            pathways={visible.pathways}
-            nodes={currentNodes}
-            mode={mode}
-            selectedPathId={selected?.type === "pathway" ? selected.id : null}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onSelectPathway={(pathwayId, anchor) => selectCanvasObject("pathway", pathwayId, anchor)}
-          />
-
-          <LocationMapLayer
-            locations={visible.locations}
-            selectedLocationId={selected?.type === "location" ? selected.id : null}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onSelectLocation={(locationId, anchor) => selectCanvasObject("location", locationId, anchor)}
-          />
-
-          <IndoorLocationMapLayers
-            indoor={indoor}
-            visibleLocations={visibleIndoorLocations}
-            contentLocations={buildingContentLocations}
-            buildings={currentBuildings}
-            selectedLocationId={selected?.type === "location" ? selected.id : null}
-            onSelectLocation={(locationId) => {
-              clearSelectionPopover();
-              setSelected({ type: "location", id: locationId });
+          <MapLayers
+            view={{ mode, selected, isOverviewZoom, campusBoundary }}
+            visible={visible}
+            current={{
+              buildings: currentBuildings,
+              nodes: currentNodes,
+              featureLinks: currentFeatureLinks,
+              localFeatures: currentLocalFeatures,
+              contentLocations: buildingContentLocations,
+              visibleIndoorLocations,
             }}
-          />
-
-          <RouteNodeMarkersLayer
-            nodes={visible.nodes}
-            mode={mode}
-            movingId={pointTool.movingId}
-            selectedNodeId={selected?.type === "node" ? selected.id : null}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onClickNode={handleRouteNodeClick}
-          />
-
-          <PathwayDraftLayer
-            pathway={pathway}
-            nodes={currentNodes}
-            mode={mode}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onSelect={setSelected}
-            onError={setError}
-          />
-
-          <BuildingDraftLayer
-            editor={buildingEditor}
-            mode={mode}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onError={setError}
-          />
-
-          <RouteNodeMoveLayer
-            pointTool={pointTool}
-            mode={mode}
-            snapTargets={pointSnapTargets}
-            campusBoundary={campusBoundary}
-            outsideBoundary={movingOutsideBoundary}
-            distanceMeters={moveDistanceMeters}
-            isOverviewZoom={isOverviewZoom}
-          />
-
-          <RouteNodePlacementMarker
-            pointTool={pointTool}
-            mode={mode}
-            campusBoundary={campusBoundary}
-            isOverviewZoom={isOverviewZoom}
-            onError={setError}
+            editors={{ pathway, buildingEditor, pointTool, indoor }}
+            move={{ snapTargets: pointSnapTargets, outsideBoundary: movingOutsideBoundary, distanceMeters: moveDistanceMeters }}
+            actions={{
+              onSelectCanvasObject: selectCanvasObject,
+              onSelectObject: selectObject,
+              onSelectIndoorLocation: (locationId) => {
+                clearSelectionPopover();
+                setSelected({ type: "location", id: locationId });
+              },
+              onClickNode: handleRouteNodeClick,
+              onSelect: setSelected,
+              onError: setError,
+            }}
           />
         </MapContainer>
 
