@@ -1,4 +1,3 @@
-import { useSyncExternalStore, useEffect } from "react";
 import type {
   ActiveToolDraft,
   InterruptionAction,
@@ -15,12 +14,11 @@ function generateOperationId(prefix = "op"): string {
 }
 
 /**
- * Pure state container managing the operation-based undo/redo stack,
- * dirtiness tracking, tool draft lifecycle, and 3-way interruption draft safety.
+ * Pure state container for the Working Session operation log, dirtiness
+ * tracking, the tool draft lifecycle, and 3-way interruption draft safety.
  */
 export class WorkingSessionManager {
   private pastOperations: WorkingOperation[] = [];
-  private futureOperations: WorkingOperation[] = [];
   private activeDraft: ActiveToolDraft | null = null;
   private suspendedDrafts: ActiveToolDraft[] = [];
   private savedCheckpointIndex: number = 0;
@@ -40,13 +38,10 @@ export class WorkingSessionManager {
   public getState(): WorkingSessionState {
     return {
       pastOperations: [...this.pastOperations],
-      futureOperations: [...this.futureOperations],
       activeDraft: this.activeDraft ? { ...this.activeDraft } : null,
       suspendedDrafts: this.suspendedDrafts.map((d) => ({ ...d })),
       isDirty: this.getIsDirty(),
       uncommittedCount: this.getUncommittedCount(),
-      canUndo: this.canUndo(),
-      canRedo: this.canRedo(),
     };
   }
 
@@ -54,7 +49,6 @@ export class WorkingSessionManager {
     return structuredClone({
       schemaVersion: 1 as const,
       pastOperations: this.pastOperations,
-      futureOperations: this.futureOperations,
       activeDraft: this.activeDraft,
       suspendedDrafts: this.suspendedDrafts,
       savedCheckpointIndex: this.savedCheckpointIndex,
@@ -65,7 +59,6 @@ export class WorkingSessionManager {
     if (
       snapshot.schemaVersion !== 1
       || !Array.isArray(snapshot.pastOperations)
-      || !Array.isArray(snapshot.futureOperations)
       || !Array.isArray(snapshot.suspendedDrafts)
       || !Number.isInteger(snapshot.savedCheckpointIndex)
     ) {
@@ -73,7 +66,6 @@ export class WorkingSessionManager {
     }
 
     this.pastOperations = structuredClone(snapshot.pastOperations);
-    this.futureOperations = structuredClone(snapshot.futureOperations);
     this.activeDraft = snapshot.activeDraft ? structuredClone(snapshot.activeDraft) : null;
     this.suspendedDrafts = structuredClone(snapshot.suspendedDrafts);
     this.savedCheckpointIndex = Math.max(
@@ -102,7 +94,7 @@ export class WorkingSessionManager {
   }
 
   // ---------------------------------------------------------------------------
-  // Operations & Undo/Redo Stack
+  // Operation Log
   // ---------------------------------------------------------------------------
 
   public executeOperation(
@@ -118,9 +110,12 @@ export class WorkingSessionManager {
       this.savedCheckpointIndex = this.pastOperations.length;
     }
     this.pastOperations.push(op);
-    this.futureOperations = [];
     this.notify();
     return op;
+  }
+
+  public getPastOperations(): readonly WorkingOperation[] {
+    return this.pastOperations;
   }
 
   public executeBatch(
@@ -144,37 +139,6 @@ export class WorkingSessionManager {
     return this.executeOperation(batchOp);
   }
 
-  public undo(): WorkingOperation | null {
-    if (!this.canUndo()) return null;
-    const op = this.pastOperations.pop()!;
-    this.futureOperations.push(op);
-    this.notify();
-    return op;
-  }
-
-  public redo(): WorkingOperation | null {
-    if (!this.canRedo()) return null;
-    const op = this.futureOperations.pop()!;
-    this.pastOperations.push(op);
-    this.notify();
-    return op;
-  }
-
-  public canUndo(): boolean {
-    return this.pastOperations.length > 0;
-  }
-
-  public canRedo(): boolean {
-    return this.futureOperations.length > 0;
-  }
-
-  public getPastOperations(): readonly WorkingOperation[] {
-    return this.pastOperations;
-  }
-
-  public getFutureOperations(): readonly WorkingOperation[] {
-    return this.futureOperations;
-  }
 
   // ---------------------------------------------------------------------------
   // Dirtiness & Checkpoint Tracking
@@ -207,7 +171,6 @@ export class WorkingSessionManager {
 
   public reset(): void {
     this.pastOperations = [];
-    this.futureOperations = [];
     this.activeDraft = null;
     this.suspendedDrafts = [];
     this.savedCheckpointIndex = 0;
@@ -525,138 +488,4 @@ export function compoundBatchOperation(
     description: description ?? `Compound batch with ${nestedOperations.length} operations`,
     timestamp: Date.now(),
   };
-}
-
-// -----------------------------------------------------------------------------
-// Atomic Compound Undo/Redo Traversal Helpers
-// -----------------------------------------------------------------------------
-
-/**
- * Traverses an operation in reverse for undoing.
- * For compound_batch, walks nested operations in LIFO (reverse) order.
- */
-export function traverseRevertOperation(
-  operation: WorkingOperation,
-  callback: (op: WorkingOperation) => void
-): void {
-  if (operation.type === "compound_batch" && operation.nestedOperations) {
-    for (let i = operation.nestedOperations.length - 1; i >= 0; i--) {
-      traverseRevertOperation(operation.nestedOperations[i], callback);
-    }
-  }
-  callback(operation);
-}
-
-/**
- * Traverses an operation in forward order for redoing/applying.
- * For compound_batch, walks nested operations in forward order.
- */
-export function traverseApplyOperation(
-  operation: WorkingOperation,
-  callback: (op: WorkingOperation) => void
-): void {
-  callback(operation);
-  if (operation.type === "compound_batch" && operation.nestedOperations) {
-    for (let i = 0; i < operation.nestedOperations.length; i++) {
-      traverseApplyOperation(operation.nestedOperations[i], callback);
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Keyboard Helper & React Hooks
-// -----------------------------------------------------------------------------
-
-function isEditableElement(target: EventTarget | null): boolean {
-  if (!target || !(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  if (tag === "input" || tag === "textarea" || tag === "select") return true;
-  return target.isContentEditable;
-}
-
-export interface KeyboardShortcutOptions {
-  isBlocked?: () => boolean;
-  onUndo?: (op: WorkingOperation | null) => void;
-  onRedo?: (op: WorkingOperation | null) => void;
-  allowInInputs?: boolean;
-}
-
-/**
- * Handles Ctrl+Z / Cmd+Z (Undo) and Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y (Redo).
- * Returns true if a shortcut was intercepted and executed.
- */
-export function handleWorkingSessionKeyboardShortcut(
-  event: KeyboardEvent | React.KeyboardEvent,
-  manager: WorkingSessionManager,
-  options?: KeyboardShortcutOptions
-): boolean {
-  if (!options?.allowInInputs && isEditableElement(event.target)) {
-    return false;
-  }
-
-  if (options?.isBlocked && options.isBlocked()) {
-    return false;
-  }
-
-  const isModifier = event.metaKey || event.ctrlKey;
-  if (!isModifier || event.altKey) {
-    return false;
-  }
-
-  const key = event.key.toLowerCase();
-
-  // Redo: Ctrl+Shift+Z, Cmd+Shift+Z, or Ctrl+Y, Cmd+Y
-  if ((key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey)) {
-    if (manager.canRedo()) {
-      event.preventDefault();
-      const op = manager.redo();
-      options?.onRedo?.(op);
-      return true;
-    }
-  }
-
-  // Undo: Ctrl+Z or Cmd+Z (without shift)
-  if (key === "z" && !event.shiftKey) {
-    if (manager.canUndo()) {
-      event.preventDefault();
-      const op = manager.undo();
-      options?.onUndo?.(op);
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * React hook to bind a component to WorkingSessionManager state.
- */
-export function useWorkingSession(manager: WorkingSessionManager): WorkingSessionState {
-  return useSyncExternalStore(
-    (onStoreChange) => manager.subscribe(onStoreChange),
-    () => manager.getState()
-  );
-}
-
-/**
- * React hook to listen for global undo/redo shortcuts on window.
- */
-export function useWorkingSessionShortcuts(
-  manager: WorkingSessionManager,
-  options?: KeyboardShortcutOptions & { enabled?: boolean }
-): void {
-  const { enabled = true, ...shortcutOpts } = options ?? {};
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      handleWorkingSessionKeyboardShortcut(event, manager, shortcutOpts);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [manager, enabled, shortcutOpts]);
 }

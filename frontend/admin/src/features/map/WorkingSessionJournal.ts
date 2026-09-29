@@ -42,7 +42,6 @@ const isStoredWorkingSession = (value: unknown): value is StoredWorkingSession =
   return candidate.schemaVersion === 1
     && candidate.snapshot?.schemaVersion === 1
     && Array.isArray(candidate.snapshot.pastOperations)
-    && Array.isArray(candidate.snapshot.futureOperations)
     && Array.isArray(candidate.snapshot.suspendedDrafts)
     && candidate.snapshot.suspendedDrafts.every(isActiveToolDraft)
     && Number.isInteger(candidate.snapshot.savedCheckpointIndex)
