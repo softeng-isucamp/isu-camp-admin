@@ -120,7 +120,7 @@ interface LocationDetailsModalProps {
   directory: Location[];
   allowedTypes?: LocationType[];
   onClose: () => void;
-  onSubmit: (location: Location, photos: LocationPhotoDraft[]) => void | Promise<void>;
+  onSubmit: (location: Location, photos?: LocationPhotoDraft[]) => void | Promise<void>;
   onPickIndoorLocationOnMap?: () => void;
 }
 
@@ -194,7 +194,7 @@ export function LocationDetailsModal({
         lat: draft.lat,
         lng: draft.lng,
         positioned: draft.lat !== null && draft.lng !== null,
-      }, photos);
+      }, loadingPhotos || photoLoadFailed ? undefined : photos);
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to save location.");
@@ -216,7 +216,13 @@ export function LocationDetailsModal({
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
-      <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} />
+      <LocationPhotoUpload
+        photos={photos}
+        onChange={setPhotos}
+        loading={loadingPhotos}
+        disabled={photoLoadFailed}
+        error={photoLoadFailed ? "Photos could not be loaded. Metadata can still be saved; reopen the editor to manage photos." : undefined}
+      />
       {locationPolicy.classify(draft.type).kind === "indoor" ? (
         <LocationCoordinatesFields
           lat={draft.lat}
@@ -230,7 +236,7 @@ export function LocationDetailsModal({
       )}
       <div className="modal-actions">
         <Button variant="subtle" disabled={submitting} onClick={onClose}>Cancel</Button>
-        <Button disabled={submitting || loadingPhotos || photoLoadFailed} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
+        <Button disabled={submitting} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
       </div>
     </Modal>
   );

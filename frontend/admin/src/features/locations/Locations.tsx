@@ -491,7 +491,8 @@ export function Locations() {
       if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
         await services.locations.save(handoffParent);
       }
-      let saved = await services.locations.save(normalized, photos);
+      const gallery = !adding && (loadingPhotos || photoLoadFailed) ? undefined : photos;
+      let saved = await services.locations.save(normalized, gallery);
       if (isChildType(saved.type) && saved.parentId && normalized.lat !== null && normalized.lng !== null) {
         saved = await services.locations.saveIndoorPosition({
           id: saved.id,
@@ -1209,7 +1210,15 @@ export function Locations() {
               </p>}
 
               {/* Upload Box */}
-              <LocationPhotoUpload photos={photos} onChange={setPhotos} loading={loadingPhotos} error={errorFor("photo")} />
+              <LocationPhotoUpload
+                photos={photos}
+                onChange={setPhotos}
+                loading={loadingPhotos}
+                disabled={photoLoadFailed}
+                error={photoLoadFailed
+                  ? "Photos could not be loaded. Metadata can still be saved; reopen the editor to manage photos."
+                  : errorFor("photo")}
+              />
             </div>
 
             {/* Bottom Actions */}
@@ -1217,7 +1226,7 @@ export function Locations() {
               <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button disabled={saving || loadingPhotos || photoLoadFailed} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
+              <Button disabled={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
                 {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>
