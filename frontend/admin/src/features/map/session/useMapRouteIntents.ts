@@ -15,7 +15,7 @@ export type MapRouteIntent =
 interface UseMapRouteIntentsOptions {
   route: { pathname: string; search: string; navigate: NavigateFunction };
   data: {
-    /** The loaded map data; the intents re-run whenever it changes (e.g. a refetch after saving). */
+    /** The loaded map data; intents wait for it, and each URL intent clears its param once handled so a refetch does not re-run it. */
     map: ReturnType<typeof useMapData>["data"];
     directoryLocations: Location[];
     directoryPathways: Pathway[];
@@ -69,6 +69,7 @@ export function useMapRouteIntents({ route, data, current, onIntent, setError }:
     if (locationId && (building || loc)) {
       if (building) onIntent({ type: "locate-building", building });
       else if (loc) onIntent({ type: "locate-location", location: loc });
+      route.navigate(route.pathname, { replace: true });
     }
   }, [current.locations, current.buildings, data.map, data.directoryLocations, route.navigate, route.pathname, route.search]);
 
@@ -80,9 +81,11 @@ export function useMapRouteIntents({ route, data, current, onIntent, setError }:
       ?? data.directoryPathways.find((item) => item.id === pathwayId);
     if (!requested) {
       setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
+      route.navigate(route.pathname, { replace: true });
       return;
     }
     const sourceNode = current.nodes.find((node) => node.id === requested.sourceNodeId);
     onIntent({ type: "open-pathway", pathway: requested, sourceNode });
-  }, [current.nodes, data.map, data.directoryPathways, data.overlayPathways, route.search]);
+    route.navigate(route.pathname, { replace: true });
+  }, [current.nodes, data.map, data.directoryPathways, data.overlayPathways, route.navigate, route.pathname, route.search]);
 }
