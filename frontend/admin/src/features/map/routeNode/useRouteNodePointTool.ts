@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
+import type { ActiveToolDraft } from "../types";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
 import type { RouteNodeValidationContext, RouteNodeWorkflow } from "./RouteNodeWorkflow";
@@ -19,6 +20,8 @@ interface UseRouteNodePointToolOptions {
   context: PointToolContext;
   refreshMapData: () => Promise<void>;
   onError: (message: string) => void;
+  /** The caller's editor mode and selection, persisted with the draft. */
+  editorContext: { mode: string; selected: unknown };
 }
 
 const REFRESH_FAILED = "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.";
@@ -30,7 +33,7 @@ const isPlacingNodeType = (value: unknown): value is PlacingNodeType =>
  * Owns the provisional position and the placement/move draft state; the caller
  * owns editor mode and selection, and reacts to the saves' results.
  */
-export function useRouteNodePointTool({ workflow, overlay, saving, context, refreshMapData, onError }: UseRouteNodePointToolOptions) {
+export function useRouteNodePointTool({ workflow, overlay, saving, context, refreshMapData, onError, editorContext }: UseRouteNodePointToolOptions) {
   const [position, setPosition] = useState<MapPoint | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
   const [snapped, setSnapped] = useState(false);
@@ -202,6 +205,29 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
   /** The nested records persisted with a point-tool draft. */
   const draftRecords = { placingNodeType, placingNodeName, placingAssociatedBuildingId, movingId };
 
+  /** The Tool Draft persisted into the Working Session, or null when nothing is pending. */
+  const draftSnapshot = useMemo<Omit<ActiveToolDraft, "id" | "isSuspended"> | null>(() => position && draftDirty ? ({
+    toolType: "point",
+    label: "Route Node draft",
+    provisionalGeometry: {
+      points: [{ x: position[1], y: position[0], lat: position[0], lng: position[1] }],
+    },
+    nestedRecords: {
+      editorMode: editorContext.mode,
+      ...draftRecords,
+      selected: editorContext.selected,
+    },
+  }) : null, [
+    editorContext.mode,
+    editorContext.selected,
+    movingId,
+    draftDirty,
+    placingAssociatedBuildingId,
+    placingNodeName,
+    placingNodeType,
+    position,
+  ]);
+
   /** Restores a suspended or recovered point-tool draft. */
   const restoreDraft = (point: MapPoint | null, records: Record<string, unknown>) => {
     setPosition(point);
@@ -228,6 +254,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
     placingNodeName,
     placingAssociatedBuildingId,
     draftRecords,
+    draftSnapshot,
     setPosition,
     setDraftDirty,
     setDragging,
