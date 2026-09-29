@@ -28,7 +28,7 @@ import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
-import type { ActiveToolDraft, ToolType } from "./types";
+import type { ActiveToolDraft, EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
 import { distanceInMeters } from "./pointInteractions";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
@@ -44,6 +44,7 @@ import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
+import { useMapRouteIntents } from "./session/useMapRouteIntents";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSessionMapData } from "./session/useSessionMapData";
@@ -58,7 +59,7 @@ import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
 import { MapController } from "./MapController";
-import { belongsToBuilding, indoorLocationParent, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
+import { belongsToBuilding, indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationMapLayers } from "./indoorLocation/IndoorLocationMapLayers";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
@@ -114,9 +115,7 @@ export function MapEditor() {
   const overlay = useMapOverlay(data?.buildings);
   const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
 
-  const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move">(
-    "select",
-  );
+  const [mode, setMode] = useState<EditorMode>("select");
   const [selected, setSelected] = useState<MapSelection | null>(null);
 
   const [networkBrowserOpen, setNetworkBrowserOpen] = useState(false);
@@ -389,93 +388,15 @@ export function MapEditor() {
   const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes, currentFeatureLinks);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
-  useEffect(() => {
-    const create = new URLSearchParams(routeLocation.search).get("create");
-    if (create === "building") {
-      toolSession.activateTool("polygon");
-      return;
-    }
-  }, [routeLocation.search]);
-
-  useEffect(() => {
-    const indoorLocationId = new URLSearchParams(routeLocation.search).get("indoorLocation");
-    if (indoorLocationId) {
-      if (!data) return;
-      const indoorLocation = buildingContentLocations.find((item) => item.id === indoorLocationId && isIndoorLocation(item));
-      const parentBuilding = indoorLocation
-        ? currentBuildings.find((item) => item.id === indoorLocation.parentId || item.name === indoorLocation.building)
-        : undefined;
-      if (!indoorLocation || !parentBuilding) {
-        setError("The indoor location or its parent Building could not be found.");
-        navigate(routeLocation.pathname, { replace: true });
-        return;
-      }
-      const shouldPlace = new URLSearchParams(routeLocation.search).get("place") === "1";
-      setMode("select");
-      setFrameBounds(null);
-      setError("");
-      if (isPositionedLocation(indoorLocation) && !shouldPlace) {
-        indoor.setPlacement(null);
-        setSelected({ type: "location", id: indoorLocation.id });
-        flyTo([indoorLocation.lat, indoorLocation.lng], 20);
-      } else {
-        setSelected({ type: "location", id: indoorLocation.id });
-        indoor.startPlacement(parentBuilding, indoorLocation);
-        flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
-      }
-      navigate(routeLocation.pathname, { replace: true });
-      return;
-    }
-
-    const locationId = new URLSearchParams(routeLocation.search).get(
-      "location",
-    );
-    const building = locationId ? currentBuildings.find((item) => item.id === locationId) : undefined;
-    const loc = locationId ? directoryLocations.find((item) => item.id === locationId) : undefined;
-    if (locationId && (building || loc)) {
-      const buildingPoints = building?.points ?? [];
-      // Locations may locate an existing record, but it must never hand off
-      // into a standalone point-placement workflow. Footprint geometry stays
-      // owned by Map Editor's Building Polygon tool.
-      setMode("select");
-      if (building) {
-        setSelected({ type: "building", id: locationId });
-        if (buildingPoints.length >= 3) {
-          setFrameBounds([
-            [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
-            [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
-          ]);
-        }
-      } else if (loc) {
-        setSelected({ type: "location", id: locationId });
-      }
-      if (!building && loc && isPositionedLocation(loc)) {
-        setFrameBounds(null);
-        flyTo([loc.lat, loc.lng]);
-      }
-    }
-  }, [buildingContentLocations, currentBuildings, data, directoryLocations, navigate, routeLocation.pathname, routeLocation.search]);
-
-  useEffect(() => {
-    const pathwayId = new URLSearchParams(routeLocation.search).get("pathway");
-    if (!pathwayId) return;
-    if (!data) return;
-    const pathway = overlay.pathways.find((item) => item.id === pathwayId)
-      ?? directoryPathways.find((item) => item.id === pathwayId);
-    if (!pathway) {
-      setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
-      return;
-    }
-    setSelected({ type: "pathway", id: pathway.id });
-    setEditingPathId(pathway.id);
-    setPathwayDraft({ ...pathway });
-    setPathwayDraftOriginal({ ...pathway });
-    setPathPoints([...pathway.pathPoints]);
-    setMode("path");
-    setError("");
-    const source = currentNodes.find((node) => node.id === pathway.sourceNodeId);
-    if (source) flyTo([source.lat, source.lng]);
-  }, [currentNodes, data, directoryPathways, overlay.pathways, routeLocation.search]);
+  useMapRouteIntents({
+    route: { pathname: routeLocation.pathname, search: routeLocation.search, navigate },
+    data: { loaded: Boolean(data), directoryLocations, directoryPathways, overlayPathways: overlay.pathways },
+    current: { buildings: currentBuildings, locations: buildingContentLocations, nodes: currentNodes },
+    indoor,
+    pathway,
+    toolSession,
+    view: { setMode, setSelected, setError, setFrameBounds, flyTo },
+  });
 
   const applySelection = useCallback((type: MapSelectionType, id: string) => {
     localFeatures.setActionNotice("");
