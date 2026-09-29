@@ -4,6 +4,7 @@ import type { Building, Pathway, RouteNode } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
 import { overlayChanges, pathwayWithSuggestedName, polygonFeatureAnchor, suggestedPathwayName, validatePathwayDraft } from "../mapEditing";
 import { distanceInMeters } from "../pointInteractions";
+import type { MapSelection } from "../selection/useMapSelection";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
 import type { ActiveToolDraft } from "../types";
@@ -11,7 +12,7 @@ import type { WorkingSessionManager } from "../WorkingSessionManager";
 import type { PathPointConversionDraft } from "./PathPointConversionModal";
 import { createRoutableCrossing } from "./pathwayCommands";
 import { isPathwayDraft } from "./pathwayDrafts";
-import { findPathwayCrossings, insertPathPointAtSegmentMidpoint } from "./pathwayTopology";
+import { findPathwayCrossings, insertPathPointAtSegmentMidpoint, pathwayConnectionError } from "./pathwayTopology";
 import { createPathwayWorkflow } from "./PathwayWorkflow";
 
 export interface PathwayNetwork {
@@ -98,6 +99,80 @@ export function usePathwayEditing({
     setPathStartNodeId(null);
     setPathPoints([]);
     setPathDraftDirty(false);
+  };
+
+  /**
+   * A Route Node click while drawing a new pathway: the first node starts it,
+   * the second creates a provisional pathway. Returns the selection to adopt,
+   * or null when the click was rejected.
+   */
+  const handleNodeClick = (node: RouteNode, isOverviewZoom: boolean): MapSelection | null => {
+    if (isOverviewZoom) {
+      setError("Zoom in to edit map geometry.");
+      return null;
+    }
+    if (node.status !== undefined && node.status !== "Active") {
+      setError("Pathways can only use active Route Nodes.");
+      return null;
+    }
+    if (!pathStartNodeId) {
+      setPathStartNodeId(node.id);
+      setPathDraftDirty(true);
+      return { type: "node", id: node.id };
+    }
+    const source = currentNodes.find((candidate) => candidate.id === pathStartNodeId);
+    if (!source || (source.status !== undefined && source.status !== "Active")) {
+      setError("Pathways can only use active Route Nodes.");
+      return null;
+    }
+    const connectionError = pathwayConnectionError(pathStartNodeId, node.id, currentPathways);
+    if (connectionError) {
+      setError(connectionError);
+      return null;
+    }
+    const directDistance = Math.max(
+      1,
+      Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
+    );
+    const newPath: Pathway = {
+      id: `pathway-${Date.now()}`,
+      name: "",
+      sourceNodeId: source.id,
+      destinationNodeId: node.id,
+      distance: `${directDistance} m`,
+      time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
+      shade: "Unknown",
+      type: "Walkway",
+      direction: "Two-way",
+      status: "Active",
+      allowedModes: ["Walking"],
+      pathPoints: [],
+    };
+    overlay.putPathways([newPath]);
+    setEditingPathId(newPath.id);
+    setProvisionalPathwayId(newPath.id);
+    setPathPoints([]);
+    setPathwayDraft({ ...newPath });
+    setPathwayDraftOriginal(null);
+    setPathDraftDirty(true);
+    setError("");
+    return { type: "pathway", id: newPath.id };
+  };
+
+  /** Stages an edited pathway in the overlay unless it would duplicate a connection. */
+  const update = (updated: Pathway): boolean => {
+    const connectionError = pathwayConnectionError(
+      updated.sourceNodeId,
+      updated.destinationNodeId,
+      currentPathways.filter((pathway) => pathway.id !== updated.id),
+    );
+    if (connectionError) {
+      setError(connectionError);
+      return false;
+    }
+    overlay.putPathways([updated]);
+    setError("");
+    return true;
   };
 
   const insertPathPoint = (segmentIndex: number) => {
@@ -471,6 +546,8 @@ export function usePathwayEditing({
     setPathPointDragPreview,
     adoptSuggestedPathwayName,
     startNew,
+    handleNodeClick,
+    update,
     insertPathPoint,
     saveShape,
     createJunctionAtCrossing,

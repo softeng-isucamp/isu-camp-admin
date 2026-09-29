@@ -41,7 +41,6 @@ import {
   nudgePoint,
   type PointSnapTarget,
 } from "./pointInteractions";
-import { pathwayConnectionError } from "./pathway/pathwayTopology";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
@@ -234,8 +233,6 @@ export function MapEditor() {
     setProvisionalPathwayId,
     setPathPoints,
     setSelectedPathPointIndex,
-    pathStartNodeId,
-    setPathStartNodeId,
     setPathDraftDirty,
     conversionDraft,
     setConversionDraft,
@@ -869,20 +866,6 @@ export function MapEditor() {
 
   const updateLocation = overlay.putLocation;
   const updateNode = overlay.putNode;
-  const updatePathway = (updated: Pathway): boolean => {
-    const connectionError = pathwayConnectionError(
-      updated.sourceNodeId,
-      updated.destinationNodeId,
-      currentPathways.filter((pathway) => pathway.id !== updated.id),
-    );
-    if (connectionError) {
-      setError(connectionError);
-      return false;
-    }
-    overlay.putPathways([updated]);
-    setError("");
-    return true;
-  };
   const updateBuilding = overlay.putBuilding;
 
 
@@ -1015,57 +998,8 @@ export function MapEditor() {
 
   const handleRouteNodeClick = (node: RouteNode) => {
     if (mode === "path" && !editingPathId) {
-      if (isOverviewZoom) {
-        setError("Zoom in to edit map geometry.");
-        return;
-      }
-      if (node.status !== undefined && node.status !== "Active") {
-        setError("Pathways can only use active Route Nodes.");
-        return;
-      }
-      if (!pathStartNodeId) {
-        setPathStartNodeId(node.id);
-        setPathDraftDirty(true);
-        setSelected({ type: "node", id: node.id });
-        return;
-      }
-      const source = currentNodes.find((candidate) => candidate.id === pathStartNodeId);
-      if (!source || (source.status !== undefined && source.status !== "Active")) {
-        setError("Pathways can only use active Route Nodes.");
-        return;
-      }
-      const connectionError = pathwayConnectionError(pathStartNodeId, node.id, currentPathways);
-      if (connectionError) {
-        setError(connectionError);
-        return;
-      }
-      const directDistance = Math.max(
-        1,
-        Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
-      );
-      const newPath: Pathway = {
-        id: `pathway-${Date.now()}`,
-        name: "",
-        sourceNodeId: source.id,
-        destinationNodeId: node.id,
-        distance: `${directDistance} m`,
-        time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
-        shade: "Unknown",
-        type: "Walkway",
-        direction: "Two-way",
-        status: "Active",
-        allowedModes: ["Walking"],
-        pathPoints: [],
-      };
-      overlay.putPathways([newPath]);
-      setEditingPathId(newPath.id);
-      setProvisionalPathwayId(newPath.id);
-      setPathPoints([]);
-      setPathwayDraft({ ...newPath });
-      setPathwayDraftOriginal(null);
-      setSelected({ type: "pathway", id: newPath.id });
-      setPathDraftDirty(true);
-      setError("");
+      const nextSelection = pathway.handleNodeClick(node, isOverviewZoom);
+      if (nextSelection) setSelected(nextSelection);
       return;
     }
     selectCanvasObject("node", node.id, [node.lat, node.lng]);
@@ -1483,7 +1417,7 @@ export function MapEditor() {
                 pathway={pathway}
                 path={selectedPath}
                 nodes={currentNodes}
-                onUpdate={updatePathway}
+                onUpdate={pathway.update}
                 onReshape={reshapePathway}
                 onClearSelection={() => setSelected(null)}
               />
