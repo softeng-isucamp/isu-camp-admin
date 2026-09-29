@@ -27,7 +27,7 @@ import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
-import { useMapRouteIntents } from "./session/useMapRouteIntents";
+import { useMapRouteIntents, type MapRouteIntent } from "./session/useMapRouteIntents";
 import { useMapSaveFailureFlag } from "./session/useMapSaveFailureFlag";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
@@ -51,7 +51,7 @@ import { MapModals, type OwnerModal } from "./MapModals";
 import { MapLayers } from "./MapLayers";
 import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
-import { indoorLocationParent } from "./indoorLocation/indoorLocations";
+import { indoorLocationParent, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
@@ -287,14 +287,73 @@ export function MapEditor() {
   const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes, currentFeatureLinks);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
+  const applyRouteIntent = (intent: MapRouteIntent) => {
+    switch (intent.type) {
+      case "open-building-tool":
+        toolSession.activateTool("polygon");
+        break;
+      case "locate-indoor-location": {
+        const { location, parentBuilding, place } = intent;
+        setMode("select");
+        setFrameBounds(null);
+        setError("");
+        if (isPositionedLocation(location) && !place) {
+          indoor.setPlacement(null);
+          setSelected({ type: "location", id: location.id });
+          flyTo([location.lat, location.lng], 20);
+        } else {
+          setSelected({ type: "location", id: location.id });
+          indoor.startPlacement(parentBuilding, location);
+          flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
+        }
+        break;
+      }
+      case "locate-building": {
+        const { building } = intent;
+        // Locations may locate an existing record, but it must never hand off
+        // into a standalone point-placement workflow. Footprint geometry stays
+        // owned by Map Editor's Building Polygon tool.
+        setMode("select");
+        setSelected({ type: "building", id: building.id });
+        if (building.points.length >= 3) {
+          setFrameBounds([
+            [Math.min(...building.points.map(([lat]) => lat)), Math.min(...building.points.map(([, lng]) => lng))],
+            [Math.max(...building.points.map(([lat]) => lat)), Math.max(...building.points.map(([, lng]) => lng))],
+          ]);
+        }
+        break;
+      }
+      case "locate-location": {
+        const { location } = intent;
+        setMode("select");
+        setSelected({ type: "location", id: location.id });
+        if (isPositionedLocation(location)) {
+          setFrameBounds(null);
+          flyTo([location.lat, location.lng]);
+        }
+        break;
+      }
+      case "open-pathway": {
+        const { pathway: requested, sourceNode } = intent;
+        setSelected({ type: "pathway", id: requested.id });
+        pathway.setEditingPathId(requested.id);
+        pathway.setPathwayDraft({ ...requested });
+        pathway.setPathwayDraftOriginal({ ...requested });
+        pathway.setPathPoints([...requested.pathPoints]);
+        setMode("path");
+        setError("");
+        if (sourceNode) flyTo([sourceNode.lat, sourceNode.lng]);
+        break;
+      }
+    }
+  };
+
   useMapRouteIntents({
     route: { pathname: routeLocation.pathname, search: routeLocation.search, navigate },
     data: { map: data, directoryLocations, directoryPathways, overlayPathways: overlay.pathways },
     current: { buildings: currentBuildings, locations: buildingContentLocations, nodes: currentNodes },
-    indoor,
-    pathway,
-    toolSession,
-    view: { setMode, setSelected, setError, setFrameBounds, flyTo },
+    onIntent: applyRouteIntent,
+    setError,
   });
 
   const applySelection = useCallback((type: MapSelectionType, id: string) => {

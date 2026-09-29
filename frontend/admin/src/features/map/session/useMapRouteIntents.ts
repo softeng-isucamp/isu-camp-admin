@@ -1,14 +1,16 @@
 import { useEffect } from "react";
 import type { NavigateFunction } from "react-router-dom";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
-import type { useIndoorLocationPlacement } from "../indoorLocation/useIndoorLocationPlacement";
-import { isIndoorLocation, isPositionedLocation } from "../indoorLocation/indoorLocations";
-import { polygonFeatureAnchor } from "../mapEditing";
-import type { usePathwayEditing } from "../pathway/usePathwayEditing";
-import type { MapSelection } from "../selection/useMapSelection";
-import type { EditorMode } from "../types";
+import { isIndoorLocation } from "../indoorLocation/indoorLocations";
 import type { useMapData } from "./useMapData";
-import type { useToolSession } from "./useToolSession";
+
+/** What a URL intent asked the Map Editor to do; MapEditor applies the mode, selection, and framing. */
+export type MapRouteIntent =
+  | { type: "open-building-tool" }
+  | { type: "locate-indoor-location"; location: Location; parentBuilding: Building; place: boolean }
+  | { type: "locate-building"; building: Building }
+  | { type: "locate-location"; location: Location }
+  | { type: "open-pathway"; pathway: Pathway; sourceNode: RouteNode | undefined };
 
 interface UseMapRouteIntentsOptions {
   route: { pathname: string; search: string; navigate: NavigateFunction };
@@ -20,36 +22,22 @@ interface UseMapRouteIntentsOptions {
     overlayPathways: Pathway[];
   };
   current: { buildings: Building[]; locations: Location[]; nodes: RouteNode[] };
-  indoor: ReturnType<typeof useIndoorLocationPlacement>;
-  pathway: ReturnType<typeof usePathwayEditing>;
-  toolSession: ReturnType<typeof useToolSession>;
-  view: {
-    setMode: (mode: EditorMode) => void;
-    setSelected: (selection: MapSelection | null) => void;
-    setError: (message: string) => void;
-    setFrameBounds: (bounds: [[number, number], [number, number]] | null) => void;
-    flyTo: (point: [number, number], zoom?: number) => void;
-  };
+  onIntent: (intent: MapRouteIntent) => void;
+  setError: (message: string) => void;
 }
 
 /**
- * Acts on the Map Editor's URL intents once their data is available: opening
+ * Reads the Map Editor's URL intents once their data is available: opening
  * the Building tool (`create`), locating or placing an indoor Location,
- * locating a Building or Location, and opening a Pathway for editing.
+ * locating a Building or Location, and opening a Pathway for editing. It
+ * reports each resolved intent through `onIntent` and never changes the editor
+ * mode or selection itself.
  */
-export function useMapRouteIntents({
-  route,
-  data,
-  current,
-  indoor,
-  pathway,
-  toolSession,
-  view,
-}: UseMapRouteIntentsOptions) {
+export function useMapRouteIntents({ route, data, current, onIntent, setError }: UseMapRouteIntentsOptions) {
   useEffect(() => {
     const create = new URLSearchParams(route.search).get("create");
     if (create === "building") {
-      toolSession.activateTool("polygon");
+      onIntent({ type: "open-building-tool" });
       return;
     }
   }, [route.search]);
@@ -63,23 +51,12 @@ export function useMapRouteIntents({
         ? current.buildings.find((item) => item.id === indoorLocation.parentId || item.name === indoorLocation.building)
         : undefined;
       if (!indoorLocation || !parentBuilding) {
-        view.setError("The indoor location or its parent Building could not be found.");
+        setError("The indoor location or its parent Building could not be found.");
         route.navigate(route.pathname, { replace: true });
         return;
       }
-      const shouldPlace = new URLSearchParams(route.search).get("place") === "1";
-      view.setMode("select");
-      view.setFrameBounds(null);
-      view.setError("");
-      if (isPositionedLocation(indoorLocation) && !shouldPlace) {
-        indoor.setPlacement(null);
-        view.setSelected({ type: "location", id: indoorLocation.id });
-        view.flyTo([indoorLocation.lat, indoorLocation.lng], 20);
-      } else {
-        view.setSelected({ type: "location", id: indoorLocation.id });
-        indoor.startPlacement(parentBuilding, indoorLocation);
-        view.flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
-      }
+      const place = new URLSearchParams(route.search).get("place") === "1";
+      onIntent({ type: "locate-indoor-location", location: indoorLocation, parentBuilding, place });
       route.navigate(route.pathname, { replace: true });
       return;
     }
@@ -90,26 +67,8 @@ export function useMapRouteIntents({
     const building = locationId ? current.buildings.find((item) => item.id === locationId) : undefined;
     const loc = locationId ? data.directoryLocations.find((item) => item.id === locationId) : undefined;
     if (locationId && (building || loc)) {
-      const buildingPoints = building?.points ?? [];
-      // Locations may locate an existing record, but it must never hand off
-      // into a standalone point-placement workflow. Footprint geometry stays
-      // owned by Map Editor's Building Polygon tool.
-      view.setMode("select");
-      if (building) {
-        view.setSelected({ type: "building", id: locationId });
-        if (buildingPoints.length >= 3) {
-          view.setFrameBounds([
-            [Math.min(...buildingPoints.map(([lat]) => lat)), Math.min(...buildingPoints.map(([, lng]) => lng))],
-            [Math.max(...buildingPoints.map(([lat]) => lat)), Math.max(...buildingPoints.map(([, lng]) => lng))],
-          ]);
-        }
-      } else if (loc) {
-        view.setSelected({ type: "location", id: locationId });
-      }
-      if (!building && loc && isPositionedLocation(loc)) {
-        view.setFrameBounds(null);
-        view.flyTo([loc.lat, loc.lng]);
-      }
+      if (building) onIntent({ type: "locate-building", building });
+      else if (loc) onIntent({ type: "locate-location", location: loc });
     }
   }, [current.locations, current.buildings, data.map, data.directoryLocations, route.navigate, route.pathname, route.search]);
 
@@ -120,17 +79,10 @@ export function useMapRouteIntents({
     const requested = data.overlayPathways.find((item) => item.id === pathwayId)
       ?? data.directoryPathways.find((item) => item.id === pathwayId);
     if (!requested) {
-      view.setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
+      setError("The requested Pathway is no longer available. Refresh the Walking Network and try again.");
       return;
     }
-    view.setSelected({ type: "pathway", id: requested.id });
-    pathway.setEditingPathId(requested.id);
-    pathway.setPathwayDraft({ ...requested });
-    pathway.setPathwayDraftOriginal({ ...requested });
-    pathway.setPathPoints([...requested.pathPoints]);
-    view.setMode("path");
-    view.setError("");
-    const source = current.nodes.find((node) => node.id === requested.sourceNodeId);
-    if (source) view.flyTo([source.lat, source.lng]);
+    const sourceNode = current.nodes.find((node) => node.id === requested.sourceNodeId);
+    onIntent({ type: "open-pathway", pathway: requested, sourceNode });
   }, [current.nodes, data.map, data.directoryPathways, data.overlayPathways, route.search]);
 }
