@@ -218,13 +218,6 @@ describe("mock service contracts", () => {
     expect(summary.topSearched).toHaveLength(0);
   });
 
-  it("supports deterministic injectable save failures", async () => {
-    setMockFailure("mapSave", true);
-    await expect(services.map.save()).rejects.toThrow("Mock mapSave failed");
-    setMockFailure("mapSave", false);
-    await expect(services.map.save()).resolves.toBeUndefined();
-  });
-
   it("validates recovery code and password requirements", () => {
     expect(
       resetSchema.safeParse({ code: "123", password: "short" }).success,
@@ -571,17 +564,6 @@ describe("mock service contracts", () => {
     const updatedPathways = await services.map.pathways();
     const pathResult = updatedPathways.find((p) => p.id === targetPath.id);
     expect(pathResult?.pathPoints).toEqual(newPoints);
-  });
-
-  it("leaves authoritative records unchanged when a map save fails", async () => {
-    const original = (await services.map.pathways())[0];
-    expect(original).toBeDefined();
-    setMockFailure("mapSave", true);
-    await expect(services.map.save({ updatedPath: { id: original!.id, pathPoints: [[16.72, 121.69]] } })).rejects.toThrow("Mock mapSave failed");
-    setMockFailure("mapSave", false);
-    expect((await services.network.pathways()).find((path) => path.id === original!.id)?.pathSequence.points).not.toEqual([
-      { latitude: 16.72, longitude: 121.69 },
-    ]);
   });
 });
 

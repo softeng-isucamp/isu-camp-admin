@@ -28,7 +28,6 @@ import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEdit
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
 import { useMapRouteIntents, type MapRouteIntent } from "./session/useMapRouteIntents";
-import { useMapSaveFailureFlag } from "./session/useMapSaveFailureFlag";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSessionMapData } from "./session/useSessionMapData";
@@ -77,7 +76,6 @@ export function MapEditor() {
     adapter: services.map,
     workingSession: workingSessionManager,
   }), [workingSessionManager]);
-  useMapSaveFailureFlag();
 
   const {
     data,
