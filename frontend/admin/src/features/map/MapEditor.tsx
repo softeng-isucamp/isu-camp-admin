@@ -20,10 +20,8 @@ import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
-import { normalizeMapLayers } from "../../services/mapLayers";
 import type { EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
-import { distanceInMeters } from "./pointInteractions";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
@@ -47,10 +45,15 @@ import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
 import { BasemapTileLayer, BasemapToggle, MapPageHeader, NonRoutableBuildingNotice, OutsideBoundaryNotice, OverviewZoomNotice } from "./MapChrome";
+import { useCurrentLocalFeatures } from "./localFeature/useCurrentLocalFeatures";
+import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLocations";
+import { networkSelectionFocus } from "./selection/networkSelectionFocus";
+import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
+import { selectedMapObjects } from "./selection/selectedMapObjects";
 import { MapLayers } from "./MapLayers";
 import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
-import { belongsToBuilding, indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
+import { indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
@@ -256,19 +259,12 @@ export function MapEditor() {
     { buildings: currentBuildings, nodes: currentNodes, pathways: currentPathways },
     { mode, movingId: pointTool.movingId },
   );
-  const normalizedLocalFeatures = useMemo(
-    () => normalizeMapLayers({
-      buildings: currentBuildings,
-      locations: currentLocations,
-      routeNodes: currentNodes,
-      pathways: currentPathways,
-    }).localFeatures,
-    [currentBuildings, currentLocations, currentNodes, currentPathways],
-  );
-  const currentLocalFeatures = useMemo(
-    () => localFeatureLayer.withFeatureChanges(normalizedLocalFeatures),
-    [localFeatureLayer.withFeatureChanges, normalizedLocalFeatures],
-  );
+  const currentLocalFeatures = useCurrentLocalFeatures(localFeatureLayer, {
+    buildings: currentBuildings,
+    locations: currentLocations,
+    nodes: currentNodes,
+    pathways: currentPathways,
+  });
 
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
@@ -288,15 +284,7 @@ export function MapEditor() {
     currentMapBounds,
   );
 
-  const visibleIndoorLocations = useMemo(() => {
-    if (currentMapZoom < 20) return [];
-    return buildingContentLocations.filter((location) =>
-      isIndoorLocation(location)
-      && location.lat !== null
-      && location.lng !== null
-      && currentBuildings.some((building) => belongsToBuilding(location, building)),
-    );
-  }, [buildingContentLocations, currentBuildings, currentMapZoom]);
+  const visibleIndoorLocations = useVisibleIndoorLocations(buildingContentLocations, currentBuildings, currentMapZoom);
   const indoor = useIndoorLocationPlacement(
     overlay,
     { buildings: currentBuildings, locations: buildingContentLocations, zoom: currentMapZoom },
@@ -304,15 +292,17 @@ export function MapEditor() {
   );
   const indoorPlacement = indoor.placement;
 
-  // IDs are scoped to an entity type. A Pathway and an Indoor Location may
-  // legitimately share a database ID, so every derived selection must cross
-  // the typed identity seam rather than matching only the ID.
-  const selectedLocation = selected?.type === "location"
-    ? buildingContentLocations.find((item) => item.id === selected.id)
-    : undefined;
-  const selectedNode = selected?.type === "node"
-    ? currentNodes.find((item) => item.id === selected.id)
-    : undefined;
+  const {
+    location: selectedLocation,
+    node: selectedNode,
+    building: selectedBuilding,
+    localFeature: selectedLocalFeature,
+  } = selectedMapObjects(selected, {
+    contentLocations: buildingContentLocations,
+    nodes: currentNodes,
+    buildings: currentBuildings,
+    localFeatures: currentLocalFeatures,
+  });
   const nodeFrame = useRouteNodeFrame(selectedNode, {
     workflow: routeNodeWorkflow,
     saving,
@@ -321,19 +311,12 @@ export function MapEditor() {
     refreshMapData,
     onError: setError,
   });
-  const selectedBuilding = selected?.type === "building"
-    ? currentBuildings.find((item) => item.id === selected.id)
-    : undefined;
-  const selectedLocalFeature = selected?.type === "local_feature"
-    ? currentLocalFeatures.find((item) => item.id === selected.id)
-    : undefined;
-  const movingObjectName = selectedNode?.name ?? "Route Node";
-  const movingOutsideBoundary = Boolean(
-    mode === "move" && pointTool.position && !pointOnCampus(pointTool.position, campusBoundary),
+  const { movingObjectName, movingOutsideBoundary, moveDistanceMeters } = routeNodeMoveStatus(
+    mode,
+    pointTool,
+    selectedNode,
+    campusBoundary,
   );
-  const moveDistanceMeters = pointTool.moveOrigin && pointTool.position
-    ? distanceInMeters(pointTool.moveOrigin, pointTool.position)
-    : 0;
   const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes, currentFeatureLinks);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
@@ -398,23 +381,12 @@ export function MapEditor() {
 
   const handleNetworkBrowserSelection = (networkSelection: NonNullable<NetworkBrowserSelection>) => {
     selectObject(networkSelection.type, networkSelection.id);
-    if (networkSelection.type === "node") {
-      const node = currentNodes.find((item) => item.id === networkSelection.id);
-      if (node) {
-        setFrameBounds(null);
-        flyTo([node.lat, node.lng]);
-      }
-      return;
-    }
-    const pathway = currentPathways.find((item) => item.id === networkSelection.id);
-    const source = pathway && currentNodes.find((node) => node.id === pathway.sourceNodeId);
-    const destination = pathway && currentNodes.find((node) => node.id === pathway.destinationNodeId);
-    if (pathway && source && destination) {
-      const points = [[source.lat, source.lng], ...pathway.pathPoints, [destination.lat, destination.lng]] as [number, number][];
-      setFrameBounds([
-        [Math.min(...points.map(([lat]) => lat)), Math.min(...points.map(([, lng]) => lng))],
-        [Math.max(...points.map(([lat]) => lat)), Math.max(...points.map(([, lng]) => lng))],
-      ]);
+    const focus = networkSelectionFocus(networkSelection, currentNodes, currentPathways);
+    if (focus?.kind === "fly") {
+      setFrameBounds(null);
+      flyTo(focus.point);
+    } else if (focus?.kind === "frame") {
+      setFrameBounds(focus.bounds);
     }
   };
   const networkBrowserSelection: NetworkBrowserSelection = selected && (selected.type === "node" || selected.type === "pathway")
