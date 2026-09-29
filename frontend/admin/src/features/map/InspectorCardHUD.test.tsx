@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 
 const baseObject = (): InspectorCardModel => ({
-  id: "feature-1",
+  id: "building-1",
   kind: "building",
-  title: "Engineering West Parking Lot",
+  title: "Engineering West Hall",
   domain: "Locations",
-  status: "Active Parking Area",
+  status: "Active",
   summary: [
     { label: "Geometry", value: "Polygon" },
     { label: "Area", value: "1,420 m²" },
@@ -36,14 +36,14 @@ describe("InspectorCardHUD", () => {
     const object = baseObject();
     render(<InspectorCardHUD object={object} onClose={vi.fn()} />);
 
-    const card = screen.getByRole("complementary", { name: "Engineering West Parking Lot object details" });
+    const card = screen.getByRole("complementary", { name: "Engineering West Hall object details" });
     expect(card).toBeInTheDocument();
     expect(card).toHaveClass("map-glass-panel");
     expect(screen.getByText("[Locations]")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "✎ Edit Details" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Hall" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     expect(object.overflowActions[0].onSelect).toHaveBeenCalledOnce();
   });
@@ -87,7 +87,7 @@ describe("InspectorCardHUD", () => {
     expect(primary).toBeDisabled();
     expect(primary).toHaveAttribute("title", "Imported basemap context cannot be edited in the Map Editor.");
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Parking Lot" }));
+    fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Hall" }));
     expect(screen.getByRole("menuitem", { name: "✎ Edit Details" })).toBeDisabled();
   });
 });
