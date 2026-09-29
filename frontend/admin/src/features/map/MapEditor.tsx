@@ -7,7 +7,7 @@ import { services, setMockFailure } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, polygonFeatureAnchor } from "./mapEditing";
+import { overlayChanges, polygonFeatureAnchor } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
@@ -59,11 +59,11 @@ import { useSavingAction } from "./session/useSavingAction";
 import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
 import { localFeatureInspectorModel } from "./localFeature/localFeatureInspectorModel";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
-import {
-  findSelectionCandidates,
-  type CanvasSelectionType,
-  type SelectionCandidate,
-} from "./selectionCandidates";
+import { useMapSelection, type MapSelection, type MapSelectionType } from "./selection/useMapSelection";
+import { useMapSearch } from "./selection/useMapSearch";
+import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
+import { MapSearchBox } from "./selection/MapSearchBox";
+import { SelectionPopover } from "./selection/SelectionPopover";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
@@ -164,16 +164,8 @@ export function MapEditor() {
   const [mode, setMode] = useState<"select" | "place" | "path" | "area" | "move">(
     "select",
   );
-  const [selected, setSelected] = useState<{
-    type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature";
-    id: string;
-  } | null>(null);
-  const [selectionPopover, setSelectionPopover] = useState<{
-    anchor: MapPoint;
-    candidates: SelectionCandidate[];
-  } | null>(null);
+  const [selected, setSelected] = useState<MapSelection | null>(null);
 
-  const [search, setSearch] = useState("");
   const [networkBrowserOpen, setNetworkBrowserOpen] = useState(false);
   const [flyTarget, setFlyTarget] = useState<[number, number] | null>(null);
   const [flyTargetZoom, setFlyTargetZoom] = useState(19);
@@ -429,21 +421,12 @@ export function MapEditor() {
     return locations + nodes + pathways + buildings;
   }, [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways]);
 
-  // Mode-driven dynamic filtering & viewport culling for fast, lag-free rendering
-  const filteredBuildings = useMemo(() => {
-    return currentBuildings;
-  }, [currentBuildings]);
-
-  const filteredLocations = useMemo(() => {
-    const positioned = currentLocations.filter(isPositionedLocation);
-    if (mode === "area") return [];
-    return positioned.filter(
-      (loc) => !isIndoorLocation(loc)
-        && loc.type !== "Building"
-        && (loc.type !== "Facility" || !currentBuildings.some((building) => building.id === loc.id))
-        && (isPointInBounds(loc.lat, loc.lng, currentMapBounds) || (selected?.type === "location" && selected.id === loc.id))
-    );
-  }, [currentBuildings, currentLocations, currentMapBounds, mode, selected?.id, selected?.type]);
+  const visible = useVisibleMapObjects(
+    { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways },
+    mode,
+    selected,
+    currentMapBounds,
+  );
 
   const visibleIndoorLocations = useMemo(() => {
     if (currentMapZoom < 20) return [];
@@ -460,19 +443,6 @@ export function MapEditor() {
     setError,
   );
   const indoorPlacement = indoor.placement;
-
-  const filteredNodes = useMemo(() => {
-    if (mode === "place" || mode === "area") return [];
-    return currentNodes.filter(
-      (node) => isPointInBounds(node.lat, node.lng, currentMapBounds)
-        || (selected?.type === "node" && selected.id === node.id)
-    );
-  }, [currentMapBounds, currentNodes, mode, selected?.id, selected?.type]);
-
-  const filteredPathways = useMemo(() => {
-    if (mode === "area") return [];
-    return currentPathways;
-  }, [currentPathways, mode]);
 
   // IDs are scoped to an entity type. A Pathway and an Indoor Location may
   // legitimately share a database ID, so every derived selection must cross
@@ -620,108 +590,54 @@ export function MapEditor() {
     if (source) flyTo([source.lat, source.lng]);
   }, [currentNodes, data, directoryPathways, overlay.pathways, routeLocation.search]);
 
-  const results = useMemo(() => {
-    if (!search.trim()) return [];
-    const q = search.trim().toLowerCase();
-    const allLocs = directoryLocations.length ? directoryLocations : overlay.locations;
-    const allNodes = directoryNodes.length ? directoryNodes : overlay.nodes;
-    const allPaths = currentPathways;
-
-    const matchedLocs = allLocs
-      .filter((l) => l.name.toLowerCase().includes(q) || l.type.toLowerCase().includes(q))
-      .map((item) => ({ ...item, kind: "Location" as const }));
-    const matchedNodes = allNodes
-      .filter((n) => n.name.toLowerCase().includes(q) || n.nodeType.toLowerCase().includes(q))
-      .map((item) => ({ ...item, kind: "Route Node" as const }));
-    const matchedPaths = allPaths
-      .filter((p) => p.name.toLowerCase().includes(q) || p.shade.toLowerCase().includes(q))
-      .map((item) => ({ ...item, kind: "Pathway" as const }));
-    return [...matchedLocs, ...matchedNodes, ...matchedPaths].slice(0, 8);
-  }, [currentPathways, directoryLocations, directoryNodes, overlay.locations, overlay.nodes, search]);
-
-  const selectObject = useCallback(
-    (type: "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature", id: string) => {
-      setSelected({ type, id });
-      setSelectionPopover(null);
-      localFeatures.setActionNotice("");
-      if (type === "pathway") {
-        const path = currentPathways.find((p) => p.id === id);
-        if (path) {
-          setPathwayDraft({ ...path });
-          setPathwayDraftOriginal({ ...path });
-          // Legacy Open records retain the old edit-on-selection behavior for
-          // compatibility. Canonical Active records open in inspection first;
-          // editing requires the explicit Edit/Reshape action.
-          if (path.status === "Open") {
-            setEditingPathId(path.id);
-            setPathPoints(path.pathPoints || []);
-            setMode("path");
-          } else {
-            setEditingPathId(null);
-            setPathPoints([]);
-            setMode("select");
-          }
-          setSelectedPathPointIndex(null);
+  const applySelection = useCallback((type: MapSelectionType, id: string) => {
+    localFeatures.setActionNotice("");
+    if (type === "pathway") {
+      const path = currentPathways.find((p) => p.id === id);
+      if (path) {
+        setPathwayDraft({ ...path });
+        setPathwayDraftOriginal({ ...path });
+        // Legacy Open records retain the old edit-on-selection behavior for
+        // compatibility. Canonical Active records open in inspection first;
+        // editing requires the explicit Edit/Reshape action.
+        if (path.status === "Open") {
+          setEditingPathId(path.id);
+          setPathPoints(path.pathPoints || []);
+          setMode("path");
+        } else {
+          setEditingPathId(null);
+          setPathPoints([]);
+          setMode("select");
         }
+        setSelectedPathPointIndex(null);
       }
-      if (type === "node") {
-        const node = currentNodes.find((candidate) => candidate.id === id);
-        if (node) {
-          nodeFrame.load(node);
-        }
+    }
+    if (type === "node") {
+      const node = currentNodes.find((candidate) => candidate.id === id);
+      if (node) {
+        nodeFrame.load(node);
       }
-      pointTool.setPosition(null);
-    },
-    [currentNodes, currentPathways],
+    }
+    pointTool.setPosition(null);
+  }, [currentNodes, currentPathways]);
+  const { popover: selectionPopover, clearPopover: clearSelectionPopover, selectObject, selectCanvasObject } = useMapSelection(
+    mode,
+    setSelected,
+    { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
+    applySelection,
   );
 
-  const selectCanvasObject = (
-    type: CanvasSelectionType,
-    id: string,
-    anchor: MapPoint,
-  ) => {
-    if (mode !== "select") {
-      selectObject(type, id);
-      return;
-    }
-    const candidates = findSelectionCandidates(anchor, {
-      locations: currentLocations,
-      nodes: currentNodes,
+  const { search, setSearch, results, selectResult: handleSearchResultClick } = useMapSearch(
+    {
+      directoryLocations,
+      directoryNodes,
+      overlayLocations: overlay.locations,
+      overlayNodes: overlay.nodes,
       pathways: currentPathways,
-      buildings: currentBuildings,
-    });
-    if (candidates.length <= 1) {
-      selectObject(type, id);
-      return;
-    }
-    setSelected(null);
-    setSelectionPopover({ anchor, candidates });
-  };
-
-  const handleSearchResultClick = (item: {
-    id: string;
-    kind: "Location" | "Route Node" | "Pathway";
-    lat?: number | null;
-    lng?: number | null;
-  }) => {
-    if (item.kind === "Location") {
-      selectObject("location", item.id);
-      const loc = directoryLocations.find((l) => l.id === item.id) || overlay.locations.find((l) => l.id === item.id);
-      if (loc && isPositionedLocation(loc)) flyTo([loc.lat, loc.lng]);
-    } else if (item.kind === "Route Node") {
-      selectObject("node", item.id);
-      const n = directoryNodes.find((node) => node.id === item.id) || overlay.nodes.find((node) => node.id === item.id);
-      if (n) flyTo([n.lat, n.lng]);
-    } else if (item.kind === "Pathway") {
-      selectObject("pathway", item.id);
-      const p = currentPathways.find((path) => path.id === item.id);
-      if (p) {
-        const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || overlay.nodes.find((n) => n.id === p.sourceNodeId);
-        if (src) flyTo([src.lat, src.lng]);
-      }
-    }
-    setSearch("");
-  };
+    },
+    selectObject,
+    flyTo,
+  );
 
   const handleNetworkBrowserSelection = (networkSelection: NonNullable<NetworkBrowserSelection>) => {
     selectObject(networkSelection.type, networkSelection.id);
@@ -752,7 +668,7 @@ export function MapEditor() {
     if (indoor.handleMapClick(point)) return;
     if (mode === "select") {
       setSelected(null);
-      setSelectionPopover(null);
+      clearSelectionPopover();
       return;
     }
     if (isOverviewZoom) {
@@ -1439,7 +1355,7 @@ export function MapEditor() {
           />
 
           <BuildingFootprintLayer
-            buildings={filteredBuildings}
+            buildings={visible.buildings}
             selectedBuildingId={selected?.type === "building" ? selected.id : null}
             mode={mode}
             editingBuildingId={editingBuildingId}
@@ -1453,7 +1369,7 @@ export function MapEditor() {
 
           <PathwaysLayer
             pathway={pathway}
-            pathways={filteredPathways}
+            pathways={visible.pathways}
             nodes={currentNodes}
             mode={mode}
             selectedPathId={selected?.type === "pathway" ? selected.id : null}
@@ -1463,7 +1379,7 @@ export function MapEditor() {
           />
 
           <LocationMapLayer
-            locations={filteredLocations}
+            locations={visible.locations}
             selectedLocationId={selected?.type === "location" ? selected.id : null}
             campusBoundary={campusBoundary}
             isOverviewZoom={isOverviewZoom}
@@ -1477,13 +1393,13 @@ export function MapEditor() {
             buildings={currentBuildings}
             selectedLocationId={selected?.type === "location" ? selected.id : null}
             onSelectLocation={(locationId) => {
-              setSelectionPopover(null);
+              clearSelectionPopover();
               setSelected({ type: "location", id: locationId });
             }}
           />
 
           <RouteNodeMarkersLayer
-            nodes={filteredNodes}
+            nodes={visible.nodes}
             mode={mode}
             movingId={pointTool.movingId}
             selectedNodeId={selected?.type === "node" ? selected.id : null}
@@ -1559,35 +1475,7 @@ export function MapEditor() {
         )}
 
         {selectionPopover && (
-          <div
-            role="dialog"
-            aria-label="Choose overlapping object"
-            data-anchor={selectionPopover.anchor.join(",")}
-            className="absolute z-[1100] w-64 -translate-x-1/2 -translate-y-full rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
-            style={{
-              left: `${Math.max(8, Math.min(92, ((selectionPopover.anchor[1] - navigationBounds[0][1]) / (navigationBounds[1][1] - navigationBounds[0][1])) * 100))}%`,
-              top: `${Math.max(8, Math.min(92, (1 - (selectionPopover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
-              maxHeight: "min(50vh, 420px)",
-              overflowY: "auto",
-              overscrollBehavior: "contain",
-            }}
-          >
-            <p className="mb-2 text-xs font-bold text-[#191c1d]">Choose an object</p>
-            <div className="flex flex-col gap-1">
-              {selectionPopover.candidates.map((candidate) => (
-                <button
-                  key={`${candidate.type}-${candidate.id}`}
-                  type="button"
-                  aria-label={`Select ${candidate.label} ${candidate.kindLabel}`}
-                  className="rounded-xl px-3 py-2 text-left text-xs hover:bg-[#edf3ef]"
-                  onClick={() => selectObject(candidate.type, candidate.id)}
-                >
-                  <strong className="block">{candidate.label}</strong>
-                  <span className="text-[#59645e]">{candidate.kindLabel}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} onSelect={selectObject} />
         )}
 
         {outsideBoundaryCount > 0 && (
@@ -1648,43 +1536,7 @@ export function MapEditor() {
           />
         )}
 
-        <div className={`map-glass-panel absolute right-4 top-4 z-[900] w-72 rounded-[20px] p-2`}>
-          <div className="relative flex items-center">
-            <svg className="w-4 h-4 absolute left-3 text-[#3f4941]/60 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search campus places..."
-              className="w-full bg-[#f8f9fa] text-xs font-semibold py-2 pl-9 pr-7 rounded-xl outline-none focus:ring-2 focus:ring-[#005931]"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                className="absolute right-2.5 text-xs font-bold text-[#005931]"
-              >
-                ×
-              </button>
-            )}
-          </div>
-          {results.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-[#e1e3e4] max-h-56 overflow-y-auto text-xs">
-              {results.map((item) => (
-                <button
-                  key={`${item.kind}:${item.id}`}
-                  type="button"
-                  className="w-full text-left p-2 hover:bg-[#f8f9fa] rounded-lg flex items-center justify-between transition"
-                  onClick={() => handleSearchResultClick(item)}
-                >
-                  <span className="font-semibold text-[#191c1d]">{item.name}</span>
-                  <span className="text-[10px] text-[#3f4941] bg-[#e1e3e4] px-2 py-0.5 rounded-full">{item.kind}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <MapSearchBox search={search} results={results} onSearchChange={setSearch} onSelectResult={handleSearchResultClick} />
 
         <RouteNodeMovePanel
           pointTool={pointTool}
