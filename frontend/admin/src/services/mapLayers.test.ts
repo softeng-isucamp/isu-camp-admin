@@ -111,7 +111,7 @@ const mockSeedSources: RawSeedSources = {
 };
 
 describe("normalizeMapLayers", () => {
-  it("normalizes entities across all 6 spatial layers", () => {
+  it("normalizes entities across all 4 spatial layers", () => {
     const layers = normalizeMapLayers(mockSeedSources);
 
     // 1. Buildings
@@ -119,11 +119,9 @@ describe("normalizeMapLayers", () => {
     const engBuilding = layers.buildings.find((b) => b.id === "bld-eng-01");
     expect(engBuilding).toBeDefined();
     expect(engBuilding?.name).toBe("Engineering Complex");
-    expect(engBuilding?.linkedFeatureId).toBe("feat-poly-bld-eng-01");
     expect(engBuilding?.entranceNodeIds).toEqual(["node-ent-01"]);
 
     const unlinkedBuilding = layers.buildings.find((b) => b.id === "bld-unlinked-02");
-    expect(unlinkedBuilding?.linkedFeatureId).toBeNull();
     expect(unlinkedBuilding?.entranceNodeIds).toEqual([]);
 
     // 2. Outdoor Locations (filters out type: 'Building')
@@ -147,26 +145,6 @@ describe("normalizeMapLayers", () => {
       [16.721, 121.689],
       [16.7215, 121.6895],
     ]);
-
-    // 5. Local Map Features (includes seeded basemap, and building footprint)
-    const footprint = layers.localFeatures.find((f) => f.id === "feat-poly-bld-eng-01");
-    expect(footprint).toBeDefined();
-    expect(footprint?.family).toBe("building_footprint");
-    expect(footprint?.linkedBuildingId).toBe("bld-eng-01");
-    expect(footprint?.coordinates).toEqual(mockRawBuildings[0].points);
-
-    expect(layers.localFeatures.find((f) => f.family === "campus_boundary")).toBeUndefined();
-
-    // 6. Feature Links
-    expect(layers.featureLinks).toHaveLength(1);
-    expect(layers.featureLinks[0]).toEqual({
-      id: "link-bld-eng-01",
-      featureId: "feat-poly-bld-eng-01",
-      targetDomain: "Locations",
-      targetEntityId: "bld-eng-01",
-      linkType: "building_footprint",
-      createdAt: "2026-08-15T00:00:00Z",
-    });
   });
 
   it("constructs a valid closed GeoJSON polygon for campus boundary", () => {

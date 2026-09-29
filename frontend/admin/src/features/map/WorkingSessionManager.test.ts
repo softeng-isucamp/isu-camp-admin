@@ -6,8 +6,6 @@ import {
   updatePropertiesOperation,
   retireEntityOperation,
   restoreEntityOperation,
-  linkFeatureOperation,
-  unlinkFeatureOperation,
 } from "./WorkingSessionManager";
 import type { ActiveToolDraft } from "./types";
 
@@ -80,13 +78,13 @@ describe("WorkingSessionManager", () => {
 
     it("creates update_geometry operation via factory", () => {
       const op = updateGeometryOperation(
-        "Local Map Data",
+        "Locations",
         "feat-1",
         { points: [[0, 0], [10, 0], [10, 10], [0, 10]] },
         { points: [[0, 0], [20, 0], [20, 20], [0, 20]] }
       );
       expect(op.type).toBe("update_geometry");
-      expect(op.domain).toBe("Local Map Data");
+      expect(op.domain).toBe("Locations");
       expect(op.before).toEqual({ points: [[0, 0], [10, 0], [10, 10], [0, 10]] });
       expect(op.after).toEqual({ points: [[0, 0], [20, 0], [20, 20], [0, 20]] });
     });
@@ -106,56 +104,37 @@ describe("WorkingSessionManager", () => {
 
     it("creates retire_entity and restore_entity operations via factories", () => {
       const currentRec = { id: "feat-1", name: "Old Walkway", status: "active" };
-      const retireOp = retireEntityOperation("Local Map Data", "feat-1", currentRec);
+      const retireOp = retireEntityOperation("Locations", "feat-1", currentRec);
       expect(retireOp.type).toBe("retire_entity");
       expect(retireOp.before).toEqual(currentRec);
       expect(retireOp.after).toEqual({ ...currentRec, status: "retired" });
 
       const retiredRec = { id: "feat-1", name: "Old Walkway", status: "retired" };
-      const restoreOp = restoreEntityOperation("Local Map Data", "feat-1", retiredRec);
+      const restoreOp = restoreEntityOperation("Locations", "feat-1", retiredRec);
       expect(restoreOp.type).toBe("restore_entity");
       expect(restoreOp.before).toEqual(retiredRec);
       expect(restoreOp.after).toEqual({ ...retiredRec, status: "active" });
-    });
-
-    it("creates link_feature and unlink_feature operations via factories", () => {
-      const linkData = { featureId: "poly-1", targetDomain: "Locations", targetEntityId: "bld-1" };
-      const linkOp = linkFeatureOperation("Local Map Data", "link-1", linkData);
-      expect(linkOp.type).toBe("link_feature");
-      expect(linkOp.before).toBeNull();
-      expect(linkOp.after).toEqual(linkData);
-
-      const unlinkOp = unlinkFeatureOperation("Local Map Data", "link-1", linkData);
-      expect(unlinkOp.type).toBe("unlink_feature");
-      expect(unlinkOp.before).toEqual(linkData);
-      expect(unlinkOp.after).toBeNull();
     });
   });
 
   describe("Compound Batch Operations", () => {
     it("executes compound batch operation as a single atomic unit", () => {
-      const opFootprint = createEntityOperation("Local Map Data", "poly-101", {
-        family: "building_footprint",
-        coordinates: [[0, 0], [10, 0], [10, 10], [0, 10]],
-      });
       const opBuilding = createEntityOperation("Locations", "bld-202", {
         name: "Engineering Annex",
         code: "ENG-ANNEX",
       });
-      const opLink = linkFeatureOperation("Local Map Data", "lnk-303", {
-        featureId: "poly-101",
-        targetEntityId: "bld-202",
-      });
+
+      const opGeometry = updateGeometryOperation("Locations", "bld-202", { points: [] }, { points: [[0, 0], [10, 0], [10, 10]] });
 
       const batchOp = manager.executeBatch(
-        "Create building with footprint & link",
+        "Create building with polygon",
         "Locations",
         "bld-202",
-        [opFootprint, opBuilding, opLink]
+        [opBuilding, opGeometry]
       );
 
       expect(batchOp.type).toBe("compound_batch");
-      expect(batchOp.nestedOperations).toHaveLength(3);
+      expect(batchOp.nestedOperations).toHaveLength(2);
       expect(manager.getPastOperations()).toHaveLength(1);
     });
 

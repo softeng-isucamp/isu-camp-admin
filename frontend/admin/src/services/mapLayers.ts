@@ -9,9 +9,9 @@ import type {
   SourceProvenance,
 } from "../types";
 import { echagueCampusBoundary } from "../features/map/campusBoundary";
-import type { LocalFeatureFamily, SpatialDomain } from "../features/map/types";
+import type { SpatialDomain } from "../features/map/types";
 
-export type { LocalFeatureFamily, SpatialDomain };
+export type { SpatialDomain };
 
 // ============================================================================
 // 1. Normalized Map Editor Entities
@@ -24,7 +24,6 @@ export interface BuildingEntity {
   status: "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
   category?: string;
   type?: "Building" | "Facility";
-  linkedFeatureId?: string | null;
   entranceNodeIds: string[];
   source?: SourceProvenance;
 }
@@ -81,38 +80,6 @@ export interface PathwayEntity {
   source?: SourceProvenance;
 }
 
-export interface LocalMapFeatureEntity {
-  id: string;
-  family: LocalFeatureFamily;
-  name: string;
-  isEditable: boolean;
-  geometryType: "point" | "polygon" | "line";
-  coordinates: [number, number][] | [number, number][][] | [number, number];
-  surface?: string;
-  access?: string;
-  direction?: string;
-  isCovered?: boolean;
-  status?: "active" | "retired";
-  linkedBuildingId?: string | null;
-  areaOrLength?: string;
-  provenance?: {
-    osmId?: string;
-    osmVersion?: number;
-    importedAt?: string;
-    license?: string;
-    rawTags?: Record<string, string>;
-  };
-}
-
-export interface FeatureLinkEntity {
-  id: string;
-  featureId: string;
-  targetDomain: "Locations";
-  targetEntityId: string;
-  linkType: "building_footprint";
-  createdAt?: string;
-}
-
 export interface GeoJSONPolygon {
   type: "Polygon";
   coordinates: number[][][]; // GeoJSON standard [lng, lat]
@@ -123,8 +90,6 @@ export interface MapEditorLayers {
   outdoorLocations: OutdoorLocationEntity[];
   routeNodes: RouteNodeEntity[];
   pathways: PathwayEntity[];
-  localFeatures: LocalMapFeatureEntity[];
-  featureLinks: FeatureLinkEntity[];
 }
 
 // ============================================================================
@@ -136,7 +101,6 @@ export interface RawSeedSources {
   locations: Location[];
   routeNodes: RouteNode[];
   pathways: Pathway[];
-  additionalLocalFeatures?: LocalMapFeatureEntity[];
 }
 
 export function createCampusBoundaryGeoJson(points: [number, number][] = echagueCampusBoundary): GeoJSONPolygon {
@@ -155,114 +119,10 @@ export function createCampusBoundaryGeoJson(points: [number, number][] = echague
 }
 
 export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
-  const localFeatures: LocalMapFeatureEntity[] = [];
-  const featureLinks: FeatureLinkEntity[] = [];
   const buildings: BuildingEntity[] = [];
   const outdoorLocations: OutdoorLocationEntity[] = [];
   const routeNodes: RouteNodeEntity[] = [];
   const pathways: PathwayEntity[] = [];
-
-  // Seed sample basemap / parking / cartographic features
-  localFeatures.push(
-    {
-      id: "feat-poly-pkg-west",
-      family: "parking_area",
-      name: "Engineering West Parking Lot",
-      isEditable: true,
-      geometryType: "polygon",
-      coordinates: [
-        [16.7212, 121.6888],
-        [16.7215, 121.6892],
-        [16.7211, 121.6895],
-        [16.7208, 121.6891],
-      ],
-      surface: "asphalt",
-      access: "campus_only",
-      status: "active",
-      areaOrLength: "1,420 m²",
-      provenance: {
-        osmId: "way/74920194",
-        osmVersion: 4,
-        importedAt: "2026-08-15T08:30:00Z",
-        license: "ODbL (OpenStreetMap contributors)",
-        rawTags: { amenity: "parking", surface: "asphalt" },
-      },
-    },
-    {
-      id: "feat-line-walkway-oval",
-      family: "cartographic_walkway",
-      name: "Oval Perimeter Walkway",
-      isEditable: true,
-      geometryType: "line",
-      coordinates: [
-        [16.7198, 121.6888],
-        [16.7202, 121.6893],
-        [16.7207, 121.6897],
-      ],
-      surface: "concrete",
-      access: "yes",
-      direction: "both",
-      status: "active",
-      areaOrLength: "340 m",
-      provenance: {
-        osmId: "way/88219401",
-        osmVersion: 2,
-        importedAt: "2026-08-15T08:30:00Z",
-        license: "ODbL (OpenStreetMap contributors)",
-        rawTags: { highway: "footway", surface: "concrete" },
-      },
-    },
-    {
-      id: "feat-line-vehicle-ring",
-      family: "vehicle_path",
-      name: "Campus Ring Service Road",
-      isEditable: true,
-      geometryType: "line",
-      coordinates: [
-        [16.7195, 121.6884],
-        [16.7201, 121.6887],
-        [16.7208, 121.6891],
-      ],
-      surface: "asphalt",
-      access: "campus_only",
-      direction: "both",
-      status: "active",
-      areaOrLength: "780 m",
-      provenance: {
-        osmId: "way/90124855",
-        osmVersion: 3,
-        importedAt: "2026-08-15T08:30:00Z",
-        license: "ODbL (OpenStreetMap contributors)",
-        rawTags: { highway: "service", surface: "asphalt", oneway: "no" },
-      },
-    },
-    {
-      id: "feat-poly-water-pond-01",
-      family: "readonly_basemap",
-      name: "Campus Aquaculture Lagoon",
-      isEditable: false,
-      geometryType: "polygon",
-      coordinates: [
-        [16.7225, 121.691],
-        [16.7229, 121.6918],
-        [16.7223, 121.6922],
-        [16.7219, 121.6914],
-      ],
-      status: "active",
-      areaOrLength: "3,100 m²",
-      provenance: {
-        osmId: "way/9823101",
-        osmVersion: 2,
-        importedAt: "2026-08-15T08:30:00Z",
-        license: "ODbL (OpenStreetMap contributors)",
-        rawTags: { natural: "water", water: "lagoon" },
-      },
-    }
-  );
-
-  if (sources.additionalLocalFeatures) {
-    localFeatures.push(...sources.additionalLocalFeatures);
-  }
 
   // Normalize Route Nodes
   for (const node of sources.routeNodes) {
@@ -282,44 +142,8 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
     });
   }
 
-  // Normalize Buildings and extract Footprint Local Features & Feature Links
+  // Normalize Buildings
   for (const bld of sources.buildings) {
-    const hasPolygon = Array.isArray(bld.points) && bld.points.length >= 3;
-    let featureId: string | null = null;
-
-    if (hasPolygon) {
-      featureId = `feat-poly-${bld.id}`;
-      localFeatures.push({
-        id: featureId,
-        family: "building_footprint",
-        name: `${bld.name} Footprint`,
-        isEditable: true,
-        geometryType: "polygon",
-        coordinates: bld.points.map(([lat, lng]) => [lat, lng] as [number, number]),
-        status: "active",
-        linkedBuildingId: bld.id,
-        areaOrLength: "850 m²",
-        provenance: bld.source
-          ? {
-              osmId: `${bld.source.sourceType}/${bld.source.sourceId}`,
-              osmVersion: 1,
-              importedAt: "2026-08-01T00:00:00Z",
-              license: "ODbL (OpenStreetMap contributors)",
-              rawTags: { building: "yes", name: bld.name },
-            }
-          : undefined,
-      });
-
-      featureLinks.push({
-        id: `link-${bld.id}`,
-        featureId,
-        targetDomain: "Locations",
-        targetEntityId: bld.id,
-        linkType: "building_footprint",
-        createdAt: "2026-08-15T00:00:00Z",
-      });
-    }
-
     const entranceNodeIds = routeNodes
       .filter(
         (n) =>
@@ -337,7 +161,6 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
       status: bld.status ?? "Active",
       category: "Academic / University Building",
       type: sources.locations.find((location) => location.id === bld.id)?.type === "Facility" ? "Facility" : "Building",
-      linkedFeatureId: featureId,
       entranceNodeIds,
       source: bld.source,
     });
@@ -396,8 +219,6 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
     outdoorLocations,
     routeNodes,
     pathways,
-    localFeatures,
-    featureLinks,
   };
 }
 

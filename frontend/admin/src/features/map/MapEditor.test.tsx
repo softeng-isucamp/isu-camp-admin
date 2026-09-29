@@ -32,7 +32,6 @@ describe("Map Editor preview", () => {
       "true",
     );
 
-    expect(screen.queryByRole("button", { name: "Local Feature" })).not.toBeInTheDocument();
   });
 
   it("opens the requested creation tool from a Locations handoff", async () => {

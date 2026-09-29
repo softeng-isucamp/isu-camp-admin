@@ -36,9 +36,7 @@ export function useMapData() {
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
   const directoryPathways = data?.pathways || [];
-  // Local map features are retained by the data/service layer for compatibility,
-  // but are intentionally not rendered in this editor. The campus boundary is
-  // still used below for validation and navigation bounds.
+  // The campus boundary is used below for validation and navigation bounds.
   const campusBoundary = echagueCampusBoundary;
   const directoryMapLayers = useMemo(() => normalizeMapLayers({
     buildings: data?.buildings || [],

@@ -25,7 +25,6 @@ import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
-import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
 import { useMapRouteIntents, type MapRouteIntent } from "./session/useMapRouteIntents";
 import { useMapData } from "./session/useMapData";
@@ -33,7 +32,6 @@ import { useMapOverlay } from "./session/useMapOverlay";
 import { useSessionMapData } from "./session/useSessionMapData";
 import { useSavingAction } from "./session/useSavingAction";
 import { useToolSession } from "./session/useToolSession";
-import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
 import { useMapSelection, type MapSelection, type MapSelectionType } from "./selection/useMapSelection";
 import { useMapSearch } from "./selection/useMapSearch";
@@ -41,7 +39,6 @@ import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
 import { BasemapTileLayer, BasemapToggle, MapPageHeader, NonRoutableBuildingNotice, OutsideBoundaryNotice, OverviewZoomNotice } from "./MapChrome";
-import { useCurrentLocalFeatures } from "./localFeature/useCurrentLocalFeatures";
 import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLocations";
 import { networkSelectionFocus } from "./selection/networkSelectionFocus";
 import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
@@ -84,7 +81,6 @@ export function MapEditor() {
     directoryNodes,
     directoryPathways,
     campusBoundary,
-    directoryMapLayers,
   } = useMapData();
 
   const overlay = useMapOverlay(data?.buildings);
@@ -134,12 +130,6 @@ export function MapEditor() {
     setCurrentMapZoom(zoom);
   }, []);
 
-  const localFeatureLayer = useLocalFeatureLayer(directoryMapLayers.featureLinks);
-  const localFeatures = useLocalFeatureEditing({
-    workingSession: workingSessionManager,
-    layer: localFeatureLayer,
-    onError: setError,
-  });
   const {
     currentLocations,
     buildingContentLocations,
@@ -222,12 +212,6 @@ export function MapEditor() {
     { buildings: currentBuildings, nodes: currentNodes, pathways: currentPathways },
     { mode, movingId: pointTool.movingId },
   );
-  const currentLocalFeatures = useCurrentLocalFeatures(localFeatureLayer, {
-    buildings: currentBuildings,
-    locations: currentLocations,
-    nodes: currentNodes,
-    pathways: currentPathways,
-  });
 
   const displaysOsmOverlays = [...currentBuildings, ...currentLocations, ...currentNodes, ...currentPathways]
     .some((item) => item.source?.provider === "OpenStreetMap");
@@ -259,12 +243,10 @@ export function MapEditor() {
     location: selectedLocation,
     node: selectedNode,
     building: selectedBuilding,
-    localFeature: selectedLocalFeature,
   } = selectedMapObjects(selected, {
     contentLocations: buildingContentLocations,
     nodes: currentNodes,
     buildings: currentBuildings,
-    localFeatures: currentLocalFeatures,
   });
   const nodeFrame = useRouteNodeFrame(selectedNode, {
     workflow: routeNodeWorkflow,
@@ -353,7 +335,6 @@ export function MapEditor() {
   });
 
   const applySelection = useCallback((type: MapSelectionType, id: string) => {
-    localFeatures.setActionNotice("");
     if (type === "pathway") {
       const outcome = pathway.loadForSelection(id);
       if (outcome) setMode(outcome === "edit" ? "path" : "select");
@@ -612,7 +593,6 @@ export function MapEditor() {
       location: selectedLocation,
       node: selectedNode,
       path: selectedPath,
-      localFeature: selectedLocalFeature,
     },
     current: {
       buildings: currentBuildings,
@@ -621,7 +601,7 @@ export function MapEditor() {
       pathways: currentPathways,
       contentLocations: buildingContentLocations,
     },
-    editors: { pathway, nodeFrame, localFeatures, routeNodeWorkflow },
+    editors: { pathway, nodeFrame, routeNodeWorkflow },
     campusBoundary,
     buildingAssociationOptions,
     savingAction,
@@ -642,7 +622,6 @@ export function MapEditor() {
         onDelete: () => setDeleteConfirmation({ kind: "building", id: view.building.id, name: view.building.name }),
       }),
       onEditLocationDetails: () => setOwnerModal("location"),
-      onEditLocalFeatureDetails: () => setOwnerModal("local_feature"),
       onError: setError,
       onNodeUpdated: overlay.putNode,
       onMoveNode: handleStartMoveNode,
@@ -832,9 +811,8 @@ export function MapEditor() {
           building: selectedBuilding,
           buildingLocation: selectedBuildingLocation,
           location: selectedLocation,
-          localFeature: selectedLocalFeature,
         }}
-        editors={{ buildingEditor, pathway, indoor, localFeatures }}
+        editors={{ buildingEditor, pathway, indoor }}
         data={{
           locations: currentLocations,
           contentLocations: buildingContentLocations,

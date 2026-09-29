@@ -8,7 +8,7 @@ import {
   type SelectionCandidate,
 } from "../selectionCandidates";
 
-export type MapSelectionType = "location" | "node" | "pathway" | "building" | "area" | "path_point" | "local_feature";
+export type MapSelectionType = "location" | "node" | "pathway" | "building" | "area" | "path_point";
 export type MapSelection = { type: MapSelectionType; id: string };
 
 export interface SelectionPopoverState {

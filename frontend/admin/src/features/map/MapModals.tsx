@@ -6,15 +6,12 @@ import { DeleteConfirmationModal, type DeleteConfirmation } from "./DeleteConfir
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
 import { isIndoorLocation } from "./indoorLocation/indoorLocations";
 import type { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
-import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
-import type { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import type { usePathwayEditing } from "./pathway/usePathwayEditing";
-import type { LocalMapFeatureEntity } from "../../services/mapLayers";
 import type { SaveAction } from "./session/useSavingAction";
 
-export type OwnerModal = "location" | "local_feature" | null;
+export type OwnerModal = "location" | null;
 
 interface MapModalsProps {
   ownerModal: OwnerModal;
@@ -25,13 +22,11 @@ interface MapModalsProps {
     building: Building | undefined;
     buildingLocation: Location | undefined;
     location: Location | undefined;
-    localFeature: LocalMapFeatureEntity | undefined;
   };
   editors: {
     buildingEditor: ReturnType<typeof useBuildingFootprintEditing>;
     pathway: ReturnType<typeof usePathwayEditing>;
     indoor: ReturnType<typeof useIndoorLocationPlacement>;
-    localFeatures: ReturnType<typeof useLocalFeatureEditing>;
   };
   data: {
     locations: Location[];
@@ -55,8 +50,8 @@ interface MapModalsProps {
 
 /** Every modal the Map Editor can open over the map. */
 export function MapModals({ ownerModal, error, savingAction, selection, editors, data, deletion, actions }: MapModalsProps) {
-  const { buildingEditor, pathway, indoor, localFeatures } = editors;
-  const { building: selectedBuilding, location: selectedLocation, localFeature: selectedLocalFeature } = selection;
+  const { buildingEditor, pathway, indoor } = editors;
+  const { building: selectedBuilding, location: selectedLocation } = selection;
   const { conversionDraft, setConversionDraft } = pathway;
   const locationModalEntity = locationDetailsEntity(selectedLocation, selectedBuilding, selection.buildingLocation);
   return (
@@ -85,16 +80,6 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
             ? () => actions.onPickIndoorLocationOnMap(selectedLocation)
             : undefined}
           onSubmit={actions.onSubmitLocationDetails}
-        />
-      )}
-
-      {ownerModal === "local_feature" && selectedLocalFeature && selectedLocalFeature.isEditable && (
-        <LocalFeatureDetailsModal
-          feature={selectedLocalFeature}
-          onClose={actions.onCloseOwnerModal}
-          onSubmit={(updated) => {
-            if (localFeatures.updateFeature(selectedLocalFeature, updated)) actions.onCloseOwnerModal();
-          }}
         />
       )}
 
