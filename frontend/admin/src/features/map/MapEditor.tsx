@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { MapContainer } from "react-leaflet";
 import L from "leaflet";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
-import { services, setMockFailure } from "../../services/api";
+import { services } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
@@ -28,6 +28,7 @@ import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEdit
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
 import { useMapRouteIntents } from "./session/useMapRouteIntents";
+import { useMapSaveFailureFlag } from "./session/useMapSaveFailureFlag";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSessionMapData } from "./session/useSessionMapData";
@@ -76,16 +77,7 @@ export function MapEditor() {
     adapter: services.map,
     workingSession: workingSessionManager,
   }), [workingSessionManager]);
-  useEffect(() => {
-    const failure = new URLSearchParams(window.location.search).get(
-      "mockFailure",
-    );
-    if (failure === "mapSave") {
-      setMockFailure("mapSave", true);
-      return () => setMockFailure("mapSave", false);
-    }
-    return undefined;
-  }, []);
+  useMapSaveFailureFlag();
 
   const {
     data,
