@@ -38,7 +38,6 @@ import {
 } from "./campusBoundary";
 import {
   distanceInMeters,
-  nudgePoint,
   type PointSnapTarget,
 } from "./pointInteractions";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
@@ -73,7 +72,9 @@ import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChoos
 import { LocationMapLayer } from "./location/LocationMapLayer";
 import { SelectedLocationPanel } from "./location/SelectedLocationPanel";
 import { locationInspectorModel } from "./location/locationInspectorModel";
-import { DeleteConfirmationModal, type DeleteConfirmation } from "./DeleteConfirmationModal";
+import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
+import { useDeleteConfirmation } from "./session/useDeleteConfirmation";
+import { useEscapeShortcut, usePointMoveKeys } from "./session/useMapKeyboard";
 import "leaflet/dist/leaflet.css";
 
 const MAP_EDITOR_PROJECT_ID = "proj-echague";
@@ -148,7 +149,6 @@ export function MapEditor() {
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
-  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
@@ -883,55 +883,20 @@ export function MapEditor() {
 
   const browseWalkingNetwork = () => toolSession.requestTool({ toolType: "select", openNetworkBrowser: true });
 
-  useEffect(() => {
-    const position = pointTool.position;
-    if (mode !== "move" || !position) return;
-    const handlePointMoveKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        handleCancelMove();
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (pointOnCampus(position, campusBoundary)) handleSavePosition();
-        return;
-      }
-      if (["INPUT", "TEXTAREA", "SELECT"].includes((event.target as HTMLElement | null)?.tagName ?? "")) return;
-      const directions = {
-        ArrowUp: "north",
-        ArrowDown: "south",
-        ArrowLeft: "west",
-        ArrowRight: "east",
-      } as const;
-      const direction = directions[event.key as keyof typeof directions];
-      if (!direction) return;
-      event.preventDefault();
-      pointTool.updateMovePosition(nudgePoint(position, direction, event.shiftKey ? 5 : 0.5));
-    };
-    window.addEventListener("keydown", handlePointMoveKey);
-    return () => window.removeEventListener("keydown", handlePointMoveKey);
-  }, [campusBoundary, mode, pointTool.position]);
-
-  useEffect(() => {
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (mode === "move") return;
-      if (toolSession.pendingToolRequest) {
-        toolSession.cancelInterruption();
-      } else if (workingSessionManager.hasActiveDraft()) {
-        toolSession.requestTool({ toolType: "select" });
-      } else if (activeTool !== "select") {
-        toolSession.activateTool("select");
-      } else {
-        setSelected(null);
-      }
-    };
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, [activeTool, mode, toolSession.pendingToolRequest, workingSessionManager]);
+  usePointMoveKeys({
+    mode,
+    pointTool,
+    campusBoundary,
+    onCancel: handleCancelMove,
+    onSave: handleSavePosition,
+  });
+  useEscapeShortcut({
+    mode,
+    activeTool,
+    toolSession,
+    workingSession: workingSessionManager,
+    onClearSelection: () => setSelected(null),
+  });
 
   const workingSessionState = toolSession.state;
   const recordPropertyOperation = (
@@ -950,28 +915,12 @@ export function MapEditor() {
       description,
     });
   };
-  const confirmDelete = async () => {
-    if (!deleteConfirmation) return;
-    try {
-      if (deleteConfirmation.kind === "building") {
-        await services.map.removeBuilding(deleteConfirmation.id);
-        overlay.removeBuilding(deleteConfirmation.id);
-        overlay.removeLocation(deleteConfirmation.id);
-      } else if (deleteConfirmation.kind === "route_node") {
-        await services.map.deleteRouteNode(deleteConfirmation.id);
-        overlay.removeNode(deleteConfirmation.id);
-      } else {
-        await services.map.deletePathway(deleteConfirmation.id);
-        overlay.deletePathway(deleteConfirmation.id);
-      }
-      await refreshMapData();
-      setSelected(null);
-      setDeleteConfirmation(null);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `Failed to delete ${deleteConfirmation.name}. Retry when ready.`);
-    }
-  };
+  const { deleteConfirmation, setDeleteConfirmation, confirmDelete } = useDeleteConfirmation({
+    overlay,
+    refreshMapData,
+    onError: setError,
+    onDeleted: () => setSelected(null),
+  });
 
   const locationModalEntity: Location | null = selectedLocation ?? (selectedBuilding ? {
     id: selectedBuildingLocation?.id ?? selectedBuilding.id,
