@@ -1,23 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  MapContainer,
-  Marker,
-  Popup,
-  TileLayer,
-  Tooltip,
-} from "react-leaflet";
+import { MapContainer, TileLayer } from "react-leaflet";
 import L from "leaflet";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
-import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { isPointInBounds, overlayChanges, polygonFeatureAnchor } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
-import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
+import { InspectorCardHUD } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import { BuildingToolPanel } from "./building/BuildingToolPanel";
@@ -49,7 +42,6 @@ import {
   type PointSnapTarget,
 } from "./pointInteractions";
 import { pathwayConnectionError } from "./pathway/pathwayTopology";
-import type { DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
@@ -72,13 +64,16 @@ import {
   type CanvasSelectionType,
   type SelectionCandidate,
 } from "./selectionCandidates";
-import {
-  createIndoorLocationIcon,
-  createLocationPinIcon,
-} from "./mapIcons";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
+import { IndoorLocationMapLayers } from "./indoorLocation/IndoorLocationMapLayers";
+import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
+import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
+import { LocationMapLayer } from "./location/LocationMapLayer";
+import { SelectedLocationPanel } from "./location/SelectedLocationPanel";
+import { locationInspectorModel } from "./location/locationInspectorModel";
+import { DeleteConfirmationModal, type DeleteConfirmation } from "./DeleteConfirmationModal";
 import "leaflet/dist/leaflet.css";
 
 const MAP_EDITOR_PROJECT_ID = "proj-echague";
@@ -192,7 +187,7 @@ export function MapEditor() {
   const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{ kind: "building" | "route_node" | "pathway"; id: string; name: string; impact?: DeleteImpact } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
@@ -1326,39 +1321,12 @@ export function MapEditor() {
       });
     }
     if (selectedLocation) {
-      const isFootprintOwner = selectedLocation.type === "Building" || selectedLocation.type === "Facility";
-      const parentBuilding = selectedLocation.parentId
-        ? currentBuildings.find((building) => building.id === selectedLocation.parentId)
-          ?? currentLocations.find((location) => location.id === selectedLocation.parentId)
-        : null;
-      const locationSummary: InspectorCardModel["summary"] = [
-        { label: "Code", value: selectedLocation.code },
-        { label: "Type", value: selectedLocation.type },
-        ...(!isFootprintOwner && !isIndoorLocation(selectedLocation) ? [{ label: "Parent building", value: selectedLocation.building || parentBuilding?.name || "—" }] : []),
-        ...(!isFootprintOwner ? [{ label: "Floor", value: selectedLocation.floor || "—" }] : []),
-        ...(selectedLocation.function ? [{ label: "Function", value: selectedLocation.function }] : []),
-        ...(selectedLocation.keywords ? [{ label: "Keywords", value: selectedLocation.keywords }] : []),
-        ...(selectedLocation.lat !== null && selectedLocation.lng !== null
-          ? [{ label: "Coordinates", value: `${selectedLocation.lat.toFixed(6)}, ${selectedLocation.lng.toFixed(6)}` }]
-          : []),
-        { label: "Lifecycle", value: selectedLocation.status },
-        ...(isFootprintOwner || !isIndoorLocation(selectedLocation)
-          ? [{ label: "Spatial source", value: isFootprintOwner ? "Linked Building Footprint" : "Inherited from parent Building" }]
-          : []),
-      ];
-      return {
-        id: selectedLocation.id,
-        kind: isFootprintOwner ? "building" : "campus_location",
-        title: selectedLocation.name,
-        domain: "Locations",
-        status: isFootprintOwner
-          ? "Campus Location · footprint geometry managed in Map Editor"
-          : "Campus Location",
-        summary: locationSummary,
-        overflowActions: [
-          { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
-        ],
-      } satisfies InspectorCardModel;
+      return locationInspectorModel({
+        location: selectedLocation,
+        buildings: currentBuildings,
+        locations: currentLocations,
+        onEditDetails: () => setOwnerModal("location"),
+      });
     }
     if (selectedNode) {
       return routeNodeInspectorModel({
@@ -1494,68 +1462,25 @@ export function MapEditor() {
             onSelectPathway={(pathwayId, anchor) => selectCanvasObject("pathway", pathwayId, anchor)}
           />
 
-          {filteredLocations.map((loc) => {
-            const isSelected = selected?.type === "location" && selected?.id === loc.id;
-            if (isOverviewZoom && !isSelected) return null;
-            return (
-              <Marker
-                key={`location:${loc.id}`}
-                position={[loc.lat, loc.lng]}
-                icon={createLocationPinIcon(isSelected)}
-                eventHandlers={{
-                  click: () => {
-                    selectCanvasObject("location", loc.id, [loc.lat, loc.lng]);
-                  },
-                }}
-              >
-                {!isOverviewZoom && <Tooltip direction="top" offset={[0, -28]} className="map-label">
-                  <div className="font-bold text-xs">{loc.name}</div>
-                  <div className="text-[10px] text-gray-500 font-normal">{loc.type} · {loc.code}</div>
-                  {!pointOnCampus([loc.lat, loc.lng], campusBoundary) && (
-                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
-                  )}
-                </Tooltip>}
-                <Popup>
-                  <strong>{loc.name}</strong>
-                  <br />
-                  <small>{loc.type} · {loc.code}</small>
-                </Popup>
-              </Marker>
-            );
-          })}
+          <LocationMapLayer
+            locations={filteredLocations}
+            selectedLocationId={selected?.type === "location" ? selected.id : null}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onSelectLocation={(locationId, anchor) => selectCanvasObject("location", locationId, anchor)}
+          />
 
-          {visibleIndoorLocations.map((location) => {
-            if (indoorPlacement?.locationId === location.id) return null;
-            const isSelected = selected?.type === "location" && selected.id === location.id;
-            const building = currentBuildings.find((item) => belongsToBuilding(location, item));
-            return (
-              <Marker
-                key={`indoor-location:${location.id}`}
-                position={[location.lat!, location.lng!]}
-                icon={createIndoorLocationIcon(location.type, isSelected)}
-                eventHandlers={{
-                  click: () => {
-                    setSelectionPopover(null);
-                    setSelected({ type: "location", id: location.id });
-                  },
-                }}
-              >
-                <Tooltip direction="top" offset={[0, -12]} className="map-label">
-                  <div className="font-bold text-xs">{location.name}</div>
-                  <div className="text-[10px] text-gray-500 font-normal">{building?.name ?? location.building} · {location.type}</div>
-                </Tooltip>
-              </Marker>
-            );
-          })}
-
-          {indoorPlacement?.position && (() => {
-            const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
-            return location ? <Marker
-              key={`indoor-placement-preview:${location.id}`}
-              position={indoorPlacement.position}
-              icon={createIndoorLocationIcon(location.type, true)}
-            /> : null;
-          })()}
+          <IndoorLocationMapLayers
+            indoor={indoor}
+            visibleLocations={visibleIndoorLocations}
+            contentLocations={buildingContentLocations}
+            buildings={currentBuildings}
+            selectedLocationId={selected?.type === "location" ? selected.id : null}
+            onSelectLocation={(locationId) => {
+              setSelectionPopover(null);
+              setSelected({ type: "location", id: locationId });
+            }}
+          />
 
           <RouteNodeMarkersLayer
             nodes={filteredNodes}
@@ -1605,28 +1530,14 @@ export function MapEditor() {
         </MapContainer>
 
         {indoorPlacement && (
-          <aside className="absolute right-4 top-4 z-[1000] flex max-h-[calc(100%-2rem)] w-[min(24rem,calc(100%-2rem))] flex-col gap-4 overflow-auto rounded-2xl border border-[#dbe6df] bg-white/95 p-5 text-[#234333] shadow-xl backdrop-blur" aria-label="Indoor location position editor">
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#426257]">INDOOR LOCATION</p>
-              <h2 className="mt-1 text-lg font-extrabold text-[#191c1d]">{buildingContentLocations.find((location) => location.id === indoorPlacement.locationId)?.name ?? "Position location"}</h2>
-              <p className="mt-1 text-xs text-[#526359]">{currentBuildings.find((building) => building.id === indoorPlacement.buildingId)?.name ?? "Parent Building"}</p>
-            </div>
-            <p role="status" className="rounded-xl bg-[#eff6f1] px-3 py-2.5 text-xs leading-relaxed">
-              {indoorPlacement.position
-                ? "Position preview selected. Click another point inside the building to change it."
-                : "Click inside the building footprint to choose this location's position."}
-              {currentMapZoom < 20 ? " Zoom to level 20 or closer." : ""}
-            </p>
-            {indoorPlacement.position && <dl className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg bg-[#f7f9f8] p-2"><dt className="font-bold text-[#526359]">Latitude</dt><dd className="mt-1 font-mono">{indoorPlacement.position[0].toFixed(6)}</dd></div>
-              <div className="rounded-lg bg-[#f7f9f8] p-2"><dt className="font-bold text-[#526359]">Longitude</dt><dd className="mt-1 font-mono">{indoorPlacement.position[1].toFixed(6)}</dd></div>
-            </dl>}
-            {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-            <div className="flex justify-end gap-2 border-t border-[#e6ece8] pt-3">
-              <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoor.saving} onClick={indoor.cancel}>Cancel</button>
-              <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={() => { void saveIndoorLocationPosition(); }}>{indoor.saving ? "Saving Position…" : "Save Position"}</button>
-            </div>
-          </aside>
+          <IndoorLocationPlacementPanel
+            indoor={indoor}
+            contentLocations={buildingContentLocations}
+            buildings={currentBuildings}
+            zoom={currentMapZoom}
+            error={error}
+            onSave={() => { void saveIndoorLocationPosition(); }}
+          />
         )}
 
         {isOverviewZoom && mode !== "select" && (
@@ -1841,36 +1752,11 @@ export function MapEditor() {
                 onClearSelection={() => setSelected(null)}
               />
             ) : selectedLocation ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Location</div>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Location name
-                  <input aria-label="Location name" value={selectedLocation.name} onChange={(event) => updateLocation({ ...selectedLocation, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
-                </label>
-                <div className="text-xs text-[#3f4941]">{selectedLocation.type} · Campus Location</div>
-                <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Name</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.name}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Type</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.type}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Parent</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.building || selectedLocation.parentId || "—"}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Spatial source</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedLocation.type === "Building" || selectedLocation.type === "Facility" ? "Linked building footprint" : "Inherited from parent"}</dd>
-                  </div>
-                </dl>
-                <div className="mt-4">
-                  <button type="button" onClick={() => setSelected(null)} className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer">
-                    Clear Selection
-                  </button>
-                </div>
-              </div>
+              <SelectedLocationPanel
+                location={selectedLocation}
+                onUpdate={updateLocation}
+                onClearSelection={() => setSelected(null)}
+              />
             ) : selectedNode ? (
               <SelectedRouteNodePanel
                 node={selectedNode}
@@ -1991,64 +1877,22 @@ export function MapEditor() {
       />}
 
       {indoor.chooserOpen && selectedBuilding && (
-        <Modal
-          title="Mark indoor location"
-          subtitle={`Choose an existing indoor location in ${selectedBuilding.name}, then click its position inside the building footprint.`}
-          size="md"
-          variant="green"
-          onClose={() => indoor.setChooserOpen(false)}
-        >
-          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
-            {buildingContentLocations.filter((location) => isIndoorLocation(location) && belongsToBuilding(location, selectedBuilding)).map((location) => {
-              const positioned = location.lat !== null && location.lng !== null;
-              return (
-                <div key={location.id} className="flex items-center justify-between gap-3 rounded-xl border border-[#dbe0e2] p-3">
-                  <div className="min-w-0">
-                    <strong className="block truncate text-sm text-[#191c1d]">{location.name}</strong>
-                    <span className="text-xs text-[#526359]">{location.floor ? `${location.floor} · ` : ""}{location.type} · {location.code}</span>
-                    <span className="block text-[10px] text-[#526359]">{positioned ? "Marker placed" : "No map marker"}</span>
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button onClick={() => beginIndoorLocationPlacement(selectedBuilding, location)}>{positioned ? "Reposition" : "Place marker"}</Button>
-                    <Button variant="subtle" disabled={!positioned} onClick={() => indoor.clear(selectedBuilding, location)}>Clear</Button>
-                  </div>
-                </div>
-              );
-            })}
-            {!buildingContentLocations.some((location) => isIndoorLocation(location) && belongsToBuilding(location, selectedBuilding)) && (
-              <p className="rounded-xl bg-[#f8faf9] p-4 text-sm text-[#526359]">This building has no Room, Office, Laboratory, or Restroom records yet. Use “Add indoor location” to create one first.</p>
-            )}
-          </div>
-          {error && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700">{error}</div>}
-          <div className="modal-actions"><Button variant="subtle" onClick={() => indoor.setChooserOpen(false)}>Close</Button></div>
-        </Modal>
+        <IndoorLocationChooserModal
+          indoor={indoor}
+          building={selectedBuilding}
+          contentLocations={buildingContentLocations}
+          error={error}
+          onBeginPlacement={beginIndoorLocationPlacement}
+        />
       )}
 
       {deleteConfirmation && (
-        <Modal
-          title={`Delete ${deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}?`}
-          subtitle="This is a permanent hard delete and cannot be undone."
-          size="sm"
-          variant="danger"
+        <DeleteConfirmationModal
+          confirmation={deleteConfirmation}
+          error={error}
+          onConfirm={confirmDelete}
           onClose={() => setDeleteConfirmation(null)}
-        >
-          <div className="space-y-2 text-xs text-[#3f4941]" role="document">
-            <p><strong>{deleteConfirmation.name}</strong> will be permanently removed.</p>
-            {deleteConfirmation.kind === "building" && <p className="text-red-700">The Building record and all associated Indoor Locations are permanently removed.</p>}
-            {deleteConfirmation.kind === "route_node" && <><p><strong>Connected Pathways:</strong> {deleteConfirmation.impact?.connectedPathways.length ? deleteConfirmation.impact.connectedPathways.map((pathway) => pathway.name).join(", ") : "None"}</p><p className="text-red-700">Connected Pathways and their Path Points are removed by the existing delete cascade in the same transaction.</p></>}
-            {deleteConfirmation.kind === "pathway" && <p className="text-red-700">This Pathway and its {deleteConfirmation.impact?.connectedPathways[0]?.pathPoints.length ?? 0} Path Point(s) are permanently removed.</p>}
-            {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2 text-red-700">{error}</div>}
-          </div>
-          <div className="modal-actions">
-            <Button variant="subtle" onClick={() => setDeleteConfirmation(null)}>Cancel</Button>
-            <Button
-              variant="danger"
-              onClick={confirmDelete}
-            >
-              Delete {deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}
-            </Button>
-          </div>
-        </Modal>
+        />
       )}
     </div>
   );
