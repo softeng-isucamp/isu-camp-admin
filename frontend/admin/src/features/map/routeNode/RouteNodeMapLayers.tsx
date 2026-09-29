@@ -2,6 +2,7 @@ import { Marker, Tooltip } from "react-leaflet";
 import type L from "leaflet";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
+import type { EditorMode } from "../types";
 import { createNodeIcon, createTempIcon } from "../mapIcons";
 import type { PointSnapTarget } from "../pointInteractions";
 import { PointMoveLayer } from "../PointMoveLayer";
@@ -9,7 +10,7 @@ import type { useRouteNodePointTool } from "./useRouteNodePointTool";
 
 interface RouteNodeMarkersLayerProps {
   nodes: RouteNode[];
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   movingId: string | null;
   selectedNodeId: string | null;
   campusBoundary: MapPoint[];
@@ -58,7 +59,7 @@ export function RouteNodeMarkersLayer({
 
 interface RouteNodeMoveLayerProps {
   pointTool: ReturnType<typeof useRouteNodePointTool>;
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   snapTargets: PointSnapTarget[];
   campusBoundary: MapPoint[];
   outsideBoundary: boolean;
@@ -98,7 +99,7 @@ export function RouteNodeMoveLayer({
 
 interface RouteNodePlacementMarkerProps {
   pointTool: ReturnType<typeof useRouteNodePointTool>;
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   campusBoundary: MapPoint[];
   isOverviewZoom: boolean;
   onError: (message: string) => void;

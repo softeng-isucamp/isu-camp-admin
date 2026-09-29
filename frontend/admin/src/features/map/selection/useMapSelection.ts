@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
+import type { EditorMode } from "../types";
 import {
   findSelectionCandidates,
   type CanvasSelectionType,
@@ -28,7 +29,7 @@ export interface SelectableMapObjects {
  * `onSelected` runs after each selection so domains can load their drafts.
  */
 export function useMapSelection(
-  mode: string,
+  mode: EditorMode,
   setSelected: (selection: MapSelection | null) => void,
   objects: SelectableMapObjects,
   onSelected: (type: MapSelectionType, id: string) => void,

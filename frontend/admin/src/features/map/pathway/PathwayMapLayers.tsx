@@ -2,6 +2,7 @@ import { Marker, Polyline, Tooltip } from "react-leaflet";
 import type L from "leaflet";
 import type { Pathway, RouteNode } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
+import type { EditorMode } from "../types";
 import { createPointIcon, createSplitIcon } from "../mapIcons";
 import type { usePathwayEditing } from "./usePathwayEditing";
 import { segmentMidpoints } from "./pathwayTopology";
@@ -10,7 +11,7 @@ interface PathwaysLayerProps {
   pathway: ReturnType<typeof usePathwayEditing>;
   pathways: Pathway[];
   nodes: RouteNode[];
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   selectedPathId: string | null;
   campusBoundary: MapPoint[];
   isOverviewZoom: boolean;
@@ -100,7 +101,7 @@ export function PathwaysLayer({
 interface PathwayDraftLayerProps {
   pathway: ReturnType<typeof usePathwayEditing>;
   nodes: RouteNode[];
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   campusBoundary: MapPoint[];
   isOverviewZoom: boolean;
   onSelect: (selection: { type: "path_point"; id: string }) => void;
