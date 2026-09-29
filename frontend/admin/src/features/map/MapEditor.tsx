@@ -21,7 +21,7 @@ import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
-import type { ActiveToolDraft, EditorMode, ToolType } from "./types";
+import type { EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
 import { distanceInMeters } from "./pointInteractions";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
@@ -57,6 +57,7 @@ import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChoos
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
 import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
+import { activeToolForMode, enterToolMode, restoreToolMode } from "./session/toolModeTransitions";
 import { useDeleteConfirmation } from "./session/useDeleteConfirmation";
 import { useEscapeShortcut, usePointMoveKeys } from "./session/useMapKeyboard";
 import "leaflet/dist/leaflet.css";
@@ -239,55 +240,16 @@ export function MapEditor() {
     onError: setError,
     editorContext: { mode, selected },
   });
-  const activeTool: ToolType = mode === "place" || mode === "move"
-    ? "point"
-    : mode === "area"
-      ? "polygon"
-      : mode === "path"
-        ? "pathway"
-        : mode;
+  const activeTool = activeToolForMode(mode);
+  const editorState = { setMode, setSelected, setNetworkBrowserOpen };
   const toolSession = useToolSession({
     manager: workingSessionManager,
     journal: workingSessionJournal,
     key: workingSessionKey,
     activeTool,
     tools: { point: pointTool, polygon: buildingEditor, pathway },
-    onToolActivated: (toolType, openedPathway) => {
-      const activationHandlers: Record<ToolType, () => void> = {
-        select: () => setMode("select"),
-        point: () => {
-          setMode("place");
-          setSelected(null);
-        },
-        polygon: () => setMode("area"),
-        pathway: () => {
-          setMode("path");
-          setNetworkBrowserOpen(false);
-          if (openedPathway) setSelected({ type: "pathway", id: openedPathway.id });
-        },
-      };
-      activationHandlers[toolType]();
-    },
-    onDraftRestored: (toolType, records) => {
-      const restoreHandlers: Record<ActiveToolDraft["toolType"], () => void> = {
-        point: () => {
-          setMode(records.editorMode === "move" ? "move" : "place");
-          const restoredSelection = records.selected;
-          if (
-            restoredSelection
-            && typeof restoredSelection === "object"
-            && "type" in restoredSelection
-            && "id" in restoredSelection
-            && restoredSelection.type === "node"
-            && typeof restoredSelection.id === "string"
-          ) setSelected({ type: restoredSelection.type, id: restoredSelection.id });
-          else setSelected(null);
-        },
-        polygon: () => setMode("area"),
-        pathway: () => setMode("path"),
-      };
-      restoreHandlers[toolType]();
-    },
+    onToolActivated: (toolType, openedPathway) => enterToolMode(toolType, openedPathway, editorState),
+    onDraftRestored: (toolType, records) => restoreToolMode(toolType, records, editorState),
     onOpenNetworkBrowser: () => setNetworkBrowserOpen(true),
   });
   const pointSnapTargets = usePointSnapTargets(
