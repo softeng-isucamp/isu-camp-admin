@@ -2,8 +2,6 @@ import { PropsWithChildren, useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { Button } from "./UI";
-import { services } from "../services/api";
-import type { NotificationItem } from "../types";
 import logo from "../assets/figma/brand/kumpas-logo.png";
 import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
 import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
@@ -13,7 +11,6 @@ import logsIcon from "../assets/figma/navigation/logs.svg";
 import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
 import signOutIcon from "../assets/figma/navigation/sign-out.svg";
 import searchIcon from "../assets/figma/navigation/search.svg";
-import notificationsIcon from "../assets/figma/navigation/notifications.svg";
 
 export const links = [
   {
@@ -57,8 +54,6 @@ export function Shell({ children }: PropsWithChildren) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notificationsList, setNotificationsList] = useState<NotificationItem[]>([]);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -69,12 +64,6 @@ export function Shell({ children }: PropsWithChildren) {
     localStorage.setItem("isucamp_sidebar_minimized", String(minimized));
   }, [minimized]);
 
-  useEffect(() => {
-    services.notifications.list().then(setNotificationsList).catch(() => {});
-  }, [location.pathname]);
-
-  const hasUnread = notificationsList.some((n) => !n.read);
-
   const handleSearchSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && searchQuery.trim()) {
       const q = searchQuery.trim();
@@ -84,11 +73,6 @@ export function Shell({ children }: PropsWithChildren) {
         navigate(`/locations?q=${encodeURIComponent(q)}`);
       }
     }
-  };
-
-  const handleMarkAllRead = async () => {
-    await services.notifications.markAllRead();
-    setNotificationsList((current) => current.map((n) => ({ ...n, read: true })));
   };
 
   const handleToggleMinimize = () => {
@@ -248,63 +232,6 @@ export function Shell({ children }: PropsWithChildren) {
               >
                 ×
               </button>
-            )}
-          </div>
-          <div className="notification-wrapper" style={{ position: "relative" }}>
-            <button
-              className="icon-btn"
-              aria-label="Notifications"
-              onClick={() => setShowNotifications(!showNotifications)}
-            >
-              <img src={notificationsIcon} alt="" />
-              {hasUnread && <em />}
-            </button>
-            {showNotifications && (
-              <div className="notification-dropdown">
-                <div className="notification-header">
-                  <strong>Notifications</strong>
-                  <button type="button" onClick={handleMarkAllRead}>
-                    Mark all read
-                  </button>
-                </div>
-                <div className="notification-list">
-                  {notificationsList.length > 0 ? (
-                    notificationsList.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`notification-item ${item.read ? "read" : "unread"}`}
-                        onClick={async () => {
-                          await services.notifications.markRead(item.id);
-                          setNotificationsList((current) =>
-                            current.map((n) =>
-                              n.id === item.id ? { ...n, read: true } : n
-                            )
-                          );
-                        }}
-                      >
-                        <div className="notification-title">
-                          <span>{item.title}</span>
-                          <small>{item.time}</small>
-                        </div>
-                        <p>{item.message}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="notification-empty">No notifications</div>
-                  )}
-                </div>
-                <div className="notification-footer">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowNotifications(false);
-                      navigate("/system-logs");
-                    }}
-                  >
-                    View System Logs →
-                  </button>
-                </div>
-              </div>
             )}
           </div>
           <div

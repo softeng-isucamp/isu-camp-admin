@@ -511,20 +511,6 @@ describe("mock service contracts", () => {
     await expect(services.locations.save({ ...created, lat: 16.72, lng: null })).rejects.toThrow();
   });
 
-  it("handles notifications listing and mark as read", async () => {
-    const list = await services.notifications.list();
-    expect(list.length).toBeGreaterThan(0);
-    const unread = list.find((n) => !n.read);
-    if (unread) {
-      await services.notifications.markRead(unread.id);
-      const updated = await services.notifications.list();
-      expect(updated.find((n) => n.id === unread.id)?.read).toBe(true);
-    }
-    await services.notifications.markAllRead();
-    const all = await services.notifications.list();
-    expect(all.every((n) => n.read)).toBe(true);
-  });
-
   it("persists new route nodes, moved locations, and updated path shapes", async () => {
     const nodeName = `Test Gate ${Date.now()}`;
     await services.map.save({

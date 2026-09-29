@@ -5,16 +5,6 @@ import { MemoryRouter } from "react-router-dom";
 import { Shell } from "./Shell";
 import * as AuthContext from "../features/auth/AuthContext";
 
-vi.mock("../services/api", () => ({
-  services: {
-    notifications: {
-      list: vi.fn().mockResolvedValue([]),
-      markAllRead: vi.fn().mockResolvedValue(undefined),
-      markRead: vi.fn().mockResolvedValue(undefined),
-    },
-  },
-}));
-
 describe("Shell Sidebar Component", () => {
   const mockLogout = vi.fn();
   const mockSession = {

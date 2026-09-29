@@ -9,7 +9,6 @@ import type {
   LocationPosition,
   LocationType,
   MapSavePayload,
-  NotificationItem,
   Page,
   Pathway,
   RouteNode,
@@ -22,7 +21,6 @@ import { z } from "zod";
 import {
   buildings,
   locations,
-  notifications,
   pathways,
   routeNodes,
   topSearchedLocations,
@@ -567,14 +565,6 @@ export interface Services {
     ): Promise<Page<AuditEntry>>;
 
     forLocation(id: string, name?: string, type?: LocationType): Promise<Page<AuditEntry>>;
-  };
-
-  notifications: {
-    list(): Promise<NotificationItem[]>;
-
-    markRead(id: string): Promise<void>;
-
-    markAllRead(): Promise<void>;
   };
 
   map: {
@@ -1322,47 +1312,6 @@ export const services: Services = {
       enrichLegacyLocationAuditIds();
       const entries = localAuditEntries.filter((entry) => entry.targetId === id);
       return wait({ items: clone(entries), total: entries.length, page: 1, pageSize: 20 });
-    },
-  },
-
-
-  // ========================================
-  // NOTIFICATIONS
-  // ========================================
-
-  notifications: {
-
-    list: async () =>
-      wait(
-        clone(notifications)
-      ),
-
-
-    markRead: async (id) => {
-
-      const item =
-        notifications.find(
-          (notification) =>
-            notification.id === id
-        );
-
-      if (item) {
-        item.read = true;
-      }
-
-      return wait(undefined);
-    },
-
-
-    markAllRead: async () => {
-
-      notifications.forEach(
-        (notification) => {
-          notification.read = true;
-        }
-      );
-
-      return wait(undefined);
     },
   },
 

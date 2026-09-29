@@ -1185,30 +1185,3 @@ export const pathways: Pathway[] = [
     pathPoints: [[16.72051, 121.68987]],
   },
 ];
-
-export const notifications: import("../types").NotificationItem[] = [
-  {
-    id: "n-1",
-    title: "Geospatial Update",
-    message: "Campus walkway geometry successfully calibrated.",
-    time: "10m ago",
-    read: false,
-    type: "success",
-  },
-  {
-    id: "n-2",
-    title: "New Location Added",
-    message: "Main Library entrance node linked to directory.",
-    time: "1h ago",
-    read: false,
-    type: "info",
-  },
-  {
-    id: "n-3",
-    title: "System Synchronization",
-    message: "Campus database synchronized with live mobile clients.",
-    time: "3h ago",
-    read: true,
-    type: "info",
-  },
-];
