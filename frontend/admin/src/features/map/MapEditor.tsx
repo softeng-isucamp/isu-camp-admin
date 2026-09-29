@@ -16,6 +16,7 @@ import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import { BuildingToolPanel } from "./building/BuildingToolPanel";
 import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
+import { useEntranceLinking } from "./building/useEntranceLinking";
 import { buildingInspectorModel } from "./building/buildingInspectorModel";
 import type { SelectedBuildingView } from "./building/selectedBuilding";
 import { RouteNodePlacePanel } from "./routeNode/RouteNodePlacePanel";
@@ -64,7 +65,7 @@ import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
 import { MapController } from "./MapController";
-import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
+import { belongsToBuilding, indoorLocationParent, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationMapLayers } from "./indoorLocation/IndoorLocationMapLayers";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
@@ -148,7 +149,6 @@ export function MapEditor() {
   const [frameBounds, setFrameBounds] = useState<[[number, number], [number, number]] | null>(null);
   const saving = useSavingAction();
   const { savingAction } = saving;
-  const [linkingBuildingEntrance, setLinkingBuildingEntrance] = useState(false);
 
 
   const [error, setError] = useState("");
@@ -759,47 +759,19 @@ export function MapEditor() {
   };
 
   const openIndoorLocationHandoff = (building: Building) => {
-    const parent = currentLocations.find((location) => location.id === building.id && location.type === "Building") ?? {
-      id: building.id,
-      name: building.name,
-      code: building.code,
-      type: "Building" as const,
-      parentId: null,
-      status: building.status ?? "Active",
-      lat: null,
-      lng: null,
-      positioned: false,
-    };
     navigate(`/locations?add=indoor&parentId=${encodeURIComponent(building.id)}`, {
-      state: { indoorLocationParent: parent },
+      state: { indoorLocationParent: indoorLocationParent(building, currentLocations) },
     });
   };
 
-  const linkExistingEntrance = async (building: Building, node: RouteNode) => {
-    const associatedPlaceId = selectedBuildingLocation?.id ?? building.id;
-    const updated = { ...node, nodeType: "Entrance" as const, associatedPlaceId };
-    const result = await routeNodeWorkflow.finalize({
-      kind: "update",
-      before: node,
-      after: updated,
-      context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-      description: `Link ${node.name} to ${building.name}`,
-    });
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    try {
-      updateNode(result.node);
-      await refreshMapData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The Entrance association was saved, but the map could not refresh.");
-      return;
-    }
-    setLinkingBuildingEntrance(false);
-    setSelected({ type: "building", id: building.id });
-  };
-
+  const entranceLinking = useEntranceLinking({
+    workflow: routeNodeWorkflow,
+    context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
+    onNodeSaved: overlay.putNode,
+    refreshMapData,
+    onError: setError,
+    onLinked: (buildingId) => setSelected({ type: "building", id: buildingId }),
+  });
 
   const finishPathwayTool = () => {
     setMode("select");
@@ -867,7 +839,6 @@ export function MapEditor() {
   };
 
   const updateLocation = overlay.putLocation;
-  const updateNode = overlay.putNode;
   const updateBuilding = overlay.putBuilding;
 
 
@@ -936,7 +907,7 @@ export function MapEditor() {
         view: selectedBuildingView,
         contentLocations: buildingContentLocations,
         nodes: currentNodes,
-        linkingEntrance: linkingBuildingEntrance,
+        linkingEntrance: entranceLinking.linking,
         actions: {
           onReshape: startSelectedBuildingGeometryEdit,
           onEditDetails: () => setOwnerModal("location"),
@@ -946,9 +917,9 @@ export function MapEditor() {
             pointTool.beginEntrancePlacement(`${selectedBuildingView.building.name} Entrance`, selectedBuildingView.associationId);
             setMode("place");
           },
-          onToggleLinkEntrance: () => setLinkingBuildingEntrance((open) => !open),
-          onLinkExistingEntrance: () => setLinkingBuildingEntrance(true),
-          onLinkEntrance: (node) => linkExistingEntrance(selectedBuildingView.building, node),
+          onToggleLinkEntrance: () => entranceLinking.setLinking((open) => !open),
+          onLinkExistingEntrance: () => entranceLinking.setLinking(true),
+          onLinkEntrance: (node) => entranceLinking.linkExistingEntrance(selectedBuildingView, node),
           onDelete: () => setDeleteConfirmation({ kind: "building", id: selectedBuildingView.building.id, name: selectedBuildingView.building.name }),
         },
       });
@@ -974,7 +945,7 @@ export function MapEditor() {
         buildingAssociationOptions,
         savingAction,
         onError: setError,
-        onNodeUpdated: updateNode,
+        onNodeUpdated: overlay.putNode,
         onMove: handleStartMoveNode,
         onDelete: setDeleteConfirmation,
       });
