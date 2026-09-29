@@ -7,12 +7,14 @@ import { polygonFeatureAnchor } from "../mapEditing";
 import type { usePathwayEditing } from "../pathway/usePathwayEditing";
 import type { MapSelection } from "../selection/useMapSelection";
 import type { EditorMode } from "../types";
+import type { useMapData } from "./useMapData";
 import type { useToolSession } from "./useToolSession";
 
 interface UseMapRouteIntentsOptions {
   route: { pathname: string; search: string; navigate: NavigateFunction };
   data: {
-    loaded: boolean;
+    /** The loaded map data; the intents re-run whenever it changes (e.g. a refetch after saving). */
+    map: ReturnType<typeof useMapData>["data"];
     directoryLocations: Location[];
     directoryPathways: Pathway[];
     overlayPathways: Pathway[];
@@ -55,7 +57,7 @@ export function useMapRouteIntents({
   useEffect(() => {
     const indoorLocationId = new URLSearchParams(route.search).get("indoorLocation");
     if (indoorLocationId) {
-      if (!data.loaded) return;
+      if (!data.map) return;
       const indoorLocation = current.locations.find((item) => item.id === indoorLocationId && isIndoorLocation(item));
       const parentBuilding = indoorLocation
         ? current.buildings.find((item) => item.id === indoorLocation.parentId || item.name === indoorLocation.building)
@@ -109,12 +111,12 @@ export function useMapRouteIntents({
         view.flyTo([loc.lat, loc.lng]);
       }
     }
-  }, [current.locations, current.buildings, data.loaded, data.directoryLocations, route.navigate, route.pathname, route.search]);
+  }, [current.locations, current.buildings, data.map, data.directoryLocations, route.navigate, route.pathname, route.search]);
 
   useEffect(() => {
     const pathwayId = new URLSearchParams(route.search).get("pathway");
     if (!pathwayId) return;
-    if (!data.loaded) return;
+    if (!data.map) return;
     const requested = data.overlayPathways.find((item) => item.id === pathwayId)
       ?? data.directoryPathways.find((item) => item.id === pathwayId);
     if (!requested) {
@@ -130,5 +132,5 @@ export function useMapRouteIntents({
     view.setError("");
     const source = current.nodes.find((node) => node.id === requested.sourceNodeId);
     if (source) view.flyTo([source.lat, source.lng]);
-  }, [current.nodes, data.loaded, data.directoryPathways, data.overlayPathways, route.search]);
+  }, [current.nodes, data.map, data.directoryPathways, data.overlayPathways, route.search]);
 }

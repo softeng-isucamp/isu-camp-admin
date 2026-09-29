@@ -289,7 +289,7 @@ export function MapEditor() {
 
   useMapRouteIntents({
     route: { pathname: routeLocation.pathname, search: routeLocation.search, navigate },
-    data: { loaded: Boolean(data), directoryLocations, directoryPathways, overlayPathways: overlay.pathways },
+    data: { map: data, directoryLocations, directoryPathways, overlayPathways: overlay.pathways },
     current: { buildings: currentBuildings, locations: buildingContentLocations, nodes: currentNodes },
     indoor,
     pathway,
