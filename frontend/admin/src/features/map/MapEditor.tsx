@@ -11,22 +11,18 @@ import { polygonFeatureAnchor } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
-import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
-import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import { mapInspectorModel } from "./inspector/mapInspectorModel";
 import { useEntranceLinking } from "./building/useEntranceLinking";
 import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
-import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import type { EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
-import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
@@ -50,16 +46,14 @@ import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLoca
 import { networkSelectionFocus } from "./selection/networkSelectionFocus";
 import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
 import { selectedMapObjects } from "./selection/selectedMapObjects";
+import { MapModals, type OwnerModal } from "./MapModals";
 import { MapLayers } from "./MapLayers";
 import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
-import { indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
+import { indoorLocationParent } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
-import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
-import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
-import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
 import { activeToolForMode, enterToolMode, restoreToolMode } from "./session/toolModeTransitions";
 import { useDeleteConfirmation } from "./session/useDeleteConfirmation";
 import { useEscapeShortcut, usePointMoveKeys } from "./session/useMapKeyboard";
@@ -104,7 +98,7 @@ export function MapEditor() {
   } = useMapData();
 
   const overlay = useMapOverlay(data?.buildings);
-  const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
+  const [ownerModal, setOwnerModal] = useState<OwnerModal>(null);
 
   const [mode, setMode] = useState<EditorMode>("select");
   const [selected, setSelected] = useState<MapSelection | null>(null);
@@ -181,7 +175,6 @@ export function MapEditor() {
     currentPathways,
     pathwayCrossings,
     selectedPath,
-    activePathway,
     editingPathId,
     setEditingPathId,
     setPathwayDraft,
@@ -190,9 +183,6 @@ export function MapEditor() {
     setPathPoints,
     setSelectedPathPointIndex,
     setPathDraftDirty,
-    conversionDraft,
-    setConversionDraft,
-    updateConversionPathway,
   } = pathway;
   const buildingEditor = useBuildingFootprintEditing({
     workingSession: workingSessionManager,
@@ -221,18 +211,9 @@ export function MapEditor() {
     setPoints,
     polygonInteraction,
     polygonClosed,
-    buildingWorkflowMode,
-    buildingDetailsModalOpen,
-    buildingClassification,
-    setBuildingClassification,
     nonRoutableBuildingId,
     setNonRoutableBuildingId,
-    buildingForm,
-    setBuildingForm,
-    editingBuildingId,
     currentBuildings,
-    closeDetailsModal: closeBuildingDetailsModal,
-    createBuilding: handleCreateBuilding,
   } = buildingEditor;
   const pointTool = useRouteNodePointTool({
     workflow: routeNodeWorkflow,
@@ -590,7 +571,6 @@ export function MapEditor() {
     overlay,
     refreshMapData,
   });
-  const locationModalEntity = locationDetailsEntity(selectedLocation, selectedBuilding, selectedBuildingLocation);
 
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
@@ -827,85 +807,48 @@ export function MapEditor() {
         <MapLegend />
       </div>
 
-      {buildingDetailsModalOpen && polygonClosed && buildingWorkflowMode === "create" && !editingBuildingId && (
-        <BuildingDetailsModal
-          draft={buildingForm}
-          classification={buildingClassification}
-          error={error}
-          onChange={setBuildingForm}
-          onClassificationChange={setBuildingClassification}
-          onClose={closeBuildingDetailsModal}
-          onSubmit={handleCreateBuilding}
-          submitting={savingAction === "building"}
-        />
-      )}
-
-      {ownerModal === "location" && locationModalEntity && (
-        <LocationDetailsModal
-          location={locationModalEntity}
-          directory={currentLocations}
-          allowedTypes={selectedBuilding ? ["Building", "Facility"] : undefined}
-          onClose={() => setOwnerModal(null)}
-          onPickIndoorLocationOnMap={selectedLocation && isIndoorLocation(selectedLocation)
-            ? () => {
-                const parent = currentBuildings.find((item) => item.id === selectedLocation.parentId || item.name === selectedLocation.building);
-                setOwnerModal(null);
-                if (parent) beginIndoorLocationPlacement(parent, selectedLocation);
-                else setError("The parent Building footprint could not be found.");
-              }
-            : undefined}
-          onSubmit={async (updated, photos) => {
+      <MapModals
+        ownerModal={ownerModal}
+        error={error}
+        savingAction={savingAction}
+        selection={{
+          building: selectedBuilding,
+          buildingLocation: selectedBuildingLocation,
+          location: selectedLocation,
+          localFeature: selectedLocalFeature,
+        }}
+        editors={{ buildingEditor, pathway, indoor, localFeatures }}
+        data={{
+          locations: currentLocations,
+          contentLocations: buildingContentLocations,
+          nodes: currentNodes,
+          buildingAssociationOptions,
+        }}
+        deletion={{
+          confirmation: deleteConfirmation,
+          onConfirm: confirmDelete,
+          onClose: () => setDeleteConfirmation(null),
+        }}
+        actions={{
+          onCloseOwnerModal: () => setOwnerModal(null),
+          onSubmitLocationDetails: async (updated, photos) => {
             await locationDetails.save(
               { building: selectedBuilding, buildingLocation: selectedBuildingLocation, location: selectedLocation },
               updated,
               photos,
             );
             setOwnerModal(null);
-          }}
-        />
-      )}
-
-      {ownerModal === "local_feature" && selectedLocalFeature && selectedLocalFeature.isEditable && (
-        <LocalFeatureDetailsModal
-          feature={selectedLocalFeature}
-          onClose={() => setOwnerModal(null)}
-          onSubmit={(updated) => {
-            if (localFeatures.updateFeature(selectedLocalFeature, updated)) setOwnerModal(null);
-          }}
-        />
-      )}
-
-      {conversionDraft && <PathPointConversionModal
-        draft={conversionDraft}
-        parentName={activePathway?.name ?? conversionDraft.pathwayId}
-        nodes={currentNodes}
-        buildings={buildingAssociationOptions}
-        error={error}
-        saving={savingAction === "path-point-conversion"}
-        onClose={() => { if (savingAction !== "path-point-conversion") setConversionDraft(null); }}
-        onNodeChange={(change) => setConversionDraft((draft) => draft ? { ...draft, node: { ...draft.node, ...change } } : draft)}
-        onPathwayChange={updateConversionPathway}
-        onSave={savePathPointConversion}
-      />}
-
-      {indoor.chooserOpen && selectedBuilding && (
-        <IndoorLocationChooserModal
-          indoor={indoor}
-          building={selectedBuilding}
-          contentLocations={buildingContentLocations}
-          error={error}
-          onBeginPlacement={beginIndoorLocationPlacement}
-        />
-      )}
-
-      {deleteConfirmation && (
-        <DeleteConfirmationModal
-          confirmation={deleteConfirmation}
-          error={error}
-          onConfirm={confirmDelete}
-          onClose={() => setDeleteConfirmation(null)}
-        />
-      )}
+          },
+          onPickIndoorLocationOnMap: (location) => {
+            const parent = currentBuildings.find((item) => item.id === location.parentId || item.name === location.building);
+            setOwnerModal(null);
+            if (parent) beginIndoorLocationPlacement(parent, location);
+            else setError("The parent Building footprint could not be found.");
+          },
+          onBeginIndoorPlacement: beginIndoorLocationPlacement,
+          onSavePathPointConversion: savePathPointConversion,
+        }}
+      />
     </div>
   );
 }
