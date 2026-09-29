@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
 import L from "leaflet";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { services, setMockFailure } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { overlayChanges, polygonFeatureAnchor } from "./mapEditing";
+import { polygonFeatureAnchor } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
@@ -29,9 +29,7 @@ import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
 import type { ActiveToolDraft, ToolType } from "./types";
-import { locationIdentityKey } from "../../lib/locationPolicy";
 import {
-  echagueCampusBoundary,
   geometryOnCampus,
   paddedCampusBounds,
   pointOnCampus,
@@ -53,7 +51,9 @@ import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
+import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
+import { useSessionMapData } from "./session/useSessionMapData";
 import { useSavingAction } from "./session/useSavingAction";
 import { useToolSession } from "./session/useToolSession";
 import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
@@ -108,28 +108,15 @@ export function MapEditor() {
     return undefined;
   }, []);
 
-  const { data } = useQuery({
-    queryKey: ["map"],
-    queryFn: async () => ({
-      buildings: await services.map.buildings(),
-      locations: await services.map.locations(),
-      nodes: await services.map.nodes(),
-      pathways: await services.map.pathways(),
-    }),
-  });
-  const { data: locationDirectory } = useQuery({
-    queryKey: ["locations", "map-directory"],
-    queryFn: async () => {
-      const first = await services.locations.list("", 1, 100);
-      const pages = Math.ceil(first.total / first.pageSize);
-      const remaining = await Promise.all(
-        Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
-          services.locations.list("", index + 2, first.pageSize)),
-      );
-      return [first, ...remaining].flatMap((page) => page.items);
-    },
-    retry: false,
-  });
+  const {
+    data,
+    locationDirectory,
+    directoryLocations,
+    directoryNodes,
+    directoryPathways,
+    campusBoundary,
+    directoryMapLayers,
+  } = useMapData();
 
   const overlay = useMapOverlay(data?.buildings);
   const [ownerModal, setOwnerModal] = useState<"location" | "local_feature" | null>(null);
@@ -183,23 +170,6 @@ export function MapEditor() {
     setCurrentMapZoom(zoom);
   }, []);
 
-  const directoryLocations = data?.locations || [];
-  const directoryNodes = data?.nodes || [];
-  const directoryPathways = data?.pathways || [];
-  const directoryBuildings = (data?.buildings || []).filter((building) => building.points.length >= 3);
-  // Local map features are retained by the data/service layer for compatibility,
-  // but are intentionally not rendered in this editor. The campus boundary is
-  // still used below for validation and navigation bounds.
-  const campusBoundary = useMemo(
-    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
-    [directoryBuildings],
-  );
-  const directoryMapLayers = useMemo(() => normalizeMapLayers({
-    buildings: data?.buildings || [],
-    locations: data?.locations || [],
-    routeNodes: data?.nodes || [],
-    pathways: data?.pathways || [],
-  }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
   const localFeatureLayer = useLocalFeatureLayer(directoryMapLayers.featureLinks);
   const currentFeatureLinks = localFeatureLayer.currentFeatureLinks;
   const localFeatures = useLocalFeatureEditing({
@@ -207,13 +177,14 @@ export function MapEditor() {
     layer: localFeatureLayer,
     onError: setError,
   });
-  const currentLocations = useMemo(() => overlayChanges(directoryLocations, overlay.locations), [directoryLocations, overlay.locations]);
-  const buildingContentLocations = useMemo(() => {
-    const locationsById = new Map((locationDirectory ?? []).map((location) => [locationIdentityKey(location), location]));
-    for (const location of currentLocations) locationsById.set(locationIdentityKey(location), location);
-    return Array.from(locationsById.values());
-  }, [currentLocations, locationDirectory]);
-  const currentNodes = useMemo(() => overlayChanges(directoryNodes, overlay.nodes), [directoryNodes, overlay.nodes]);
+  const {
+    currentLocations,
+    buildingContentLocations,
+    currentNodes,
+    sessionBuildings,
+    allSessionBuildings,
+    buildingAssociationOptions,
+  } = useSessionMapData(data, locationDirectory, overlay);
   const pathway = usePathwayEditing({
     workingSession: workingSessionManager,
     overlay,
@@ -240,52 +211,6 @@ export function MapEditor() {
     setConversionDraft,
     updateConversionPathway,
   } = pathway;
-  const sessionBuildings = useMemo(() => {
-    return overlayChanges(data?.buildings || [], overlay.buildings);
-  }, [data?.buildings, overlay.buildings]);
-  const allSessionBuildings = useMemo(() => {
-    const buildingMap = new Map<string, Building>();
-    for (const loc of currentLocations) {
-      if (loc.type === "Building" || loc.type === "Facility") {
-        buildingMap.set(loc.id, {
-          id: loc.id,
-          name: loc.name,
-          code: loc.code,
-          type: loc.type === "Facility" ? "Facility" : "Building",
-          status: loc.status ?? "Active",
-          points: [],
-        });
-      }
-    }
-    for (const bld of sessionBuildings) {
-      const existing = buildingMap.get(bld.id);
-      buildingMap.set(bld.id, {
-        ...existing,
-        ...bld,
-      });
-    }
-    return Array.from(buildingMap.values());
-  }, [currentLocations, sessionBuildings]);
-  const buildingAssociationOptions = useMemo(() => {
-    const buildingMap = new Map<string, Building>();
-    for (const location of locationDirectory ?? []) {
-      if (location.type !== "Building") continue;
-      buildingMap.set(location.id, {
-        id: location.id,
-        name: location.name,
-        code: location.code,
-        type: "Building",
-        status: location.status,
-        points: [],
-      });
-    }
-    for (const building of allSessionBuildings) {
-      if (building.type === "Facility") continue;
-      const existing = buildingMap.get(building.id);
-      buildingMap.set(building.id, { ...existing, ...building, type: "Building" });
-    }
-    return Array.from(buildingMap.values()).sort((left, right) => left.name.localeCompare(right.name));
-  }, [allSessionBuildings, locationDirectory]);
   const buildingEditor = useBuildingFootprintEditing({
     workingSession: workingSessionManager,
     layers: { overlay, localFeatures: localFeatureLayer },
