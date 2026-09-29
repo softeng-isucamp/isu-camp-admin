@@ -148,15 +148,14 @@ describe("normalizeMapLayers", () => {
       [16.7215, 121.6895],
     ]);
 
-    // 5. Local Map Features (includes campus boundary, seeded basemap, and building footprint)
+    // 5. Local Map Features (includes seeded basemap, and building footprint)
     const footprint = layers.localFeatures.find((f) => f.id === "feat-poly-bld-eng-01");
     expect(footprint).toBeDefined();
     expect(footprint?.family).toBe("building_footprint");
     expect(footprint?.linkedBuildingId).toBe("bld-eng-01");
     expect(footprint?.coordinates).toEqual(mockRawBuildings[0].points);
 
-    const boundaryFeature = layers.localFeatures.find((f) => f.family === "campus_boundary");
-    expect(boundaryFeature).toBeDefined();
+    expect(layers.localFeatures.find((f) => f.family === "campus_boundary")).toBeUndefined();
 
     // 6. Feature Links
     expect(layers.featureLinks).toHaveLength(1);

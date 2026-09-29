@@ -162,25 +162,6 @@ export function normalizeMapLayers(sources: RawSeedSources): MapEditorLayers {
   const routeNodes: RouteNodeEntity[] = [];
   const pathways: PathwayEntity[] = [];
 
-  // Seed campus boundary feature
-  localFeatures.push({
-    id: "feat-poly-campus-boundary",
-    family: "campus_boundary",
-    name: "ISU Echague Campus Perimeter",
-    isEditable: true,
-    geometryType: "polygon",
-    coordinates: echagueCampusBoundary.map(([lat, lng]) => [lat, lng] as [number, number]),
-    status: "active",
-    areaOrLength: "1,250,000 m²",
-    provenance: {
-      osmId: "relation/isu-echague-perimeter",
-      osmVersion: 1,
-      importedAt: "2026-08-01T00:00:00Z",
-      license: "ODbL (OpenStreetMap contributors)",
-      rawTags: { boundary: "administrative", name: "Isabela State University - Main Campus" },
-    },
-  });
-
   // Seed sample basemap / parking / cartographic features
   localFeatures.push(
     {

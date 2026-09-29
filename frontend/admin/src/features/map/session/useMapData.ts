@@ -36,14 +36,10 @@ export function useMapData() {
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
   const directoryPathways = data?.pathways || [];
-  const directoryBuildings = (data?.buildings || []).filter((building) => building.points.length >= 3);
   // Local map features are retained by the data/service layer for compatibility,
   // but are intentionally not rendered in this editor. The campus boundary is
   // still used below for validation and navigation bounds.
-  const campusBoundary = useMemo(
-    () => directoryBuildings.find((building) => building.code === "CAMPUS_00" || /whole isu campus/i.test(building.name))?.points ?? echagueCampusBoundary,
-    [directoryBuildings],
-  );
+  const campusBoundary = echagueCampusBoundary;
   const directoryMapLayers = useMemo(() => normalizeMapLayers({
     buildings: data?.buildings || [],
     locations: data?.locations || [],
