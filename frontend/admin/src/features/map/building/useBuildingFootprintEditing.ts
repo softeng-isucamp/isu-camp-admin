@@ -7,6 +7,7 @@ import type { LocalFeatureLayer } from "../localFeature/useLocalFeatureLayer";
 import { polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, translatePolygon } from "../mapEditing";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
+import type { ActiveToolDraft } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
 import {
   detectBuildingFootprintOverlap,
@@ -382,6 +383,112 @@ export function useBuildingFootprintEditing({
     setPolygonClosed(true);
   };
 
+  /** The polygon tool's draft, as persisted in the Working Session. */
+  const draftSnapshot = useMemo<Omit<ActiveToolDraft, "id" | "isSuspended"> | null>(() => {
+    return points.length > 0 ? ({
+      toolType: "polygon",
+      label: "Building Polygon draft",
+      provisionalGeometry: {
+        points: points.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
+        isClosed: polygonClosed,
+      },
+      nestedRecords: {
+        buildingForm,
+        buildingName,
+        buildingCode,
+        buildingFunction,
+        buildingKeywords,
+        buildingClassification,
+        editingBuildingId,
+        polygonClosed,
+        buildingDetailsModalOpen,
+        polygonInteraction,
+        buildingWorkflowMode,
+        buildingRecordMode: buildingWorkflowMode,
+        selectedAttachBuildingId,
+        selectedBuildingRecordId: selectedAttachBuildingId,
+        attachBuildingSearch,
+        buildingRecordSearch: attachBuildingSearch,
+      },
+    }) : null;
+  }, [
+    attachBuildingSearch,
+    buildingDetailsModalOpen,
+    buildingForm,
+    buildingWorkflowMode,
+    editingBuildingId,
+    points,
+    polygonClosed,
+    polygonInteraction,
+    selectedAttachBuildingId,
+  ]);
+
+  /** Discards the polygon tool's draft geometry and form. */
+  const clearToolDraft = () => {
+    setPoints([]);
+    setPolygonClosed(false);
+    setBuildingWorkflowMode("create");
+    setBuildingDetailsModalOpen(false);
+    setAttachBuildingSearch("");
+    setSelectedAttachBuildingId(null);
+    resetBuildingForm();
+    setEditingBuildingId(null);
+  };
+
+  /** Starts the polygon tool in drawing mode. */
+  const activate = () => {
+    setPolygonInteraction("draw");
+    setPolygonClosed(false);
+  };
+
+  /** Restores a suspended or recovered polygon-tool draft. */
+  const restoreDraft = (restoredPoints: MapPoint[], records: Record<string, unknown>) => {
+    setPoints(restoredPoints);
+    if (records.buildingForm && typeof records.buildingForm === "object") {
+      const form = records.buildingForm as Record<string, unknown>;
+      setBuildingForm({
+        name: typeof form.name === "string" ? form.name : "",
+        code: typeof form.code === "string" ? form.code : "",
+        function: typeof form.function === "string" ? form.function : "",
+        keywords: typeof form.keywords === "string" ? form.keywords : "",
+        status: "Active",
+      });
+    } else {
+      setBuildingForm({
+        name: typeof records.buildingName === "string" ? records.buildingName : "",
+        code: typeof records.buildingCode === "string" ? records.buildingCode : "",
+        function: typeof records.buildingFunction === "string" ? records.buildingFunction : "",
+        keywords: typeof records.buildingKeywords === "string" ? records.buildingKeywords : "",
+        status: "Active",
+      });
+    }
+    setBuildingClassification(records.buildingClassification === "Facility" ? "Facility" : "Building");
+    setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
+    setPolygonClosed(records.polygonClosed === true);
+    setBuildingDetailsModalOpen(records.buildingDetailsModalOpen === true);
+    if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
+      setPolygonInteraction(records.polygonInteraction);
+    } else {
+      setPolygonInteraction("draw");
+    }
+    const restoredWorkflowMode = records.buildingWorkflowMode ?? records.buildingRecordMode;
+    if (restoredWorkflowMode === "create" || restoredWorkflowMode === "attach") {
+      setBuildingWorkflowMode(restoredWorkflowMode);
+    }
+    const restoredSelectedId = typeof records.selectedAttachBuildingId === "string"
+      ? records.selectedAttachBuildingId
+      : typeof records.selectedBuildingRecordId === "string"
+        ? records.selectedBuildingRecordId
+        : null;
+    setSelectedAttachBuildingId(restoredSelectedId);
+    const restoredSearch = typeof records.attachBuildingSearch === "string"
+      ? records.attachBuildingSearch
+      : typeof records.buildingRecordSearch === "string"
+        ? records.buildingRecordSearch
+        : "";
+    setAttachBuildingSearch(restoredSearch);
+  };
+
   return {
     points,
     setPoints,
@@ -433,5 +540,9 @@ export function useBuildingFootprintEditing({
     createBuilding,
     attachBuilding,
     initializeFootprintEdit,
+    draftSnapshot,
+    clearToolDraft,
+    activate,
+    restoreDraft,
   };
 }
