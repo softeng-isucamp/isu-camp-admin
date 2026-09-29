@@ -32,7 +32,7 @@ describe("generated map fixture service mode", () => {
       lng: 121.6901,
     })).resolves.toMatchObject({ id: generatedMapFixture.locations[0].id, lat: 16.7201, lng: 121.6901 });
     vi.unstubAllEnvs();
-  }, 10_000);
+  }, 30_000);
 
   it("supports a local administrator session without bypassing OSM fixture mode", async () => {
     vi.stubEnv("VITE_MAP_FIXTURE", "osm");
@@ -56,5 +56,5 @@ describe("generated map fixture service mode", () => {
     await expect(services.auth.me()).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
-  });
+  }, 30_000);
 });

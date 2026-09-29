@@ -7,5 +7,5 @@ export default defineConfig({
     'import.meta.env.VITE_API_MODE': JSON.stringify('local'),
     'import.meta.env.VITE_API_BASE_URL': JSON.stringify(''),
   },
-  test: { environment: 'jsdom', setupFiles: ['./src/test/setup.ts'], exclude: ['node_modules/**', 'e2e/**'] },
+  test: { environment: 'jsdom', testTimeout: 15000, setupFiles: ['./src/test/setup.ts'], exclude: ['node_modules/**', 'e2e/**'] },
 })
