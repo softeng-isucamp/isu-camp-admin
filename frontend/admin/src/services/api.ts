@@ -31,7 +31,6 @@ import {
 import {
   locationSchema,
 } from "./schemas";
-import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
@@ -203,21 +202,27 @@ export const API_MODE: ApiMode = import.meta.env.VITE_TEST_LOCAL_ADAPTER === "tr
   ? ((import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local")
   : "real";
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
+// The generated fixture is a very large JSON module. Load it only in fixture
+// mode so normal application bundles and tests never parse it. The env check is
+// inlined so bundlers can drop the dynamic import when the flag is off.
+const generatedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm"
+  ? (await import("./generatedMapFixture")).generatedMapFixture
+  : null;
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 const localAdapter = createLocalAdapter(
-  USE_GENERATED_MAP_FIXTURE
+  generatedMapFixture
     ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
         nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
     : { buildings, locations, nodes: routeNodes, pathways },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
-const mapLocations = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations : locations;
-const mapBuildings = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings;
-const mapNodes = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes;
-const mapPathways = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways;
+const mapLocations = generatedMapFixture ? generatedMapFixture.locations : locations;
+const mapBuildings = generatedMapFixture ? generatedMapFixture.buildings : buildings;
+const mapNodes = generatedMapFixture ? generatedMapFixture.nodes : routeNodes;
+const mapPathways = generatedMapFixture ? generatedMapFixture.pathways : pathways;
 const normalizeMapPathway = (pathway: Pathway): Pathway => {
   const normalizedType = normalizePathwayWayType(pathway.type);
   return {
@@ -390,7 +395,7 @@ const actionablePathPointError = (pathwayId: string, cause: unknown) => {
   return new Error(`Could not persist Path Points for Pathway ${pathwayId}: ${message}`);
 };
 const canonicalNetwork = createCanonicalNetworkStore(
-  USE_GENERATED_MAP_FIXTURE
+  generatedMapFixture
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
     : { buildings, nodes: routeNodes, pathways, locationBuildings: locations.filter((location) => location.type === "Building").map((location) => ({ id: location.id, name: location.name })) },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
