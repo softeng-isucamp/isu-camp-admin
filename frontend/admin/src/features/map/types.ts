@@ -45,6 +45,9 @@ export interface WorkingOperation {
 // Active Tool Draft & Interruption States
 export type ToolType = "select" | "point" | "polygon" | "pathway";
 
+/** The Map Editor's interaction mode; `move` and `place` both belong to the point tool. */
+export type EditorMode = "select" | "place" | "path" | "area" | "move";
+
 export interface ProvisionalGeometry {
   points?: Array<{ x: number; y: number; lat?: number; lng?: number }>;
   isClosed?: boolean;

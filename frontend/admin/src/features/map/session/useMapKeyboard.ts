@@ -2,12 +2,12 @@ import { useEffect } from "react";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
 import { nudgePoint } from "../pointInteractions";
 import type { useRouteNodePointTool } from "../routeNode/useRouteNodePointTool";
-import type { ToolType } from "../types";
+import type { EditorMode, ToolType } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
 import type { useToolSession } from "./useToolSession";
 
 interface UsePointMoveKeysOptions {
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   pointTool: ReturnType<typeof useRouteNodePointTool>;
   campusBoundary: MapPoint[];
   onCancel: () => void;
@@ -50,7 +50,7 @@ export function usePointMoveKeys({ mode, pointTool, campusBoundary, onCancel, on
 }
 
 interface UseEscapeShortcutOptions {
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   activeTool: ToolType;
   toolSession: ReturnType<typeof useToolSession>;
   workingSession: WorkingSessionManager;
