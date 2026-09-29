@@ -13,14 +13,10 @@ import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
-import { BuildingToolPanel } from "./building/BuildingToolPanel";
-import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
 import { mapInspectorModel } from "./inspector/mapInspectorModel";
 import { useEntranceLinking } from "./building/useEntranceLinking";
 import { selectedBuildingViewFor } from "./building/selectedBuilding";
-import { RouteNodePlacePanel } from "./routeNode/RouteNodePlacePanel";
-import { SelectedRouteNodePanel } from "./routeNode/SelectedRouteNodePanel";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
 import { RouteNodeMarkersLayer, RouteNodeMoveLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
@@ -35,8 +31,6 @@ import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
-import { PathwayToolPanel } from "./pathway/PathwayToolPanel";
-import { SelectedPathwayPanel } from "./pathway/SelectedPathwayPanel";
 import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
@@ -55,6 +49,7 @@ import { useMapSearch } from "./selection/useMapSearch";
 import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
+import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
 import { belongsToBuilding, indoorLocationParent, isIndoorLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
@@ -62,7 +57,6 @@ import { IndoorLocationMapLayers } from "./indoorLocation/IndoorLocationMapLayer
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
 import { LocationMapLayer } from "./location/LocationMapLayer";
-import { SelectedLocationPanel } from "./location/SelectedLocationPanel";
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
 import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
@@ -621,8 +615,6 @@ export function MapEditor() {
     setMode("place");
   };
 
-  const updateLocation = overlay.putLocation;
-  const updateBuilding = overlay.putBuilding;
 
 
 
@@ -982,85 +974,45 @@ export function MapEditor() {
 
         {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
           && !networkBrowserOpen && (
-          <aside className="map-glass-panel absolute right-4 top-20 z-[901] w-80 max-h-[calc(100%-100px)] overflow-y-auto rounded-[28px] p-5">
-            {error && (
-              <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl" role="alert">
-                {error}
-              </div>
-            )}
-
-            {mode === "area" ? (
-              <BuildingToolPanel
-                editor={buildingEditor}
-                savingAction={savingAction}
-                onSave={handleSaveBuilding}
-                onOpenDetails={(buildingId) => {
-                  setSelected({ type: "building", id: buildingId });
-                  setOwnerModal("location");
-                }}
-              />
-            ) : mode === "place" ? (
-              <RouteNodePlacePanel
-                pointTool={pointTool}
-                buildingAssociationOptions={buildingAssociationOptions}
-                campusCenter={campusCenter}
-                savingAction={savingAction}
-                onSave={handleSavePlacedNode}
-                onCancel={() => selectTool("select")}
-              />
-            ) : mode === "path" ? (
-              <PathwayToolPanel
-                pathway={pathway}
-                nodes={currentNodes}
-                directoryPathways={directoryPathways}
-                overlayPathways={overlay.pathways}
-                savingAction={savingAction}
-                onNewPathway={startNewPathway}
-                onBrowseNetwork={() => { setMode("select"); setNetworkBrowserOpen(true); }}
-                onSave={handleSavePathShape}
-                onCancel={() => selectTool("select")}
-              />
-            ) : selectedBuildingView ? (
-              <SelectedBuildingPanel
-                view={selectedBuildingView}
-                contentLocations={buildingContentLocations}
-                onUpdateBuilding={updateBuilding}
-                onEditFootprint={startSelectedBuildingGeometryEdit}
-                onPlaceEntrance={() => {
-                  pointTool.setPlacingNodeType("Entrance");
-                  pointTool.setPlacingNodeName("");
-                  pointTool.setPlacingAssociatedBuildingId(selectedBuildingView.associationId);
-                  setMode("place");
-                }}
-                onClearSelection={() => setSelected(null)}
-              />
-            ) : selectedLocation ? (
-              <SelectedLocationPanel
-                location={selectedLocation}
-                onUpdate={updateLocation}
-                onClearSelection={() => setSelected(null)}
-              />
-            ) : selectedNode ? (
-              <SelectedRouteNodePanel
-                node={selectedNode}
-                frame={nodeFrame}
-                locations={currentLocations}
-                pathways={directoryPathways}
-                buildingAssociationOptions={buildingAssociationOptions}
-                onMove={handleStartMoveNode}
-                onClearSelection={() => setSelected(null)}
-              />
-            ) : selectedPath ? (
-              <SelectedPathwayPanel
-                pathway={pathway}
-                path={selectedPath}
-                nodes={currentNodes}
-                onUpdate={pathway.update}
-                onReshape={reshapePathway}
-                onClearSelection={() => setSelected(null)}
-              />
-            ) : null}
-          </aside>
+          <ToolPanel
+            mode={mode}
+            error={error}
+            savingAction={savingAction}
+            selection={{ building: selectedBuildingView, location: selectedLocation, node: selectedNode, path: selectedPath }}
+            editors={{ buildingEditor, pointTool, pathway, nodeFrame }}
+            data={{
+              nodes: currentNodes,
+              locations: currentLocations,
+              contentLocations: buildingContentLocations,
+              buildingAssociationOptions,
+              directoryPathways,
+              overlayPathways: overlay.pathways,
+            }}
+            actions={{
+              onSaveBuilding: handleSaveBuilding,
+              onOpenBuildingDetails: (buildingId) => {
+                setSelected({ type: "building", id: buildingId });
+                setOwnerModal("location");
+              },
+              onSavePlacedNode: handleSavePlacedNode,
+              onCancelTool: () => selectTool("select"),
+              onNewPathway: startNewPathway,
+              onBrowseNetwork: () => { setMode("select"); setNetworkBrowserOpen(true); },
+              onSavePathShape: handleSavePathShape,
+              onUpdateBuilding: overlay.putBuilding,
+              onEditBuildingFootprint: startSelectedBuildingGeometryEdit,
+              onPlaceEntrance: (view) => {
+                pointTool.setPlacingNodeType("Entrance");
+                pointTool.setPlacingNodeName("");
+                pointTool.setPlacingAssociatedBuildingId(view.associationId);
+                setMode("place");
+              },
+              onUpdateLocation: overlay.putLocation,
+              onMoveNode: handleStartMoveNode,
+              onReshapePathway: reshapePathway,
+              onClearSelection: () => setSelected(null),
+            }}
+          />
         )}
 
         {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
