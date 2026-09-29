@@ -1,4 +1,3 @@
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../services/mapLayers";
 import type { Building, Location, RouteNode } from "../../types";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
 import type { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
@@ -27,8 +26,6 @@ interface MapLayersProps {
   current: {
     buildings: Building[];
     nodes: RouteNode[];
-    featureLinks: FeatureLinkEntity[];
-    localFeatures: LocalMapFeatureEntity[];
     contentLocations: Location[];
     visibleIndoorLocations: Location[];
   };
@@ -65,12 +62,9 @@ export function MapLayers({ view, visible, current, editors, move, actions }: Ma
         selectedBuildingId={selected?.type === "building" ? selected.id : null}
         mode={mode}
         editingBuildingId={buildingEditor.editingBuildingId}
-        featureLinks={current.featureLinks}
-        localFeatures={current.localFeatures}
         campusBoundary={campusBoundary}
         isOverviewZoom={isOverviewZoom}
         onSelectBuilding={(buildingId, anchor) => actions.onSelectCanvasObject("building", buildingId, anchor)}
-        onSelectLocalFeature={(featureId) => actions.onSelectObject("local_feature", featureId)}
       />
 
       <PathwaysLayer

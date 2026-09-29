@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Building, Location } from "../../../types";
-import type { FeatureLinkEntity } from "../../../services/mapLayers";
 import type { MapPoint } from "../campusBoundary";
 import {
-  buildAttachBuildingCompoundOperation,
-  buildCreateBuildingCompoundOperation,
+  buildBuildingFootprintOperation,
+  buildCreateBuildingOperation,
   detectBuildingFootprintOverlap,
   findBuildingFootprintOverlaps,
   findFirstOverlappingBuilding,
@@ -207,67 +206,44 @@ describe("validateBuildingIdentityDetails", () => {
 });
 
 describe("getBuildingAttachmentEligibility", () => {
-  const links: FeatureLinkEntity[] = [
-    {
-      id: "link-1",
-      featureId: "feat-poly-bld-eng",
-      targetDomain: "Locations",
-      targetEntityId: "bld-eng",
-      linkType: "building_footprint",
-    },
-  ];
-
   it("rejects inactive building", () => {
     const bld: Building = { id: "bld-inactive", name: "Old Hall", code: "OLD", points: [], status: "Inactive" };
-    expect(getBuildingAttachmentEligibility(bld, links)).toEqual({
+    expect(getBuildingAttachmentEligibility(bld)).toEqual({
       eligible: false,
       reason: "Building is inactive",
     });
   });
 
-  it("rejects building already linked via FeatureLinkEntity", () => {
-    const bld: Building = { id: "bld-eng", name: "Engineering", code: "ENG", points: [], status: "Active" };
-    expect(getBuildingAttachmentEligibility(bld, links)).toEqual({
-      eligible: false,
-      reason: "Already linked to footprint feat-poly-bld-eng",
-    });
-  });
-
   it("rejects building with existing points", () => {
     const bld: Building = { id: "bld-has-points", name: "Gym", code: "GYM", points: validPoints, status: "Active" };
-    expect(getBuildingAttachmentEligibility(bld, [])).toEqual({
+    expect(getBuildingAttachmentEligibility(bld)).toEqual({
       eligible: false,
       reason: "Building already has a footprint",
     });
   });
 
-  it("approves active building without active link or footprint", () => {
+  it("approves active building without a polygon", () => {
     const bld: Building = { id: "bld-open", name: "Student Center", code: "STU", points: [], status: "Active" };
-    expect(getBuildingAttachmentEligibility(bld, links)).toEqual({
+    expect(getBuildingAttachmentEligibility(bld)).toEqual({
       eligible: true,
       reason: null,
     });
   });
 });
 
-describe("buildCreateBuildingCompoundOperation", () => {
-  it("builds ordered compound operation with Campus Location -> Footprint -> Link", () => {
+describe("buildCreateBuildingOperation", () => {
+  it("records the new Building with its polygon and no copied outdoor coordinate", () => {
     const input: BuildingIdentityInput = {
       name: "New Laboratory Building",
       code: "LAB-NEW",
       function: "Research",
       keywords: "lab, research",
     };
-    const batch = buildCreateBuildingCompoundOperation(input, validPoints, "bld-test-123");
-    expect(batch.type).toBe("compound_batch");
-    expect(batch.nestedOperations).toHaveLength(3);
-
-    const [createLoc, createFeat] = batch.nestedOperations!;
-
-    // 1. Campus Location Building (stores NO copied outdoor coordinate)
-    expect(createLoc.type).toBe("create_entity");
-    expect(createLoc.domain).toBe("Locations");
-    expect(createLoc.after).toMatchObject({
+    const operation = buildCreateBuildingOperation(input, validPoints, "bld-test-123");
+    expect(operation.type).toBe("create_entity");
+    expect(operation.domain).toBe("Locations");
+    expect(operation.entityId).toBe("bld-test-123");
+    expect(operation.after).toMatchObject({
       id: "bld-test-123",
       name: "New Laboratory Building",
       code: "LAB-NEW",
@@ -276,37 +252,18 @@ describe("buildCreateBuildingCompoundOperation", () => {
       lat: null,
       lng: null,
       positioned: false,
+      polygonCoordinates: validPoints,
     });
-
-    // 2. Building Footprint
-    expect(createFeat.type).toBe("create_entity");
-    expect(createFeat.domain).toBe("Local Map Data");
-    expect(createFeat.after).toMatchObject({
-      family: "building_footprint",
-      geometryType: "polygon",
-      coordinates: validPoints,
-      status: "active",
-    });
-
-    // Decoupled Cartographic vs Domain Identity: featureId must NOT contain or couple to buildingId
-    expect(createFeat.entityId).not.toContain("bld-test-123");
-    expect(createFeat.entityId).toMatch(/^feat-poly-/);
-  });
-
-  it("respects overrideFeatureId when explicitly supplied", () => {
-    const input: BuildingIdentityInput = { name: "Lab", code: "L" };
-    const batch = buildCreateBuildingCompoundOperation(input, validPoints, "bld-1", "feat-custom-42");
-    const createFeat = batch.nestedOperations![1];
-    expect(createFeat.entityId).toBe("feat-custom-42");
+    expect(operation.nestedOperations).toBeUndefined();
   });
 
   it("creates a footprint-backed Facility without copied outdoor coordinates", () => {
-    const batch = buildCreateBuildingCompoundOperation(
+    const operation = buildCreateBuildingOperation(
       { name: "Health Center", code: "HC-01", type: "Facility" },
       validPoints,
       "facility-1",
     );
-    expect(batch.nestedOperations?.[0].after).toMatchObject({
+    expect(operation.after).toMatchObject({
       type: "Facility",
       lat: null,
       lng: null,
@@ -316,49 +273,29 @@ describe("buildCreateBuildingCompoundOperation", () => {
   });
 });
 
-describe("buildAttachBuildingCompoundOperation", () => {
-  it("builds atomic compound operation for Attach Existing Building without duplicating Location", () => {
-    const existing: Building = {
-      id: "bld-existing-123",
-      name: "Existing Administration",
-      code: "ADM",
-      points: [],
-      status: "Active",
-    };
-    const batch = buildAttachBuildingCompoundOperation(existing, validPoints);
-    expect(batch.type).toBe("compound_batch");
-    expect(batch.nestedOperations).toHaveLength(2);
-
-    const [createFeat, createLink] = batch.nestedOperations!;
-    expect(createFeat.type).toBe("create_entity");
-    expect(createFeat.domain).toBe("Local Map Data");
-    expect(createFeat.after).toMatchObject({
-      family: "building_footprint",
-      geometryType: "polygon",
-      coordinates: validPoints,
-      status: "active",
+describe("buildBuildingFootprintOperation", () => {
+  it("records attaching a polygon to a Building that had none", () => {
+    const existing: Building = { id: "bld-existing-123", name: "Existing Administration", code: "ADM", points: [], status: "Active" };
+    const operation = buildBuildingFootprintOperation(existing, validPoints);
+    expect(operation).toMatchObject({
+      type: "update_geometry",
+      domain: "Locations",
+      entityId: "bld-existing-123",
+      before: { points: [] },
+      after: { points: validPoints },
+      description: "Attach footprint to Existing Administration",
     });
-
-    expect(createLink.type).toBe("link_feature");
-    expect(createLink.domain).toBe("Local Map Data");
-    expect(createLink.after).toMatchObject({
-      featureId: createFeat.entityId,
-      targetEntityId: "bld-existing-123",
-      linkType: "building_footprint",
-    });
-
-    // Verify no Locations operation exists in the batch
-    expect(batch.nestedOperations?.some((op) => op.domain === "Locations")).toBe(false);
-
-    // Decoupled Cartographic vs Domain Identity: featureId must NOT contain or couple to buildingId
-    expect(createFeat.entityId).not.toContain("bld-existing-123");
-    expect(createFeat.entityId).toMatch(/^feat-poly-/);
   });
 
-  it("respects overrideFeatureId when explicitly supplied for attach", () => {
-    const existing: Building = { id: "bld-42", name: "Hall", code: "H", points: [] };
-    const batch = buildAttachBuildingCompoundOperation(existing, validPoints, "feat-attach-99");
-    const createFeat = batch.nestedOperations![0];
-    expect(createFeat.entityId).toBe("feat-attach-99");
+  it("records reshaping an existing polygon", () => {
+    const existing: Building = { id: "bld-1", name: "Hall", code: "H", points: validPoints };
+    const reshaped: [number, number][] = [...validPoints.slice(0, -1), [0.5, 0.5]];
+    const operation = buildBuildingFootprintOperation(existing, reshaped);
+    expect(operation).toMatchObject({
+      type: "update_geometry",
+      before: { points: validPoints },
+      after: { points: reshaped },
+      description: "Reshape footprint for Hall",
+    });
   });
 });

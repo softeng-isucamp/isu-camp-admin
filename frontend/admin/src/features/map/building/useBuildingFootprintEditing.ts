@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { services } from "../../../services/api";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { Building, Location, RouteNode } from "../../../types";
 import { geometryOnCampus, type MapPoint } from "../campusBoundary";
-import type { LocalFeatureLayer } from "../localFeature/useLocalFeatureLayer";
 import { polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, translatePolygon } from "../mapEditing";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
@@ -23,7 +21,6 @@ export interface BuildingEditingContext {
   associationOptions: Building[];
   locations: Location[];
   nodes: RouteNode[];
-  featureLinks: FeatureLinkEntity[];
   campusBoundary: MapPoint[];
 }
 
@@ -35,7 +32,7 @@ export type BuildingEditingOutcome =
 
 interface UseBuildingFootprintEditingOptions {
   workingSession: WorkingSessionManager;
-  layers: { overlay: MapOverlay; localFeatures: LocalFeatureLayer };
+  overlay: MapOverlay;
   saving: SavingAction;
   context: BuildingEditingContext;
   drawing: boolean;
@@ -51,7 +48,7 @@ interface UseBuildingFootprintEditingOptions {
  */
 export function useBuildingFootprintEditing({
   workingSession,
-  layers,
+  overlay,
   saving,
   context,
   drawing,
@@ -59,13 +56,11 @@ export function useBuildingFootprintEditing({
   onError,
   onFinished,
 }: UseBuildingFootprintEditingOptions) {
-  const { overlay, localFeatures: localFeatureLayer } = layers;
   const {
     sessionBuildings,
     associationOptions: buildingAssociationOptions,
     locations: currentLocations,
     nodes: currentNodes,
-    featureLinks: currentFeatureLinks,
     campusBoundary,
   } = context;
   const { beginSaving, endSaving } = saving;
@@ -112,18 +107,18 @@ export function useBuildingFootprintEditing({
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
 
   const buildingAttachmentEligibility = (building: Building) =>
-    getBuildingAttachmentEligibility(building, currentFeatureLinks);
+    getBuildingAttachmentEligibility(building);
   const selectedAttachBuilding = buildingAssociationOptions.find((b) => b.id === selectedAttachBuildingId);
   const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
   const attachCandidateBuildings = useMemo(() => {
     const query = attachBuildingSearch.trim().toLowerCase();
     return buildingAssociationOptions.filter((building) => {
       if (building.id === "pending-building" || building.id === editingBuildingId) return false;
-      const eligibility = getBuildingAttachmentEligibility(building, currentFeatureLinks);
+      const eligibility = getBuildingAttachmentEligibility(building);
       if (!eligibility.eligible) return false;
       return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
     });
-  }, [attachBuildingSearch, buildingAssociationOptions, currentFeatureLinks, editingBuildingId]);
+  }, [attachBuildingSearch, buildingAssociationOptions, editingBuildingId]);
   const currentBuildings = useMemo(() => {
     const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
     if (!drawing || points.length === 0) return validMerged;
@@ -232,25 +227,10 @@ export function useBuildingFootprintEditing({
     setError("");
   };
 
-  const saveBuilding = async (currentLocalFeatures: readonly LocalMapFeatureEntity[]) => {
+  const saveBuilding = async () => {
     if (editingBuildingId) {
       if (!canFinishFootprint) return;
       if (!beginSaving("building")) return;
-      const footprintLink = currentFeatureLinks.find((link) =>
-        link.targetDomain === "Locations"
-        && link.targetEntityId === editingBuildingId
-        && link.linkType === "building_footprint",
-      );
-      const footprint = currentLocalFeatures.find((feature) =>
-        feature.id === footprintLink?.featureId
-        || (feature.family === "building_footprint"
-          && (feature.linkedBuildingId === editingBuildingId || feature.id === `feat-poly-${editingBuildingId}`)),
-      );
-      if (!footprintLink || !footprint) {
-        setError("This Building has no linked footprint to reshape. Open Building details to review its ownership.");
-        endSaving();
-        return;
-      }
       const buildingForSave = currentBuildings.find((building) => building.id === editingBuildingId);
       if (!buildingForSave) {
         setError("This Building is no longer available. Reload the map and retry the footprint update.");
@@ -260,17 +240,14 @@ export function useBuildingFootprintEditing({
       const result = await buildingFootprintWorkflow.finalize({
         kind: "reshape",
         building: buildingForSave,
-        footprint,
-        link: footprintLink,
         points: [...points],
-        context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+        context: { locations: currentLocations, campusBoundary },
       });
       if (!result.ok) {
         setError(result.message);
         endSaving();
         return;
       }
-      localFeatureLayer.putFeature(result.footprint);
       overlay.refreshBuilding(result.building);
       void refreshMapData();
       clearDraft();
@@ -289,8 +266,6 @@ export function useBuildingFootprintEditing({
       overlay.putLocation(result.location!);
     }
     overlay.putBuilding(result.building);
-    localFeatureLayer.putFeature(result.footprint);
-    localFeatureLayer.putBuildingLink(result.link);
     setPoints([]);
     resetBuildingForm();
     setAttachBuildingSearch("");
@@ -323,7 +298,7 @@ export function useBuildingFootprintEditing({
         status: "Active",
       },
       points: [...points],
-      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+      context: { locations: currentLocations, campusBoundary },
     });
     if (!result.ok) {
       setError(result.message);
@@ -349,7 +324,7 @@ export function useBuildingFootprintEditing({
       kind: "attach",
       building: existing,
       points: [...points],
-      context: { locations: currentLocations, featureLinks: currentFeatureLinks, campusBoundary },
+      context: { locations: currentLocations, campusBoundary },
     });
     if (!result.ok) {
       setError(result.message);

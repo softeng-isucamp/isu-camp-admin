@@ -135,7 +135,6 @@ export function MapEditor() {
   }, []);
 
   const localFeatureLayer = useLocalFeatureLayer(directoryMapLayers.featureLinks);
-  const currentFeatureLinks = localFeatureLayer.currentFeatureLinks;
   const localFeatures = useLocalFeatureEditing({
     workingSession: workingSessionManager,
     layer: localFeatureLayer,
@@ -170,14 +169,13 @@ export function MapEditor() {
   } = pathway;
   const buildingEditor = useBuildingFootprintEditing({
     workingSession: workingSessionManager,
-    layers: { overlay, localFeatures: localFeatureLayer },
+    overlay,
     saving,
     context: {
       sessionBuildings,
       associationOptions: buildingAssociationOptions,
       locations: currentLocations,
       nodes: currentNodes,
-      featureLinks: currentFeatureLinks,
       campusBoundary,
     },
     drawing: mode === "area",
@@ -282,7 +280,7 @@ export function MapEditor() {
     selectedNode,
     campusBoundary,
   );
-  const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes, currentFeatureLinks);
+  const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
   const applyRouteIntent = (intent: MapRouteIntent) => {
@@ -537,7 +535,7 @@ export function MapEditor() {
     }
   };
 
-  const handleSaveBuilding = () => buildingEditor.saveBuilding(currentLocalFeatures);
+  const handleSaveBuilding = () => buildingEditor.saveBuilding();
 
   const initializeBuildingFootprintEdit = (
     building: Building,
@@ -688,8 +686,6 @@ export function MapEditor() {
             current={{
               buildings: currentBuildings,
               nodes: currentNodes,
-              featureLinks: currentFeatureLinks,
-              localFeatures: currentLocalFeatures,
               contentLocations: buildingContentLocations,
               visibleIndoorLocations,
             }}

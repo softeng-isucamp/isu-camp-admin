@@ -1,5 +1,4 @@
 import type { Building, Location, RecordStatus } from "../../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { WorkingOperation } from "../types";
 import {
   geometryOnCampus,
@@ -31,10 +30,6 @@ export interface BuildingOverlapWarning {
   overlappingBuildingId: string;
   message: string;
   advisory: true;
-}
-
-function generateBuildingFootprintFeatureId(): string {
-  return `feat-poly-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 /** Check if two line segments (p1-p2 and p3-p4) intersect. */
@@ -210,15 +205,9 @@ export function validateBuildingIdentityDetails(
 
 export function getBuildingAttachmentEligibility(
   building: Building,
-  featureLinks: readonly FeatureLinkEntity[],
 ): { eligible: true; reason: null } | { eligible: false; reason: string } {
   if (building.status === "Inactive") {
     return { eligible: false, reason: "Building is inactive" };
-  }
-
-  const activeLink = featureLinks.find((link) => link.targetEntityId === building.id);
-  if (activeLink) {
-    return { eligible: false, reason: `Already linked to footprint ${activeLink.featureId}` };
   }
 
   if (building.points && building.points.length >= 3) {
@@ -228,18 +217,14 @@ export function getBuildingAttachmentEligibility(
   return { eligible: true, reason: null };
 }
 
-export function buildCreateBuildingCompoundOperation(
+/** The Working Session record of a new Building saved together with its footprint polygon. */
+export function buildCreateBuildingOperation(
   input: BuildingIdentityInput,
   footprintPoints: MapPoint[],
-  overrideBuildingId?: string,
-  overrideFeatureId?: string,
+  buildingId: string,
 ): WorkingOperation {
-  const buildingId = overrideBuildingId ?? `building-${Date.now()}`;
-  const featureId = overrideFeatureId ?? generateBuildingFootprintFeatureId();
-  const linkId = `link-${featureId}-${buildingId}`;
-
   // The Building Campus Location record stores NO copied outdoor coordinate.
-  // Its spatial anchor is derived from the authoritative footprint geometry.
+  // Its spatial anchor is derived from the footprint polygon.
   const buildingLocationRecord: Location = {
     id: buildingId,
     name: input.name.trim(),
@@ -253,125 +238,35 @@ export function buildCreateBuildingCompoundOperation(
     spatialRole: "building_footprint_owner",
     function: input.function?.trim() || undefined,
     keywords: input.keywords?.trim() || undefined,
+    polygonCoordinates: [...footprintPoints],
   };
-
-  const footprintFeature: LocalMapFeatureEntity = {
-    id: featureId,
-    family: "building_footprint",
-    name: `${input.name.trim()} footprint`,
-    isEditable: true,
-    status: "active",
-    geometryType: "polygon",
-    coordinates: [...footprintPoints],
-  };
-
-  const featureLink: FeatureLinkEntity = {
-    id: linkId,
-    featureId,
-    targetDomain: "Locations",
-    targetEntityId: buildingId,
-    linkType: "building_footprint",
-  };
-
-  // 1. Campus Location Building -> 2. Building Footprint -> 3. Feature Link
-  const nestedOperations: WorkingOperation[] = [
-    {
-      id: `create-${buildingId}`,
-      type: "create_entity",
-      domain: "Locations",
-      entityId: buildingId,
-      before: null,
-      after: buildingLocationRecord as unknown as Record<string, unknown>,
-      description: `Create Campus Location ${buildingLocationRecord.name}`,
-    },
-    {
-      id: `create-${featureId}`,
-      type: "create_entity",
-      domain: "Local Map Data",
-      entityId: featureId,
-      before: null,
-      after: footprintFeature as unknown as Record<string, unknown>,
-      description: `Create ${footprintFeature.name}`,
-    },
-    {
-      id: `create-${linkId}`,
-      type: "link_feature",
-      domain: "Local Map Data",
-      entityId: linkId,
-      before: null,
-      after: featureLink as unknown as Record<string, unknown>,
-      description: `Link footprint to ${buildingLocationRecord.name}`,
-    },
-  ];
 
   return {
-    id: `compound-create-${buildingId}`,
-    type: "compound_batch",
-    domain: "Local Map Data",
-    entityId: featureId,
-    description: `Create ${input.name.trim()} with footprint`,
+    id: `create-${buildingId}`,
+    type: "create_entity",
+    domain: "Locations",
+    entityId: buildingId,
     before: null,
-    after: null,
-    nestedOperations,
+    after: buildingLocationRecord as unknown as Record<string, unknown>,
+    description: `Create ${buildingLocationRecord.name} with footprint`,
   };
 }
 
-export function buildAttachBuildingCompoundOperation(
-  targetBuilding: Building,
+/** The Working Session record of a Building's polygon changing (attach when it had none, otherwise reshape). */
+export function buildBuildingFootprintOperation(
+  building: Building,
   footprintPoints: MapPoint[],
-  overrideFeatureId?: string,
 ): WorkingOperation {
-  const featureId = overrideFeatureId ?? generateBuildingFootprintFeatureId();
-  const linkId = `link-${featureId}-${targetBuilding.id}`;
-
-  const footprintFeature: LocalMapFeatureEntity = {
-    id: featureId,
-    family: "building_footprint",
-    name: `${targetBuilding.name.trim()} footprint`,
-    isEditable: true,
-    status: "active",
-    geometryType: "polygon",
-    coordinates: [...footprintPoints],
-  };
-
-  const featureLink: FeatureLinkEntity = {
-    id: linkId,
-    featureId,
-    targetDomain: "Locations",
-    targetEntityId: targetBuilding.id,
-    linkType: "building_footprint",
-  };
-
-  // Atomic compound containing ONLY footprint and link; NEVER duplicates Campus Location
-  const nestedOperations: WorkingOperation[] = [
-    {
-      id: `create-${featureId}`,
-      type: "create_entity",
-      domain: "Local Map Data",
-      entityId: featureId,
-      before: null,
-      after: footprintFeature as unknown as Record<string, unknown>,
-      description: `Create ${footprintFeature.name}`,
-    },
-    {
-      id: `create-${linkId}`,
-      type: "link_feature",
-      domain: "Local Map Data",
-      entityId: linkId,
-      before: null,
-      after: featureLink as unknown as Record<string, unknown>,
-      description: `Link footprint to ${targetBuilding.name}`,
-    },
-  ];
-
+  const attaching = !building.points || building.points.length < 3;
   return {
-    id: `compound-attach-${targetBuilding.id}`,
-    type: "compound_batch",
-    domain: "Local Map Data",
-    entityId: featureId,
-    description: `Attach footprint to ${targetBuilding.name}`,
-    before: null,
-    after: null,
-    nestedOperations,
+    id: `footprint-${building.id}-${Date.now()}`,
+    type: "update_geometry",
+    domain: "Locations",
+    entityId: building.id,
+    before: { points: [...(building.points ?? [])] },
+    after: { points: [...footprintPoints] },
+    description: attaching
+      ? `Attach footprint to ${building.name}`
+      : `Reshape footprint for ${building.name}`,
   };
 }
