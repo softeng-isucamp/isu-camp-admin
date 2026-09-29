@@ -9,7 +9,6 @@ export let mapFlyTo = vi.fn();
 export const mapTestState: {
   zoom: number;
   pathPointDragPosition: { lat: number; lng: number } | undefined;
-  movingPointDragPosition: { lat: number; lng: number } | undefined;
   visibleBounds: {
     getSouth: () => number;
     getNorth: () => number;
@@ -19,7 +18,6 @@ export const mapTestState: {
 } = {
   zoom: 18,
   pathPointDragPosition: undefined,
-  movingPointDragPosition: undefined,
   visibleBounds: undefined,
 };
 
@@ -28,7 +26,6 @@ export const resetMapMockState = () => {
   mapZoomEndHandler = undefined;
   mapTestState.zoom = 18;
   mapTestState.pathPointDragPosition = undefined;
-  mapTestState.movingPointDragPosition = undefined;
   mapFitBounds = vi.fn();
   mapFlyTo = vi.fn();
   mapTestState.visibleBounds = undefined;
@@ -47,7 +44,7 @@ export const reactLeafletMock = () => ({
   MapContainer: ({ children, maxZoom }: { children: React.ReactNode; maxZoom?: number }) => <div data-testid="map-container" data-max-zoom={maxZoom}>{children}</div>,
   Marker: ({ position, eventHandlers, draggable, icon }: { position: [number, number]; eventHandlers?: { click?: () => void; dragstart?: () => void; drag?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void; dragend?: (event: { target: { getLatLng: () => { lat: number; lng: number } } }) => void }; draggable?: boolean; icon?: { className?: string; iconSize?: [number, number]; testId?: number } }) => typeof draggable === "boolean" && icon?.className === "path-point-icon selected"
     ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} data-icon-id={icon.testId} data-icon-size={icon.iconSize?.join(",")} onClick={eventHandlers?.click} onDrag={() => mapTestState.pathPointDragPosition && eventHandlers?.drag?.({ target: { getLatLng: () => mapTestState.pathPointDragPosition! } })} onDragEnd={() => mapTestState.pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => mapTestState.pathPointDragPosition! } })} />
-    : eventHandlers?.drag ? <button aria-label={`Move point at ${position.join(",")}`} data-testid="move-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers.click} onDragStart={eventHandlers.dragstart} onDrag={() => mapTestState.movingPointDragPosition && eventHandlers.drag?.({ target: { getLatLng: () => mapTestState.movingPointDragPosition! } })} onDragEnd={() => mapTestState.movingPointDragPosition && eventHandlers.dragend?.({ target: { getLatLng: () => mapTestState.movingPointDragPosition! } })} />
+    : eventHandlers?.drag ? <button aria-label={`Move point at ${position.join(",")}`} data-testid="move-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers.click} onDragStart={eventHandlers.dragstart} />
     : typeof draggable === "boolean" ? <button aria-label={`Path Point at ${position.join(",")}`} data-testid="path-point-marker" data-position={position.join(",")} data-draggable={String(draggable)} onClick={eventHandlers?.click} onDragEnd={() => mapTestState.pathPointDragPosition && eventHandlers?.dragend?.({ target: { getLatLng: () => mapTestState.pathPointDragPosition! } })} /> : icon ? <button aria-label={`Map marker at ${position.join(",")}`} data-testid="saved-map-marker" data-icon-class={icon.className} data-position={position.join(",")} onClick={eventHandlers?.click} /> : null,
   Polygon: ({ eventHandlers, pathOptions }: { eventHandlers?: { click?: () => void }; pathOptions?: { className?: string } }) => <button aria-label={pathOptions?.className ?? "building polygon"} onClick={eventHandlers?.click} />,
   Polyline: ({ positions, pathOptions, children, eventHandlers }: { positions: [number, number][]; pathOptions?: { className?: string; color?: string }; children?: React.ReactNode; eventHandlers?: { click?: () => void } }) => <output data-testid={pathOptions?.className === "point-move-tether" ? "point-move-tether" : "path-geometry"} data-positions={JSON.stringify(positions)} data-color={pathOptions?.color} onClick={eventHandlers?.click}>{children}</output>,
