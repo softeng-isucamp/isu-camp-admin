@@ -1,8 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   Marker,
-  Polygon,
   Polyline,
   Popup,
   TileLayer,
@@ -22,6 +21,11 @@ import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 import { LocalFeatureDetailsModal } from "./localFeature/LocalFeatureDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
+import { BuildingToolPanel } from "./building/BuildingToolPanel";
+import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
+import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
+import { buildingInspectorModel } from "./building/buildingInspectorModel";
+import type { SelectedBuildingView } from "./building/selectedBuilding";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
@@ -66,7 +70,6 @@ import {
   createPointIcon,
   createSplitIcon,
   createTempIcon,
-  createVertexIcon,
 } from "./mapIcons";
 import { PointCoordinateInputs, PointMoveLayer } from "./PointMoveLayer";
 import { MapController } from "./MapController";
@@ -362,43 +365,19 @@ export function MapEditor() {
     points,
     setPoints,
     polygonInteraction,
-    setPolygonInteraction,
     polygonClosed,
-    setPolygonClosed,
-    polygonInvalid,
     buildingWorkflowMode,
-    setBuildingWorkflowMode,
     buildingDetailsModalOpen,
-    setBuildingDetailsModalOpen,
     buildingClassification,
     setBuildingClassification,
-    attachBuildingSearch,
-    setAttachBuildingSearch,
-    selectedAttachBuildingId,
-    setSelectedAttachBuildingId,
     nonRoutableBuildingId,
     setNonRoutableBuildingId,
     buildingForm,
     setBuildingForm,
-    buildingName,
-    buildingCode,
     editingBuildingId,
-    selectedAttachEligibility,
-    attachCandidateBuildings,
     currentBuildings,
-    footprintGeometryIssues,
-    footprintOverlapWarning,
-    canFinishFootprint,
-    canSaveBuilding,
-    closePolygon,
-    updatePolygonVertex,
-    insertPolygonVertex,
-    deletePolygonVertex,
-    movePolygon,
-    cancelDraft: cancelBuildingDraft,
     closeDetailsModal: closeBuildingDetailsModal,
     createBuilding: handleCreateBuilding,
-    attachBuilding: handleAttachBuilding,
   } = buildingEditor;
   const pointTool = useRouteNodePointTool({
     workflow: routeNodeWorkflow,
@@ -558,6 +537,14 @@ export function MapEditor() {
     (selectedBuildingLocation ? selectedBuildingLocation.status === "Active" : (selectedBuilding.status ?? "Active") === "Active") &&
     selectedBuildingEntrances.some((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng) && (node.status ? node.status === "Active" : true)),
   );
+  const selectedBuildingView: SelectedBuildingView | null = selectedBuilding ? {
+    building: selectedBuilding,
+    location: selectedBuildingLocation,
+    associationId: selectedBuildingAssociationId ?? selectedBuilding.id,
+    entrances: selectedBuildingEntrances,
+    hasFootprint: selectedBuildingHasFootprint,
+    routable: selectedBuildingRoutable,
+  } : null;
 
   useEffect(() => {
     const create = new URLSearchParams(routeLocation.search).get("create");
@@ -1261,97 +1248,27 @@ export function MapEditor() {
 
   const inspectorModel = (() => {
     if (!selected) return null;
-    if (selectedBuilding) {
-      return {
-        id: selectedBuilding.id,
-        kind: "building",
-        title: selectedBuilding.name,
-        domain: "Locations",
-        status: !selectedBuildingHasFootprint
-          ? "Building preserved · Footprint unlinked"
-          : selectedBuildingRoutable
-            ? "Linked & Routable"
-            : "Linked · Entrance needed",
-        summary: [
-          { label: "Code", value: selectedBuilding.code },
-          { label: "Geometry", value: `Building Footprint · ${selectedBuilding.points.length} vertices` },
-          { label: "Entrances", value: String(selectedBuildingEntrances.length) },
-        ],
-        details: (
-          <>
-            <section aria-label="Building summary" className="inspector-related-section">
-              <h3>Building summary</h3>
-              <p>{selectedBuilding.code} · {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building")}</p>
-              <p>{selectedBuildingHasFootprint ? "Linked Building Footprint" : "Footprint not linked"} · {selectedBuildingRoutable ? "Routable" : "Not routable"}</p>
-            </section>
-            <section aria-label="Building content" className="inspector-related-section">
-              <div className="flex items-center justify-between gap-2">
-                <h3>Building content</h3>
-                {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" && <button type="button" className="inspector-secondary-action" onClick={() => openIndoorLocationHandoff(selectedBuilding)}>＋ Add indoor location</button>}
-              </div>
-              <section aria-label="Building room directory">
-                <div className="inspector-related-heading">
-                  <div>
-                    <h4>Indoor locations by floor</h4>
-                    <span>{buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name).length} places</span>
-                  </div>
-                </div>
-                {(() => {
-                  const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
-                  const grouped = new Map<string, Location[]>();
-                  children.forEach((child) => {
-                    const floor = child.floor || "Unspecified Floor";
-                    grouped.set(floor, [...(grouped.get(floor) ?? []), child]);
-                  });
-                  return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => (
-                    <div key={floor} role="region" className="inspector-floor-group" aria-label={`${floor} indoor locations`}>
-                      <div className="inspector-floor-heading"><strong><span aria-hidden="true">⌄</span>{floor}</strong><span>{rooms.length}</span></div>
-                      {rooms.map((room) => <div key={room.id} className="inspector-location-row"><span className="inspector-content-icon" aria-hidden="true">{room.type === "Laboratory" ? "L" : "R"}</span><div><strong>{room.name}</strong><span>{room.type} · {room.code}</span></div></div>)}
-                    </div>
-                  )) : <p>No Indoor Locations recorded.</p>;
-                })()}
-              </section>
-            </section>
-            <section aria-label="Walking access" className="inspector-related-section">
-              <div className="inspector-related-heading">
-                <div>
-                  <h3>Walking access</h3>
-                  <span>{selectedBuildingEntrances.length} linked {selectedBuildingEntrances.length === 1 ? "entrance" : "entrances"}</span>
-                </div>
-              </div>
-              <section aria-label="Building entrances">
-                <h4>Entrance route nodes</h4>
-                {selectedBuildingEntrances.length
-                  ? <div className="inspector-node-list">{selectedBuildingEntrances.map((node) => <div key={node.id} className="inspector-node-row"><span className="inspector-node-icon" aria-hidden="true">⌖</span><div><strong>{node.name}</strong><span>{node.lat.toFixed(5)}, {node.lng.toFixed(5)}</span></div><em>{node.status === "Inactive" ? "Inactive" : "Active"}</em></div>)}</div>
-                  : <p>No active Entrance Route Node.</p>}
-              </section>
-              <div className="inspector-inline-actions">
-                <button type="button" onClick={() => { pointTool.beginEntrancePlacement(`${selectedBuilding.name} Entrance`, selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); }}>＋ Add entrance</button>
-                <button type="button" onClick={() => setLinkingBuildingEntrance((open) => !open)}>↔ Link existing entrance</button>
-              </div>
-              {linkingBuildingEntrance && (
-                <div className="inspector-related-group" aria-label="Existing Entrance Route Nodes">
-                  <strong>Select an existing Entrance Route Node</strong>
-                  {currentNodes.filter((node) => node.nodeType === "Entrance").map((node) => <button key={node.id} type="button" onClick={() => linkExistingEntrance(selectedBuilding, node)}>Link {node.name}</button>)}
-                  {!currentNodes.some((node) => node.nodeType === "Entrance") && <span>No Entrance Route Nodes available.</span>}
-                </div>
-              )}
-            </section>
-          </>
-        ),
-        primaryAction: {
-          label: "▱ Reshape Footprint",
-          onSelect: startSelectedBuildingGeometryEdit,
+    if (selectedBuildingView) {
+      return buildingInspectorModel({
+        view: selectedBuildingView,
+        contentLocations: buildingContentLocations,
+        nodes: currentNodes,
+        linkingEntrance: linkingBuildingEntrance,
+        actions: {
+          onReshape: startSelectedBuildingGeometryEdit,
+          onEditDetails: () => setOwnerModal("location"),
+          onAddIndoorLocation: () => openIndoorLocationHandoff(selectedBuildingView.building),
+          onMarkIndoorLocation: () => { setError(""); indoor.setChooserOpen(true); },
+          onAddEntrance: () => {
+            pointTool.beginEntrancePlacement(`${selectedBuildingView.building.name} Entrance`, selectedBuildingView.associationId);
+            setMode("place");
+          },
+          onToggleLinkEntrance: () => setLinkingBuildingEntrance((open) => !open),
+          onLinkExistingEntrance: () => setLinkingBuildingEntrance(true),
+          onLinkEntrance: (node) => linkExistingEntrance(selectedBuildingView.building, node),
+          onDelete: () => setDeleteConfirmation({ kind: "building", id: selectedBuildingView.building.id, name: selectedBuildingView.building.name }),
         },
-        overflowActions: [
-          { label: "✎ Edit Details", onSelect: () => setOwnerModal("location") },
-          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: () => openIndoorLocationHandoff(selectedBuilding) }] : []),
-          ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: () => { setError(""); indoor.setChooserOpen(true); } }] : []),
-          { label: "＋ Add entrance", onSelect: () => { pointTool.beginEntrancePlacement(`${selectedBuilding.name} Entrance`, selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); } },
-          { label: "↔ Link existing entrance", onSelect: () => setLinkingBuildingEntrance(true) },
-          { label: "🗑 Delete Building", tone: "danger" as const, onSelect: () => setDeleteConfirmation({ kind: "building", id: selectedBuilding.id, name: selectedBuilding.name }) },
-        ],
-      } satisfies InspectorCardModel;
+      });
     }
     if (selectedLocation) {
       const isFootprintOwner = selectedLocation.type === "Building" || selectedLocation.type === "Facility";
@@ -1691,69 +1608,18 @@ export function MapEditor() {
             onViewportChange={handleViewportChange}
           />
 
-          {filteredBuildings.map((building) => {
-            const isSelected = selected?.type === "building" && selected.id === building.id;
-            const footprintLink = currentFeatureLinks.find((link) =>
-              link.targetDomain === "Locations"
-              && link.targetEntityId === building.id
-              && link.linkType === "building_footprint",
-            );
-            const footprint = currentLocalFeatures.find((feature) =>
-              feature.id === footprintLink?.featureId
-              || (feature.family === "building_footprint"
-                && (feature.linkedBuildingId === building.id || feature.id === `feat-poly-${building.id}`)),
-            );
-            const footprintRetired = footprint?.status === "retired";
-            const buildingFillOpacity =
-              footprintRetired ? 0.1 : mode === "path" ? 0.08 : isSelected ? 0.35 : 0.22;
-
-            return (
-              <Fragment key={`building:${building.id}`}>
-              <Polygon
-                key={`building-polygon:${building.id}`}
-                positions={building.points}
-                pathOptions={{
-                  color: footprintRetired
-                    ? "#7c8780"
-                    : !geometryOnCampus(building.points, campusBoundary)
-                    ? "#b42318"
-                    : isSelected
-                      ? "#e67e22"
-                      : "#278b70",
-                  fillColor: footprintRetired ? "#cbd2ce" : isSelected ? "#f97316" : "#8fd1bd",
-                  fillOpacity: buildingFillOpacity,
-                  weight: isSelected ? 3 : 2,
-                  opacity: footprintRetired ? 0.48 : 1,
-                  dashArray: footprintRetired ? "7 6" : undefined,
-                }}
-                eventHandlers={{
-                  click: (event) => {
-                    if (footprintRetired && footprint) selectObject("local_feature", footprint.id);
-                    else selectCanvasObject("building", building.id, event.latlng
-                      ? [event.latlng.lat, event.latlng.lng]
-                  : polygonFeatureAnchor(building.points));
-                  },
-                }}
-              >
-                {!isOverviewZoom && <Tooltip sticky direction="top" className="map-label">
-                  <div className="font-bold text-xs">{building.name}</div>
-                  {building.code && <div className="text-[10px] text-gray-500 font-normal">{building.code}</div>}
-                  {!geometryOnCampus(building.points, campusBoundary) && (
-                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
-                  )}
-                  {footprintRetired && <div className="text-[10px] font-semibold text-amber-700">Retired · restore available</div>}
-                </Tooltip>}
-              </Polygon>
-              {mode === "select" && editingBuildingId === null && (!isOverviewZoom || isSelected) && (
-                <Marker
-                  position={polygonFeatureAnchor(building.points)}
-                  icon={createLocationPinIcon(isSelected)}
-                  eventHandlers={{ click: () => selectCanvasObject("building", building.id, polygonFeatureAnchor(building.points)) }}
-                />
-              )}
-              </Fragment>
-            );
-          })}
+          <BuildingFootprintLayer
+            buildings={filteredBuildings}
+            selectedBuildingId={selected?.type === "building" ? selected.id : null}
+            mode={mode}
+            editingBuildingId={editingBuildingId}
+            featureLinks={currentFeatureLinks}
+            localFeatures={currentLocalFeatures}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onSelectBuilding={(buildingId, anchor) => selectCanvasObject("building", buildingId, anchor)}
+            onSelectLocalFeature={(featureId) => selectObject("local_feature", featureId)}
+          />
 
           {filteredPathways.map((path) => {
             const source = currentNodes.find((node) => node.id === path.sourceNodeId);
@@ -2018,83 +1884,13 @@ export function MapEditor() {
             });
           })()}
 
-          {points.length > 1 && (
-            <Polygon
-              positions={points}
-              pathOptions={{
-                color: polygonInvalid ? "#b42318" : "#005931",
-                fillColor: "#8fd1bd",
-                fillOpacity: 0.25,
-                weight: 2,
-              }}
-            />
-          )}
-
-          {/* Center marker for the polygon currently being drawn/reshaped, so it's visible
-              before the building is committed (fixes #32 — previously only rendered post-commit
-              when mode === "select", so nothing showed while mode === "area"). Recomputed from
-              `points` on every render, same as the committed-building marker below. */}
-          {!isOverviewZoom && mode === "area" && points.length >= 3 && (
-            <Marker
-              position={polygonFeatureAnchor(points)}
-              icon={createLocationPinIcon(false)}
-            />
-          )}
-
-          {!isOverviewZoom && mode === "area" &&
-            points.map((pt, i) => (
-              <Marker
-                key={`area-pt-${i}`}
-                position={pt}
-                icon={createVertexIcon(i)}
-                draggable={polygonInteraction === "reshape"}
-                eventHandlers={{
-                  drag: (event) => {
-                    const next = (event.target as L.Marker).getLatLng();
-                    updatePolygonVertex(i, [next.lat, next.lng]);
-                  },
-                  dragend: (event) => {
-                    const next = (event.target as L.Marker).getLatLng();
-                    if (pointOnCampus([next.lat, next.lng], campusBoundary)) {
-                      updatePolygonVertex(i, [next.lat, next.lng]);
-                      setError("");
-                    } else {
-                      setError("The building footprint must stay inside the ISU Echague campus boundary.");
-                    }
-                  },
-                }}
-              />
-            ))}
-
-          {!isOverviewZoom && mode === "area" && polygonInteraction === "reshape" && points.length >= 3 && points.map((point, index) => {
-            const next = points[(index + 1) % points.length];
-            return (
-              <Marker
-                key={`split-${index}`}
-                position={[(point[0] + next[0]) / 2, (point[1] + next[1]) / 2]}
-                icon={createSplitIcon()}
-                eventHandlers={{ click: () => insertPolygonVertex(index) }}
-              />
-            );
-          })}
-
-          {!isOverviewZoom && mode === "area" && polygonInteraction === "move" && points.length >= 3 && (
-            <Marker
-              position={polygonFeatureAnchor(points)}
-              icon={createLocationPinIcon(true)}
-              draggable
-              eventHandlers={{
-                drag: (event) => {
-                  const next = (event.target as L.Marker).getLatLng();
-                  movePolygon([next.lat, next.lng]);
-                },
-                dragend: (event) => {
-                  const next = (event.target as L.Marker).getLatLng();
-                  movePolygon([next.lat, next.lng]);
-                },
-              }}
-            />
-          )}
+          <BuildingDraftLayer
+            editor={buildingEditor}
+            mode={mode}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onError={setError}
+          />
 
           {!isOverviewZoom && mode === "move" && pointTool.moveOrigin && pointTool.position && (
             <PointMoveLayer
@@ -2360,220 +2156,15 @@ export function MapEditor() {
             )}
 
             {mode === "area" ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{editingBuildingId ? "Change Building Footprint" : polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
-                {editingBuildingId ? (
-                  <section aria-label="Change scope" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                    <h3 className="text-xs font-extrabold text-[#005931]">Change scope</h3>
-                    <p className="mt-1 text-xs leading-5 text-[#3f4941]">
-                      This action edits only the linked Building Footprint geometry. The Building Campus Location and its details are unchanged.
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-3 rounded-full border border-[#005931] bg-white px-3 py-1.5 text-xs font-bold text-[#005931]"
-                      onClick={() => {
-                        const buildingId = editingBuildingId;
-                        cancelBuildingDraft();
-                        if (buildingId) {
-                          setSelected({ type: "building", id: buildingId });
-                          setOwnerModal("location");
-                        }
-                      }}
-                    >
-                      Open Building details ↗
-                    </button>
-                  </section>
-                ) : polygonClosed ? (
-                  <section aria-label="Create or attach Building" className="mt-3">
-                    <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building it should represent.</p>
-                    {footprintOverlapWarning && (
-                      <div className="my-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-semibold text-amber-800" role="status">
-                        ⚠️ {footprintOverlapWarning.message}
-                      </div>
-                    )}
-                    <div role="tablist" aria-label="Building workflow" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[#edf3ef] p-1">
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={buildingWorkflowMode === "create"}
-                        onClick={() => setBuildingWorkflowMode("create")}
-                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "create" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-                      >
-                        ★ Create New Building
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={buildingWorkflowMode === "attach"}
-                        onClick={() => setBuildingWorkflowMode("attach")}
-                        className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "attach" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-                      >
-                        🔗 Attach Existing Building
-                      </button>
-                    </div>
-                    {buildingWorkflowMode === "create" ? (
-                      <div className="mt-3 space-y-2">
-                        <p className="text-xs text-[#3f4941]">Add the Building identity and descriptive details before committing this footprint.</p>
-                        <button type="button" className="w-full rounded-xl border border-[#005931] bg-emerald-50 px-3 py-2 text-xs font-bold text-[#005931]" onClick={() => setBuildingDetailsModalOpen(true)}>
-                          {buildingName.trim() || buildingCode.trim() ? "Open Building details" : "Add Building details"}
-                        </button>
-                        {(buildingName.trim() || buildingCode.trim()) && <p className="text-[11px] text-[#526359]">{buildingName || "Unnamed Building"} {buildingCode ? `· ${buildingCode}` : ""}</p>}
-                      </div>
-                    ) : (
-                      <div className="mt-3 space-y-2">
-                        <input
-                          type="search"
-                          aria-label="Search existing Buildings"
-                          value={attachBuildingSearch}
-                          onChange={(event) => setAttachBuildingSearch(event.target.value)}
-                          placeholder="Search by name or code"
-                          className="w-full rounded-lg border border-[#dbe0e2] px-2 py-2 text-sm"
-                        />
-                        <div className="space-y-2 max-h-52 overflow-y-auto">
-                          {attachCandidateBuildings.length === 0 ? (
-                            <p className="p-3 text-center text-xs text-[#526359]">No eligible Buildings available to attach.</p>
-                          ) : (
-                            attachCandidateBuildings.map((building) => (
-                              <button
-                                key={building.id}
-                                type="button"
-                                aria-pressed={selectedAttachBuildingId === building.id}
-                                onClick={() => setSelectedAttachBuildingId(building.id)}
-                                className={`w-full rounded-xl border p-2 text-left text-xs transition cursor-pointer ${
-                                  selectedAttachBuildingId === building.id
-                                    ? "border-[#005931] bg-emerald-50 text-[#005931]"
-                                    : "border-[#dbe0e2] hover:bg-[#f8f9fa]"
-                                }`}
-                              >
-                                <span className="block font-bold">{building.name} · {building.code}</span>
-                                <span className="mt-1 block text-emerald-700 font-medium">Eligible</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </section>
-                ) : (
-                  <div>
-                    <p className="text-xs text-[#3f4941] mt-1">
-                      Click on the map to plot the perimeter corners of the building footprint. A minimum of 3 points is required to form a closed polygon.
-                    </p>
-                    <div className="flex items-center gap-1 my-3 bg-[#edf3ef] p-1 rounded-xl" role="group" aria-label="Footprint interaction mode">
-                      <button
-                        type="button"
-                        onClick={() => setPolygonInteraction("draw")}
-                        className={`flex-1 rounded-lg py-1 text-xs font-bold ${polygonInteraction === "draw" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-                      >
-                        Draw
-                      </button>
-                      <button
-                        type="button"
-                        disabled={points.length < 3}
-                        onClick={() => setPolygonInteraction("reshape")}
-                        className={`flex-1 rounded-lg py-1 text-xs font-bold disabled:opacity-40 ${polygonInteraction === "reshape" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-                      >
-                        Reshape
-                      </button>
-                      <button
-                        type="button"
-                        disabled={points.length < 3}
-                        onClick={() => setPolygonInteraction("move")}
-                        className={`flex-1 rounded-lg py-1 text-xs font-bold disabled:opacity-40 ${polygonInteraction === "move" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-                      >
-                        Move
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="text-xs font-bold text-[#191c1d] my-3">Points plotted: {points.length}</div>
-                {points.length >= 3 && (
-                  <div className="mb-2 text-[11px] text-[#526359]">
-                    Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")}
-                  </div>
-                )}
-                {footprintGeometryIssues.length > 0 && (
-                  <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700" role="alert">
-                    {footprintGeometryIssues[0].message}
-                  </div>
-                )}
-                {!polygonClosed && footprintOverlapWarning && (
-                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-2 text-xs font-semibold text-amber-800" role="status">
-                    ⚠️ {footprintOverlapWarning.message}
-                  </div>
-                )}
-                {points.length > 0 && polygonInteraction === "reshape" && (
-                  <div className="mb-3 space-y-1 max-h-36 overflow-y-auto">
-                    {points.map((point, index) => (
-                      <div key={`${point.join(",")}-${index}`} className="flex items-center justify-between rounded-lg bg-[#f8f9fa] px-2 py-1 text-xs">
-                        <span>V{index + 1} · {point[0].toFixed(5)}, {point[1].toFixed(5)}</span>
-                        <button type="button" disabled={points.length <= 3} onClick={() => deletePolygonVertex(index)} className="text-red-700 disabled:cursor-not-allowed disabled:opacity-40">Delete</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!polygonClosed && (
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <button
-                      type="button"
-                      disabled={!points.length}
-                      onClick={() => setPoints((c) => c.slice(0, -1))}
-                      className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-                    >
-                      Remove Last Point
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!points.length}
-                      onClick={() => setPoints([])}
-                      className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-                    >
-                      Clear Area
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canFinishFootprint}
-                      onClick={closePolygon}
-                      className="px-3 py-1.5 bg-emerald-50 border border-[#005931] text-[#005931] rounded-full text-xs font-bold hover:bg-emerald-100 disabled:opacity-40 transition cursor-pointer"
-                    >
-                      Save shape
-                    </button>
-                  </div>
-                )}
-                <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[#e1e3e4]">
-                  <button
-                    type="button"
-                    className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                    onClick={cancelBuildingDraft}
-                  >
-                    Cancel
-                  </button>
-                  {!editingBuildingId && polygonClosed && (
-                    <button
-                      type="button"
-                      className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                      onClick={() => setPolygonClosed(false)}
-                    >
-                      ▱ Edit Shape
-                    </button>
-                  )}
-                  {(editingBuildingId || (polygonClosed && buildingWorkflowMode === "attach")) && <button
-                    type="button"
-                    disabled={savingAction === "building" || (editingBuildingId
-                      ? !canFinishFootprint
-                      : buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)}
-                    onClick={editingBuildingId
-                      ? handleSaveBuilding
-                        : buildingWorkflowMode === "create" ? () => setBuildingDetailsModalOpen(true) : handleAttachBuilding}
-                    className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
-                  >
-                    {editingBuildingId
-                  ? savingAction === "building" ? "Saving Building Footprint…" : "Update Building Footprint"
-                      : buildingWorkflowMode === "create" ? "Open Building details" : savingAction === "building" ? "Saving Building…" : "Attach Selected Building"}
-                  </button>}
-                </div>
-              </div>
+              <BuildingToolPanel
+                editor={buildingEditor}
+                savingAction={savingAction}
+                onSave={handleSaveBuilding}
+                onOpenDetails={(buildingId) => {
+                  setSelected({ type: "building", id: buildingId });
+                  setOwnerModal("location");
+                }}
+              />
             ) : mode === "place" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Place on Map</div>
@@ -2777,64 +2368,20 @@ export function MapEditor() {
                   </>
                 )}
               </div>
-            ) : selectedBuilding ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Building</div>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Building name
-                  <input aria-label="Building name" value={selectedBuilding.name} onChange={(event) => updateBuilding({ ...selectedBuilding, name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
-                </label>
-                <label className="mt-2 block text-[10px] font-bold text-[#3f4941]">Building code
-                  <input aria-label="Building code" value={selectedBuilding.code} onChange={(event) => updateBuilding({ ...selectedBuilding, code: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
-                </label>
-                <div className="text-xs text-[#3f4941] mt-2">Building footprint</div>
-                <button
-                  type="button"
-                  className="mt-2 px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold"
-                  onClick={() => initializeBuildingFootprintEdit(selectedBuilding, "reshape")}
-                >
-                  Edit Footprint
-                </button>
-                <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Object Type</dt>
-                    <dd className="text-[#191c1d] font-bold">Building Area Footprint</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Routability</dt>
-                    <dd className={`font-bold ${selectedBuildingRoutable ? "text-[#005931]" : "text-amber-700"}`}>
-                      {selectedBuildingRoutable ? "Routable" : "Not routable"}
-                    </dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Code</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedBuilding.code}</dd>
-                  </div>
-                </dl>
-                <section aria-label="Building room directory" className="mt-4 rounded-xl border border-[#dbe0e2] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-extrabold text-[#191c1d]">Room directory</h3>
-                  </div>
-                  {(() => {
-                    const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
-                    const grouped = new Map<string, Location[]>();
-                    children.forEach((child) => { const key = child.floor || "Unassigned floor"; grouped.set(key, [...(grouped.get(key) ?? []), child]); });
-                    return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => <div key={floor} className="mt-3"><div className="text-[10px] font-bold uppercase tracking-wide text-[#005931]">{floor}</div>{rooms.map((room) => <div key={room.id} className="flex justify-between gap-2 py-1 text-xs"><span className="font-semibold">{room.name}</span><span className="text-[#6b7280]">{room.code}</span></div>)}</div>) : <p className="mt-2 text-xs text-[#6b7280]">No rooms yet.</p>;
-                  })()}
-                </section>
-                <section aria-label="Building entrances" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
-                  <div className="flex items-center justify-between"><h3 className="text-xs font-extrabold text-[#191c1d]">Entrance nodes</h3><button type="button" className="text-[10px] font-bold text-[#005931]" onClick={() => { pointTool.setPlacingNodeType("Entrance"); pointTool.setPlacingNodeName(""); pointTool.setPlacingAssociatedBuildingId(selectedBuildingAssociationId ?? selectedBuilding.id); setMode("place"); }}>＋ Place Entrance</button></div>
-                  {selectedBuildingEntrances.length ? selectedBuildingEntrances.map((node) => <div key={node.id} className="flex justify-between gap-2 py-1 text-xs"><span>{node.name}</span><span className="text-[#6b7280]">{node.status === "Inactive" ? "Inactive" : "Active"}</span></div>) : <p className="mt-2 text-xs text-amber-700">No active Entrance Route Node. Add one to make this Building routable.</p>}
-                </section>
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => setSelected(null)}
-                    className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                  >
-                    Clear Selection
-                  </button>
-                </div>
-              </div>
+            ) : selectedBuildingView ? (
+              <SelectedBuildingPanel
+                view={selectedBuildingView}
+                contentLocations={buildingContentLocations}
+                onUpdateBuilding={updateBuilding}
+                onEditFootprint={startSelectedBuildingGeometryEdit}
+                onPlaceEntrance={() => {
+                  pointTool.setPlacingNodeType("Entrance");
+                  pointTool.setPlacingNodeName("");
+                  pointTool.setPlacingAssociatedBuildingId(selectedBuildingView.associationId);
+                  setMode("place");
+                }}
+                onClearSelection={() => setSelected(null)}
+              />
             ) : selectedLocation ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Location</div>
