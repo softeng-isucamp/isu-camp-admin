@@ -15,7 +15,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, polygonFeatureAnchor, suggestedPathwayName, validateRouteNodeDraft } from "./mapEditing";
+import { isPointInBounds, overlayChanges, polygonFeatureAnchor, suggestedPathwayName } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -26,6 +26,11 @@ import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
 import { buildingInspectorModel } from "./building/buildingInspectorModel";
 import type { SelectedBuildingView } from "./building/selectedBuilding";
+import { RouteNodePlacePanel } from "./routeNode/RouteNodePlacePanel";
+import { SelectedRouteNodePanel } from "./routeNode/SelectedRouteNodePanel";
+import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
+import { routeNodeInspectorModel } from "./routeNode/routeNodeInspectorModel";
+import { RouteNodeMarkersLayer, RouteNodeMoveLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
@@ -66,12 +71,9 @@ import {
 import {
   createIndoorLocationIcon,
   createLocationPinIcon,
-  createNodeIcon,
   createPointIcon,
   createSplitIcon,
-  createTempIcon,
 } from "./mapIcons";
-import { PointCoordinateInputs, PointMoveLayer } from "./PointMoveLayer";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
@@ -1246,6 +1248,64 @@ export function MapEditor() {
     initializeBuildingFootprintEdit(selectedBuilding, "reshape");
   };
 
+  const handleRouteNodeClick = (node: RouteNode) => {
+    if (mode === "path" && !editingPathId) {
+      if (isOverviewZoom) {
+        setError("Zoom in to edit map geometry.");
+        return;
+      }
+      if (node.status !== undefined && node.status !== "Active") {
+        setError("Pathways can only use active Route Nodes.");
+        return;
+      }
+      if (!pathStartNodeId) {
+        setPathStartNodeId(node.id);
+        setPathDraftDirty(true);
+        setSelected({ type: "node", id: node.id });
+        return;
+      }
+      const source = currentNodes.find((candidate) => candidate.id === pathStartNodeId);
+      if (!source || (source.status !== undefined && source.status !== "Active")) {
+        setError("Pathways can only use active Route Nodes.");
+        return;
+      }
+      const connectionError = pathwayConnectionError(pathStartNodeId, node.id, currentPathways);
+      if (connectionError) {
+        setError(connectionError);
+        return;
+      }
+      const directDistance = Math.max(
+        1,
+        Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
+      );
+      const newPath: Pathway = {
+        id: `pathway-${Date.now()}`,
+        name: "",
+        sourceNodeId: source.id,
+        destinationNodeId: node.id,
+        distance: `${directDistance} m`,
+        time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
+        shade: "Unknown",
+        type: "Walkway",
+        direction: "Two-way",
+        status: "Active",
+        allowedModes: ["Walking"],
+        pathPoints: [],
+      };
+      overlay.putPathways([newPath]);
+      setEditingPathId(newPath.id);
+      setProvisionalPathwayId(newPath.id);
+      setPathPoints([]);
+      setPathwayDraft({ ...newPath });
+      setPathwayDraftOriginal(null);
+      setSelected({ type: "pathway", id: newPath.id });
+      setPathDraftDirty(true);
+      setError("");
+      return;
+    }
+    selectCanvasObject("node", node.id, [node.lat, node.lng]);
+  };
+
   const inspectorModel = (() => {
     if (!selected) return null;
     if (selectedBuildingView) {
@@ -1306,106 +1366,22 @@ export function MapEditor() {
       } satisfies InspectorCardModel;
     }
     if (selectedNode) {
-      const stageRouteNodeEdit = (updated: RouteNode) => {
-        nodeFrame.stage(updated);
-      };
-      const connectedPathways = currentPathways.filter((pathway) => pathway.sourceNodeId === selectedNode.id || pathway.destinationNodeId === selectedNode.id);
-      const connectedPaths = connectedPathways.length;
-      const nodeFindings = validateRouteNodeDraft(selectedNode, {
+      return routeNodeInspectorModel({
+        node: selectedNode,
+        frame: nodeFrame,
+        workflow: routeNodeWorkflow,
+        nodes: currentNodes,
+        pathways: currentPathways,
         buildings: currentBuildings,
         locations: currentLocations,
         campusBoundary,
+        buildingAssociationOptions,
+        savingAction,
+        onError: setError,
+        onNodeUpdated: updateNode,
+        onMove: handleStartMoveNode,
+        onDelete: setDeleteConfirmation,
       });
-      const associatedBuilding = selectedNode.associatedPlaceId
-        ? currentBuildings.find((building) => building.id === selectedNode.associatedPlaceId)
-          ?? currentLocations.find((location) => location.id === selectedNode.associatedPlaceId && (location.type === "Building" || location.type === "Facility"))
-        : null;
-      return {
-        id: selectedNode.id,
-        kind: selectedNode.nodeType === "Entrance" ? "entrance_route_node" : "route_node",
-        title: selectedNode.name,
-        domain: "Walking Network",
-        status: selectedNode.nodeType === "Entrance" ? "Entrance Route Node" : `${selectedNode.nodeType} Route Node`,
-        summary: [
-          { label: "Node Type", value: selectedNode.nodeType },
-          { label: "Lifecycle", value: selectedNode.status ?? "Active" },
-          { label: "Associated Building", value: associatedBuilding?.name ?? (selectedNode.associatedPlaceId ? "Missing" : "None") },
-          { label: "Connected Pathways", value: String(connectedPaths) },
-          { label: "Network Findings", value: nodeFindings.length ? nodeFindings[0].message : "No blocking findings" },
-          { label: "Latitude", value: selectedNode.lat.toFixed(6) },
-          { label: "Longitude", value: selectedNode.lng.toFixed(6) },
-        ],
-        details: (
-          <section className="inspector-related-section" aria-label="Edit Route Node metadata">
-            <h3>Route Node metadata</h3>
-            <div className="inspector-edit-fields">
-              <label> Name
-                <input aria-label="Route Node name" value={nodeFrame.frame?.name ?? selectedNode.name} onChange={(event) => {
-                  const name = event.target.value;
-                  stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), name });
-                }} />
-              </label>
-              <label> Node type
-                <select aria-label="Route Node type" value={nodeFrame.frame?.nodeType ?? selectedNode.nodeType} onChange={(event) => {
-                  const nodeType = event.target.value as RouteNode["nodeType"];
-                  stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? nodeFrame.frame?.associatedPlaceId ?? null : null });
-                }}>
-                  <option>Entrance</option><option>Junction</option><option>Access Point</option>
-                </select>
-              </label>
-              {(nodeFrame.frame?.nodeType ?? selectedNode.nodeType) === "Entrance" && (
-                <label> Building association
-                  <select aria-label="Route Node association" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => {
-                    const associatedPlaceId = event.target.value || null;
-                    stageRouteNodeEdit({ ...(nodeFrame.frame ?? selectedNode), associatedPlaceId });
-                  }}>
-                    <option value="">No Building association</option>
-                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
-                  </select>
-                  <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Update action.</span>
-                </label>
-              )}
-            </div>
-            <div className="inspector-inline-actions">
-              <button type="button" onClick={nodeFrame.cancel} disabled={!nodeFrame.dirty}>Cancel</button>
-              <button type="button" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
-            </div>
-          </section>
-        ),
-        primaryAction: { label: selectedNode.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: handleStartMoveNode },
-        overflowActions: [
-          ...(selectedNode.nodeType === "Entrance" ? [{
-            label: "⎋ Convert to Standard Node",
-            tone: "danger" as const,
-            onSelect: () => {
-              const updated = { ...selectedNode, nodeType: "Junction" as const, associatedPlaceId: null };
-              void routeNodeWorkflow.finalize({
-                kind: "update",
-                before: selectedNode,
-                after: updated,
-                context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-                description: `Convert ${selectedNode.name} to a standard Route Node`,
-              }).then((result) => {
-                if (!result.ok) {
-                  setError(result.message);
-                  return;
-                }
-                const confirmed = result.node;
-                updateNode(confirmed);
-                nodeFrame.load(confirmed);
-                setError("");
-              });
-            },
-          }] : []),
-          {
-            label: "🗑 Delete Route Node",
-            tone: "danger" as const,
-            onSelect: () => {
-              setDeleteConfirmation({ kind: "route_node", id: selectedNode.id, name: selectedNode.name, impact: calculateDeleteImpact({ object: selectedNode, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
-            },
-          },
-        ],
-      } satisfies InspectorCardModel;
     }
     if (selectedPath) {
       return {
@@ -1747,85 +1723,15 @@ export function MapEditor() {
             /> : null;
           })()}
 
-          {filteredNodes.map((node) => {
-            if (mode === "move" && pointTool.movingId === node.id) return null;
-            const isSelected = selected?.type === "node" && selected?.id === node.id;
-            if (isOverviewZoom && !isSelected) return null;
-            return (
-              <Marker
-                key={node.id}
-                position={[node.lat, node.lng]}
-                icon={createNodeIcon(isSelected)}
-                eventHandlers={{
-                  click: () => {
-                    if (mode === "path" && !editingPathId) {
-                      if (isOverviewZoom) {
-                        setError("Zoom in to edit map geometry.");
-                        return;
-                      }
-                      if (node.status !== undefined && node.status !== "Active") {
-                        setError("Pathways can only use active Route Nodes.");
-                        return;
-                      }
-                      if (!pathStartNodeId) {
-                        setPathStartNodeId(node.id);
-                        setPathDraftDirty(true);
-                        setSelected({ type: "node", id: node.id });
-                        return;
-                      }
-                      const source = currentNodes.find((candidate) => candidate.id === pathStartNodeId);
-                      if (!source || (source.status !== undefined && source.status !== "Active")) {
-                        setError("Pathways can only use active Route Nodes.");
-                        return;
-                      }
-                      const connectionError = pathwayConnectionError(pathStartNodeId, node.id, currentPathways);
-                      if (connectionError) {
-                        setError(connectionError);
-                        return;
-                      }
-                      const directDistance = Math.max(
-                        1,
-                        Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
-                      );
-                      const newPath: Pathway = {
-                        id: `pathway-${Date.now()}`,
-                        name: "",
-                        sourceNodeId: source.id,
-                        destinationNodeId: node.id,
-                        distance: `${directDistance} m`,
-                        time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
-                        shade: "Unknown",
-                        type: "Walkway",
-                        direction: "Two-way",
-                        status: "Active",
-                        allowedModes: ["Walking"],
-                        pathPoints: [],
-                      };
-                      overlay.putPathways([newPath]);
-                      setEditingPathId(newPath.id);
-                      setProvisionalPathwayId(newPath.id);
-                      setPathPoints([]);
-                      setPathwayDraft({ ...newPath });
-                      setPathwayDraftOriginal(null);
-                      setSelected({ type: "pathway", id: newPath.id });
-                      setPathDraftDirty(true);
-                      setError("");
-                      return;
-                    }
-                    selectCanvasObject("node", node.id, [node.lat, node.lng]);
-                  },
-                }}
-              >
-                {!isOverviewZoom && <Tooltip direction="top" offset={[0, -10]} className="map-label">
-                  <div className="font-bold text-xs">{node.name}</div>
-                  <div className="text-[10px] text-gray-500 font-normal">Route Node ({node.nodeType})</div>
-                  {!pointOnCampus([node.lat, node.lng], campusBoundary) && (
-                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
-                  )}
-                </Tooltip>}
-              </Marker>
-            );
-          })}
+          <RouteNodeMarkersLayer
+            nodes={filteredNodes}
+            mode={mode}
+            movingId={pointTool.movingId}
+            selectedNodeId={selected?.type === "node" ? selected.id : null}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onClickNode={handleRouteNodeClick}
+          />
 
           {!isOverviewZoom && mode === "path" &&
             pathPoints.map((point, index) => (
@@ -1892,43 +1798,23 @@ export function MapEditor() {
             onError={setError}
           />
 
-          {!isOverviewZoom && mode === "move" && pointTool.moveOrigin && pointTool.position && (
-            <PointMoveLayer
-              origin={pointTool.moveOrigin}
-              position={pointTool.position}
-              snapTargets={pointSnapTargets}
-              campusBoundary={campusBoundary}
-              outsideBoundary={movingOutsideBoundary}
-              distanceMeters={moveDistanceMeters}
-              snapped={pointTool.snapped}
-              onPositionChange={pointTool.updateMovePosition}
-              onDropRejected={pointTool.rejectDrop}
-              onDraggingChange={pointTool.setDragging}
-            />
-          )}
+          <RouteNodeMoveLayer
+            pointTool={pointTool}
+            mode={mode}
+            snapTargets={pointSnapTargets}
+            campusBoundary={campusBoundary}
+            outsideBoundary={movingOutsideBoundary}
+            distanceMeters={moveDistanceMeters}
+            isOverviewZoom={isOverviewZoom}
+          />
 
-          {!isOverviewZoom && pointTool.position && mode !== "move" && (
-            <Marker
-              position={pointTool.position}
-              icon={createTempIcon()}
-              draggable={mode === "place"}
-              eventHandlers={{
-                drag: (event) => {
-                  const next = (event.target as L.Marker).getLatLng();
-                  pointTool.editPosition([next.lat, next.lng]);
-                },
-                dragend: (event) => {
-                  const next = (event.target as L.Marker).getLatLng();
-                  const point: MapPoint = [next.lat, next.lng];
-                  if (pointOnCampus(point, campusBoundary)) {
-                    pointTool.setPosition(point);
-                  } else {
-                    setError("The new position must stay inside the ISU Echague campus boundary.");
-                  }
-                },
-              }}
-            />
-          )}
+          <RouteNodePlacementMarker
+            pointTool={pointTool}
+            mode={mode}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onError={setError}
+          />
         </MapContainer>
 
         {indoorPlacement && (
@@ -2110,41 +1996,16 @@ export function MapEditor() {
           )}
         </div>
 
-        {mode === "move" && pointTool.position && (
-          <section
-            className={`point-move-hud${movingOutsideBoundary ? " outside-boundary" : ""}`}
-            role="region"
-            aria-label={`Move ${movingObjectName}`}
-          >
-            <div className="point-move-hud-header">
-              <div>
-                <span>Move Route Node</span>
-                <strong>{movingObjectName}</strong>
-              </div>
-              <div className="point-move-distance" aria-live="polite">
-                Δ {moveDistanceMeters.toFixed(1)}m {pointTool.snapped && <em>(Snapped)</em>}
-              </div>
-            </div>
-            <PointCoordinateInputs position={pointTool.position} onChange={pointTool.updateMovePosition} />
-            {movingOutsideBoundary && (
-              <div className="point-move-warning" role="alert">
-                Position is outside the ISU Echague Campus Boundary. Drop and save are blocked.
-              </div>
-            )}
-            {pointTool.dropRejected && (
-              <div className="point-move-warning" role="alert">
-                Point drop was blocked outside the ISU Echague Campus Boundary. The marker returned to its last valid position.
-              </div>
-            )}
-            <div className="point-move-hud-footer">
-              <span>{pointTool.dragging ? "Dragging · release to preview" : "Arrow keys 0.5m · Shift + Arrow 5.0m · Enter save · Esc cancel"}</span>
-              <div>
-                <button type="button" onClick={handleCancelMove}>Cancel</button>
-                <button type="button" className="primary" disabled={movingOutsideBoundary || savingAction === "position"} onClick={handleSavePosition}>{savingAction === "position" ? "Saving Position…" : "Save Position"}</button>
-              </div>
-            </div>
-          </section>
-        )}
+        <RouteNodeMovePanel
+          pointTool={pointTool}
+          mode={mode}
+          movingObjectName={movingObjectName}
+          movingOutsideBoundary={movingOutsideBoundary}
+          moveDistanceMeters={moveDistanceMeters}
+          savingAction={savingAction}
+          onCancel={handleCancelMove}
+          onSave={handleSavePosition}
+        />
 
         {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
           && !networkBrowserOpen && (
@@ -2166,78 +2027,14 @@ export function MapEditor() {
                 }}
               />
             ) : mode === "place" ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Place on Map</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Place Route Node</h2>
-                <div className="flex flex-col gap-1.5 my-2">
-                  <label className="text-xs font-semibold text-[#3f4941]">Route Node type</label>
-                  <select
-                    aria-label="Route Node type"
-                    value={pointTool.placingNodeType}
-                    onChange={(e) => pointTool.setPlacingNodeType(e.target.value as "Entrance" | "Junction" | "Access Point")}
-                    className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-                  >
-                    <option>Entrance</option>
-                    <option>Junction</option>
-                    <option>Access Point</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5 my-2">
-                  <label className="text-xs font-semibold text-[#3f4941]">Route Node name</label>
-                  <input
-                    type="text"
-                    aria-label="Route Node name"
-                    placeholder="e.g. CAS Entrance"
-                    value={pointTool.placingNodeName}
-                    onChange={(e) => pointTool.setPlacingNodeName(e.target.value)}
-                    className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5 my-2">
-                  <label className="text-xs font-semibold text-[#3f4941]">Building association</label>
-                  <select
-                    aria-label="Route Node association"
-                    value={pointTool.placingAssociatedBuildingId ?? ""}
-                    onChange={(e) => pointTool.setPlacingAssociatedBuildingId(e.target.value || null)}
-                    disabled={pointTool.placingNodeType !== "Entrance"}
-                    className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-                  >
-                    <option value="">No Building association</option>
-                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>
-                      {building.name} ({building.code})
-                    </option>)}
-                  </select>
-                  <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Save action.</span>
-                </div>
-                <div className="my-2 text-xs text-[#3f4941]">
-                  {pointTool.position
-                    ? `Preview position: ${pointTool.position[0].toFixed(5)}, ${pointTool.position[1].toFixed(5)}`
-                    : "Click the map to position this Route Node."}
-                </div>
-                <label className="block text-xs font-semibold text-[#3f4941]">Latitude
-                  <input aria-label="Placement latitude" type="number" step="any" value={pointTool.position?.[0] ?? ""} onChange={(e) => pointTool.editPosition([Number(e.target.value), pointTool.position?.[1] ?? campusCenter[1]])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
-                </label>
-                <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
-                  <input aria-label="Placement longitude" type="number" step="any" value={pointTool.position?.[1] ?? ""} onChange={(e) => pointTool.editPosition([pointTool.position?.[0] ?? campusCenter[0], Number(e.target.value)])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
-                </label>
-                <div className="flex items-center gap-2 mt-4">
-                  <button
-                    type="button"
-                    className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                    onClick={() => selectTool("select")}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!pointTool.position || !pointTool.placingNodeName.trim() || savingAction === "route-node"}
-                    onClick={handleSavePlacedNode}
-                    className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
-                  >
-                    {savingAction === "route-node" ? "Saving Route Node…" : "Save Route Node"}
-                  </button>
-                </div>
-              </div>
+              <RouteNodePlacePanel
+                pointTool={pointTool}
+                buildingAssociationOptions={buildingAssociationOptions}
+                campusCenter={campusCenter}
+                savingAction={savingAction}
+                onSave={handleSavePlacedNode}
+                onCancel={() => selectTool("select")}
+              />
             ) : mode === "path" ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Path Shape Points</div>
@@ -2414,70 +2211,15 @@ export function MapEditor() {
                 </div>
               </div>
             ) : selectedNode ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Route Node</div>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node name
-                  <input aria-label="Route Node name" value={nodeFrame.frame?.name ?? selectedNode.name} onChange={(event) => nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), name: event.target.value })} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
-                </label>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Route Node type
-                  <select aria-label="Route Node type" value={nodeFrame.frame?.nodeType ?? selectedNode.nodeType} onChange={(event) => { const nodeType = event.target.value as RouteNode["nodeType"]; nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), nodeType, associatedPlaceId: nodeType === "Entrance" ? nodeFrame.frame?.associatedPlaceId ?? null : null }); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
-                    <option>Entrance</option><option>Junction</option><option>Access Point</option>
-                  </select>
-                </label>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Associated Building
-                  <select aria-label="Associated Building" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => nodeFrame.stage({ ...(nodeFrame.frame ?? selectedNode), associatedPlaceId: event.target.value || null })} disabled={(nodeFrame.frame?.nodeType ?? selectedNode.nodeType) !== "Entrance"} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs disabled:bg-[#f8f9fa]">
-                    <option value="">None</option>
-                    {selectedNode.associatedPlaceId && !currentLocations.some((location) => location.id === selectedNode.associatedPlaceId) && (
-                      <option value={selectedNode.associatedPlaceId}>Missing Building ({selectedNode.associatedPlaceId})</option>
-                    )}
-                    {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
-                  </select>
-                  <span className="mt-1 block text-[10px] text-[#526359]">Building choices are preview-only; this association is not persisted yet.</span>
-                </label>
-                <div className="text-xs text-[#3f4941]">{selectedNode.nodeType}</div>
-                <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Node Type</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedNode.nodeType}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Latitude</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedNode.lat.toFixed(6)}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Longitude</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedNode.lng.toFixed(6)}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Connected Paths</dt>
-                    <dd className="text-[#191c1d] font-bold">
-                      {
-                        directoryPathways.filter(
-                          (p) =>
-                            p.sourceNodeId === selectedNode.id ||
-                            p.destinationNodeId === selectedNode.id,
-                        ).length
-                      }
-                    </dd>
-                  </div>
-                </dl>
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button
-                    type="button"
-                    onClick={handleStartMoveNode}
-                    className="px-4 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
-                  >
-                    Move Node
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(null)}
-                    className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                  >
-                    Clear Selection
-                  </button>
-                </div>
-              </div>
+              <SelectedRouteNodePanel
+                node={selectedNode}
+                frame={nodeFrame}
+                locations={currentLocations}
+                pathways={directoryPathways}
+                buildingAssociationOptions={buildingAssociationOptions}
+                onMove={handleStartMoveNode}
+                onClearSelection={() => setSelected(null)}
+              />
             ) : selectedPath ? (
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Connection</div>
