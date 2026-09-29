@@ -56,6 +56,7 @@ import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEdit
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSavingAction } from "./session/useSavingAction";
+import { useToolSession } from "./session/useToolSession";
 import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
 import { localFeatureInspectorModel } from "./localFeature/localFeatureInspectorModel";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
@@ -89,37 +90,6 @@ export function MapEditor() {
     administratorId: session.id,
     projectId: MAP_EDITOR_PROJECT_ID,
   }) : null, [session?.id]);
-  const [, setWorkingSessionRevision] = useState(0);
-  const [pendingToolRequest, setPendingToolRequest] = useState<{
-    toolType: ToolType;
-    resumeDraftId?: string;
-    openNetworkBrowser?: boolean;
-  } | null>(null);
-
-  useEffect(
-    () => workingSessionManager.subscribe(() => {
-      setWorkingSessionRevision((revision) => revision + 1);
-    }),
-    [workingSessionManager],
-  );
-
-  useEffect(() => {
-    if (!workingSessionKey) return undefined;
-    const stored = workingSessionJournal.load(workingSessionKey);
-    if (stored) {
-      workingSessionManager.hydrate(stored.snapshot);
-      const recoveredDraft = workingSessionManager.getActiveDraft();
-      if (recoveredDraft) restoreWorkingSessionDraft(recoveredDraft);
-    }
-
-    const saveRecovery = () => workingSessionJournal.save(workingSessionKey, {
-      schemaVersion: 1,
-      snapshot: workingSessionManager.exportSnapshot(),
-    });
-    saveRecovery();
-    return workingSessionManager.subscribe(saveRecovery);
-  }, [workingSessionJournal, workingSessionKey, workingSessionManager]);
-
   const routeNodeWorkflow = useMemo(() => createRouteNodeWorkflow({
     adapter: services.map,
     workingSession: workingSessionManager,
@@ -364,6 +334,58 @@ export function MapEditor() {
     context: { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, campusBoundary },
     refreshMapData,
     onError: setError,
+    editorContext: { mode, selected },
+  });
+  const activeTool: ToolType = mode === "place" || mode === "move"
+    ? "point"
+    : mode === "area"
+      ? "polygon"
+      : mode === "path"
+        ? "pathway"
+        : mode;
+  const toolSession = useToolSession({
+    manager: workingSessionManager,
+    journal: workingSessionJournal,
+    key: workingSessionKey,
+    activeTool,
+    tools: { point: pointTool, polygon: buildingEditor, pathway },
+    onToolActivated: (toolType, openedPathway) => {
+      const activationHandlers: Record<ToolType, () => void> = {
+        select: () => setMode("select"),
+        point: () => {
+          setMode("place");
+          setSelected(null);
+        },
+        polygon: () => setMode("area"),
+        pathway: () => {
+          setMode("path");
+          setNetworkBrowserOpen(false);
+          if (openedPathway) setSelected({ type: "pathway", id: openedPathway.id });
+        },
+      };
+      activationHandlers[toolType]();
+    },
+    onDraftRestored: (toolType, records) => {
+      const restoreHandlers: Record<ActiveToolDraft["toolType"], () => void> = {
+        point: () => {
+          setMode(records.editorMode === "move" ? "move" : "place");
+          const restoredSelection = records.selected;
+          if (
+            restoredSelection
+            && typeof restoredSelection === "object"
+            && "type" in restoredSelection
+            && "id" in restoredSelection
+            && restoredSelection.type === "node"
+            && typeof restoredSelection.id === "string"
+          ) setSelected({ type: restoredSelection.type, id: restoredSelection.id });
+          else setSelected(null);
+        },
+        polygon: () => setMode("area"),
+        pathway: () => setMode("path"),
+      };
+      restoreHandlers[toolType]();
+    },
+    onOpenNetworkBrowser: () => setNetworkBrowserOpen(true),
   });
   const pointSnapTargets = useMemo<PointSnapTarget[]>(() => [
     ...currentBuildings.flatMap((building) => building.points.map((point, index) => ({
@@ -505,7 +527,7 @@ export function MapEditor() {
   useEffect(() => {
     const create = new URLSearchParams(routeLocation.search).get("create");
     if (create === "building") {
-      activateTool("polygon");
+      toolSession.activateTool("polygon");
       return;
     }
   }, [routeLocation.search]);
@@ -868,178 +890,15 @@ export function MapEditor() {
 
 
 
-  const activeTool: ToolType = mode === "place" || mode === "move"
-    ? "point"
-    : mode === "area"
-      ? "polygon"
-      : mode === "path"
-        ? "pathway"
-        : mode;
-  const draftSnapshot = useMemo<Omit<ActiveToolDraft, "id" | "isSuspended"> | null>(() => {
-    type DraftSnapshot = Omit<ActiveToolDraft, "id" | "isSuspended">;
-    const snapshotBuilders: Record<ToolType, () => DraftSnapshot | null> = {
-      select: () => null,
-      point: () => pointTool.position && pointTool.draftDirty ? ({
-        toolType: "point",
-        label: "Route Node draft",
-        provisionalGeometry: {
-          points: [{ x: pointTool.position[1], y: pointTool.position[0], lat: pointTool.position[0], lng: pointTool.position[1] }],
-        },
-        nestedRecords: {
-          editorMode: mode,
-          ...pointTool.draftRecords,
-          selected,
-        },
-      }) : null,
-      polygon: () => buildingEditor.draftSnapshot,
-      pathway: () => pathway.draftSnapshot,
-    };
-    return snapshotBuilders[activeTool]();
-  }, [
-    activeTool,
-    buildingEditor.draftSnapshot,
-    mode,
-    pathway.draftSnapshot,
-    pointTool.movingId,
-    pointTool.draftDirty,
-    pointTool.placingAssociatedBuildingId,
-    pointTool.placingNodeName,
-    pointTool.placingNodeType,
-    pointTool.position,
-    selected,
-  ]);
-
-  useEffect(() => {
-    const activeDraft = workingSessionManager.getActiveDraft();
-    if (!draftSnapshot) {
-      if (activeDraft && (activeDraft.toolType === activeTool || activeTool === "select")) {
-        workingSessionManager.discardActiveDraft();
-      }
-      return;
-    }
-    if (!activeDraft) {
-      workingSessionManager.startDraft(draftSnapshot);
-    } else if (activeDraft.toolType === draftSnapshot.toolType) {
-      workingSessionManager.updateDraft(draftSnapshot);
-    }
-  }, [activeTool, draftSnapshot, workingSessionManager]);
-
-  const clearDraftGeometry = (toolType: Exclude<ToolType, "select">) => {
-    const clearHandlers: Record<Exclude<ToolType, "select">, () => void> = {
-      point: () => pointTool.reset(),
-      polygon: () => buildingEditor.clearToolDraft(),
-      pathway: () => pathway.clearToolDraft(),
-    };
-    clearHandlers[toolType]();
-  };
-
-  const activateTool = (toolType: ToolType) => {
-    const activationHandlers: Record<ToolType, () => void> = {
-      select: () => {
-        setMode("select");
-        pointTool.reset();
-      },
-      point: () => {
-        setMode("place");
-        setSelected(null);
-        pointTool.activatePlacement();
-      },
-      polygon: () => {
-        setMode("area");
-        buildingEditor.activate();
-      },
-      pathway: () => {
-        setMode("path");
-        setNetworkBrowserOpen(false);
-        const opened = pathway.activate();
-        if (opened) setSelected({ type: "pathway", id: opened.id });
-      },
-    };
-    activationHandlers[toolType]();
-  };
-
   const selectTool = (toolType: ToolType) => {
     if (toolType === activeTool) {
       if (toolType === "pathway") setNetworkBrowserOpen(false);
       return;
     }
-    if (workingSessionManager.hasActiveDraft()) {
-      setPendingToolRequest({ toolType });
-      return;
-    }
-    activateTool(toolType);
+    toolSession.requestTool({ toolType });
   };
 
-  const browseWalkingNetwork = () => {
-    if (workingSessionManager.hasActiveDraft()) {
-      setPendingToolRequest({ toolType: "select", openNetworkBrowser: true });
-      return;
-    }
-    activateTool("select");
-    setNetworkBrowserOpen(true);
-  };
-
-  function restoreWorkingSessionDraft(draft: ActiveToolDraft) {
-    const restoredPoints = (draft.provisionalGeometry.points ?? []).map((point) => [
-      point.lat ?? point.y,
-      point.lng ?? point.x,
-    ] as [number, number]);
-    const records = draft.nestedRecords ?? {};
-
-    const restoreHandlers: Record<ActiveToolDraft["toolType"], () => void> = {
-      point: () => {
-        pointTool.restoreDraft(restoredPoints[0] ?? null, records);
-        setMode(records.editorMode === "move" ? "move" : "place");
-        const restoredSelection = records.selected;
-        if (
-          restoredSelection
-          && typeof restoredSelection === "object"
-          && "type" in restoredSelection
-          && "id" in restoredSelection
-          && restoredSelection.type === "node"
-          && typeof restoredSelection.id === "string"
-        ) setSelected({ type: restoredSelection.type, id: restoredSelection.id });
-        else setSelected(null);
-      },
-      polygon: () => {
-        buildingEditor.restoreDraft(restoredPoints, records);
-        setMode("area");
-      },
-      pathway: () => {
-        pathway.restoreDraft(restoredPoints, draft.provisionalGeometry.startNodeId, records);
-        setMode("path");
-      },
-    };
-    restoreHandlers[draft.toolType]();
-  }
-
-  const restoreSuspendedDraft = (draftId: string) => {
-    const draft = workingSessionManager.resumeSuspendedDraft(draftId);
-    if (draft) restoreWorkingSessionDraft(draft);
-  };
-
-  const requestDraftResume = (draftId: string) => {
-    const draft = workingSessionManager.getSuspendedDrafts().find((item) => item.id === draftId);
-    if (!draft) return;
-    if (workingSessionManager.hasActiveDraft()) {
-      setPendingToolRequest({ toolType: draft.toolType, resumeDraftId: draftId });
-      return;
-    }
-    restoreSuspendedDraft(draftId);
-  };
-
-  const finishInterruption = (action: "keep_draft" | "discard_geometry") => {
-    if (!pendingToolRequest) return;
-    const currentDraft = workingSessionManager.getActiveDraft();
-    if (!currentDraft) return;
-    workingSessionManager.handleInterruption(action);
-    clearDraftGeometry(currentDraft.toolType);
-    const request = pendingToolRequest;
-    setPendingToolRequest(null);
-    if (request.resumeDraftId) restoreSuspendedDraft(request.resumeDraftId);
-    else activateTool(request.toolType);
-    if (request.openNetworkBrowser) setNetworkBrowserOpen(true);
-  };
+  const browseWalkingNetwork = () => toolSession.requestTool({ toolType: "select", openNetworkBrowser: true });
 
   useEffect(() => {
     const position = pointTool.position;
@@ -1077,21 +936,21 @@ export function MapEditor() {
     const onEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (mode === "move") return;
-      if (pendingToolRequest) {
-        setPendingToolRequest(null);
+      if (toolSession.pendingToolRequest) {
+        toolSession.cancelInterruption();
       } else if (workingSessionManager.hasActiveDraft()) {
-        setPendingToolRequest({ toolType: "select" });
+        toolSession.requestTool({ toolType: "select" });
       } else if (activeTool !== "select") {
-        activateTool("select");
+        toolSession.activateTool("select");
       } else {
         setSelected(null);
       }
     };
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
-  }, [activeTool, mode, pendingToolRequest, workingSessionManager]);
+  }, [activeTool, mode, toolSession.pendingToolRequest, workingSessionManager]);
 
-  const workingSessionState = workingSessionManager.getState();
+  const workingSessionState = toolSession.state;
   const recordPropertyOperation = (
     domain: SpatialDomain,
     entityId: string,
@@ -1523,16 +1382,16 @@ export function MapEditor() {
           onSelectTool={selectTool}
           onBrowseWalkingNetwork={browseWalkingNetwork}
           suspendedDrafts={workingSessionState.suspendedDrafts}
-          onResumeDraft={requestDraftResume}
+          onResumeDraft={toolSession.requestDraftResume}
         />
 
-        {pendingToolRequest && workingSessionState.activeDraft && (
+        {toolSession.pendingToolRequest && workingSessionState.activeDraft && (
           <ToolInterruptionDialog
             currentTool={workingSessionState.activeDraft.toolType}
-            requestedTool={pendingToolRequest.toolType}
-            onSuspend={() => finishInterruption("keep_draft")}
-            onContinue={() => setPendingToolRequest(null)}
-            onDiscard={() => finishInterruption("discard_geometry")}
+            requestedTool={toolSession.pendingToolRequest.toolType}
+            onSuspend={() => toolSession.finishInterruption("keep_draft")}
+            onContinue={toolSession.cancelInterruption}
+            onDiscard={() => toolSession.finishInterruption("discard_geometry")}
           />
         )}
 
