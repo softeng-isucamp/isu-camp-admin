@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
+import type { EditorMode } from "../types";
 import { isPositionedLocation } from "../indoorLocation/indoorLocations";
 import type { PointSnapTarget } from "../pointInteractions";
 
@@ -14,7 +15,7 @@ interface CurrentMapObjects {
 /** Building perimeter segments and Pathway vertices a moved or placed point snaps to. */
 export function usePointSnapTargets(
   { buildings, nodes, pathways }: Pick<CurrentMapObjects, "buildings" | "nodes" | "pathways">,
-  moving: { mode: string; movingId: string | null | undefined },
+  moving: { mode: EditorMode; movingId: string | null | undefined },
 ) {
   const { mode, movingId } = moving;
   return useMemo<PointSnapTarget[]>(() => [

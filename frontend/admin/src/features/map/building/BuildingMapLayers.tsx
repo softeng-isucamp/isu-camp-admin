@@ -3,6 +3,7 @@ import { Marker, Polygon, Tooltip } from "react-leaflet";
 import type { Building } from "../../../types";
 import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapLayers";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
+import type { EditorMode } from "../types";
 import type L from "leaflet";
 import { createLocationPinIcon, createSplitIcon, createVertexIcon } from "../mapIcons";
 import { polygonFeatureAnchor } from "../mapEditing";
@@ -11,7 +12,7 @@ import type { useBuildingFootprintEditing } from "./useBuildingFootprintEditing"
 interface BuildingFootprintLayerProps {
   buildings: Building[];
   selectedBuildingId: string | null;
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   editingBuildingId: string | null;
   featureLinks: FeatureLinkEntity[];
   localFeatures: LocalMapFeatureEntity[];
@@ -105,7 +106,7 @@ export function BuildingFootprintLayer({
 
 interface BuildingDraftLayerProps {
   editor: ReturnType<typeof useBuildingFootprintEditing>;
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   campusBoundary: MapPoint[];
   isOverviewZoom: boolean;
   onError: (message: string) => void;

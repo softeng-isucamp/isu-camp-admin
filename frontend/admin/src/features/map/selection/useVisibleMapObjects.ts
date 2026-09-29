@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type L from "leaflet";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { isIndoorLocation, isPositionedLocation } from "../indoorLocation/indoorLocations";
+import type { EditorMode } from "../types";
 import { isPointInBounds } from "../mapEditing";
 import type { MapSelection } from "./useMapSelection";
 
@@ -18,7 +19,7 @@ export interface CurrentMapObjects {
  */
 export function useVisibleMapObjects(
   current: CurrentMapObjects,
-  mode: "select" | "place" | "path" | "area" | "move",
+  mode: EditorMode,
   selected: MapSelection | null,
   mapBounds: L.LatLngBounds | null,
 ) {

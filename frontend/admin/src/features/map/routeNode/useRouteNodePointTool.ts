@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
-import type { ActiveToolDraft } from "../types";
+import type { ActiveToolDraft, EditorMode } from "../types";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
 import type { RouteNodeValidationContext, RouteNodeWorkflow } from "./RouteNodeWorkflow";
@@ -21,7 +21,7 @@ interface UseRouteNodePointToolOptions {
   refreshMapData: () => Promise<void>;
   onError: (message: string) => void;
   /** The caller's editor mode and selection, persisted with the draft. */
-  editorContext: { mode: string; selected: unknown };
+  editorContext: { mode: EditorMode; selected: unknown };
 }
 
 const REFRESH_FAILED = "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.";

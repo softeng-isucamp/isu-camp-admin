@@ -1,10 +1,11 @@
 import { PointCoordinateInputs } from "../PointMoveLayer";
+import type { EditorMode } from "../types";
 import type { SaveAction } from "../session/useSavingAction";
 import type { useRouteNodePointTool } from "./useRouteNodePointTool";
 
 interface RouteNodeMovePanelProps {
   pointTool: ReturnType<typeof useRouteNodePointTool>;
-  mode: "select" | "place" | "path" | "area" | "move";
+  mode: EditorMode;
   movingObjectName: string;
   movingOutsideBoundary: boolean;
   moveDistanceMeters: number;
