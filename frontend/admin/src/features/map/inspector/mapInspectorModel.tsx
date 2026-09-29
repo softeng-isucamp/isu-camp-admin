@@ -1,12 +1,9 @@
-import type { LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { buildingInspectorModel } from "../building/buildingInspectorModel";
 import type { SelectedBuildingView } from "../building/selectedBuilding";
 import type { MapPoint } from "../campusBoundary";
 import type { DeleteConfirmation } from "../DeleteConfirmationModal";
 import type { InspectorCardModel } from "../InspectorCardHUD";
-import { localFeatureInspectorModel } from "../localFeature/localFeatureInspectorModel";
-import type { useLocalFeatureEditing } from "../localFeature/useLocalFeatureEditing";
 import { locationInspectorModel } from "../location/locationInspectorModel";
 import { pathPointInspectorModel, selectedPathwayInspectorModel } from "../pathway/pathwayInspectorModel";
 import type { usePathwayEditing } from "../pathway/usePathwayEditing";
@@ -24,7 +21,6 @@ interface MapInspectorOptions {
     location: Location | undefined;
     node: RouteNode | undefined;
     path: Pathway | undefined;
-    localFeature: LocalMapFeatureEntity | undefined;
   };
   current: {
     buildings: Building[];
@@ -37,7 +33,6 @@ interface MapInspectorOptions {
   editors: {
     pathway: ReturnType<typeof usePathwayEditing>;
     nodeFrame: ReturnType<typeof useRouteNodeFrame>;
-    localFeatures: ReturnType<typeof useLocalFeatureEditing>;
     routeNodeWorkflow: RouteNodeWorkflow;
   };
   campusBoundary: MapPoint[];
@@ -48,7 +43,6 @@ interface MapInspectorOptions {
     /** The Building actions, bound to the selected Building. */
     building: (view: SelectedBuildingView) => Parameters<typeof buildingInspectorModel>[0]["actions"];
     onEditLocationDetails: () => void;
-    onEditLocalFeatureDetails: () => void;
     onError: (message: string) => void;
     onNodeUpdated: (node: RouteNode) => void;
     onMoveNode: () => void;
@@ -74,7 +68,7 @@ export function mapInspectorModel({
   actions,
 }: MapInspectorOptions): InspectorCardModel | null {
   if (!selected) return null;
-  const { pathway, nodeFrame, localFeatures, routeNodeWorkflow } = editors;
+  const { pathway, nodeFrame, routeNodeWorkflow } = editors;
   if (selection.building) {
     return buildingInspectorModel({
       view: selection.building,
@@ -136,17 +130,6 @@ export function mapInspectorModel({
       onStartConversion: actions.onStartPathPointConversion,
     });
     if (pathPointModel) return pathPointModel;
-  }
-  const feature = selection.localFeature;
-  if (feature) {
-    return localFeatureInspectorModel({
-      feature,
-      actionNotice: localFeatures.actionNotice,
-      onNotice: localFeatures.setActionNotice,
-      onRestore: () => localFeatures.restoreFeature(feature),
-      onEditDetails: actions.onEditLocalFeatureDetails,
-      onRetire: () => localFeatures.retireFeature(feature),
-    });
   }
   return null;
 }

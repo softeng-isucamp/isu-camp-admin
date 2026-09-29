@@ -52,11 +52,9 @@ const OPERATION_TYPES: readonly WorkingOperationType[] = [
   "update_properties",
   "retire_entity",
   "restore_entity",
-  "link_feature",
-  "unlink_feature",
   "compound_batch",
 ];
-const SPATIAL_DOMAINS: readonly SpatialDomain[] = ["Locations", "Walking Network", "Local Map Data"];
+const SPATIAL_DOMAINS: readonly SpatialDomain[] = ["Locations", "Walking Network"];
 
 const isKnownOperation = (value: unknown): value is WorkingOperation => {
   if (!value || typeof value !== "object") return false;

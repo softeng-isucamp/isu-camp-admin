@@ -1,5 +1,5 @@
 // Canonical Spatial Domains & Object Types
-export type SpatialDomain = "Locations" | "Walking Network" | "Local Map Data";
+export type SpatialDomain = "Locations" | "Walking Network";
 
 export type SpatialObjectType =
   | "building"
@@ -8,16 +8,7 @@ export type SpatialObjectType =
   | "route_node"
   | "entrance_route_node"
   | "pathway"
-  | "path_point"
-  | "local_map_feature";
-
-export type LocalFeatureFamily =
-  | "building_footprint"
-  | "parking_area"
-  | "cartographic_walkway"
-  | "vehicle_path"
-  | "campus_boundary"
-  | "readonly_basemap";
+  | "path_point";
 
 // Working Session Operation Types
 export type WorkingOperationType =
@@ -26,8 +17,6 @@ export type WorkingOperationType =
   | "update_properties"
   | "retire_entity"
   | "restore_entity"
-  | "link_feature"
-  | "unlink_feature"
   | "compound_batch";
 
 export interface WorkingOperation {
@@ -134,24 +123,3 @@ export interface PathwayEntity {
   [key: string]: unknown;
 }
 
-export interface LocalMapFeatureEntity {
-  id: string;
-  family: LocalFeatureFamily;
-  name: string;
-  status: "active" | "retired";
-  geometryType: "Point" | "LineString" | "Polygon";
-  coordinates: unknown;
-  properties?: Record<string, unknown>;
-  sourceOsmId?: number | null;
-  sourceOsmTags?: Record<string, string>;
-  [key: string]: unknown;
-}
-
-export interface FeatureLinkEntity {
-  id: string;
-  featureId: string;
-  targetDomain: SpatialDomain;
-  targetEntityId: string;
-  linkType: "building_footprint" | "entrance_association" | "custom";
-  createdAt?: string;
-}

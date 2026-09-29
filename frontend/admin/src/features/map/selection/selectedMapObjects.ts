@@ -1,4 +1,3 @@
-import type { LocalMapFeatureEntity } from "../../../services/mapLayers";
 import type { Building, Location, RouteNode } from "../../../types";
 import type { MapSelection } from "./useMapSelection";
 
@@ -14,7 +13,6 @@ export function selectedMapObjects(
     contentLocations: Location[];
     nodes: RouteNode[];
     buildings: Building[];
-    localFeatures: LocalMapFeatureEntity[];
   },
 ) {
   const location = selected?.type === "location"
@@ -26,8 +24,5 @@ export function selectedMapObjects(
   const building = selected?.type === "building"
     ? current.buildings.find((item) => item.id === selected.id)
     : undefined;
-  const localFeature = selected?.type === "local_feature"
-    ? current.localFeatures.find((item) => item.id === selected.id)
-    : undefined;
-  return { location, node, building, localFeature };
+  return { location, node, building };
 }

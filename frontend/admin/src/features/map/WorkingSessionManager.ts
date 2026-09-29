@@ -435,42 +435,6 @@ export function restoreEntityOperation(
   };
 }
 
-export function linkFeatureOperation(
-  domain: SpatialDomain,
-  entityId: string,
-  linkRecord: Record<string, unknown>,
-  description?: string
-): WorkingOperation {
-  return {
-    id: generateOperationId("link"),
-    type: "link_feature",
-    domain,
-    entityId,
-    before: null,
-    after: linkRecord,
-    description: description ?? `Link feature ${entityId}`,
-    timestamp: Date.now(),
-  };
-}
-
-export function unlinkFeatureOperation(
-  domain: SpatialDomain,
-  entityId: string,
-  linkRecord: Record<string, unknown>,
-  description?: string
-): WorkingOperation {
-  return {
-    id: generateOperationId("unlink"),
-    type: "unlink_feature",
-    domain,
-    entityId,
-    before: linkRecord,
-    after: null,
-    description: description ?? `Unlink feature ${entityId}`,
-    timestamp: Date.now(),
-  };
-}
-
 export function compoundBatchOperation(
   domain: SpatialDomain,
   entityId: string,

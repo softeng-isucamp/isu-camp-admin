@@ -106,14 +106,14 @@ describe("WorkingSessionJournal", () => {
       nestedOperations: [kept, removedType],
     };
     const polygonDraft = { id: "d1", toolType: "polygon", provisionalGeometry: {}, isSuspended: true };
-    const localFeatureDraft = { id: "d2", toolType: "local_feature", provisionalGeometry: {}, isSuspended: true };
+    const unknownToolDraft = { id: "d2", toolType: "unknown_tool", provisionalGeometry: {}, isSuspended: true };
     storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
       schemaVersion: 1,
       snapshot: {
         schemaVersion: 1,
         pastOperations: [removedType, kept, removedNested],
-        activeDraft: localFeatureDraft,
-        suspendedDrafts: [localFeatureDraft, polygonDraft],
+        activeDraft: unknownToolDraft,
+        suspendedDrafts: [unknownToolDraft, polygonDraft],
         savedCheckpointIndex: 2,
       },
     }));

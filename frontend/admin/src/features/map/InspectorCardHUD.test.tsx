@@ -4,9 +4,9 @@ import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
 
 const baseObject = (): InspectorCardModel => ({
   id: "feature-1",
-  kind: "local_map_feature",
+  kind: "building",
   title: "Engineering West Parking Lot",
-  domain: "Local Map Data",
+  domain: "Locations",
   status: "Active Parking Area",
   summary: [
     { label: "Geometry", value: "Polygon" },
@@ -39,7 +39,7 @@ describe("InspectorCardHUD", () => {
     const card = screen.getByRole("complementary", { name: "Engineering West Parking Lot object details" });
     expect(card).toBeInTheDocument();
     expect(card).toHaveClass("map-glass-panel");
-    expect(screen.getByText("[Local Map Data]")).toBeInTheDocument();
+    expect(screen.getByText("[Locations]")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "✎ Edit Details" })).not.toBeInTheDocument();
 
