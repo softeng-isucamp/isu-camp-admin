@@ -46,7 +46,6 @@ import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
-import { isPathwayDraft } from "./pathway/pathwayDrafts";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
@@ -383,11 +382,7 @@ export function MapEditor() {
     setBuildingForm,
     buildingName,
     buildingCode,
-    buildingFunction,
-    buildingKeywords,
-    resetBuildingForm,
     editingBuildingId,
-    setEditingBuildingId,
     selectedAttachEligibility,
     attachCandidateBuildings,
     currentBuildings,
@@ -1001,79 +996,22 @@ export function MapEditor() {
           selected,
         },
       }) : null,
-      polygon: () => points.length > 0 ? ({
-        toolType: "polygon",
-        label: "Building Polygon draft",
-        provisionalGeometry: {
-          points: points.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
-          isClosed: polygonClosed,
-        },
-        nestedRecords: {
-          buildingForm,
-          buildingName,
-          buildingCode,
-          buildingFunction,
-          buildingKeywords,
-          buildingClassification,
-          editingBuildingId,
-          polygonClosed,
-          buildingDetailsModalOpen,
-          polygonInteraction,
-          buildingWorkflowMode,
-          buildingRecordMode: buildingWorkflowMode,
-          selectedAttachBuildingId,
-          selectedBuildingRecordId: selectedAttachBuildingId,
-          attachBuildingSearch,
-          buildingRecordSearch: attachBuildingSearch,
-        },
-      }) : null,
-      pathway: () => pathStartNodeId || pathDraftDirty ? ({
-        toolType: "pathway",
-        label: "Pathway draft",
-        provisionalGeometry: {
-          points: pathPoints.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
-          startNodeId: pathStartNodeId ?? activePathway?.sourceNodeId,
-          endNodeId: activePathway?.destinationNodeId,
-        },
-        nestedRecords: {
-          editingPathId,
-          selectedPathPointIndex,
-          provisionalPathwayId,
-          provisionalPathway: provisionalPathwayId
-            ? overlay.pathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
-            : null,
-        },
-      }) : null,
+      polygon: () => buildingEditor.draftSnapshot,
+      pathway: () => pathway.draftSnapshot,
     };
     return snapshotBuilders[activeTool]();
   }, [
-    activePathway?.destinationNodeId,
-    activePathway?.sourceNodeId,
     activeTool,
-    buildingForm,
-    buildingWorkflowMode,
-    attachBuildingSearch,
-    editingBuildingId,
-    polygonInteraction,
-    selectedAttachBuildingId,
-    editingPathId,
-    overlay.pathways,
+    buildingEditor.draftSnapshot,
     mode,
+    pathway.draftSnapshot,
     pointTool.movingId,
-    pathDraftDirty,
-    pathPoints,
-    polygonClosed,
-    buildingDetailsModalOpen,
-    pathStartNodeId,
     pointTool.draftDirty,
     pointTool.placingAssociatedBuildingId,
     pointTool.placingNodeName,
     pointTool.placingNodeType,
-    points,
-    provisionalPathwayId,
-    selected,
-    selectedPathPointIndex,
     pointTool.position,
+    selected,
   ]);
 
   useEffect(() => {
@@ -1094,27 +1032,8 @@ export function MapEditor() {
   const clearDraftGeometry = (toolType: Exclude<ToolType, "select">) => {
     const clearHandlers: Record<Exclude<ToolType, "select">, () => void> = {
       point: () => pointTool.reset(),
-      polygon: () => {
-        setPoints([]);
-        setPolygonClosed(false);
-        setBuildingWorkflowMode("create");
-        setBuildingDetailsModalOpen(false);
-        setAttachBuildingSearch("");
-        setSelectedAttachBuildingId(null);
-        resetBuildingForm();
-        setEditingBuildingId(null);
-      },
-      pathway: () => {
-        if (provisionalPathwayId) {
-          overlay.dropPathway(provisionalPathwayId);
-        }
-        setPathPoints([]);
-        setPathStartNodeId(null);
-        setEditingPathId(null);
-        setProvisionalPathwayId(null);
-        setSelectedPathPointIndex(null);
-        setPathDraftDirty(false);
-      },
+      polygon: () => buildingEditor.clearToolDraft(),
+      pathway: () => pathway.clearToolDraft(),
     };
     clearHandlers[toolType]();
   };
@@ -1132,22 +1051,13 @@ export function MapEditor() {
       },
       polygon: () => {
         setMode("area");
-        setPolygonInteraction("draw");
-        setPolygonClosed(false);
+        buildingEditor.activate();
       },
       pathway: () => {
         setMode("path");
         setNetworkBrowserOpen(false);
-        if (!editingPathId && (directoryPathways.length || overlay.pathways.length)) {
-          const first = overlay.pathways[0] || directoryPathways[0];
-          if (first?.status === "Open") {
-            setEditingPathId(first.id);
-            setPathwayDraft({ ...first });
-            setPathwayDraftOriginal({ ...first });
-            setPathPoints(first.pathPoints || []);
-            setSelected({ type: "pathway", id: first.id });
-          }
-        }
+        const opened = pathway.activate();
+        if (opened) setSelected({ type: "pathway", id: opened.id });
       },
     };
     activationHandlers[toolType]();
@@ -1197,65 +1107,11 @@ export function MapEditor() {
         else setSelected(null);
       },
       polygon: () => {
-        setPoints(restoredPoints);
-        if (records.buildingForm && typeof records.buildingForm === "object") {
-          const form = records.buildingForm as Record<string, unknown>;
-          setBuildingForm({
-            name: typeof form.name === "string" ? form.name : "",
-            code: typeof form.code === "string" ? form.code : "",
-            function: typeof form.function === "string" ? form.function : "",
-            keywords: typeof form.keywords === "string" ? form.keywords : "",
-            status: "Active",
-          });
-        } else {
-          setBuildingForm({
-            name: typeof records.buildingName === "string" ? records.buildingName : "",
-            code: typeof records.buildingCode === "string" ? records.buildingCode : "",
-            function: typeof records.buildingFunction === "string" ? records.buildingFunction : "",
-            keywords: typeof records.buildingKeywords === "string" ? records.buildingKeywords : "",
-            status: "Active",
-          });
-        }
-        setBuildingClassification(records.buildingClassification === "Facility" ? "Facility" : "Building");
-        setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
-        setPolygonClosed(records.polygonClosed === true);
-        setBuildingDetailsModalOpen(records.buildingDetailsModalOpen === true);
-        if (records.polygonInteraction === "draw" || records.polygonInteraction === "reshape" || records.polygonInteraction === "move") {
-          setPolygonInteraction(records.polygonInteraction);
-        } else {
-          setPolygonInteraction("draw");
-        }
-        const restoredWorkflowMode = records.buildingWorkflowMode ?? records.buildingRecordMode;
-        if (restoredWorkflowMode === "create" || restoredWorkflowMode === "attach") {
-          setBuildingWorkflowMode(restoredWorkflowMode);
-        }
-        const restoredSelectedId = typeof records.selectedAttachBuildingId === "string"
-          ? records.selectedAttachBuildingId
-          : typeof records.selectedBuildingRecordId === "string"
-            ? records.selectedBuildingRecordId
-            : null;
-        setSelectedAttachBuildingId(restoredSelectedId);
-        const restoredSearch = typeof records.attachBuildingSearch === "string"
-          ? records.attachBuildingSearch
-          : typeof records.buildingRecordSearch === "string"
-            ? records.buildingRecordSearch
-            : "";
-        setAttachBuildingSearch(restoredSearch);
+        buildingEditor.restoreDraft(restoredPoints, records);
         setMode("area");
       },
       pathway: () => {
-        setPathPoints(restoredPoints);
-        setPathStartNodeId(draft.provisionalGeometry.startNodeId ?? null);
-        setEditingPathId(typeof records.editingPathId === "string" ? records.editingPathId : null);
-        setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
-        const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
-          ? { ...records.provisionalPathway, pathPoints: restoredPoints }
-          : null;
-        setProvisionalPathwayId(typeof records.provisionalPathwayId === "string" ? records.provisionalPathwayId : null);
-        if (restoredProvisionalPathway) {
-          overlay.putPathways([restoredProvisionalPathway]);
-        }
-        setPathDraftDirty(true);
+        pathway.restoreDraft(restoredPoints, draft.provisionalGeometry.startNodeId, records);
         setMode("path");
       },
     };

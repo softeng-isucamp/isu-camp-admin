@@ -6,9 +6,11 @@ import { overlayChanges, pathwayWithSuggestedName, polygonFeatureAnchor, suggest
 import { distanceInMeters } from "../pointInteractions";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
+import type { ActiveToolDraft } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
 import type { PathPointConversionDraft } from "./PathPointConversionModal";
 import { createRoutableCrossing } from "./pathwayCommands";
+import { isPathwayDraft } from "./pathwayDrafts";
 import { findPathwayCrossings, insertPathPointAtSegmentMidpoint } from "./pathwayTopology";
 import { createPathwayWorkflow } from "./PathwayWorkflow";
 
@@ -360,6 +362,84 @@ export function usePathwayEditing({
     return { discarded: false, pathwayId: pathwayDraftOriginal.id };
   };
 
+  /** The pathway tool's draft, as persisted in the Working Session. */
+  const draftSnapshot = useMemo<Omit<ActiveToolDraft, "id" | "isSuspended"> | null>(() => {
+    return pathStartNodeId || pathDraftDirty ? ({
+      toolType: "pathway",
+      label: "Pathway draft",
+      provisionalGeometry: {
+        points: pathPoints.map(([lat, lng]) => ({ x: lng, y: lat, lat, lng })),
+        startNodeId: pathStartNodeId ?? activePathway?.sourceNodeId,
+        endNodeId: activePathway?.destinationNodeId,
+      },
+      nestedRecords: {
+        editingPathId,
+        selectedPathPointIndex,
+        provisionalPathwayId,
+        provisionalPathway: provisionalPathwayId
+          ? overlay.pathways.find((pathway) => pathway.id === provisionalPathwayId) ?? null
+          : null,
+      },
+    }) : null;
+  }, [
+    activePathway?.destinationNodeId,
+    activePathway?.sourceNodeId,
+    editingPathId,
+    overlay.pathways,
+    pathDraftDirty,
+    pathPoints,
+    pathStartNodeId,
+    provisionalPathwayId,
+    selectedPathPointIndex,
+  ]);
+
+  /** Discards the pathway tool's draft geometry, and any provisional pathway record. */
+  const clearToolDraft = () => {
+    if (provisionalPathwayId) {
+      overlay.dropPathway(provisionalPathwayId);
+    }
+    setPathPoints([]);
+    setPathStartNodeId(null);
+    setEditingPathId(null);
+    setProvisionalPathwayId(null);
+    setSelectedPathPointIndex(null);
+    setPathDraftDirty(false);
+  };
+
+  /**
+   * Starts the pathway tool; a legacy Open pathway is opened for reshaping
+   * straight away. Returns the opened pathway, if any.
+   */
+  const activate = (): Pathway | null => {
+    if (!editingPathId && (directoryPathways.length || overlay.pathways.length)) {
+      const first = overlay.pathways[0] || directoryPathways[0];
+      if (first?.status === "Open") {
+        setEditingPathId(first.id);
+        setPathwayDraft({ ...first });
+        setPathwayDraftOriginal({ ...first });
+        setPathPoints(first.pathPoints || []);
+        return first;
+      }
+    }
+    return null;
+  };
+
+  /** Restores a suspended or recovered pathway-tool draft. */
+  const restoreDraft = (restoredPoints: MapPoint[], startNodeId: string | undefined, records: Record<string, unknown>) => {
+    setPathPoints(restoredPoints);
+    setPathStartNodeId(startNodeId ?? null);
+    setEditingPathId(typeof records.editingPathId === "string" ? records.editingPathId : null);
+    setSelectedPathPointIndex(typeof records.selectedPathPointIndex === "number" ? records.selectedPathPointIndex : null);
+    const restoredProvisionalPathway = isPathwayDraft(records.provisionalPathway)
+      ? { ...records.provisionalPathway, pathPoints: restoredPoints }
+      : null;
+    setProvisionalPathwayId(typeof records.provisionalPathwayId === "string" ? records.provisionalPathwayId : null);
+    if (restoredProvisionalPathway) {
+      overlay.putPathways([restoredProvisionalPathway]);
+    }
+    setPathDraftDirty(true);
+  };
+
   return {
     currentPathways,
     pathwayCrossings,
@@ -400,5 +480,9 @@ export function usePathwayEditing({
     applyFrame,
     switchEndpoints,
     cancelFrame,
+    draftSnapshot,
+    clearToolDraft,
+    activate,
+    restoreDraft,
   };
 }
