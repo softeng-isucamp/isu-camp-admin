@@ -459,14 +459,12 @@ const matches = (value: string, query: string) =>
 export type FailureKey =
   | "locationSave"
   | "locationRemove"
-  | "buildingRemove"
-  | "mapSave";
+  | "buildingRemove";
 
 export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
   locationRemove: false,
   buildingRemove: false,
-  mapSave: false,
 };
 
 export const setMockFailure = (
@@ -1573,11 +1571,6 @@ export const services: Services = {
         });
         return;
       }
-
-      failIfConfigured(
-        "mapSave"
-      );
-
 
       // ------------------------------------
       // Selected Location / Node
