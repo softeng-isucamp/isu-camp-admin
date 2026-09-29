@@ -202,12 +202,18 @@ export const API_MODE: ApiMode = import.meta.env.VITE_TEST_LOCAL_ADAPTER === "tr
   ? ((import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local")
   : "real";
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
-// The generated fixture is a very large JSON module. Load it only in fixture
-// mode so normal application bundles and tests never parse it. The env check is
-// inlined so bundlers can drop the dynamic import when the flag is off.
-const generatedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm"
+// The generated fixture is a very large JSON module. Load it only when needed
+// so production bundles and unit tests never parse it: in fixture mode
+// (VITE_MAP_FIXTURE=osm) it replaces all map data; in local adapter mode outside
+// vitest (local dev, the indoor-location e2e config) it only seeds Buildings.
+// The env checks are inlined so bundlers drop the dynamic import from real builds.
+const loadedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm"
+  || (import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true" && import.meta.env.VITE_API_MODE !== "real"
+    && import.meta.env.VITE_API_MODE !== "mock" && import.meta.env.MODE !== "test")
   ? (await import("./generatedMapFixture")).generatedMapFixture
   : null;
+const generatedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm" ? loadedMapFixture : null;
+if (loadedMapFixture && !generatedMapFixture) buildings.push(...loadedMapFixture.buildings);
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
