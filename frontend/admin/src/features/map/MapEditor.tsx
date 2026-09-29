@@ -27,7 +27,7 @@ import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
-import type { ActiveToolDraft, SpatialDomain, ToolType } from "./types";
+import type { ActiveToolDraft, ToolType } from "./types";
 import { locationIdentityKey } from "../../lib/locationPolicy";
 import {
   echagueCampusBoundary,
@@ -72,6 +72,8 @@ import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChoos
 import { LocationMapLayer } from "./location/LocationMapLayer";
 import { SelectedLocationPanel } from "./location/SelectedLocationPanel";
 import { locationInspectorModel } from "./location/locationInspectorModel";
+import { locationDetailsEntity } from "./location/locationDetailsEntity";
+import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
 import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
 import { useDeleteConfirmation } from "./session/useDeleteConfirmation";
 import { useEscapeShortcut, usePointMoveKeys } from "./session/useMapKeyboard";
@@ -899,22 +901,6 @@ export function MapEditor() {
   });
 
   const workingSessionState = toolSession.state;
-  const recordPropertyOperation = (
-    domain: SpatialDomain,
-    entityId: string,
-    before: object,
-    after: object,
-    description: string,
-  ) => {
-    workingSessionManager.executeOperation({
-      type: "update_properties",
-      domain,
-      entityId,
-      before: before as Record<string, unknown>,
-      after: after as Record<string, unknown>,
-      description,
-    });
-  };
   const { deleteConfirmation, setDeleteConfirmation, confirmDelete } = useDeleteConfirmation({
     overlay,
     refreshMapData,
@@ -922,23 +908,12 @@ export function MapEditor() {
     onDeleted: () => setSelected(null),
   });
 
-  const locationModalEntity: Location | null = selectedLocation ?? (selectedBuilding ? {
-    id: selectedBuildingLocation?.id ?? selectedBuilding.id,
-    name: selectedBuilding.name,
-    code: selectedBuilding.code,
-    type: selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building",
-    parentId: null,
-    function: selectedBuildingLocation?.function ?? "Campus Building",
-    keywords: selectedBuildingLocation?.keywords ?? "",
-    status: selectedBuildingLocation?.status ?? selectedBuilding.status ?? "Active",
-    lat: selectedBuildingLocation?.lat ?? null,
-    lng: selectedBuildingLocation?.lng ?? null,
-    positioned: selectedBuildingLocation?.positioned ?? (selectedBuildingLocation?.lat != null && selectedBuildingLocation?.lng != null),
-    hasPhoto: selectedBuildingLocation?.hasPhoto,
-    photo: selectedBuildingLocation?.photo,
-  } : null);
-
-
+  const locationDetails = useLocationDetailsSave({
+    workingSession: workingSessionManager,
+    overlay,
+    refreshMapData,
+  });
+  const locationModalEntity = locationDetailsEntity(selectedLocation, selectedBuilding, selectedBuildingLocation);
 
   const startSelectedBuildingGeometryEdit = () => {
     if (!selectedBuilding) return;
@@ -1412,36 +1387,11 @@ export function MapEditor() {
               }
             : undefined}
           onSubmit={async (updated, photos) => {
-            if (selectedBuilding) {
-              const savedLocation = typeof services.locations.save === "function"
-                ? await services.locations.save(updated, photos)
-                : updated;
-              const updatedBuilding: Building = {
-                ...selectedBuilding,
-                name: savedLocation.name,
-                code: savedLocation.code,
-                type: savedLocation.type === "Facility" ? "Facility" : "Building",
-                status: savedLocation.status,
-              };
-              updateBuilding(updatedBuilding);
-              updateLocation({ ...savedLocation, id: selectedBuildingLocation?.id ?? savedLocation.id });
-              recordPropertyOperation("Locations", selectedBuilding.id, selectedBuilding, updatedBuilding, `Edit ${selectedBuilding.name} details`);
-            } else if (selectedLocation) {
-              const savedRecord = typeof services.locations.save === "function"
-                ? await services.locations.save(updated, photos)
-                : updated;
-              const savedLocation = isIndoorLocation(updated) && updated.parentId && typeof services.locations.saveIndoorPosition === "function"
-                ? await services.locations.saveIndoorPosition({
-                    id: savedRecord.id,
-                    buildingId: updated.parentId,
-                    lat: updated.lat,
-                    lng: updated.lng,
-                  })
-                : savedRecord;
-              updateLocation(savedLocation);
-              recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);
-            }
-            await refreshMapData();
+            await locationDetails.save(
+              { building: selectedBuilding, buildingLocation: selectedBuildingLocation, location: selectedLocation },
+              updated,
+              photos,
+            );
             setOwnerModal(null);
           }}
         />
