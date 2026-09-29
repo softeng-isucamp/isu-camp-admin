@@ -18,7 +18,7 @@ import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
 import { useEntranceLinking } from "./building/useEntranceLinking";
 import { buildingInspectorModel } from "./building/buildingInspectorModel";
-import type { SelectedBuildingView } from "./building/selectedBuilding";
+import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodePlacePanel } from "./routeNode/RouteNodePlacePanel";
 import { SelectedRouteNodePanel } from "./routeNode/SelectedRouteNodePanel";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
@@ -29,16 +29,8 @@ import { MapLegend } from "./MapLegend";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { normalizeMapLayers } from "../../services/mapLayers";
 import type { ActiveToolDraft, ToolType } from "./types";
-import {
-  geometryOnCampus,
-  paddedCampusBounds,
-  pointOnCampus,
-  type MapPoint,
-} from "./campusBoundary";
-import {
-  distanceInMeters,
-  type PointSnapTarget,
-} from "./pointInteractions";
+import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
+import { distanceInMeters } from "./pointInteractions";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
@@ -51,6 +43,7 @@ import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
+import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
 import { useSessionMapData } from "./session/useSessionMapData";
@@ -311,26 +304,10 @@ export function MapEditor() {
     },
     onOpenNetworkBrowser: () => setNetworkBrowserOpen(true),
   });
-  const pointSnapTargets = useMemo<PointSnapTarget[]>(() => [
-    ...currentBuildings.flatMap((building) => building.points.map((point, index) => ({
-      kind: "building_perimeter" as const,
-      start: point,
-      end: building.points[(index + 1) % building.points.length],
-    }))),
-    ...currentPathways.flatMap((pathway) => {
-      const source = currentNodes.find((node) => node.id === pathway.sourceNodeId);
-      const destination = currentNodes.find((node) => node.id === pathway.destinationNodeId);
-      return [
-        ...(source && !(mode === "move" && source.id === pointTool.movingId)
-          ? [[source.lat, source.lng] as MapPoint]
-          : []),
-        ...pathway.pathPoints,
-        ...(destination && !(mode === "move" && destination.id === pointTool.movingId)
-          ? [[destination.lat, destination.lng] as MapPoint]
-          : []),
-      ].map((point) => ({ kind: "pathway_vertex" as const, point }));
-    }),
-  ], [currentBuildings, currentNodes, currentPathways, mode, pointTool.movingId]);
+  const pointSnapTargets = usePointSnapTargets(
+    { buildings: currentBuildings, nodes: currentNodes, pathways: currentPathways },
+    { mode, movingId: pointTool.movingId },
+  );
   const normalizedLocalFeatures = useMemo(
     () => normalizeMapLayers({
       buildings: currentBuildings,
@@ -351,21 +328,10 @@ export function MapEditor() {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
   }, [campusBoundary]);
-  const outsideBoundaryCount = useMemo(() => {
-    const locations = currentLocations.filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
-    const nodes = currentNodes.filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary)).length;
-    const pathways = currentPathways.filter((item) => {
-      const source = currentNodes.find((node) => node.id === item.sourceNodeId);
-      const destination = currentNodes.find((node) => node.id === item.destinationNodeId);
-      return !geometryOnCampus([
-        ...(source ? [[source.lat, source.lng] as [number, number]] : []),
-        ...item.pathPoints,
-        ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
-      ], campusBoundary);
-    }).length;
-    const buildings = currentBuildings.filter((item) => !geometryOnCampus(item.points, campusBoundary)).length;
-    return locations + nodes + pathways + buildings;
-  }, [campusBoundary, currentBuildings, currentLocations, currentNodes, currentPathways]);
+  const outsideBoundaryCount = useOutsideBoundaryCount(
+    { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways },
+    campusBoundary,
+  );
 
   const visible = useVisibleMapObjects(
     { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways },
@@ -420,33 +386,8 @@ export function MapEditor() {
   const moveDistanceMeters = pointTool.moveOrigin && pointTool.position
     ? distanceInMeters(pointTool.moveOrigin, pointTool.position)
     : 0;
-  const selectedBuildingLocation = selectedBuilding && currentLocations.find((location) =>
-    (location.type === "Building" || location.type === "Facility")
-      && (location.id === selectedBuilding.id || location.name === selectedBuilding.name));
-  const selectedBuildingAssociationId = selectedBuildingLocation?.id ?? selectedBuilding?.id;
-  const selectedBuildingEntrances = selectedBuilding
-    ? currentNodes.filter((node) => node.nodeType === "Entrance" && (node.associatedPlaceId === selectedBuilding.id || node.associatedPlaceId === selectedBuildingAssociationId))
-    : [];
-  const selectedBuildingHasFootprint = Boolean(
-    selectedBuilding && (
-      selectedBuilding.points.length >= 3 ||
-      currentFeatureLinks.some((link) => link.targetEntityId === selectedBuilding.id && link.linkType === "building_footprint")
-    ),
-  );
-  const selectedBuildingRoutable = Boolean(
-    selectedBuilding &&
-    selectedBuildingHasFootprint &&
-    (selectedBuildingLocation ? selectedBuildingLocation.status === "Active" : (selectedBuilding.status ?? "Active") === "Active") &&
-    selectedBuildingEntrances.some((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng) && (node.status ? node.status === "Active" : true)),
-  );
-  const selectedBuildingView: SelectedBuildingView | null = selectedBuilding ? {
-    building: selectedBuilding,
-    location: selectedBuildingLocation,
-    associationId: selectedBuildingAssociationId ?? selectedBuilding.id,
-    entrances: selectedBuildingEntrances,
-    hasFootprint: selectedBuildingHasFootprint,
-    routable: selectedBuildingRoutable,
-  } : null;
+  const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes, currentFeatureLinks);
+  const selectedBuildingLocation = selectedBuildingView?.location;
 
   useEffect(() => {
     const create = new URLSearchParams(routeLocation.search).get("create");
