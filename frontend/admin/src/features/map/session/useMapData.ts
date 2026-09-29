@@ -1,13 +1,11 @@
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { services } from "../../../services/api";
-import { normalizeMapLayers } from "../../../services/mapLayers";
 import { echagueCampusBoundary } from "../campusBoundary";
 
 /**
  * The directory data the Map Editor loads: the map records and the full
- * Locations directory, plus the campus boundary and normalized layers derived
- * from them. Session changes are layered on top by `useSessionMapData`.
+ * Locations directory, plus the campus boundary. Session changes are layered
+ * on top by `useSessionMapData`.
  */
 export function useMapData() {
   const { data } = useQuery({
@@ -38,12 +36,6 @@ export function useMapData() {
   const directoryPathways = data?.pathways || [];
   // The campus boundary is used below for validation and navigation bounds.
   const campusBoundary = echagueCampusBoundary;
-  const directoryMapLayers = useMemo(() => normalizeMapLayers({
-    buildings: data?.buildings || [],
-    locations: data?.locations || [],
-    routeNodes: data?.nodes || [],
-    pathways: data?.pathways || [],
-  }), [data?.buildings, data?.locations, data?.nodes, data?.pathways]);
 
   return {
     data,
@@ -52,6 +44,5 @@ export function useMapData() {
     directoryNodes,
     directoryPathways,
     campusBoundary,
-    directoryMapLayers,
   };
 }
