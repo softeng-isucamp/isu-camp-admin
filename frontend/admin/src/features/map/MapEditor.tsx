@@ -16,13 +16,12 @@ import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import { BuildingToolPanel } from "./building/BuildingToolPanel";
 import { SelectedBuildingPanel } from "./building/SelectedBuildingPanel";
 import { BuildingDraftLayer, BuildingFootprintLayer } from "./building/BuildingMapLayers";
+import { mapInspectorModel } from "./inspector/mapInspectorModel";
 import { useEntranceLinking } from "./building/useEntranceLinking";
-import { buildingInspectorModel } from "./building/buildingInspectorModel";
 import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodePlacePanel } from "./routeNode/RouteNodePlacePanel";
 import { SelectedRouteNodePanel } from "./routeNode/SelectedRouteNodePanel";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
-import { routeNodeInspectorModel } from "./routeNode/routeNodeInspectorModel";
 import { RouteNodeMarkersLayer, RouteNodeMoveLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
@@ -38,7 +37,6 @@ import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
 import { PathwayToolPanel } from "./pathway/PathwayToolPanel";
 import { SelectedPathwayPanel } from "./pathway/SelectedPathwayPanel";
-import { selectedPathwayInspectorModel, pathPointInspectorModel } from "./pathway/pathwayInspectorModel";
 import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
@@ -51,7 +49,6 @@ import { useSessionMapData } from "./session/useSessionMapData";
 import { useSavingAction } from "./session/useSavingAction";
 import { useToolSession } from "./session/useToolSession";
 import { useLocalFeatureEditing } from "./localFeature/useLocalFeatureEditing";
-import { localFeatureInspectorModel } from "./localFeature/localFeatureInspectorModel";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
 import { useMapSelection, type MapSelection, type MapSelectionType } from "./selection/useMapSelection";
 import { useMapSearch } from "./selection/useMapSearch";
@@ -66,7 +63,6 @@ import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPla
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
 import { LocationMapLayer } from "./location/LocationMapLayer";
 import { SelectedLocationPanel } from "./location/SelectedLocationPanel";
-import { locationInspectorModel } from "./location/locationInspectorModel";
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
 import { DeleteConfirmationModal } from "./DeleteConfirmationModal";
@@ -687,95 +683,55 @@ export function MapEditor() {
     selectCanvasObject("node", node.id, [node.lat, node.lng]);
   };
 
-  const inspectorModel = (() => {
-    if (!selected) return null;
-    if (selectedBuildingView) {
-      return buildingInspectorModel({
-        view: selectedBuildingView,
-        contentLocations: buildingContentLocations,
-        nodes: currentNodes,
-        linkingEntrance: entranceLinking.linking,
-        actions: {
-          onReshape: startSelectedBuildingGeometryEdit,
-          onEditDetails: () => setOwnerModal("location"),
-          onAddIndoorLocation: () => openIndoorLocationHandoff(selectedBuildingView.building),
-          onMarkIndoorLocation: () => { setError(""); indoor.setChooserOpen(true); },
-          onAddEntrance: () => {
-            pointTool.beginEntrancePlacement(`${selectedBuildingView.building.name} Entrance`, selectedBuildingView.associationId);
-            setMode("place");
-          },
-          onToggleLinkEntrance: () => entranceLinking.setLinking((open) => !open),
-          onLinkExistingEntrance: () => entranceLinking.setLinking(true),
-          onLinkEntrance: (node) => entranceLinking.linkExistingEntrance(selectedBuildingView, node),
-          onDelete: () => setDeleteConfirmation({ kind: "building", id: selectedBuildingView.building.id, name: selectedBuildingView.building.name }),
-        },
-      });
-    }
-    if (selectedLocation) {
-      return locationInspectorModel({
-        location: selectedLocation,
-        buildings: currentBuildings,
-        locations: currentLocations,
+  const inspectorModel = mapInspectorModel({
+    selected,
+    selection: {
+      building: selectedBuildingView,
+      location: selectedLocation,
+      node: selectedNode,
+      path: selectedPath,
+      localFeature: selectedLocalFeature,
+    },
+    current: {
+      buildings: currentBuildings,
+      locations: currentLocations,
+      nodes: currentNodes,
+      pathways: currentPathways,
+      contentLocations: buildingContentLocations,
+    },
+    editors: { pathway, nodeFrame, localFeatures, routeNodeWorkflow },
+    campusBoundary,
+    buildingAssociationOptions,
+    savingAction,
+    linkingEntrance: entranceLinking.linking,
+    actions: {
+      building: (view) => ({
+        onReshape: startSelectedBuildingGeometryEdit,
         onEditDetails: () => setOwnerModal("location"),
-      });
-    }
-    if (selectedNode) {
-      return routeNodeInspectorModel({
-        node: selectedNode,
-        frame: nodeFrame,
-        workflow: routeNodeWorkflow,
-        nodes: currentNodes,
-        pathways: currentPathways,
-        buildings: currentBuildings,
-        locations: currentLocations,
-        campusBoundary,
-        buildingAssociationOptions,
-        savingAction,
-        onError: setError,
-        onNodeUpdated: overlay.putNode,
-        onMove: handleStartMoveNode,
-        onDelete: setDeleteConfirmation,
-      });
-    }
-    if (selectedPath) {
-      return selectedPathwayInspectorModel({
-        pathway,
-        path: selectedPath,
-        nodes: currentNodes,
-        buildings: currentBuildings,
-        savingAction,
-        onSelect: setSelected,
-        onApply: applyPathwayFrame,
-        onCancel: cancelPathwayFrame,
-        onReshape: reshapePathway,
-        onDelete: setDeleteConfirmation,
-      });
-    }
-    if (selected.type === "path_point") {
-      const pathPointModel = pathPointInspectorModel({
-        pathway,
-        id: selected.id,
-        nodes: currentNodes,
-        savingAction,
-        onSelect: setSelected,
-        onApply: applyPathwayFrame,
-        onCancel: cancelPathwayFrame,
-        onStartConversion: startPathPointConversion,
-      });
-      if (pathPointModel) return pathPointModel;
-    }
-    if (selectedLocalFeature) {
-      return localFeatureInspectorModel({
-        feature: selectedLocalFeature,
-        actionNotice: localFeatures.actionNotice,
-        onNotice: localFeatures.setActionNotice,
-        onRestore: () => localFeatures.restoreFeature(selectedLocalFeature),
-        onEditDetails: () => setOwnerModal("local_feature"),
-        onRetire: () => localFeatures.retireFeature(selectedLocalFeature),
-      });
-    }
-    return null;
-  })();
+        onAddIndoorLocation: () => openIndoorLocationHandoff(view.building),
+        onMarkIndoorLocation: () => { setError(""); indoor.setChooserOpen(true); },
+        onAddEntrance: () => {
+          pointTool.beginEntrancePlacement(`${view.building.name} Entrance`, view.associationId);
+          setMode("place");
+        },
+        onToggleLinkEntrance: () => entranceLinking.setLinking((open) => !open),
+        onLinkExistingEntrance: () => entranceLinking.setLinking(true),
+        onLinkEntrance: (node) => entranceLinking.linkExistingEntrance(view, node),
+        onDelete: () => setDeleteConfirmation({ kind: "building", id: view.building.id, name: view.building.name }),
+      }),
+      onEditLocationDetails: () => setOwnerModal("location"),
+      onEditLocalFeatureDetails: () => setOwnerModal("local_feature"),
+      onError: setError,
+      onNodeUpdated: overlay.putNode,
+      onMoveNode: handleStartMoveNode,
+      onSelect: setSelected,
+      onDelete: setDeleteConfirmation,
+      onApplyPathway: applyPathwayFrame,
+      onCancelPathway: cancelPathwayFrame,
+      onReshapePathway: reshapePathway,
+      onStartPathPointConversion: startPathPointConversion,
+    },
+  });
 
   return (
     <div className="flex flex-col gap-4 h-[calc(100vh-100px)] min-h-[580px] p-2">
