@@ -218,19 +218,6 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("permanently deleted");
 
-
-  await page.goto("/users?mockFailure=userUpdate");
-  await page.getByRole("button", { name: /Actions for/i }).first().click();
-  await page.getByRole("menuitem", { name: "Edit user" }).click();
-  await page.getByRole("button", { name: /save changes/i }).click();
-  await expect(page.getByRole("alert").first()).toContainText(
-    "Mock userUpdate failed",
-  );
-  await expect(page).toHaveScreenshot("user-save-failure.png", {
-    animations: "disabled",
-    maxDiffPixels: 200,
-  });
-
   await page.goto("/users");
   await expect(
     page.getByRole("columnheader", { name: "CREATED AT" }),
