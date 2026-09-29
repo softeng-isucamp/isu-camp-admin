@@ -114,7 +114,6 @@ export function MapEditor() {
   const saving = useSavingAction();
   const { savingAction } = saving;
 
-
   const [error, setError] = useState("");
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
@@ -127,8 +126,6 @@ export function MapEditor() {
       queryClient.invalidateQueries({ queryKey: ["locations"] }),
     ]);
   }, [queryClient]);
-
-
 
   const completeToolDraft = (toolType: Exclude<ToolType, "select">) => {
     const completionHandlers: Record<Exclude<ToolType, "select">, () => void> = {
@@ -177,11 +174,8 @@ export function MapEditor() {
     selectedPath,
     editingPathId,
     setEditingPathId,
-    setPathwayDraft,
-    setPathwayDraftOriginal,
     setProvisionalPathwayId,
     setPathPoints,
-    setSelectedPathPointIndex,
     setPathDraftDirty,
   } = pathway;
   const buildingEditor = useBuildingFootprintEditing({
@@ -314,24 +308,8 @@ export function MapEditor() {
   const applySelection = useCallback((type: MapSelectionType, id: string) => {
     localFeatures.setActionNotice("");
     if (type === "pathway") {
-      const path = currentPathways.find((p) => p.id === id);
-      if (path) {
-        setPathwayDraft({ ...path });
-        setPathwayDraftOriginal({ ...path });
-        // Legacy Open records retain the old edit-on-selection behavior for
-        // compatibility. Canonical Active records open in inspection first;
-        // editing requires the explicit Edit/Reshape action.
-        if (path.status === "Open") {
-          setEditingPathId(path.id);
-          setPathPoints(path.pathPoints || []);
-          setMode("path");
-        } else {
-          setEditingPathId(null);
-          setPathPoints([]);
-          setMode("select");
-        }
-        setSelectedPathPointIndex(null);
-      }
+      const outcome = pathway.loadForSelection(id);
+      if (outcome) setMode(outcome === "edit" ? "path" : "select");
     }
     if (type === "node") {
       const node = currentNodes.find((candidate) => candidate.id === id);
@@ -526,12 +504,6 @@ export function MapEditor() {
     pointTool.beginEntrancePlacement(`${building.name} Entrance`, building.id);
     setMode("place");
   };
-
-
-
-
-
-
 
   const selectTool = (toolType: ToolType) => {
     if (toolType === activeTool) {

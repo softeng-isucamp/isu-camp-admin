@@ -175,6 +175,30 @@ export function usePathwayEditing({
     return true;
   };
 
+  /**
+   * Loads a selected pathway into the draft. Legacy Open records retain the
+   * old edit-on-selection behavior for compatibility; canonical Active
+   * records open in inspection first, and editing requires the explicit
+   * Edit/Reshape action. Returns which of the two applied, or null when the
+   * pathway is unknown.
+   */
+  const loadForSelection = (id: string): "edit" | "inspect" | null => {
+    const path = currentPathways.find((p) => p.id === id);
+    if (!path) return null;
+    setPathwayDraft({ ...path });
+    setPathwayDraftOriginal({ ...path });
+    const outcome = path.status === "Open" ? "edit" : "inspect";
+    if (outcome === "edit") {
+      setEditingPathId(path.id);
+      setPathPoints(path.pathPoints || []);
+    } else {
+      setEditingPathId(null);
+      setPathPoints([]);
+    }
+    setSelectedPathPointIndex(null);
+    return outcome;
+  };
+
   const insertPathPoint = (segmentIndex: number) => {
     if (!activePathway) return;
     const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
@@ -548,6 +572,7 @@ export function usePathwayEditing({
     startNew,
     handleNodeClick,
     update,
+    loadForSelection,
     insertPathPoint,
     saveShape,
     createJunctionAtCrossing,
