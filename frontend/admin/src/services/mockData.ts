@@ -1,9 +1,8 @@
 import type { Building, Location, Pathway, RouteNode } from "../types";
-import { generatedMapFixture } from "./generatedMapFixture";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 
 export const campusCenter: [number, number] = [16.720868, 121.689698];
-export const buildings: Building[] = [...generatedMapFixture.buildings];
+export const buildings: Building[] = [];
 
 const seededIndoorLocations: Location[] = [
   [

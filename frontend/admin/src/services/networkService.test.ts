@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { services } from "./api";
+import { describe, expect, it, vi } from "vitest";
 
 describe("canonical network service", () => {
   it("exposes relational fixtures and persists a canonical pathway write", async () => {
+    // The relational data comes from the generated map fixture, which is only loaded in fixture mode.
+    vi.stubEnv("VITE_MAP_FIXTURE", "osm");
+    vi.resetModules();
+    const { services } = await import("./api");
     const snapshot = await services.network.snapshot();
     const entrancesByBuilding = new Map<string, number>();
     snapshot.routeNodes.forEach((node) => {
@@ -19,5 +22,6 @@ describe("canonical network service", () => {
     const updated = await services.network.savePathway({ ...original, name: `${original.name} (canonical)` });
     expect(updated.name).toBe(`${original.name} (canonical)`);
     expect((await services.network.pathways()).find((pathway) => pathway.id === original.id)?.name).toBe(updated.name);
+    vi.unstubAllEnvs();
   });
 });
