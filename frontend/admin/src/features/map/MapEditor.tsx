@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
   Marker,
-  Polyline,
   Popup,
   TileLayer,
   Tooltip,
@@ -15,7 +14,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import { Button, Modal } from "../../components/UI";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
-import { isPointInBounds, overlayChanges, polygonFeatureAnchor, suggestedPathwayName } from "./mapEditing";
+import { isPointInBounds, overlayChanges, polygonFeatureAnchor } from "./mapEditing";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD, type InspectorCardModel } from "./InspectorCardHUD";
@@ -49,13 +48,18 @@ import {
   nudgePoint,
   type PointSnapTarget,
 } from "./pointInteractions";
-import { pathwayConnectionError, segmentMidpoints } from "./pathway/pathwayTopology";
-import { calculateDeleteImpact, type DeleteImpact } from "./routeNode/routeNodeLifecycle";
+import { pathwayConnectionError } from "./pathway/pathwayTopology";
+import type { DeleteImpact } from "./routeNode/routeNodeLifecycle";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
+import { PathwayToolPanel } from "./pathway/PathwayToolPanel";
+import { SelectedPathwayPanel } from "./pathway/SelectedPathwayPanel";
+import { selectedPathwayInspectorModel, pathPointInspectorModel } from "./pathway/pathwayInspectorModel";
+import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
+import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useLocalFeatureLayer } from "./localFeature/useLocalFeatureLayer";
 import { useMapOverlay } from "./session/useMapOverlay";
@@ -71,8 +75,6 @@ import {
 import {
   createIndoorLocationIcon,
   createLocationPinIcon,
-  createPointIcon,
-  createSplitIcon,
 } from "./mapIcons";
 import { MapController } from "./MapController";
 import { belongsToBuilding, isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
@@ -268,31 +270,18 @@ export function MapEditor() {
     pathwayCrossings,
     selectedPath,
     activePathway,
-    pathwayFrame,
-    pathwayFrameIssues,
-    pathwayFrameDirty,
     editingPathId,
     setEditingPathId,
-    pathwayDraft,
     setPathwayDraft,
     setPathwayDraftOriginal,
-    provisionalPathwayId,
     setProvisionalPathwayId,
-    pathPoints,
     setPathPoints,
-    selectedPathPointIndex,
     setSelectedPathPointIndex,
     pathStartNodeId,
     setPathStartNodeId,
-    pathDraftDirty,
     setPathDraftDirty,
     conversionDraft,
     setConversionDraft,
-    pathPointDragPreview,
-    setPathPointDragPreview,
-    adoptSuggestedPathwayName,
-    insertPathPoint,
-    switchEndpoints: switchPathwayEndpoints,
     updateConversionPathway,
   } = pathway;
   const sessionBuildings = useMemo(() => {
@@ -901,6 +890,12 @@ export function MapEditor() {
     finishPathwayTool();
   });
 
+  const reshapePathway = (path: Pathway) => {
+    setEditingPathId(path.id);
+    setPathPoints(path.pathPoints || []);
+    setMode("path");
+  };
+
   const startPathPointConversion = () => pathway.startConversion(currentBuildings);
 
   const savePathPointConversion = () => pathway.saveConversion((nodeId) => {
@@ -1384,140 +1379,31 @@ export function MapEditor() {
       });
     }
     if (selectedPath) {
-      return {
-        id: selectedPath.id,
-        kind: "pathway",
-        title: selectedPath.name || "Campus Pathway",
-        domain: "Walking Network",
-        status: `${selectedPath.direction} · ${selectedPath.status}${pathwayFrameDirty ? " · Unsaved draft" : ""}`,
-        summary: [
-          { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
-          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
-          { label: "Path Sequence", value: `${selectedPath.pathPoints.length} intermediate point${selectedPath.pathPoints.length === 1 ? "" : "s"}` },
-          { label: "Distance", value: selectedPath.distance },
-        ],
-        details: (
-          <>
-            <section className="inspector-related-section" aria-label="Pathway metadata">
-              <h3>Pathway metadata</h3>
-              <div className="inspector-edit-fields">
-                <label>Pathway name<input aria-label="Pathway name" placeholder={pathwayFrame && (suggestedPathwayName(pathwayFrame, currentNodes) || "Select two named Route Nodes")} value={pathwayFrame?.name ?? selectedPath.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(pathwayFrame); }} onBlur={() => adoptSuggestedPathwayName(pathwayFrame)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} /></label>
-                <label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label>
-                <label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label>
-                <label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
-                <label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? "Active"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}>{pathwayFrame?.status === "Open" && <option>Open</option>}<option>Active</option><option>Closed</option></select></label>
-              </div>
-              <fieldset className="mt-2 rounded-xl border border-[#dbe0e2] p-2.5"><legend className="px-1 text-xs font-semibold text-[#3f4941]">Allowed modes</legend><div className="grid grid-cols-2 gap-2 text-xs">{["Walking", "Vehicle"].map((mode) => { const allowedModes = pathwayFrame?.allowedModes ?? ["Walking"]; const vehicleBlocked = pathwayFrame?.type === "Walkway" && mode === "Vehicle"; return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>; })}</div></fieldset>
-            </section>
-            <section className="inspector-related-section" aria-label="Path Sequence editor">
-              <h3>Path Sequence</h3>
-              <button type="button" className="inspector-secondary-action" onClick={switchPathwayEndpoints} disabled={!pathwayFrame} aria-label="Switch source and destination">
-                ⇄ Switch source and destination
-              </button>
-              <label className="inspector-point-selector">Select Path Point
-                <select aria-label="Select Path Point" value={selectedPathPointIndex ?? ""} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); setSelected({ type: "path_point", id: `${selectedPath.id}:point:${index}` }); }}>
-                  <option value="" disabled>Choose an ordered point</option>
-                  {selectedPath.pathPoints.map((point, index) => <option key={`${index}-${point.join(",")}`} value={index}>Path Point #{index + 1} · {point[0].toFixed(6)}, {point[1].toFixed(6)}</option>)}
-                </select>
-              </label>
-              {selectedPath.pathPoints.length === 0 && <p>No intermediate Path Points.</p>}
-              {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
-              <h3 className="inspector-subheading">Network findings</h3>
-              <p>{pathwayFrameIssues.length ? `${pathwayFrameIssues.length} local finding${pathwayFrameIssues.length === 1 ? "" : "s"} require attention.` : "No locally known blocking findings."}</p>
-              <button type="button" className="inspector-secondary-action" onClick={() => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); }}>⌁ Reshape Pathway</button>
-              <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button></div>
-            </section>
-          </>
-        ),
-        primaryAction: {
-          label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
-          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
-          disabledReason: pathwayFrameIssues[0]?.message,
-          onSelect: applyPathwayFrame,
-        },
-        overflowActions: [
-          { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
-          { label: "⌁ Reshape Pathway", onSelect: () => { setEditingPathId(selectedPath.id); setPathPoints(selectedPath.pathPoints); setMode("path"); } },
-          {
-            label: "🗑 Delete Pathway",
-            tone: "danger" as const,
-            onSelect: () => {
-              setDeleteConfirmation({ kind: "pathway", id: selectedPath.id, name: selectedPath.name, impact: calculateDeleteImpact({ object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
-            },
-          },
-        ],
-      } satisfies InspectorCardModel;
+      return selectedPathwayInspectorModel({
+        pathway,
+        path: selectedPath,
+        nodes: currentNodes,
+        buildings: currentBuildings,
+        savingAction,
+        onSelect: setSelected,
+        onApply: applyPathwayFrame,
+        onCancel: cancelPathwayFrame,
+        onReshape: reshapePathway,
+        onDelete: setDeleteConfirmation,
+      });
     }
-    if (selected.type === "path_point" && editingPathId && selectedPathPointIndex !== null && pathPoints[selectedPathPointIndex]) {
-      const point = pathPoints[selectedPathPointIndex];
-      return {
+    if (selected.type === "path_point") {
+      const pathPointModel = pathPointInspectorModel({
+        pathway,
         id: selected.id,
-        kind: "path_point",
-        title: `Path Point #${selectedPathPointIndex + 1}`,
-        domain: "Walking Network",
-        status: `Nested geometry · ${selectedPathPointIndex + 1} of ${pathPoints.length}`,
-        summary: [
-          { label: "Source Route Node", value: currentNodes.find((node) => node.id === activePathway?.sourceNodeId)?.name ?? activePathway?.sourceNodeId ?? "—" },
-          { label: "Destination Route Node", value: currentNodes.find((node) => node.id === activePathway?.destinationNodeId)?.name ?? activePathway?.destinationNodeId ?? "—" },
-          { label: "Path Sequence", value: `${pathPoints.length} intermediate point${pathPoints.length === 1 ? "" : "s"}` },
-          { label: "Latitude", value: point[0].toFixed(6) },
-          { label: "Longitude", value: point[1].toFixed(6) },
-        ],
-        details: (
-          <>
-            <section className="inspector-related-section" aria-label="Parent Pathway context"><h3>Parent Pathway</h3><p>{activePathway?.name ?? editingPathId}</p><p>{activePathway?.shade} · {activePathway?.type} · {activePathway?.direction} · {activePathway?.status}</p></section>
-            <label className="inspector-point-selector">Select Path Point
-              <select aria-label="Select Path Point" value={selectedPathPointIndex} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); setSelected({ type: "path_point", id: `${editingPathId}:point:${index}` }); }}>
-                {pathPoints.map((candidate, index) => <option key={`${index}-${candidate.join(",")}`} value={index}>Path Point #{index + 1} · {candidate[0].toFixed(6)}, {candidate[1].toFixed(6)}</option>)}
-              </select>
-            </label>
-            <div className="inspector-point-inputs"><label>Latitude
-              <input aria-label="Path Point latitude" type="number" step="any" value={point[0]} onChange={(event) => {
-                setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [Number(event.target.value), item[1]] : item));
-                setPathDraftDirty(true);
-              }} />
-            </label>
-            <label>Longitude
-              <input aria-label="Path Point longitude" type="number" step="any" value={point[1]} onChange={(event) => {
-                setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [item[0], Number(event.target.value)] : item));
-                setPathDraftDirty(true);
-              }} />
-            </label></div>
-            {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
-            {(pathwayFrameDirty || pathDraftDirty) && <p role="status">Update Pathway before converting this Path Point.</p>}
-            <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? activePathway?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label><label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
-            <div className="inspector-inline-actions"><button type="button" onClick={cancelPathwayFrame} disabled={!pathwayFrameDirty}>Cancel</button></div>
-          </>
-        ),
-        primaryAction: {
-          label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
-          disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
-          disabledReason: pathwayFrameIssues[0]?.message,
-          onSelect: applyPathwayFrame,
-        },
-        overflowActions: [
-          { label: "✓ Update Pathway", onSelect: applyPathwayFrame },
-          { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: cancelPathwayFrame },
-          { label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: startPathPointConversion },
-          {
-            label: "↩ Inspect Parent Pathway",
-            onSelect: () => {
-              setSelectedPathPointIndex(null);
-              setSelected(activePathway ? { type: "pathway", id: activePathway.id } : null);
-            },
-          },
-          {
-            label: "🗑 Remove Path Point",
-            tone: "danger" as const,
-            onSelect: () => {
-              setPathPoints((current) => current.filter((_, index) => index !== selectedPathPointIndex));
-              setSelectedPathPointIndex(null);
-              setSelected(activePathway ? { type: "pathway", id: activePathway.id } : null);
-              setPathDraftDirty(true);
-            },
-          },
-        ],
-      } satisfies InspectorCardModel;
+        nodes: currentNodes,
+        savingAction,
+        onSelect: setSelected,
+        onApply: applyPathwayFrame,
+        onCancel: cancelPathwayFrame,
+        onStartConversion: startPathPointConversion,
+      });
+      if (pathPointModel) return pathPointModel;
     }
     if (selectedLocalFeature) {
       return localFeatureInspectorModel({
@@ -1597,68 +1483,16 @@ export function MapEditor() {
             onSelectLocalFeature={(featureId) => selectObject("local_feature", featureId)}
           />
 
-          {filteredPathways.map((path) => {
-            const source = currentNodes.find((node) => node.id === path.sourceNodeId);
-            const destination = currentNodes.find((node) => node.id === path.destinationNodeId);
-            const isEditingThisPath = editingPathId === path.id && mode === "path";
-            const currentPoints = isEditingThisPath
-              ? pathPointDragPreview
-                ? pathPoints.map((point, index) =>
-                    index === pathPointDragPreview.index ? pathPointDragPreview.point : point,
-                  )
-                : pathPoints
-              : path.pathPoints;
-            const isSelected = (selected?.type === "pathway" && selected.id === path.id) || isEditingThisPath;
-
-            const pathOpacity =
-              mode === "place" || mode === "area"
-                ? 0.25
-                : isSelected
-                  ? 0.95
-                  : 0.8;
-
-            return source && destination ? (
-              <Polyline
-                key={path.id}
-                bubblingMouseEvents={false}
-                positions={[
-                  [source.lat, source.lng],
-                  ...currentPoints,
-                  [destination.lat, destination.lng],
-                ]}
-                pathOptions={{
-                  className: "map-pathway",
-                  color: !geometryOnCampus([
-                    ...(source ? [[source.lat, source.lng] as [number, number]] : []),
-                    ...currentPoints,
-                    ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
-                  ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
-                  weight: isSelected ? 6 : isOverviewZoom ? 2 : mode === "path" ? 5 : 4,
-                  dashArray: isSelected || isOverviewZoom ? undefined : "7 6",
-                  opacity: pathOpacity,
-                }}
-                eventHandlers={{
-                  click: (event) => {
-                    selectCanvasObject("pathway", path.id, event.latlng
-                      ? [event.latlng.lat, event.latlng.lng]
-                      : [source.lat, source.lng]);
-                  },
-                }}
-              >
-                {!isOverviewZoom && <Tooltip sticky direction="top" className="map-label">
-                  <div className="font-bold text-xs">{path.name || "Campus Pathway"}</div>
-                  <div className="text-[10px] text-gray-500 font-normal">Shade: {path.shade} · {path.direction}</div>
-                  {!geometryOnCampus([
-                    ...(source ? [[source.lat, source.lng] as [number, number]] : []),
-                    ...currentPoints,
-                    ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
-                  ], campusBoundary) && (
-                    <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
-                  )}
-                </Tooltip>}
-              </Polyline>
-            ) : null;
-          })}
+          <PathwaysLayer
+            pathway={pathway}
+            pathways={filteredPathways}
+            nodes={currentNodes}
+            mode={mode}
+            selectedPathId={selected?.type === "pathway" ? selected.id : null}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onSelectPathway={(pathwayId, anchor) => selectCanvasObject("pathway", pathwayId, anchor)}
+          />
 
           {filteredLocations.map((loc) => {
             const isSelected = selected?.type === "location" && selected?.id === loc.id;
@@ -1733,62 +1567,15 @@ export function MapEditor() {
             onClickNode={handleRouteNodeClick}
           />
 
-          {!isOverviewZoom && mode === "path" &&
-            pathPoints.map((point, index) => (
-              <Marker
-                key={`path-point-${index}`}
-                position={point}
-                icon={createPointIcon(true)}
-                draggable={selectedPathPointIndex === index}
-                eventHandlers={{
-                  click: () => {
-                    setSelectedPathPointIndex(index);
-                    setSelected({ type: "path_point", id: `${editingPathId ?? "pathway"}:point:${index}` });
-                  },
-                  drag: (event) => {
-                    const marker = event.target as L.Marker;
-                    const next = marker.getLatLng();
-                    setPathPointDragPreview({ index, point: [next.lat, next.lng] });
-                    setSelectedPathPointIndex(index);
-                  },
-                  dragend: (event) => {
-                    const marker = event.target as L.Marker;
-                    const next = marker.getLatLng();
-                    setPathPointDragPreview(null);
-                    if (!pointOnCampus([next.lat, next.lng], campusBoundary)) {
-                      setError("The path point must stay inside the ISU Echague campus boundary.");
-                      return;
-                    }
-                    setError("");
-                    setPathPoints((current) =>
-                      current.map((item, i) =>
-                        i === index ? [next.lat, next.lng] : item,
-                      ),
-                    );
-                    setSelectedPathPointIndex(index);
-                    setPathDraftDirty(true);
-                  },
-                }}
-              />
-            ))}
-
-          {!isOverviewZoom && mode === "path" && activePathway && (() => {
-            const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
-            const destination = currentNodes.find((node) => node.id === activePathway.destinationNodeId);
-            if (!source || !destination) return null;
-            const coordinates: [number, number][] = [[source.lat, source.lng], ...pathPoints, [destination.lat, destination.lng]];
-            const midpoints = segmentMidpoints(coordinates.map(([latitude, longitude]) => ({ latitude, longitude })));
-            return midpoints.map((midpoint, segmentIndex) => {
-              return (
-                <Marker
-                  key={`path-split-handle-${segmentIndex}`}
-                  position={[midpoint.latitude, midpoint.longitude]}
-                  icon={createSplitIcon()}
-                  eventHandlers={{ click: () => insertPathPoint(segmentIndex) }}
-                />
-              );
-            });
-          })()}
+          <PathwayDraftLayer
+            pathway={pathway}
+            nodes={currentNodes}
+            mode={mode}
+            campusBoundary={campusBoundary}
+            isOverviewZoom={isOverviewZoom}
+            onSelect={setSelected}
+            onError={setError}
+          />
 
           <BuildingDraftLayer
             editor={buildingEditor}
@@ -1898,15 +1685,7 @@ export function MapEditor() {
             <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
           </div>
         )}
-        {pathwayCrossings[0] && (
-          <div className="absolute bottom-4 left-4 z-[901] max-w-sm rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-xs text-amber-950 shadow-lg" role="alert" aria-label="Non-routable pathway crossing">
-            <strong className="block">Pathways cross without a Junction</strong>
-            <p className="mt-1">This visual crossing is not routable until a shared Junction Route Node is created.</p>
-            <button type="button" onClick={createJunctionAtCrossing} className="mt-2 rounded-full bg-[#005931] px-3 py-2 font-bold text-white">
-              Create Junction &amp; Split Pathway
-            </button>
-          </div>
-        )}
+        {pathwayCrossings[0] && <PathwayCrossingWarning onCreateJunction={createJunctionAtCrossing} />}
         {nonRoutableBuildingId && mode === "select" && (
           <div className="absolute bottom-4 left-4 z-[900] max-w-sm rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-xs text-amber-950 shadow-lg" role="alert" aria-label="Building is not routable">
             <strong className="block">Building is not routable</strong>
@@ -2036,135 +1815,17 @@ export function MapEditor() {
                 onCancel={() => selectTool("select")}
               />
             ) : mode === "path" ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Path Shape Points</div>
-                <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Calibrate Path Points</h2>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>
-                  <button
-                    type="button"
-                    className="px-3 py-1.5 border border-[#005931] bg-white text-[#005931] rounded-full text-xs font-bold"
-                    onClick={() => { setMode("select"); setNetworkBrowserOpen(true); }}
-                  >Browse Walking Network</button>
-                </div>
-                {!activePathway && (
-                  <div className="mt-3 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-3 text-xs text-[#3f4941]">
-                    <p>Select two existing active Route Nodes on the map to create a new Pathway. The endpoints are kept as nodes; only intermediate clicks become Path Points.</p>
-                    <p className="mt-2 font-semibold">{pathStartNodeId ? `Start selected: ${currentNodes.find((node) => node.id === pathStartNodeId)?.name ?? "Route Node"}. Select a different node.` : "Select the first Route Node to begin."}</p>
-                  </div>
-                )}
-                {activePathway && (
-                  <>
-                    <section aria-label="Pathway metadata" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-semibold text-[#3f4941]">Pathway name
-                          <input aria-label="New Pathway name" placeholder={suggestedPathwayName(activePathway, currentNodes) || "Select two named Route Nodes"} value={pathwayDraft?.name ?? activePathway.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(activePathway); }} onBlur={() => adoptSuggestedPathwayName(activePathway)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
-                        </label>
-                        <label className="text-xs font-semibold text-[#3f4941]">Way type
-                          <select aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
-                            {["Walkway", "Road"].map((wayType) => <option key={wayType}>{wayType}</option>)}
-                          </select>
-                        </label>
-                        <label className="text-xs font-semibold text-[#3f4941]">Shade
-                          <select aria-label="New Pathway shade" value={pathwayDraft?.shade ?? activePathway.shade} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select>
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="text-xs font-semibold text-[#3f4941]">Direction<select aria-label="New Pathway direction" value={pathwayDraft?.direction ?? activePathway.direction} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label>
-                          <label className="text-xs font-semibold text-[#3f4941]">Status<select aria-label="New Pathway status" value={pathwayDraft?.status ?? activePathway.status} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">{activePathway.status === "Open" && <option>Open</option>}<option>Active</option><option>Closed</option></select></label>
-                        </div>
-                        <fieldset className="mt-2 rounded-xl border border-[#dbe0e2] p-2.5">
-                          <legend className="px-1 text-xs font-semibold text-[#3f4941]">Allowed modes</legend>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            {["Walking", "Vehicle"].map((mode) => {
-                              const allowedModes = pathwayDraft?.allowedModes ?? activePathway.allowedModes ?? ["Walking"];
-                              const vehicleBlocked = (pathwayDraft?.type ?? activePathway.type) === "Walkway" && mode === "Vehicle";
-                              return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>;
-                            })}
-                          </div>
-                        </fieldset>
-                      </div>
-                    </section>
-                    <div className="flex flex-col gap-1.5 my-3">
-                      <label className="text-xs font-semibold text-[#3f4941]">Pathway</label>
-                      <select
-                        value={editingPathId ?? ""}
-                        onChange={(e) => {
-                          setEditingPathId(e.target.value);
-                          const found = directoryPathways.find((p) => p.id === e.target.value) || overlay.pathways.find((p) => p.id === e.target.value);
-                          if (found) {
-                            setPathPoints(found.pathPoints || []);
-                          }
-                          setSelectedPathPointIndex(null);
-                        }}
-                        className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-                      >
-                        {currentPathways.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <p className="text-xs text-[#3f4941] my-2">
-                        Select a Path Point to drag it, or click the map to add Path Points.{" "}
-                      <strong>{pathPoints.length} points plotted</strong>.
-                    </p>
-                    <section aria-label="Pathway split handles" className="my-3 rounded-xl border border-[#dbe0e2] p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-[#005931]">Midpoint split handles</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {Array.from({ length: pathPoints.length + 1 }, (_, segmentIndex) => (
-                          <button
-                            key={segmentIndex}
-                            type="button"
-                            aria-label={`Add Path Point on segment ${segmentIndex + 1}`}
-                            onClick={() => insertPathPoint(segmentIndex)}
-                            className="h-7 w-7 rounded-full border border-[#005931] bg-white text-sm font-black text-[#005931]"
-                          >+</button>
-                        ))}
-                      </div>
-                    </section>
-                    {selectedPathPointIndex !== null && pathPoints[selectedPathPointIndex] && (
-                      <section aria-label="Selected Path Point" className="my-3 rounded-xl border border-[#dbe0e2] p-3">
-                        <label className="block text-xs font-semibold text-[#3f4941]">Latitude
-                          <input aria-label="Path Point latitude" type="number" step="any" value={pathPoints[selectedPathPointIndex][0]} onChange={(event) => { setPathPoints((current) => current.map((point, index) => index === selectedPathPointIndex ? [Number(event.target.value), point[1]] : point)); setPathDraftDirty(true); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
-                        </label>
-                        <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
-                          <input aria-label="Path Point longitude" type="number" step="any" value={pathPoints[selectedPathPointIndex][1]} onChange={(event) => { setPathPoints((current) => current.map((point, index) => index === selectedPathPointIndex ? [point[0], Number(event.target.value)] : point)); setPathDraftDirty(true); }} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
-                        </label>
-                      </section>
-                    )}
-                    <div className="flex items-center gap-2 mt-3">
-                      <button
-                        type="button"
-                        disabled={!pathPoints.length}
-                        onClick={() => { setPathPoints((current) => selectedPathPointIndex === null
-                          ? current.slice(0, -1)
-                          : current.filter((_, index) => index !== selectedPathPointIndex)); setPathDraftDirty(true); }}
-                        className="px-3 py-1.5 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] disabled:opacity-40 transition cursor-pointer"
-                      >
-                        {selectedPathPointIndex === null ? "Remove Last Point" : "Remove Selected Point"}
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[#e1e3e4]">
-                      <button
-                        type="button"
-                        className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                        onClick={() => selectTool("select")}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingAction === "pathway"}
-                        onClick={handleSavePathShape}
-                        className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
-                      >
-                        {savingAction === "pathway" ? "Saving Pathway…" : provisionalPathwayId === activePathway.id ? "Save Pathway" : "Update Pathway"}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              <PathwayToolPanel
+                pathway={pathway}
+                nodes={currentNodes}
+                directoryPathways={directoryPathways}
+                overlayPathways={overlay.pathways}
+                savingAction={savingAction}
+                onNewPathway={startNewPathway}
+                onBrowseNetwork={() => { setMode("select"); setNetworkBrowserOpen(true); }}
+                onSave={handleSavePathShape}
+                onCancel={() => selectTool("select")}
+              />
             ) : selectedBuildingView ? (
               <SelectedBuildingPanel
                 view={selectedBuildingView}
@@ -2221,54 +1882,14 @@ export function MapEditor() {
                 onClearSelection={() => setSelected(null)}
               />
             ) : selectedPath ? (
-              <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Selected Connection</div>
-                <label className="block text-[10px] font-bold text-[#3f4941] mt-2">Pathway name
-                  <input aria-label="Pathway name" placeholder={pathwayFrame && (suggestedPathwayName(pathwayFrame, currentNodes) || "Select two named Route Nodes")} value={pathwayFrame?.name ?? selectedPath.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(pathwayFrame); }} onBlur={() => adoptSuggestedPathwayName(pathwayFrame)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-sm font-bold" />
-                </label>
-                <dl className="divide-y divide-[#e1e3e4] text-xs my-3">
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Source</dt>
-                    <dd><select aria-label="Pathway source" value={selectedPath.sourceNodeId} onChange={(event) => updatePathway({ ...selectedPath, sourceNodeId: event.target.value })} className="w-full border rounded px-1 py-1 font-bold">{currentNodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Destination</dt>
-                    <dd><select aria-label="Pathway destination" value={selectedPath.destinationNodeId} onChange={(event) => updatePathway({ ...selectedPath, destinationNodeId: event.target.value })} className="w-full border rounded px-1 py-1 font-bold">{currentNodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Distance</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedPath.distance}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Walking Time</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedPath.time}</dd>
-                  </div>
-                  <div className="grid grid-cols-2 py-1.5 gap-2">
-                    <dt className="text-[#3f4941] font-medium">Intermediate Points</dt>
-                    <dd className="text-[#191c1d] font-bold">{selectedPath.pathPoints?.length || 0}</dd>
-                  </div>
-                </dl>
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingPathId(selectedPath.id);
-                      setPathPoints(selectedPath.pathPoints || []);
-                      setMode("path");
-                    }}
-                    className="px-4 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
-                  >
-                    Edit Path Points
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(null)}
-                    className="px-3 py-2 bg-[#f8f9fa] border border-[#dbe0e2] text-[#3f4941] rounded-full text-xs font-bold hover:bg-[#e1e3e4] transition cursor-pointer"
-                  >
-                    Clear Selection
-                  </button>
-                </div>
-              </div>
+              <SelectedPathwayPanel
+                pathway={pathway}
+                path={selectedPath}
+                nodes={currentNodes}
+                onUpdate={updatePathway}
+                onReshape={reshapePathway}
+                onClearSelection={() => setSelected(null)}
+              />
             ) : null}
           </aside>
         )}
