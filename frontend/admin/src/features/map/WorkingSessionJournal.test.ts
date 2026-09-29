@@ -68,7 +68,6 @@ describe("WorkingSessionJournal", () => {
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],
-        futureOperations: [],
         activeDraft: null,
         suspendedDrafts: [],
         savedCheckpointIndex: "invalid",
@@ -86,7 +85,6 @@ describe("WorkingSessionJournal", () => {
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],
-        futureOperations: [],
         activeDraft: {},
         suspendedDrafts: [],
         savedCheckpointIndex: 0,

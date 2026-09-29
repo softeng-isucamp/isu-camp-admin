@@ -68,19 +68,15 @@ export type InterruptionAction = "keep_draft" | "continue_editing" | "discard_ge
 // Working Session State snapshot
 export interface WorkingSessionState {
   pastOperations: WorkingOperation[];
-  futureOperations: WorkingOperation[];
   activeDraft: ActiveToolDraft | null;
   suspendedDrafts: ActiveToolDraft[];
   isDirty: boolean;
   uncommittedCount: number;
-  canUndo: boolean;
-  canRedo: boolean;
 }
 
 export interface WorkingSessionSnapshot {
   schemaVersion: 1;
   pastOperations: WorkingOperation[];
-  futureOperations: WorkingOperation[];
   activeDraft: ActiveToolDraft | null;
   suspendedDrafts: ActiveToolDraft[];
   savedCheckpointIndex: number;
