@@ -444,6 +444,7 @@ def create_location():
                 building_code=values["code"],
                 building_name=values["name"],
                 description=values["description"],
+                keywords=values["keywords"],
                 classification=values["type"],
                 latitude=latitude,
                 longitude=longitude,

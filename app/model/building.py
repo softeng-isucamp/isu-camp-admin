@@ -11,6 +11,11 @@ class Building(db.Model):
     building_name = db.Column(db.String, nullable=False)
     classification = db.Column(db.String, nullable=False, default="Building")
     description = db.Column(db.Text, nullable=True)
+
+    # Free-text search keywords for the building, mirroring
+    # public.location.keywords. Rows written before the column existed read
+    # back as None.
+    keywords = db.Column(db.Text, nullable=True)
     latitude = db.Column(db.Numeric, nullable=True)
     longitude = db.Column(db.Numeric, nullable=True)
 
@@ -36,7 +41,7 @@ class Building(db.Model):
             "building": None,
             "floor": None,
             "function": self.description,
-            "keywords": None,
+            "keywords": self.keywords,
             "status": "Active",
             "lat": lat,
             "lng": lng,
