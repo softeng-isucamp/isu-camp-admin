@@ -255,6 +255,35 @@ def test_actions_can_edit_a_building(monkeypatch):
     assert response.json["type"] == "Facility"
 
 
+def test_actions_edit_updates_building_search_keywords(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Building", (), {
+        "building_id": 42,
+        "building_code": "ENG",
+        "building_name": "Engineering Hall",
+        "classification": "Building",
+        "description": "Old description",
+        "keywords": "old, tags",
+        "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "keywords": self.keywords},
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
+    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+
+    response = app.test_client().put(
+        "/api/actions/locations/42",
+        json={"name": "Engineering Hall", "code": "ENG", "type": "Building", "keywords": "engineering, labs"},
+    )
+
+    assert response.status_code == 200
+    assert building.keywords == "engineering, labs"
+    assert response.json["keywords"] == "engineering, labs"
+
+
 def _history_app(monkeypatch, building, history):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)

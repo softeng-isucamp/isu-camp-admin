@@ -314,6 +314,7 @@ def edit_location(location_id):
             building.building_name = values["name"]
             building.classification = values["type"]
             building.description = values["description"]
+            building.keywords = values["keywords"]
 
             if photo is not None:
                 building.photo = photo
