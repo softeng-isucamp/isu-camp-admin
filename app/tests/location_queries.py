@@ -7,6 +7,7 @@ fails here rather than only showing up as a slow request.
 """
 
 import io
+import itertools
 import re
 
 import pytest
@@ -20,14 +21,16 @@ from model.audit_log import AuditLog  # noqa: F401  registered for create_all
 from model.building import Building
 from model.floor import Floor
 from model.location import Location
-from model.location_photo import LocationPhoto  # noqa: F401  for create_all
+from model.location_photo import LocationPhoto
 
 # Large enough that fetching it would be the dominant cost of a request.
 PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"pixels" * 8192
 
-# ``.photo`` selected as a column: neither ``.photo_mime_type`` nor the
-# ``photo IS NOT NULL`` presence flag, both of which are cheap by design.
-PHOTO_COLUMN = re.compile(r"\.photo(?![_a-zA-Z])(?! IS NOT NULL)")
+# An image column in a SELECT list: ``location_photo.content`` or a ``.photo``
+# that is neither ``.photo_mime_type`` nor the cheap ``photo IS NOT NULL`` flag.
+PHOTO_COLUMN = re.compile(
+    r"\.content(?![_a-zA-Z])|\.photo(?![_a-zA-Z])(?! IS NOT NULL)"
+)
 
 
 class QueryLog(list):
@@ -60,6 +63,15 @@ def client(monkeypatch):
     # public.audit_log.id is a Postgres identity column, which SQLite will not
     # fill in. Audit writes are covered elsewhere; these tests are about reads.
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+
+    counter = itertools.count(1000)
+
+    @event.listens_for(LocationPhoto, "before_insert")
+    def _assign_photo_id(mapper, connection, target):
+        # public.location_photo.photo_id is a Postgres identity column, which
+        # SQLite will not fill in for a BIGINT primary key.
+        if target.photo_id is None:
+            target.photo_id = next(counter)
 
     log = QueryLog()
     with app.app_context():
@@ -101,6 +113,8 @@ def client(monkeypatch):
             log.append(" ".join(statement.split()))
 
         yield app.test_client(), log, app
+
+    event.remove(LocationPhoto, "before_insert", _assign_photo_id)
 
 
 def _metadata_put(client, log, payload):
@@ -210,4 +224,115 @@ def test_a_deferred_photo_is_still_served_on_demand(client):
     assert response.status_code == 200
     assert response.data == PNG_BYTES
     # Fetched here, and only here: one statement, for one row.
+    assert len(log.selecting_photo_bytes()) == 1
+
+
+def _gallery_rows(app, owner_id=1):
+    with app.app_context():
+        return [
+            (photo.photo_id, photo.position, photo.is_cover, photo.content)
+            for photo in LocationPhoto.query.filter_by(
+                owner_type="building", owner_id=owner_id
+            ).order_by(LocationPhoto.position).all()
+        ]
+
+
+def test_a_gallery_save_mirrors_the_cover_without_moving_any_image(client):
+    http, log, app = client
+    first = bytes.fromhex("89504e470d0a1a0a") + b"a" * 4096
+    second = bytes.fromhex("ffd8ff") + b"b" * 4096
+    log.clear()
+
+    response = http.put(
+        "/api/actions/locations/1",
+        data={
+            "name": "Building 1", "code": "B-1", "type": "Building",
+            "photos": [
+                (io.BytesIO(first), "front.png", "image/png"),
+                (io.BytesIO(second), "side.jpg", "image/jpeg"),
+            ],
+            "coverIndex": "1",
+        },
+        content_type="multipart/form-data",
+    )
+    # Snapshot before the assertions below read images themselves.
+    during_request = QueryLog(log)
+
+    assert response.status_code == 200, response.get_json()
+    rows = _gallery_rows(app)
+    assert [(position, is_cover) for _, position, is_cover, _ in rows] == [(0, False), (1, True)]
+    with app.app_context():
+        # The owner's own copy is the chosen cover, byte for byte.
+        assert db.session.get(Building, 1).photo == second
+    # Nothing was read back to get it there.
+    assert during_request.selecting_photo_bytes() == []
+
+
+def test_removing_the_last_photo_clears_the_owners_copy(client):
+    http, log, app = client
+    with app.app_context():
+        db.session.add(LocationPhoto(
+            photo_id=1, owner_type="building", owner_id=1, position=0,
+            filename="front.png", mime_type="image/png", content=PNG_BYTES, is_cover=True,
+        ))
+        db.session.commit()
+    log.clear()
+
+    response = http.put(
+        "/api/actions/locations/1",
+        data={
+            "name": "Building 1", "code": "B-1", "type": "Building",
+            "removePhotoIds": "[1]",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200, response.get_json()
+    assert _gallery_rows(app) == []
+    with app.app_context():
+        assert db.session.get(Building, 1).photo is None
+    assert response.get_json()["hasPhoto"] is False
+
+
+def test_gallery_metadata_listing_does_not_read_the_images(client):
+    http, log, app = client
+    with app.app_context():
+        db.session.add_all(
+            LocationPhoto(
+                photo_id=index, owner_type="building", owner_id=1, position=index - 1,
+                filename=f"photo-{index}.png", mime_type="image/png",
+                content=PNG_BYTES, is_cover=index == 1,
+            )
+            for index in (1, 2, 3)
+        )
+        db.session.commit()
+    log.clear()
+
+    response = http.get("/api/actions/locations/1/photos?type=Building")
+
+    assert response.status_code == 200, response.get_json()
+    assert [item["name"] for item in response.get_json()["items"]] == [
+        "photo-1.png", "photo-2.png", "photo-3.png",
+    ]
+    assert log.selecting_photo_bytes() == []
+
+
+def test_serving_one_gallery_photo_reads_only_that_photo(client):
+    http, log, app = client
+    wanted = bytes.fromhex("ffd8ff") + b"wanted" * 512
+    with app.app_context():
+        db.session.add_all([
+            LocationPhoto(photo_id=1, owner_type="building", owner_id=1, position=0,
+                          filename="a.png", mime_type="image/png", content=PNG_BYTES, is_cover=True),
+            LocationPhoto(photo_id=2, owner_type="building", owner_id=1, position=1,
+                          filename="b.jpg", mime_type="image/jpeg", content=wanted, is_cover=False),
+        ])
+        db.session.commit()
+    log.clear()
+
+    response = http.get("/api/actions/locations/1/photos/2?type=Building")
+
+    assert response.status_code == 200
+    assert response.data == wanted
+    # One statement carries an image, and it is the one row asked for.
     assert len(log.selecting_photo_bytes()) == 1
