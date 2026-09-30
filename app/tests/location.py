@@ -69,11 +69,12 @@ class FakeFloor:
 
 
 class FakeBuilding:
-    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None):
+    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None, keywords=None):
         self.building_id = identifier
         self.building_name = name
         self.building_code = code
         self.description = description
+        self.keywords = keywords
         self.latitude = None
         self.longitude = None
         self.classification = classification
@@ -88,7 +89,7 @@ class FakeBuilding:
             "id": str(self.building_id), "name": self.building_name,
             "code": self.building_code, "type": self.classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
-            "keywords": None, "status": "Active", "lat": lat, "lng": lng,
+            "keywords": self.keywords, "status": "Active", "lat": lat, "lng": lng,
             "positioned": lat is not None and lng is not None,
             "hasPhoto": self.photo is not None,
         }
@@ -445,6 +446,7 @@ def make_mutation_client(monkeypatch):
                 values.get("description"),
                 values.get("classification", "Building"),
                 values.get("polygon_coordinates"),
+                values.get("keywords"),
             )
             self.latitude = values.get("latitude")
             self.longitude = values.get("longitude")
@@ -644,6 +646,24 @@ def test_building_created_without_a_photo_reports_no_photo(monkeypatch):
 
     assert response.status_code == 201
     assert response.json["hasPhoto"] is False
+
+def test_building_search_keywords_are_persisted_and_projected(monkeypatch):
+    """public.building.keywords backs the admin Building form's KEYWORDS field."""
+
+    client, _, session = make_mutation_client(monkeypatch)
+    response = client.post(
+        "/api/locations",
+        json={"name": "Library", "code": "LIB", "type": "Building", "keywords": "books, study"},
+    )
+
+    assert response.status_code == 201
+    assert session.buildings[-1].keywords == "books, study"
+    assert response.json["keywords"] == "books, study"
+    assert next(
+        item for item in client.get("/api/locations").json["items"]
+        if item["id"] == response.json["id"]
+    )["keywords"] == "books, study"
+
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)
