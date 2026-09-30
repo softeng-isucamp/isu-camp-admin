@@ -240,8 +240,8 @@ def test_actions_can_edit_a_building(monkeypatch):
         "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "code": self.building_code, "type": self.classification},
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
-    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
@@ -268,8 +268,8 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
         "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "keywords": self.keywords},
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
-    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
@@ -414,8 +414,8 @@ def test_actions_can_attach_a_photo_when_editing_a_building(monkeypatch):
         "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
-    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_upload", lambda: (PNG_BYTES, "image/png", None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
@@ -442,8 +442,8 @@ def test_editing_a_building_without_an_upload_keeps_the_existing_photo(monkeypat
         "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_all_locations", lambda: [])
-    monkeypatch.setattr(actions_module, "_all_buildings", lambda: [building])
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
