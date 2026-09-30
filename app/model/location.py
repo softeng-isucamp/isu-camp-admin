@@ -1,5 +1,8 @@
-from extensions import db
 from datetime import datetime
+
+from sqlalchemy import inspect
+
+from extensions import db
 
 # These are the IDs currently persisted by public.location_type. Buildings
 # and Floors are separate tables and are therefore not location type IDs.
@@ -78,9 +81,14 @@ class Location(db.Model):
     nullable=True
     )
 
-    photo = db.Column(
-        db.LargeBinary,
-        nullable=True
+    # Deferred: whether a photo exists is read far more often than the image
+    # itself, and an eager LargeBinary made every list and edit query carry
+    # every photo. ``photo_present`` below answers that without the bytes.
+    photo = db.deferred(
+        db.Column(
+            db.LargeBinary,
+            nullable=True
+        )
     )
 
     # Stored alongside the bytes so a photo can be served back with a correct
@@ -89,6 +97,16 @@ class Location(db.Model):
         db.String,
         nullable=True
     )
+
+    def has_photo(self):
+        """Whether a photo exists, without undeferring the bytes.
+
+        Bytes already in the session win over the stored flag, so a photo set
+        earlier in the current request is reported before it is written.
+        """
+        if "photo" in inspect(self).dict:
+            return self.photo is not None
+        return bool(self.photo_present)
 
     def to_dict(self):
 
@@ -111,7 +129,7 @@ class Location(db.Model):
                 else None
             ),
             "keywords": self.keywords,
-            "has_photo": self.photo is not None,
+            "has_photo": self.has_photo(),
         }
 
     def to_location_dto(self, building=None, floor=None):
@@ -145,5 +163,17 @@ class Location(db.Model):
             "lat": float(self.latitude) if self.latitude is not None else None,
             "lng": float(self.longitude) if self.longitude is not None else None,
             "positioned": self.latitude is not None and self.longitude is not None,
-            "hasPhoto": self.photo is not None,
+            "hasPhoto": self.has_photo(),
         }
+
+
+# Declared out here because the expression needs the mapped table, which does
+# not exist until the class body has run. Selected with every Location, and it
+# reads the row's null bitmap rather than the TOASTed image.
+# expire_on_flush is off because the flag only changes when ``photo`` itself
+# does, and has_photo() reads the bytes from the session in that case: without
+# it, every write would be followed by a query to re-derive this boolean.
+Location.photo_present = db.column_property(
+    Location.__table__.c.photo.isnot(None),
+    expire_on_flush=False,
+)
