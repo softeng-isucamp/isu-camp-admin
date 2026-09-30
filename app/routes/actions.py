@@ -14,7 +14,7 @@ from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
-from services.location_photos import apply_gallery, list_photos, read_gallery_change
+from services.location_photos import apply_gallery, find_photo, list_photos, read_gallery_change
 
 actions_bp = Blueprint(
     "actions",
@@ -481,7 +481,7 @@ def view_gallery_photo(location_id, photo_id):
         owner = _gallery_owner(location_id)
         if owner is None:
             return jsonify({"success": False, "message": "Location not found."}), 404
-        photo = next((item for item in list_photos(owner) if item.photo_id == photo_id), None)
+        photo = find_photo(owner, photo_id)
         if photo is None:
             return jsonify({"success": False, "message": "Photo not found."}), 404
         return _photo_response(photo.content, photo.mime_type)
