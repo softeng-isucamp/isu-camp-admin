@@ -1,3 +1,5 @@
+from sqlalchemy import inspect
+
 from extensions import db
 
 
@@ -25,8 +27,23 @@ class Building(db.Model):
     # Buildings carry an optional photo, mirroring public.location.photo. The
     # MIME type is stored alongside the bytes so the image can be served back
     # with a correct Content-Type.
-    photo = db.Column(db.LargeBinary, nullable=True)
+    #
+    # The bytes are deferred: a list or an edit reads whether a photo exists far
+    # more often than it reads the image, and an eager LargeBinary made every
+    # such query carry every photo. ``photo_present`` below answers that
+    # question instead, so only /photo endpoints pay for the transfer.
+    photo = db.deferred(db.Column(db.LargeBinary, nullable=True))
     photo_mime_type = db.Column(db.String, nullable=True)
+
+    def has_photo(self):
+        """Whether a photo exists, without undeferring the bytes.
+
+        Bytes already in the session win over the stored flag, so a photo set
+        earlier in the current request is reported before it is written.
+        """
+        if "photo" in inspect(self).dict:
+            return self.photo is not None
+        return bool(self.photo_present)
 
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
@@ -50,5 +67,17 @@ class Building(db.Model):
             "polygonCoordinates": self.polygon_coordinates,
 
             "positioned": lat is not None and lng is not None,
-            "hasPhoto": self.photo is not None,
+            "hasPhoto": self.has_photo(),
         }
+
+
+# Declared out here because the expression needs the mapped table, which does
+# not exist until the class body has run. Selected with every Building, and it
+# reads the row's null bitmap rather than the TOASTed image.
+# expire_on_flush is off because the flag only changes when ``photo`` itself
+# does, and has_photo() reads the bytes from the session in that case: without
+# it, every write would be followed by a query to re-derive this boolean.
+Building.photo_present = db.column_property(
+    Building.__table__.c.photo.isnot(None),
+    expire_on_flush=False,
+)
