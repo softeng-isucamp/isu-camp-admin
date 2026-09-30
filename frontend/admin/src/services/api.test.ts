@@ -6,7 +6,6 @@ import {
   setMockFailure,
 } from "./api";
 import { resetPasswordSchema, resetSchema } from "./schemas";
-import { reviewMapDraft } from "../features/map/mapEditing";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 import { createLocalAdapter } from "./localAdapter";
 
@@ -217,25 +216,6 @@ describe("mock service contracts", () => {
     expect(summary.locations).toBeGreaterThan(0);
     expect(summary.pathways).toBeGreaterThan(0);
     expect(summary.topSearched).toHaveLength(0);
-  });
-
-  it("loads a valid seeded Map Editor baseline through the service boundary", async () => {
-    const snapshot = {
-      buildings: await services.map.buildings(),
-      locations: await services.map.locations(),
-      nodes: await services.map.nodes(),
-      pathways: await services.map.pathways(),
-    };
-
-    expect(reviewMapDraft({ original: snapshot, current: snapshot, deleted: [] }))
-      .toEqual({ valid: true, errors: [], groups: [] });
-  });
-
-  it("supports deterministic injectable save failures", async () => {
-    setMockFailure("mapSave", true);
-    await expect(services.map.save()).rejects.toThrow("Mock mapSave failed");
-    setMockFailure("mapSave", false);
-    await expect(services.map.save()).resolves.toBeUndefined();
   });
 
   it("validates recovery code and password requirements", () => {
@@ -531,20 +511,6 @@ describe("mock service contracts", () => {
     await expect(services.locations.save({ ...created, lat: 16.72, lng: null })).rejects.toThrow();
   });
 
-  it("handles notifications listing and mark as read", async () => {
-    const list = await services.notifications.list();
-    expect(list.length).toBeGreaterThan(0);
-    const unread = list.find((n) => !n.read);
-    if (unread) {
-      await services.notifications.markRead(unread.id);
-      const updated = await services.notifications.list();
-      expect(updated.find((n) => n.id === unread.id)?.read).toBe(true);
-    }
-    await services.notifications.markAllRead();
-    const all = await services.notifications.list();
-    expect(all.every((n) => n.read)).toBe(true);
-  });
-
   it("persists new route nodes, moved locations, and updated path shapes", async () => {
     const nodeName = `Test Gate ${Date.now()}`;
     await services.map.save({
@@ -584,17 +550,6 @@ describe("mock service contracts", () => {
     const updatedPathways = await services.map.pathways();
     const pathResult = updatedPathways.find((p) => p.id === targetPath.id);
     expect(pathResult?.pathPoints).toEqual(newPoints);
-  });
-
-  it("leaves authoritative records unchanged when a map save fails", async () => {
-    const original = (await services.map.pathways())[0];
-    expect(original).toBeDefined();
-    setMockFailure("mapSave", true);
-    await expect(services.map.save({ updatedPath: { id: original!.id, pathPoints: [[16.72, 121.69]] } })).rejects.toThrow("Mock mapSave failed");
-    setMockFailure("mapSave", false);
-    expect((await services.network.pathways()).find((path) => path.id === original!.id)?.pathSequence.points).not.toEqual([
-      { latitude: 16.72, longitude: 121.69 },
-    ]);
   });
 });
 

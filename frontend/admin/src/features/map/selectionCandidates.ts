@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { pointInPolygon, type MapPoint } from "./campusBoundary";
 

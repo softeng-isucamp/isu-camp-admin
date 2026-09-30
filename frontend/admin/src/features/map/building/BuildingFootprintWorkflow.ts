@@ -1,21 +1,19 @@
 import type { Building, Location, LocationDraft } from "../../../types";
-import type { FeatureLinkEntity, LocalMapFeatureEntity } from "../../../services/mapEditorApiClient";
 import type { MapPoint } from "../campusBoundary";
 import {
-  buildAttachBuildingCompoundOperation,
-  buildCreateBuildingCompoundOperation,
+  buildBuildingFootprintOperation,
+  buildCreateBuildingOperation,
   getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
   type BuildingValidationIssue,
-} from "../buildingFootprint";
+} from "./buildingFootprint";
 import type { WorkingOperation } from "../types";
-import { WorkingSessionManager, updateGeometryOperation } from "../WorkingSessionManager";
+import type { WorkingSessionManager } from "../WorkingSessionManager";
 
 export interface BuildingFootprintContext {
   locations: readonly Location[];
-  featureLinks: readonly FeatureLinkEntity[];
   campusBoundary?: MapPoint[];
 }
 
@@ -35,8 +33,6 @@ export type BuildingFootprintFinalizeCommand =
   | {
       kind: "reshape";
       building: Building;
-      footprint: LocalMapFeatureEntity;
-      link: FeatureLinkEntity;
       points: MapPoint[];
       context: BuildingFootprintContext;
     };
@@ -44,8 +40,6 @@ export type BuildingFootprintFinalizeCommand =
 export interface BuildingFootprintProjection {
   building: Building;
   location?: Location;
-  footprint: LocalMapFeatureEntity;
-  link: FeatureLinkEntity;
   operation: WorkingOperation;
 }
 
@@ -53,7 +47,7 @@ export type BuildingFootprintFinalizeResult =
   | ({ ok: true } & BuildingFootprintProjection)
   | {
       ok: false;
-      reason: "validation" | "persistence" | "stale";
+      reason: "validation" | "persistence";
       message: string;
       issues?: BuildingValidationIssue[];
     };
@@ -66,18 +60,6 @@ export interface BuildingFootprintWriteAdapter {
 export interface BuildingFootprintWorkflow {
   finalize(command: BuildingFootprintFinalizeCommand): Promise<BuildingFootprintFinalizeResult>;
 }
-
-const compoundEntities = (operation: WorkingOperation) => {
-  const nested = operation.nestedOperations ?? [];
-  const footprint = nested.find(
-    (item) => item.domain === "Local Map Data" && item.type === "create_entity",
-  )?.after as unknown as LocalMapFeatureEntity | undefined;
-  const link = nested.find(
-    (item) => item.domain === "Local Map Data" && item.type === "link_feature",
-  )?.after as unknown as FeatureLinkEntity | undefined;
-  if (!footprint || !link) throw new Error("Building footprint operation is incomplete.");
-  return { footprint, link };
-};
 
 export function createBuildingFootprintWorkflow(dependencies: {
   adapter: BuildingFootprintWriteAdapter;
@@ -100,23 +82,8 @@ export function createBuildingFootprintWorkflow(dependencies: {
       }
 
       if (command.kind === "attach") {
-        const eligibility = getBuildingAttachmentEligibility(command.building, command.context.featureLinks);
+        const eligibility = getBuildingAttachmentEligibility(command.building);
         if (!eligibility.eligible) return { ok: false, reason: "validation", message: eligibility.reason };
-      }
-
-      if (command.kind === "reshape" && (
-        command.link.featureId !== command.footprint.id
-        || command.link.targetEntityId !== command.building.id
-        || command.link.targetDomain !== "Locations"
-        || command.link.linkType !== "building_footprint"
-        || command.footprint.family !== "building_footprint"
-        || command.footprint.geometryType !== "polygon"
-      )) {
-        return {
-          ok: false,
-          reason: "stale",
-          message: "This Building footprint no longer matches its ownership link.",
-        };
       }
 
       try {
@@ -135,21 +102,14 @@ export function createBuildingFootprintWorkflow(dependencies: {
             positioned: false,
             polygonCoordinates: [...command.points],
           });
-          const compound = buildCreateBuildingCompoundOperation({
+          const operation = workingSession.executeOperation(buildCreateBuildingOperation({
             name: location.name,
             code: location.code,
             type: location.type === "Facility" ? "Facility" : "Building",
             function: location.function,
             keywords: location.keywords,
             status: location.status,
-          }, command.points, location.id);
-          const operation = workingSession.executeBatch(
-            compound.description ?? `Create ${location.name} with footprint`,
-            compound.domain,
-            compound.entityId,
-            compound.nestedOperations ?? [],
-          );
-          const { footprint, link } = compoundEntities(operation);
+          }, command.points, location.id));
           projection = {
             location,
             building: {
@@ -160,44 +120,15 @@ export function createBuildingFootprintWorkflow(dependencies: {
               status: location.status,
               points: [...command.points],
             },
-            footprint,
-            link,
-            operation,
-          };
-        } else if (command.kind === "attach") {
-          await adapter.saveFootprint(command.building, command.points);
-          const compound = buildAttachBuildingCompoundOperation(command.building, command.points);
-          const operation = workingSession.executeBatch(
-            compound.description ?? `Attach footprint to ${command.building.name}`,
-            compound.domain,
-            compound.entityId,
-            compound.nestedOperations ?? [],
-          );
-          const { footprint, link } = compoundEntities(operation);
-          projection = {
-            building: { ...command.building, points: [...command.points] },
-            footprint,
-            link,
             operation,
           };
         } else {
           await adapter.saveFootprint(command.building, command.points);
-          const footprint = {
-            ...command.footprint,
-            coordinates: [...command.points],
-            linkedBuildingId: command.building.id,
-          };
-          const operation = workingSession.executeOperation(updateGeometryOperation(
-            "Local Map Data",
-            footprint.id,
-            command.footprint as unknown as Record<string, unknown>,
-            footprint as unknown as Record<string, unknown>,
-            `Reshape linked footprint for ${command.building.name}`,
-          ));
+          const operation = workingSession.executeOperation(
+            buildBuildingFootprintOperation(command.building, command.points),
+          );
           projection = {
             building: { ...command.building, points: [...command.points] },
-            footprint,
-            link: command.link,
             operation,
           };
         }

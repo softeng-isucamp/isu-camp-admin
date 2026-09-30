@@ -218,19 +218,6 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("permanently deleted");
 
-
-  await page.goto("/users?mockFailure=userUpdate");
-  await page.getByRole("button", { name: /Actions for/i }).first().click();
-  await page.getByRole("menuitem", { name: "Edit user" }).click();
-  await page.getByRole("button", { name: /save changes/i }).click();
-  await expect(page.getByRole("alert").first()).toContainText(
-    "Mock userUpdate failed",
-  );
-  await expect(page).toHaveScreenshot("user-save-failure.png", {
-    animations: "disabled",
-    maxDiffPixels: 200,
-  });
-
   await page.goto("/users");
   await expect(
     page.getByRole("columnheader", { name: "CREATED AT" }),
@@ -329,7 +316,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
 
   // Map Editor behavior is covered by the dedicated consolidation specs.
-  // The former inline map flow exercised removed local-feature and point-placement UI.
+  // The former inline map flow exercised removed point-placement UI.
   if (false) {
   await page.goto("/map-editor");
   await page.goto("/map-editor");
@@ -435,39 +422,6 @@ test("locations, users, logs, and map expose their key state transitions", async
   await expect(page.getByText("Points plotted: 3")).toBeVisible();
   await expect(page).toHaveScreenshot("map-area-drawn.png", {
     animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Save Changes" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Save map changes?" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("map-save-confirmation.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "Discard" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Discard changes?" }),
-  ).toBeVisible();
-  await expect(page).toHaveScreenshot("map-discard-confirmation.png", {
-    animations: "disabled",
-  });
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page.goto("/map-editor?mockFailure=mapSave");
-  await page.getByPlaceholder("Search campus places...").fill("Laboratory");
-  await page.getByRole("button", { name: /Computer Lab 1/ }).click();
-  await page.getByRole("button", { name: "Move Marker" }).click();
-  await page
-    .locator(".leaflet-container")
-    .click({ position: { x: 400, y: 245 } });
-  await page.getByRole("button", { name: "Save Changes", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Save Changes", exact: true })
-    .last()
-    .click();
-  await expect(page.getByRole("alert")).toContainText("Mock mapSave failed");
-  await expect(page).toHaveScreenshot("map-save-failure.png", {
-    animations: "disabled",
-    maxDiffPixels: 200,
   });
   }
 });

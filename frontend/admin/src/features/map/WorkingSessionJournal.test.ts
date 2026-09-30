@@ -24,7 +24,6 @@ describe("WorkingSessionJournal", () => {
     const key = { administratorId: "admin-1", projectId: "echague" };
     const stored = {
       schemaVersion: 1 as const,
-      adminDraftVersion: 4,
       snapshot: manager.exportSnapshot(),
     };
 
@@ -43,7 +42,6 @@ describe("WorkingSessionJournal", () => {
     const second = { administratorId: "admin-2", projectId: "echague" };
     const stored = {
       schemaVersion: 1 as const,
-      adminDraftVersion: null,
       snapshot: manager.exportSnapshot(),
     };
     journal.save(first, stored);
@@ -67,11 +65,9 @@ describe("WorkingSessionJournal", () => {
     const storage = createMemoryStorage();
     storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
       schemaVersion: 1,
-      adminDraftVersion: 1,
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],
-        futureOperations: [],
         activeDraft: null,
         suspendedDrafts: [],
         savedCheckpointIndex: "invalid",
@@ -86,11 +82,9 @@ describe("WorkingSessionJournal", () => {
     const storage = createMemoryStorage();
     storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
       schemaVersion: 1,
-      adminDraftVersion: 1,
       snapshot: {
         schemaVersion: 1,
         pastOperations: [],
-        futureOperations: [],
         activeDraft: {},
         suspendedDrafts: [],
         savedCheckpointIndex: 0,
@@ -99,5 +93,37 @@ describe("WorkingSessionJournal", () => {
     const journal = createWorkingSessionJournal(storage);
 
     expect(journal.load({ administratorId: "admin-1", projectId: "echague" })).toBeNull();
+  });
+
+  it("silently drops removed operation types and drafts of removed tools", () => {
+    const storage = createMemoryStorage();
+    const journal = createWorkingSessionJournal(storage);
+    const key = { administratorId: "admin-1", projectId: "echague" };
+    const kept = { id: "op-1", type: "update_geometry", domain: "Locations", entityId: "b1", before: null, after: null };
+    const removedType = { id: "op-2", type: "retired_op_type", domain: "Locations", entityId: "x", before: null, after: null };
+    const removedNested = {
+      id: "op-3", type: "compound_batch", domain: "Locations", entityId: "b2", before: null, after: null,
+      nestedOperations: [kept, removedType],
+    };
+    const polygonDraft = { id: "d1", toolType: "polygon", provisionalGeometry: {}, isSuspended: true };
+    const unknownToolDraft = { id: "d2", toolType: "unknown_tool", provisionalGeometry: {}, isSuspended: true };
+    storage.setItem("isu-map-editor-working-session:v1:admin-1:echague", JSON.stringify({
+      schemaVersion: 1,
+      snapshot: {
+        schemaVersion: 1,
+        pastOperations: [removedType, kept, removedNested],
+        activeDraft: unknownToolDraft,
+        suspendedDrafts: [unknownToolDraft, polygonDraft],
+        savedCheckpointIndex: 2,
+      },
+    }));
+
+    const stored = journal.load(key);
+
+    expect(stored?.snapshot.pastOperations).toEqual([kept]);
+    expect(stored?.snapshot.savedCheckpointIndex).toBe(1);
+    expect(stored?.snapshot.activeDraft).toBeNull();
+    expect(stored?.snapshot.suspendedDrafts).toEqual([polygonDraft]);
+    new WorkingSessionManager().hydrate(stored!.snapshot);
   });
 });

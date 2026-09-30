@@ -30,6 +30,10 @@ test("an admin marks an existing room inside its building and the marker hides w
   await expect(marker).toHaveCount(1);
   await page.waitForTimeout(1000);
 
+  await page.getByRole("button", { name: "Save Position" }).click();
+  await expect(page.getByRole("complementary", { name: "Indoor location position editor" })).toHaveCount(0);
+  await expect(marker).toHaveCount(1); // The saved marker stays visible at close zoom.
+
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, 900);
   await expect(marker).toHaveCount(0);

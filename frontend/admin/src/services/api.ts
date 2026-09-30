@@ -9,7 +9,6 @@ import type {
   LocationPosition,
   LocationType,
   MapSavePayload,
-  NotificationItem,
   Page,
   Pathway,
   RouteNode,
@@ -22,7 +21,6 @@ import { z } from "zod";
 import {
   buildings,
   locations,
-  notifications,
   pathways,
   routeNodes,
   topSearchedLocations,
@@ -31,98 +29,12 @@ import {
 import {
   locationSchema,
 } from "./schemas";
-import { generatedMapFixture } from "./generatedMapFixture";
 import { createLocalAdapter } from "./localAdapter";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
-import { mapEditorApiClient, type MapEditorBootstrap, type SaveDraftCommand, type SaveDraftResult, type WorkingOperation } from "./mapEditorApiClient";
 
-const flattenWorkingOperations = (operations: WorkingOperation[]): WorkingOperation[] => operations.flatMap((operation) =>
-  operation.type === "compound_batch" && operation.nestedOperations
-    ? flattenWorkingOperations(operation.nestedOperations)
-    : [operation],
-);
 
-type LegacyMapReadCollections = {
-  locations: Location[];
-  buildings: Building[];
-  nodes: RouteNode[];
-  pathways: Pathway[];
-};
-
-const mirrorMapEditorOperationsToLegacyReads = (
-  operations: WorkingOperation[],
-  collectionSets: LegacyMapReadCollections[] = [{ locations, buildings, nodes: routeNodes, pathways }],
-) => {
-  const flatOperations = flattenWorkingOperations(operations);
-  const findOperation = (predicate: (operation: WorkingOperation) => boolean) => flatOperations.find(predicate);
-
-  for (const collections of collectionSets) {
-    const { locations: legacyLocations, buildings: legacyBuildings, nodes: legacyNodes, pathways: legacyPathways } = collections;
-    const upsert = <T extends { id: string }>(collection: T[], value: T) => {
-      const index = collection.findIndex((item) => item.id === value.id);
-      if (index === -1) collection.push(value);
-      else collection[index] = { ...collection[index], ...value };
-    };
-
-    for (const operation of flatOperations) {
-      const after = operation.after;
-      if (!after) continue;
-
-      if (operation.domain === "Locations") {
-        const location = after as unknown as Location;
-        if (operation.type === "create_entity" || operation.type === "update_properties" || operation.type === "update_geometry" || operation.type === "restore_entity" || operation.type === "retire_entity") {
-          upsert(legacyLocations, location);
-          if (location.type === "Building" || location.type === "Facility") {
-            const link = findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "link_feature" && candidate.after?.targetEntityId === location.id);
-            const featureId = typeof link?.after?.featureId === "string" ? link.after.featureId : undefined;
-            const feature = featureId
-              ? findOperation((candidate) => candidate.entityId === featureId)
-              : findOperation((candidate) => candidate.domain === "Local Map Data" && candidate.type === "create_entity" && candidate.after?.linkedBuildingId === location.id);
-            const previousBuilding = legacyBuildings.find((candidate) => candidate.id === location.id);
-            const points = Array.isArray(feature?.after?.coordinates)
-              ? feature.after.coordinates as [number, number][]
-              : previousBuilding?.points ?? [];
-            upsert(legacyBuildings, {
-              id: location.id,
-              name: location.name,
-              code: location.code,
-              points,
-              status: location.status,
-              type: location.type,
-            });
-          }
-        }
-        continue;
-      }
-
-      if (operation.domain === "Walking Network") {
-        if (operation.entityId.startsWith("node-") || "nodeType" in after || "associatedPlaceId" in after) {
-          upsert(legacyNodes, after as unknown as RouteNode);
-        } else if ("sourceNodeId" in after || "destinationNodeId" in after || "pathPoints" in after) {
-          upsert(legacyPathways, after as unknown as Pathway);
-        }
-        continue;
-      }
-
-      if (operation.domain === "Local Map Data" && (after.family === "building_footprint" || typeof after.linkedBuildingId === "string")) {
-        const buildingId = typeof after.linkedBuildingId === "string" ? after.linkedBuildingId : undefined;
-        const points = Array.isArray(after.coordinates) ? after.coordinates as [number, number][] : [];
-        if (buildingId) {
-          const building = legacyBuildings.find((candidate) => candidate.id === buildingId);
-          if (building) building.points = points;
-        }
-      }
-
-      if (operation.domain === "Local Map Data" && operation.type === "link_feature" && typeof after.targetEntityId === "string") {
-        const feature = findOperation((candidate) => candidate.entityId === after.featureId);
-        const building = legacyBuildings.find((candidate) => candidate.id === after.targetEntityId);
-        if (building && Array.isArray(feature?.after?.coordinates)) building.points = feature.after.coordinates as [number, number][];
-      }
-    }
-  }
-};
 
 
 // ==========================================
@@ -288,21 +200,33 @@ export const API_MODE: ApiMode = import.meta.env.VITE_TEST_LOCAL_ADAPTER === "tr
   ? ((import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local")
   : "real";
 export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
+// The generated fixture is a very large JSON module. Load it only when needed
+// so production bundles and unit tests never parse it: in fixture mode
+// (VITE_MAP_FIXTURE=osm) it replaces all map data; in local adapter mode outside
+// vitest (local dev, the indoor-location e2e config) it only seeds Buildings.
+// The env checks are inlined so bundlers drop the dynamic import from real builds.
+const loadedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm"
+  || (import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true" && import.meta.env.VITE_API_MODE !== "real"
+    && import.meta.env.VITE_API_MODE !== "mock" && import.meta.env.MODE !== "test")
+  ? (await import("./generatedMapFixture")).generatedMapFixture
+  : null;
+const generatedMapFixture = import.meta.env.VITE_MAP_FIXTURE === "osm" ? loadedMapFixture : null;
+if (loadedMapFixture && !generatedMapFixture) buildings.push(...loadedMapFixture.buildings);
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 const localAdapter = createLocalAdapter(
-  USE_GENERATED_MAP_FIXTURE
+  generatedMapFixture
     ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
         nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
     : { buildings, locations, nodes: routeNodes, pathways },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
-const mapLocations = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.locations : locations;
-const mapBuildings = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.buildings : buildings;
-const mapNodes = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.nodes : routeNodes;
-const mapPathways = USE_GENERATED_MAP_FIXTURE ? generatedMapFixture.pathways : pathways;
+const mapLocations = generatedMapFixture ? generatedMapFixture.locations : locations;
+const mapBuildings = generatedMapFixture ? generatedMapFixture.buildings : buildings;
+const mapNodes = generatedMapFixture ? generatedMapFixture.nodes : routeNodes;
+const mapPathways = generatedMapFixture ? generatedMapFixture.pathways : pathways;
 const normalizeMapPathway = (pathway: Pathway): Pathway => {
   const normalizedType = normalizePathwayWayType(pathway.type);
   return {
@@ -475,7 +399,7 @@ const actionablePathPointError = (pathwayId: string, cause: unknown) => {
   return new Error(`Could not persist Path Points for Pathway ${pathwayId}: ${message}`);
 };
 const canonicalNetwork = createCanonicalNetworkStore(
-  USE_GENERATED_MAP_FIXTURE
+  generatedMapFixture
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
     : { buildings, nodes: routeNodes, pathways, locationBuildings: locations.filter((location) => location.type === "Building").map((location) => ({ id: location.id, name: location.name })) },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
@@ -544,14 +468,12 @@ const matches = (value: string, query: string) =>
 export type FailureKey =
   | "locationSave"
   | "locationRemove"
-  | "buildingRemove"
-  | "mapSave";
+  | "buildingRemove";
 
 export const mockFailures: Record<FailureKey, boolean> = {
   locationSave: false,
   locationRemove: false,
   buildingRemove: false,
-  mapSave: false,
 };
 
 export const setMockFailure = (
@@ -645,16 +567,7 @@ export interface Services {
     forLocation(id: string, name?: string, type?: LocationType): Promise<Page<AuditEntry>>;
   };
 
-  notifications: {
-    list(): Promise<NotificationItem[]>;
-
-    markRead(id: string): Promise<void>;
-
-    markAllRead(): Promise<void>;
-  };
-
   map: {
-    getMapEditorBootstrap?(projectId: string): Promise<MapEditorBootstrap>;
     buildings(): Promise<typeof buildings>;
 
     removeBuilding(id: string): Promise<void>;
@@ -692,7 +605,6 @@ export interface Services {
       edit?: MapSavePayload
     ): Promise<void>;
 
-    saveDraft?(command: SaveDraftCommand): Promise<SaveDraftResult>;
   };
 
 }
@@ -1405,53 +1317,10 @@ export const services: Services = {
 
 
   // ========================================
-  // NOTIFICATIONS
-  // ========================================
-
-  notifications: {
-
-    list: async () =>
-      wait(
-        clone(notifications)
-      ),
-
-
-    markRead: async (id) => {
-
-      const item =
-        notifications.find(
-          (notification) =>
-            notification.id === id
-        );
-
-      if (item) {
-        item.read = true;
-      }
-
-      return wait(undefined);
-    },
-
-
-    markAllRead: async () => {
-
-      notifications.forEach(
-        (notification) => {
-          notification.read = true;
-        }
-      );
-
-      return wait(undefined);
-    },
-  },
-
-
-  // ========================================
   // MAP
   // ========================================
 
   map: {
-    getMapEditorBootstrap: (projectId) => mapEditorApiClient.getMapEditorBootstrap(projectId),
-
     buildings: async () => {
       if (!USE_HTTP_API) return wait(localAdapter.buildings.list());
       const response = await apiJson<unknown>("/api/map/buildings");
@@ -1662,11 +1531,6 @@ export const services: Services = {
         });
         return;
       }
-
-      failIfConfigured(
-        "mapSave"
-      );
-
 
       // ------------------------------------
       // Selected Location / Node
@@ -1948,21 +1812,6 @@ export const services: Services = {
       );
 
       return wait(undefined);
-    },
-    saveDraft: async (command) => {
-      const result = await mapEditorApiClient.saveDraft(command);
-      if (result.success && !USE_HTTP_API) {
-        mirrorMapEditorOperationsToLegacyReads(command.operations, [
-          { locations, buildings, nodes: routeNodes, pathways },
-          {
-            locations,
-            buildings,
-            nodes: routeNodes,
-            pathways,
-          },
-        ]);
-      }
-      return result;
     },
   },
 
