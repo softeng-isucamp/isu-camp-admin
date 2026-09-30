@@ -54,6 +54,48 @@ def _all_floors():
         raise
 
 
+def _validation_index():
+    """Ids, codes and names for every row, and nothing else.
+
+    Validation only compares codes and resolves a parent by id, and the DTO only
+    needs a parent's name, so an edit has no reason to pull descriptions,
+    polygon geometry or photos for the whole table.
+    """
+    try:
+        locations = (
+            Location.query
+            .options(db.load_only(Location.location_code))
+            .order_by(Location.location_id.asc())
+            .all()
+        )
+        buildings = (
+            Building.query
+            .options(db.load_only(Building.building_code, Building.building_name))
+            .order_by(Building.building_id.asc())
+            .all()
+        )
+        return locations, buildings
+    except Exception:
+        logger.exception("Failed to load the location validation index")
+        raise
+
+
+def _edit_target(location_id, requested_type):
+    """Load the single row this request is allowed to update.
+
+    Which table is read follows the requested type, mirroring the branch the
+    handler will take, so an edit reads one row instead of scanning every
+    Location and Building. An unrecognised type still probes both, keeping a
+    missing id a 404 rather than a validation error.
+    """
+    location = building = None
+    if requested_type not in {"Building", "Facility"}:
+        location = db.session.get(Location, location_id)
+    if requested_type not in INDOOR_TYPES:
+        building = db.session.get(Building, location_id)
+    return location, building
+
+
 def _location_floor(record, floors):
     if record.floor_id is None:
         return None
@@ -268,28 +310,16 @@ def edit_location(location_id):
     _, error = admin_required()
     if error: return error
 
-    try:
-        records, buildings = _all_locations(), _all_buildings()
-    except Exception:
-        return jsonify({"success": False, "message": "Failed to update location."}), 500
-
     data = _request_payload()
     requested_type = data.get("type")
 
-    location = next(
-        (item for item in records if item.location_id == location_id),
-        None
-    )
-
-    building = next(
-        (item for item in buildings if item.building_id == location_id),
-        None
-    )
-
-    if requested_type in INDOOR_TYPES:
-        building = None
-    elif requested_type in {"Building", "Facility"}:
-        location = None
+    try:
+        # The target first: it is then already in the session when the lean
+        # index below covers the same row.
+        location, building = _edit_target(location_id, requested_type)
+        records, buildings = _validation_index()
+    except Exception:
+        return jsonify({"success": False, "message": "Failed to update location."}), 500
 
     if location is None and building is None:
         return jsonify({
@@ -326,8 +356,11 @@ def edit_location(location_id):
                 db.session.rollback()
                 return _validation_error({"photo": gallery_error})
             log_audit("Admin", None, "update", "Building", building.building_id, building.building_name)
+            # Projected before the commit expires the row: afterwards the DTO
+            # would have to read it back out of the database again.
+            dto = building.to_location_dto()
             db.session.commit()
-            return jsonify(building.to_location_dto()), 200
+            return jsonify(dto), 200
 
         location.building_id = values["building_id"]
         location.floor_id = (
@@ -351,11 +384,10 @@ def edit_location(location_id):
             db.session.rollback()
             return _validation_error({"photo": gallery_error})
         log_audit("Admin", None, "update", "Location", location.location_id, location.location_name)
+        dto = _location_dto(location, buildings, _all_floors())
         db.session.commit()
 
-        return jsonify(
-            _location_dto(location, buildings, _all_floors())
-        ), 200
+        return jsonify(dto), 200
 
     except Exception:
         logger.exception("Failed to update location")
