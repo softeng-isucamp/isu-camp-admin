@@ -11,7 +11,10 @@ class LocationPhoto(db.Model):
     position = db.Column(db.Integer, nullable=False)
     filename = db.Column(db.String(255), nullable=False)
     mime_type = db.Column(db.String(32), nullable=False)
-    content = db.Column(db.LargeBinary, nullable=False)
+    # Deferred: a gallery is listed, reordered and re-covered far more often
+    # than an image is served, and an eager LargeBinary made every one of those
+    # operations download each photo the owner has.
+    content = db.deferred(db.Column(db.LargeBinary, nullable=False))
     is_cover = db.Column(db.Boolean, nullable=False, default=False)
 
     def to_metadata(self):

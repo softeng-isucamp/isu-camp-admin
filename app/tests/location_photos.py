@@ -10,6 +10,8 @@ class Session:
     def __init__(self):
         self.added = []
         self.deleted = []
+        self.executed = []
+        self.expired = []
 
     def add(self, photo):
         self.added.append(photo)
@@ -19,6 +21,18 @@ class Session:
 
     def flush(self):
         pass
+
+    def execute(self, statement, parameters=None):
+        self.executed.append((" ".join(str(statement).split()), parameters))
+
+    def expire(self, record, attributes=None):
+        self.expired.append((record, tuple(attributes or ())))
+
+    def mirrored_cover_id(self):
+        """The photo_id the last cover mirror copied from, or None to clear."""
+        statement, parameters = self.executed[-1]
+        assert statement.startswith("update public.building set photo"), statement
+        return parameters.get("photo_id")
 
 
 class Photo:
@@ -37,7 +51,9 @@ def test_gallery_keeps_existing_cover_when_appending_and_changes_it_when_selecte
 
     assert gallery.apply_gallery(owner, gallery.GalleryChange([("side.jpg", "image/jpeg", b"side")], [], None)) is None
     assert first.is_cover is True
-    assert owner.photo == b"front"
+    # The cover is mirrored by id, inside the database: appending a photo must
+    # not drag the existing cover's bytes down and back up again.
+    assert session.mirrored_cover_id() == 1
     assert len(session.added) == 1
 
     session.added[0].photo_id = 2
@@ -45,7 +61,7 @@ def test_gallery_keeps_existing_cover_when_appending_and_changes_it_when_selecte
     assert gallery.apply_gallery(owner, gallery.GalleryChange([], [], 1)) is None
     assert first.is_cover is False
     assert session.added[0].is_cover is True
-    assert owner.photo == b"side"
+    assert session.mirrored_cover_id() == 2
 
 
 def test_gallery_rejects_invalid_file_and_accepts_multiple_valid_uploads():

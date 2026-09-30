@@ -24,8 +24,20 @@ def owner_key(record):
 
 
 def list_photos(record):
+    """Gallery rows in display order. ``content`` stays deferred."""
     owner_type, owner_id = owner_key(record)
     return LocationPhoto.query.filter_by(owner_type=owner_type, owner_id=owner_id).order_by(LocationPhoto.position, LocationPhoto.photo_id).all()
+
+
+def find_photo(record, photo_id):
+    """One of this owner's photos, with its bytes, without reading the others."""
+    owner_type, owner_id = owner_key(record)
+    return (
+        LocationPhoto.query
+        .options(db.undefer(LocationPhoto.content))
+        .filter_by(owner_type=owner_type, owner_id=owner_id, photo_id=photo_id)
+        .first()
+    )
 
 
 def read_gallery_change(request):
@@ -91,6 +103,43 @@ def apply_gallery(record, change):
     cover = remaining[cover_index] if cover_index is not None else None
     if cover is not None:
         cover.is_cover = True
-    record.photo = cover.content if cover else None
-    record.photo_mime_type = cover.mime_type if cover else None
+    mirror_cover(record, cover)
     return None
+
+
+# public.building and public.location each keep their own copy of the cover
+# image so the existing /photo endpoints stay unchanged.
+_OWNER_TABLES = {
+    "building": ("public.building", "building_id"),
+    "location": ("public.location", "location_id"),
+}
+
+
+def mirror_cover(record, cover):
+    """Copy the cover image into the owner's own photo columns, server-side.
+
+    Assigning ``record.photo = cover.content`` would pull the image down and
+    send the same megabytes straight back on every gallery save, even when the
+    cover did not change. One statement does the copy inside the database
+    instead, so the bytes never cross the wire.
+    """
+    owner_type, owner_id = owner_key(record)
+    table, id_column = _OWNER_TABLES[owner_type]
+    # Newly uploaded photos need their ids before one can be referenced.
+    db.session.flush()
+
+    if cover is None:
+        statement = f"update {table} set photo = null, photo_mime_type = null where {id_column} = :owner_id"
+        parameters = {"owner_id": owner_id}
+    else:
+        statement = (
+            f"update {table}"
+            f" set photo = (select content from public.location_photo where photo_id = :photo_id),"
+            f" photo_mime_type = :mime_type"
+            f" where {id_column} = :owner_id"
+        )
+        parameters = {"owner_id": owner_id, "photo_id": cover.photo_id, "mime_type": cover.mime_type}
+
+    db.session.execute(db.text(statement), parameters)
+    # Written behind the ORM's back, so let it re-read them if anything asks.
+    db.session.expire(record, ["photo", "photo_mime_type", "photo_present"])
