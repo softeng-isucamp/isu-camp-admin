@@ -1,9 +1,8 @@
 import type { Building, Location, Pathway, RouteNode } from "../types";
-import { generatedMapFixture } from "./generatedMapFixture";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 
 export const campusCenter: [number, number] = [16.720868, 121.689698];
-export const buildings: Building[] = [...generatedMapFixture.buildings];
+export const buildings: Building[] = [];
 
 const seededIndoorLocations: Location[] = [
   [
@@ -1184,32 +1183,5 @@ export const pathways: Pathway[] = [
     direction: "Two-way",
     status: "Open",
     pathPoints: [[16.72051, 121.68987]],
-  },
-];
-
-export const notifications: import("../types").NotificationItem[] = [
-  {
-    id: "n-1",
-    title: "Geospatial Update",
-    message: "Campus walkway geometry successfully calibrated.",
-    time: "10m ago",
-    read: false,
-    type: "success",
-  },
-  {
-    id: "n-2",
-    title: "New Location Added",
-    message: "Main Library entrance node linked to directory.",
-    time: "1h ago",
-    read: false,
-    type: "info",
-  },
-  {
-    id: "n-3",
-    title: "System Synchronization",
-    message: "Campus database synchronized with live mobile clients.",
-    time: "3h ago",
-    read: true,
-    type: "info",
   },
 ];

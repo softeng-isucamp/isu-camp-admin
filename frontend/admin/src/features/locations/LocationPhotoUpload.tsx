@@ -9,10 +9,11 @@ interface Props {
   photos: LocationPhotoDraft[];
   onChange: (photos: LocationPhotoDraft[]) => void;
   loading?: boolean;
+  disabled?: boolean;
   error?: string;
 }
 
-export function LocationPhotoUpload({ photos, onChange, loading = false, error }: Props) {
+export function LocationPhotoUpload({ photos, onChange, loading = false, disabled = false, error }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -21,7 +22,7 @@ export function LocationPhotoUpload({ photos, onChange, loading = false, error }
   const cover = photos.find((photo) => photo.isCover) ?? photos[0];
 
   const addFiles = (files: FileList | null) => {
-    if (!files?.length) return;
+    if (loading || disabled || !files?.length) return;
     const rejected: string[] = [];
     const accepted: LocationPhotoDraft[] = [];
     for (const file of Array.from(files)) {
@@ -53,10 +54,10 @@ export function LocationPhotoUpload({ photos, onChange, loading = false, error }
           <div><strong style={{ display: "block", color: "#191c1d", fontSize: 14 }}>Location photos ({photos.length}/10)</strong><span style={{ color: "#6b7280", fontSize: 12 }}>{loading ? "Loading photos…" : cover ? `${cover.name} · Cover photo` : "PNG, JPEG, or WebP · max 5 MB each"}</span></div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button type="button" disabled={loading || photos.length >= MAX_PHOTOS} onClick={() => inputRef.current?.click()} style={{ padding: "8px 12px", border: "1px solid #0c7441", borderRadius: 999, background: "white", color: "#0c7441", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Choose photos</button>
+          <button type="button" disabled={loading || disabled || photos.length >= MAX_PHOTOS} onClick={() => inputRef.current?.click()} style={{ padding: "8px 12px", border: "1px solid #0c7441", borderRadius: 999, background: "white", color: "#0c7441", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Choose photos</button>
           <button type="button" aria-label={expanded ? "Minimize photos" : "Show all photos"} title={expanded ? "Minimize photos" : "Show all photos"} aria-expanded={expanded} aria-controls={galleryId} onClick={() => setExpanded((current) => !current)} style={{ display: "grid", placeItems: "center", width: 34, height: 34, border: "1px solid #d1d5db", borderRadius: "50%", background: "#e5e7eb", color: "#36463c", cursor: "pointer" }}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ transform: expanded ? "rotate(180deg)" : "none" }}><path d="m3 6 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg></button>
         </div>
-        <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="Upload location photos" style={{ display: "none" }} onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
+        <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="Upload location photos" disabled={loading || disabled} style={{ display: "none" }} onChange={(event) => { addFiles(event.target.files); event.currentTarget.value = ""; }} />
       </div>
       <div id={galleryId} hidden={!expanded}>
         <p style={{ margin: "12px 0 0", color: "#6b7280", fontSize: 12 }}>Drag images here or choose files. Up to 10 photos, 5 MB each.</p>

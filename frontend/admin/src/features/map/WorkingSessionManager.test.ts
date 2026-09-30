@@ -6,14 +6,8 @@ import {
   updatePropertiesOperation,
   retireEntityOperation,
   restoreEntityOperation,
-  linkFeatureOperation,
-  unlinkFeatureOperation,
-  compoundBatchOperation,
-  traverseRevertOperation,
-  traverseApplyOperation,
-  handleWorkingSessionKeyboardShortcut,
 } from "./WorkingSessionManager";
-import type { ActiveToolDraft, WorkingOperation } from "./types";
+import type { ActiveToolDraft } from "./types";
 
 describe("WorkingSessionManager", () => {
   let manager: WorkingSessionManager;
@@ -47,17 +41,14 @@ describe("WorkingSessionManager", () => {
     expect(restored.getIsDirty()).toBe(false);
   });
 
-  describe("Undo / Redo Stack Maintenance", () => {
-    it("initializes with empty past and future operations", () => {
-      expect(manager.canUndo()).toBe(false);
-      expect(manager.canRedo()).toBe(false);
+  describe("Operation Log", () => {
+    it("initializes with an empty operation log", () => {
       expect(manager.getPastOperations()).toHaveLength(0);
-      expect(manager.getFutureOperations()).toHaveLength(0);
       expect(manager.isDirty).toBe(false);
       expect(manager.getUncommittedCount()).toBe(0);
     });
 
-    it("executes an operation, pushing to pastOperations and clearing futureOperations", () => {
+    it("executes an operation, appending it to the log", () => {
       const op = manager.executeOperation({
         type: "create_entity",
         domain: "Locations",
@@ -67,130 +58,12 @@ describe("WorkingSessionManager", () => {
       });
 
       expect(op.id).toBeDefined();
-      expect(manager.canUndo()).toBe(true);
-      expect(manager.canRedo()).toBe(false);
       expect(manager.getPastOperations()).toHaveLength(1);
       expect(manager.getPastOperations()[0].entityId).toBe("loc-1");
       expect(manager.isDirty).toBe(true);
       expect(manager.getUncommittedCount()).toBe(1);
     });
 
-    it("steps backward on undo and forward on redo", () => {
-      const op1 = manager.executeOperation({
-        type: "create_entity",
-        domain: "Locations",
-        entityId: "loc-1",
-        before: null,
-        after: { name: "Building 1" },
-      });
-      const op2 = manager.executeOperation({
-        type: "update_properties",
-        domain: "Locations",
-        entityId: "loc-1",
-        before: { name: "Building 1" },
-        after: { name: "Building 1 Renamed" },
-      });
-
-      expect(manager.getPastOperations()).toHaveLength(2);
-
-      // Undo op2
-      const undoneOp = manager.undo();
-      expect(undoneOp?.id).toBe(op2.id);
-      expect(manager.getPastOperations()).toHaveLength(1);
-      expect(manager.getFutureOperations()).toHaveLength(1);
-      expect(manager.canUndo()).toBe(true);
-      expect(manager.canRedo()).toBe(true);
-
-      // Undo op1
-      const undoneOp1 = manager.undo();
-      expect(undoneOp1?.id).toBe(op1.id);
-      expect(manager.getPastOperations()).toHaveLength(0);
-      expect(manager.getFutureOperations()).toHaveLength(2);
-      expect(manager.canUndo()).toBe(false);
-      expect(manager.canRedo()).toBe(true);
-
-      // Redo op1
-      const redoneOp1 = manager.redo();
-      expect(redoneOp1?.id).toBe(op1.id);
-      expect(manager.getPastOperations()).toHaveLength(1);
-      expect(manager.getFutureOperations()).toHaveLength(1);
-
-      // Redo op2
-      const redoneOp2 = manager.redo();
-      expect(redoneOp2?.id).toBe(op2.id);
-      expect(manager.getPastOperations()).toHaveLength(2);
-      expect(manager.getFutureOperations()).toHaveLength(0);
-      expect(manager.canRedo()).toBe(false);
-    });
-
-    it("clears future operations when a new operation is executed mid-stack", () => {
-      manager.executeOperation({
-        type: "create_entity",
-        domain: "Locations",
-        entityId: "loc-1",
-        before: null,
-        after: { name: "A" },
-      });
-      manager.executeOperation({
-        type: "update_properties",
-        domain: "Locations",
-        entityId: "loc-1",
-        before: { name: "A" },
-        after: { name: "B" },
-      });
-
-      // Undo to first op
-      manager.undo();
-      expect(manager.getFutureOperations()).toHaveLength(1);
-
-      // Execute new branch
-      manager.executeOperation({
-        type: "update_properties",
-        domain: "Locations",
-        entityId: "loc-1",
-        before: { name: "A" },
-        after: { name: "C" },
-      });
-
-      expect(manager.getPastOperations()).toHaveLength(2);
-      expect(manager.getFutureOperations()).toHaveLength(0);
-      expect(manager.canRedo()).toBe(false);
-    });
-
-    it("marks a new branch dirty after undoing past the saved checkpoint", () => {
-      manager.executeOperation({
-        type: "update_properties",
-        domain: "Walking Network",
-        entityId: "node-1",
-        before: { name: "A" },
-        after: { name: "B" },
-      });
-      manager.executeOperation({
-        type: "update_properties",
-        domain: "Walking Network",
-        entityId: "node-1",
-        before: { name: "B" },
-        after: { name: "C" },
-      });
-      manager.markSaved();
-      manager.undo();
-
-      const branched = manager.executeOperation({
-        type: "update_properties",
-        domain: "Walking Network",
-        entityId: "node-1",
-        before: { name: "B" },
-        after: { name: "D" },
-      });
-
-      expect(manager.getIsDirty()).toBe(true);
-      expect(manager.getUncommittedOperations()).toEqual([branched]);
-    });
-
-    it("returns null when attempting to undo an empty stack or redo an empty future", () => {
-      expect(manager.undo()).toBeNull();
-      expect(manager.redo()).toBeNull();
-    });
   });
 
   describe("Operation Types & Helper Factories", () => {
@@ -205,13 +78,13 @@ describe("WorkingSessionManager", () => {
 
     it("creates update_geometry operation via factory", () => {
       const op = updateGeometryOperation(
-        "Local Map Data",
+        "Locations",
         "feat-1",
         { points: [[0, 0], [10, 0], [10, 10], [0, 10]] },
         { points: [[0, 0], [20, 0], [20, 20], [0, 20]] }
       );
       expect(op.type).toBe("update_geometry");
-      expect(op.domain).toBe("Local Map Data");
+      expect(op.domain).toBe("Locations");
       expect(op.before).toEqual({ points: [[0, 0], [10, 0], [10, 10], [0, 10]] });
       expect(op.after).toEqual({ points: [[0, 0], [20, 0], [20, 20], [0, 20]] });
     });
@@ -231,102 +104,40 @@ describe("WorkingSessionManager", () => {
 
     it("creates retire_entity and restore_entity operations via factories", () => {
       const currentRec = { id: "feat-1", name: "Old Walkway", status: "active" };
-      const retireOp = retireEntityOperation("Local Map Data", "feat-1", currentRec);
+      const retireOp = retireEntityOperation("Locations", "feat-1", currentRec);
       expect(retireOp.type).toBe("retire_entity");
       expect(retireOp.before).toEqual(currentRec);
       expect(retireOp.after).toEqual({ ...currentRec, status: "retired" });
 
       const retiredRec = { id: "feat-1", name: "Old Walkway", status: "retired" };
-      const restoreOp = restoreEntityOperation("Local Map Data", "feat-1", retiredRec);
+      const restoreOp = restoreEntityOperation("Locations", "feat-1", retiredRec);
       expect(restoreOp.type).toBe("restore_entity");
       expect(restoreOp.before).toEqual(retiredRec);
       expect(restoreOp.after).toEqual({ ...retiredRec, status: "active" });
     });
-
-    it("creates link_feature and unlink_feature operations via factories", () => {
-      const linkData = { featureId: "poly-1", targetDomain: "Locations", targetEntityId: "bld-1" };
-      const linkOp = linkFeatureOperation("Local Map Data", "link-1", linkData);
-      expect(linkOp.type).toBe("link_feature");
-      expect(linkOp.before).toBeNull();
-      expect(linkOp.after).toEqual(linkData);
-
-      const unlinkOp = unlinkFeatureOperation("Local Map Data", "link-1", linkData);
-      expect(unlinkOp.type).toBe("unlink_feature");
-      expect(unlinkOp.before).toEqual(linkData);
-      expect(unlinkOp.after).toBeNull();
-    });
   });
 
-  describe("Compound Batch Operations & Atomic Reversion", () => {
+  describe("Compound Batch Operations", () => {
     it("executes compound batch operation as a single atomic unit", () => {
-      const opFootprint = createEntityOperation("Local Map Data", "poly-101", {
-        family: "building_footprint",
-        coordinates: [[0, 0], [10, 0], [10, 10], [0, 10]],
-      });
       const opBuilding = createEntityOperation("Locations", "bld-202", {
         name: "Engineering Annex",
         code: "ENG-ANNEX",
       });
-      const opLink = linkFeatureOperation("Local Map Data", "lnk-303", {
-        featureId: "poly-101",
-        targetEntityId: "bld-202",
-      });
+
+      const opGeometry = updateGeometryOperation("Locations", "bld-202", { points: [] }, { points: [[0, 0], [10, 0], [10, 10]] });
 
       const batchOp = manager.executeBatch(
-        "Create building with footprint & link",
+        "Create building with polygon",
         "Locations",
         "bld-202",
-        [opFootprint, opBuilding, opLink]
+        [opBuilding, opGeometry]
       );
 
       expect(batchOp.type).toBe("compound_batch");
-      expect(batchOp.nestedOperations).toHaveLength(3);
-      expect(manager.getPastOperations()).toHaveLength(1);
-
-      // Undo whole batch in one step
-      const undone = manager.undo();
-      expect(undone?.id).toBe(batchOp.id);
-      expect(undone?.nestedOperations).toHaveLength(3);
-      expect(manager.getPastOperations()).toHaveLength(0);
-      expect(manager.getFutureOperations()).toHaveLength(1);
-
-      // Redo whole batch in one step
-      const redone = manager.redo();
-      expect(redone?.id).toBe(batchOp.id);
+      expect(batchOp.nestedOperations).toHaveLength(2);
       expect(manager.getPastOperations()).toHaveLength(1);
     });
 
-    it("traverses compound nested operations in LIFO order for reversion", () => {
-      const op1 = createEntityOperation("Local Map Data", "p1", { name: "Footprint" });
-      const op2 = createEntityOperation("Locations", "b1", { name: "Building" });
-      const op3 = linkFeatureOperation("Local Map Data", "l1", { link: "active" });
-
-      const batch = compoundBatchOperation("Locations", "b1", [op1, op2, op3]);
-
-      const visitedIds: string[] = [];
-      traverseRevertOperation(batch, (op) => {
-        visitedIds.push(op.entityId);
-      });
-
-      // LIFO reverse order: l1 (op3) -> b1 (op2) -> p1 (op1) -> b1 (batch)
-      expect(visitedIds).toEqual(["l1", "b1", "p1", "b1"]);
-    });
-
-    it("traverses compound nested operations in forward order for application", () => {
-      const op1 = createEntityOperation("Local Map Data", "p1", { name: "Footprint" });
-      const op2 = createEntityOperation("Locations", "b1", { name: "Building" });
-      const op3 = linkFeatureOperation("Local Map Data", "l1", { link: "active" });
-
-      const batch = compoundBatchOperation("Locations", "b1", [op1, op2, op3]);
-
-      const visitedIds: string[] = [];
-      traverseApplyOperation(batch, (op) => {
-        visitedIds.push(op.entityId);
-      });
-
-      // Forward order: batch -> p1 -> b1 -> l1
-      expect(visitedIds).toEqual(["b1", "p1", "b1", "l1"]);
-    });
   });
 
   describe("Active Tool Draft & Interruption State Machine", () => {
@@ -477,46 +288,6 @@ describe("WorkingSessionManager", () => {
   });
 
   describe("Dirtiness Tracking & Checkpoints", () => {
-    it("tracks dirtiness accurately across operations, undos, and redos", () => {
-      expect(manager.isDirty).toBe(false);
-      expect(manager.getUncommittedCount()).toBe(0);
-
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-      expect(manager.isDirty).toBe(true);
-      expect(manager.getUncommittedCount()).toBe(1);
-
-      manager.executeOperation(createEntityOperation("Locations", "l2", { name: "L2" }));
-      expect(manager.isDirty).toBe(true);
-      expect(manager.getUncommittedCount()).toBe(2);
-
-      // Undo back to start -> state is clean again!
-      manager.undo();
-      expect(manager.isDirty).toBe(true);
-      expect(manager.getUncommittedCount()).toBe(1);
-
-      manager.undo();
-      expect(manager.isDirty).toBe(false);
-      expect(manager.getUncommittedCount()).toBe(0);
-
-      // Redo -> dirty again
-      manager.redo();
-      expect(manager.isDirty).toBe(true);
-      expect(manager.getUncommittedCount()).toBe(1);
-
-      // Mark saved / clean
-      manager.markSaved();
-      expect(manager.isDirty).toBe(false);
-      expect(manager.getUncommittedCount()).toBe(0);
-      expect(manager.getUncommittedOperations()).toHaveLength(0);
-
-      // Add another op -> uncommitted count is 1 relative to checkpoint
-      manager.executeOperation(createEntityOperation("Locations", "l3", { name: "L3" }));
-      expect(manager.isDirty).toBe(true);
-      expect(manager.getUncommittedCount()).toBe(1);
-      expect(manager.getUncommittedOperations()).toHaveLength(1);
-      expect(manager.getUncommittedOperations()[0].entityId).toBe("l3");
-    });
-
     it("resets all state cleanly", () => {
       manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
       manager.startDraft({ toolType: "point", provisionalGeometry: {} });
@@ -524,7 +295,6 @@ describe("WorkingSessionManager", () => {
 
       manager.reset();
       expect(manager.getPastOperations()).toHaveLength(0);
-      expect(manager.getFutureOperations()).toHaveLength(0);
       expect(manager.getActiveDraft()).toBeNull();
       expect(manager.getSuspendedDrafts()).toHaveLength(0);
       expect(manager.isDirty).toBe(false);
@@ -540,123 +310,12 @@ describe("WorkingSessionManager", () => {
       expect(listener).toHaveBeenCalledTimes(1);
       expect(listener.mock.calls[0][0].pastOperations).toHaveLength(1);
 
-      manager.undo();
+      manager.markSaved();
       expect(listener).toHaveBeenCalledTimes(2);
 
       unsubscribe();
-      manager.redo();
+      manager.executeOperation(createEntityOperation("Locations", "l2", { name: "L2" }));
       expect(listener).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe("Keyboard Shortcuts Handler", () => {
-    it("handles Ctrl+Z and Cmd+Z for undo", () => {
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-
-      const preventDefault = vi.fn();
-      const onUndo = vi.fn();
-
-      const event = {
-        key: "z",
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        target: document.createElement("div"),
-        preventDefault,
-      } as unknown as KeyboardEvent;
-
-      const handled = handleWorkingSessionKeyboardShortcut(event, manager, { onUndo });
-      expect(handled).toBe(true);
-      expect(preventDefault).toHaveBeenCalled();
-      expect(onUndo).toHaveBeenCalledTimes(1);
-      expect(manager.getPastOperations()).toHaveLength(0);
-      expect(manager.getFutureOperations()).toHaveLength(1);
-    });
-
-    it("handles Ctrl+Shift+Z and Cmd+Shift+Z for redo", () => {
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-      manager.undo();
-
-      const preventDefault = vi.fn();
-      const onRedo = vi.fn();
-
-      const event = {
-        key: "z",
-        ctrlKey: false,
-        metaKey: true,
-        shiftKey: true,
-        altKey: false,
-        target: document.createElement("div"),
-        preventDefault,
-      } as unknown as KeyboardEvent;
-
-      const handled = handleWorkingSessionKeyboardShortcut(event, manager, { onRedo });
-      expect(handled).toBe(true);
-      expect(preventDefault).toHaveBeenCalled();
-      expect(onRedo).toHaveBeenCalledTimes(1);
-      expect(manager.getPastOperations()).toHaveLength(1);
-    });
-
-    it("handles Ctrl+Y for redo", () => {
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-      manager.undo();
-
-      const preventDefault = vi.fn();
-
-      const event = {
-        key: "y",
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        target: document.createElement("div"),
-        preventDefault,
-      } as unknown as KeyboardEvent;
-
-      const handled = handleWorkingSessionKeyboardShortcut(event, manager);
-      expect(handled).toBe(true);
-      expect(preventDefault).toHaveBeenCalled();
-      expect(manager.getPastOperations()).toHaveLength(1);
-    });
-
-    it("ignores shortcuts when typing in inputs or textareas unless explicitly allowed", () => {
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-
-      const input = document.createElement("input");
-      const event = {
-        key: "z",
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        target: input,
-        preventDefault: vi.fn(),
-      } as unknown as KeyboardEvent;
-
-      const handled = handleWorkingSessionKeyboardShortcut(event, manager);
-      expect(handled).toBe(false);
-      expect(manager.getPastOperations()).toHaveLength(1);
-    });
-
-    it("ignores shortcuts when blocked by isBlocked option", () => {
-      manager.executeOperation(createEntityOperation("Locations", "l1", { name: "L1" }));
-
-      const event = {
-        key: "z",
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-        target: document.createElement("div"),
-        preventDefault: vi.fn(),
-      } as unknown as KeyboardEvent;
-
-      const handled = handleWorkingSessionKeyboardShortcut(event, manager, {
-        isBlocked: () => true,
-      });
-      expect(handled).toBe(false);
-      expect(manager.getPastOperations()).toHaveLength(1);
     });
   });
 });

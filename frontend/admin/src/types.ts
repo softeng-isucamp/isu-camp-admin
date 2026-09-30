@@ -157,14 +157,6 @@ export interface Page<T> {
   page: number;
   pageSize: number;
 }
-export interface NotificationItem {
-  id: string;
-  title: string;
-  message: string;
-  time: string;
-  read: boolean;
-  type: "info" | "success" | "warning";
-}
 export interface MapSavePayload {
   selected?: { type: string; id: string };
   place?: [number, number] | null;

@@ -1,5 +1,5 @@
+import type L from "leaflet";
 import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
-import { locationPolicy } from "../../lib/locationPolicy";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
 
 export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
@@ -114,46 +114,6 @@ export const suggestedPathwayName = (
 export const pathwayWithSuggestedName = (pathway: Pathway, nodes: readonly RouteNode[]): Pathway =>
   pathway.name.trim() ? pathway : { ...pathway, name: suggestedPathwayName(pathway, nodes) };
 
-export type MapObjectType = "location" | "node" | "pathway" | "building";
-export type MapChangeKind = "added" | "moved" | "renamed" | "deleted" | "edited";
-
-export interface MapSnapshot {
-  locations: Location[];
-  nodes: RouteNode[];
-  pathways: Pathway[];
-  buildings: Building[];
-}
-
-import { findBuildingFootprintOverlaps } from "./buildingFootprint";
-
-export interface MapObjectReference {
-  type: MapObjectType;
-  id: string;
-  label?: string;
-}
-
-export interface MapValidationError {
-  object: MapObjectReference;
-  message: string;
-}
-
-export interface MapChangeGroup {
-  kind: MapChangeKind;
-  objects: MapObjectReference[];
-}
-
-export interface MapDraftReview {
-  valid: boolean;
-  errors: MapValidationError[];
-  warnings?: MapValidationError[];
-  groups: MapChangeGroup[];
-}
-
-const validCoordinate = ([lat, lng]: [number, number]) =>
-  Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-
-const label = (object: { name: string }) => object.name.trim() || "Unnamed object";
-const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
 /** Keep pathway endpoints relationally owned by the Route Nodes collection.
  * Endpoint coordinates are rendered from those nodes and must not also be
@@ -278,176 +238,21 @@ export function validatePathwayDraft(
   return issues;
 }
 
-export function reviewMapDraft(input: {
-  original: MapSnapshot;
-  current: MapSnapshot;
-  deleted: MapObjectReference[];
-  campusBoundary?: MapPoint[];
-}): MapDraftReview {
-  const { original, current, deleted, campusBoundary } = input;
-  const errors: MapValidationError[] = [];
-  const warnings: MapValidationError[] = [];
-  const groups = new Map<MapChangeKind, MapObjectReference[]>();
-  const addChange = (kind: MapChangeKind, object: MapObjectReference) =>
-    groups.set(kind, [...(groups.get(kind) ?? []), object]);
-  const addError = (object: MapObjectReference, message: string) => errors.push({ object, message });
-  const addWarning = (object: MapObjectReference, message: string) => warnings.push({ object, message });
+export const isPointInBounds = (
+  lat: number,
+  lng: number,
+  bounds: L.LatLngBounds | null,
+  margin = 0.002
+) => {
+  if (!bounds || typeof bounds.getSouth !== "function") return true;
+  const south = bounds.getSouth() - margin;
+  const north = bounds.getNorth() + margin;
+  const west = bounds.getWest() - margin;
+  const east = bounds.getEast() + margin;
+  return lat >= south && lat <= north && lng >= west && lng <= east;
+};
 
-  const collections: Array<[MapObjectType, Array<Location | RouteNode | Pathway | Building>, Array<Location | RouteNode | Pathway | Building>]> = [
-    ["location", original.locations, current.locations], ["node", original.nodes, current.nodes],
-    ["pathway", original.pathways, current.pathways], ["building", original.buildings, current.buildings],
-  ];
-  for (const [type, before, after] of collections) {
-    const originals = new Map(before.map((object) => [object.id, object]));
-    for (const object of after) {
-      const reference = { type, id: object.id, label: label(object) };
-      const previous = originals.get(object.id);
-      if (!previous) {
-        addChange("added", reference);
-        continue;
-      }
-      const renamed = object.name !== previous.name;
-      const moved = (type === "location" || type === "node") &&
-        ("lat" in object && "lat" in previous) && (object.lat !== previous.lat || object.lng !== previous.lng);
-      if (moved) addChange("moved", reference);
-      if (renamed) addChange("renamed", reference);
-      const ignored = new Set(["name", ...(moved ? ["lat", "lng"] : [])]);
-      const rest = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([key]) => !ignored.has(key)));
-      if (!same(rest(object as unknown as Record<string, unknown>), rest(previous as unknown as Record<string, unknown>))) {
-        addChange("edited", reference);
-      }
-    }
-  }
-  deleted.forEach((object) => addChange("deleted", object));
-
-  const nodeIds = new Set(current.nodes.map((object) => object.id));
-  current.locations.forEach((object) => {
-    const reference = { type: "location" as const, id: object.id, label: label(object) };
-    if (!object.name.trim()) addError(reference, "Location name is required.");
-    if (!object.code.trim()) addError(reference, "Location code is required.");
-    if (!object.type) addError(reference, "Location type is required.");
-    if (!object.status) addError(reference, "Location status is required.");
-    const hasAuthoritativeFootprint = (object.type === "Building" || object.type === "Facility")
-      && current.buildings.some((b) => b.id === object.id && b.points.length >= 3);
-    const locationEvaluation = locationPolicy.evaluate(object, {
-      context: hasAuthoritativeFootprint ? "record" : "map-readiness",
-      directory: current.locations,
-      currentId: object.id,
-    });
-    const previous = original.locations.find((candidate) => candidate.id === object.id);
-    locationEvaluation.issues
-      // Existing imported directories may contain duplicate legacy codes. Keep
-      // unchanged records reviewable; enforce uniqueness for new or renamed codes.
-      .filter((issue) => issue.code !== "code_not_unique" || !previous || previous.code !== object.code)
-      .forEach((issue) => addError(reference, issue.message));
-  });
-  current.nodes.forEach((object) => {
-    const reference = { type: "node" as const, id: object.id, label: label(object) };
-    const previous = original.nodes.find((candidate) => candidate.id === object.id);
-    validateRouteNodeDraft(object, {
-      buildings: current.buildings,
-      locations: current.locations,
-      campusBoundary,
-    }).forEach((issue) => {
-      const unchangedLegacyPosition = issue.field === "coordinate"
-        && previous
-        && previous.lat === object.lat
-        && previous.lng === object.lng;
-      if (unchangedLegacyPosition) return;
-      // Preserve reviewability of unchanged imported legacy associations; any
-      // new or edited association must satisfy the canonical Building rule.
-      const unchangedLegacyAssociation = issue.field === "association"
-        && previous?.associatedPlaceId === object.associatedPlaceId
-        && current.locations.some((location) => location.id === object.associatedPlaceId && location.type !== "Building" && location.type !== "Facility");
-      if (unchangedLegacyAssociation) return;
-      addError(reference, issue.message);
-    });
-  });
-
-  const connections = new Map<string, string>();
-  current.pathways.forEach((object) => {
-    const reference = { type: "pathway" as const, id: object.id, label: label(object) };
-    if (!object.name.trim()) addError(reference, "Pathway name is required.");
-    if (!object.type.trim()) addError(reference, "Pathway type is required.");
-    if (!object.direction) addError(reference, "Pathway direction is required.");
-    if (!object.status) addError(reference, "Pathway status is required.");
-    if (!nodeIds.has(object.sourceNodeId) || !nodeIds.has(object.destinationNodeId)) addError(reference, "Pathway endpoints must reference existing Route Nodes.");
-    if (object.sourceNodeId === object.destinationNodeId) addError(reference, "Pathway connects a Route Node to itself.");
-    const key = [object.sourceNodeId, object.destinationNodeId].sort().join("::");
-    const duplicate = connections.get(key);
-    if (duplicate && object.sourceNodeId !== object.destinationNodeId) addError(reference, `Pathway duplicates the connection already used by ${duplicate}.`);
-    else connections.set(key, label(object));
-    object.pathPoints.forEach((point) => {
-      if (!validCoordinate(point)) addError(reference, "Every Path Point must contain valid latitude and longitude coordinates.");
-    });
-  });
-  current.buildings.forEach((object) => {
-    const reference = { type: "building" as const, id: object.id, label: label(object) };
-    if (!object.name.trim()) addError(reference, "Building name is required.");
-    if (!object.code.trim()) addError(reference, "Building code is required.");
-    if (object.points.length < 3 || new Set(object.points.map((point) => point.join(","))).size < 3) addError(reference, "Building geometry requires at least 3 distinct points.");
-    if (object.points.some((point) => !validCoordinate(point))) addError(reference, "Building geometry must use valid coordinates.");
-    if (polygonSelfIntersects(object.points)) addError(reference, "Building geometry contains self-intersecting edges.");
-  });
-
-  if (campusBoundary) {
-    const changedIds = new Set(
-      [...groups.values()].flat().map((object) => `${object.type}:${object.id}`),
-    );
-    const addBoundaryError = (reference: MapObjectReference) => {
-      if (changedIds.has(`${reference.type}:${reference.id}`)) {
-        addError(reference, "New or modified geometry must stay inside the ISU Echague campus boundary.");
-      }
-    };
-    current.locations.forEach((object) => {
-      const reference = { type: "location" as const, id: object.id, label: label(object) };
-      if (object.lat !== null && object.lng !== null && !pointOnCampus([object.lat, object.lng], campusBoundary)) addBoundaryError(reference);
-    });
-    current.nodes.forEach((object) => {
-      const reference = { type: "node" as const, id: object.id, label: label(object) };
-      if (!pointOnCampus([object.lat, object.lng], campusBoundary)) addBoundaryError(reference);
-    });
-    current.pathways.forEach((object) => {
-      const source = current.nodes.find((node) => node.id === object.sourceNodeId);
-      const destination = current.nodes.find((node) => node.id === object.destinationNodeId);
-      const points = [source, ...object.pathPoints, destination]
-        .filter((point): point is RouteNode | MapPoint => Boolean(point))
-        .map((point) => "lat" in point ? [point.lat, point.lng] as MapPoint : point);
-      const reference = { type: "pathway" as const, id: object.id, label: label(object) };
-      if (!geometryOnCampus(points, campusBoundary)) addBoundaryError(reference);
-    });
-    current.buildings.forEach((object) => {
-      const reference = { type: "building" as const, id: object.id, label: label(object) };
-      if (!geometryOnCampus(object.points, campusBoundary)) addBoundaryError(reference);
-    });
-  }
-
-  // Check for building polygon overlaps (advisory review warnings for draft changes)
-  const modifiedBuildingIds = new Set(
-    current.buildings
-      .filter((bld) => {
-        const orig = original.buildings.find((o) => o.id === bld.id);
-        return !orig || JSON.stringify(orig.points) !== JSON.stringify(bld.points);
-      })
-      .map((bld) => bld.id)
-  );
-
-  const overlaps = findBuildingFootprintOverlaps(
-    current.buildings,
-    (bldA, bldB) => modifiedBuildingIds.has(bldA.id) || modifiedBuildingIds.has(bldB.id),
-  );
-  for (const { bldA, bldB } of overlaps) {
-    addWarning(
-      { type: "building", id: bldA.id, label: label(bldA) },
-      `Building footprint overlaps with ${label(bldB)}.`,
-    );
-  }
-
-  const order: MapChangeKind[] = ["added", "moved", "renamed", "deleted", "edited"];
-  return {
-    valid: errors.length === 0,
-    errors,
-    ...(warnings.length > 0 ? { warnings } : {}),
-    groups: order.flatMap((kind) => groups.has(kind) ? [{ kind, objects: groups.get(kind)! }] : []),
-  };
-}
+export const overlayChanges = <T extends { id: string }>(original: T[], changed: T[]) => {
+  const changes = new Map(changed.map((item) => [item.id, item]));
+  return original.map((item) => changes.get(item.id) ?? item).concat(changed.filter((item) => !original.some((candidate) => candidate.id === item.id)));
+};

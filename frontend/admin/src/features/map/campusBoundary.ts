@@ -1,7 +1,7 @@
 export type MapPoint = [number, number];
 
-// Echague campus fallback. Live data can override this with the existing
-// Whole ISU Campus / CAMPUS_00 polygon.
+// Developer-defined Echague campus boundary. Admins cannot move it by editing
+// data; it is the single source of the Map Editor's campus limits.
 export const echagueCampusBoundary: MapPoint[] = [
   [16.717488361227918, 121.68360872005417],
   [16.716379340457028, 121.68979066085349],
