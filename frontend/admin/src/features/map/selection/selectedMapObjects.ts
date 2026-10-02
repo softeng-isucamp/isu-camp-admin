@@ -2,10 +2,9 @@ import type { Building, Location, RouteNode } from "../../../types";
 import type { MapSelection } from "./useMapSelection";
 
 /**
- * The objects a selection refers to. IDs are scoped to an entity type: a
- * Pathway and an Indoor Location may legitimately share a database ID, so
- * every derived selection must cross the typed identity seam rather than
- * matching only the ID.
+ * The objects a selection refers to. IDs are scoped to an entity type: for
+ * example, a Building and an Indoor Location may share a database ID, so a
+ * Location selection must preserve its subtype as well as its ID.
  */
 export function selectedMapObjects(
   selected: MapSelection | null,
@@ -16,7 +15,7 @@ export function selectedMapObjects(
   },
 ) {
   const location = selected?.type === "location"
-    ? current.contentLocations.find((item) => item.id === selected.id)
+    ? current.contentLocations.find((item) => item.id === selected.id && item.type === selected.locationType)
     : undefined;
   const node = selected?.type === "node"
     ? current.nodes.find((item) => item.id === selected.id)

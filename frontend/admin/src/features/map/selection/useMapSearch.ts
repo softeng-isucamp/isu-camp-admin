@@ -1,14 +1,12 @@
 import { useMemo, useState } from "react";
 import type { Location, Pathway, RouteNode } from "../../../types";
 import { isPositionedLocation } from "../indoorLocation/indoorLocations";
+import { locationSelection, type MapSelection } from "./useMapSelection";
 
-export interface MapSearchResult {
-  id: string;
-  kind: "Location" | "Route Node" | "Pathway";
-  name: string;
-  lat?: number | null;
-  lng?: number | null;
-}
+export type MapSearchResult =
+  | (Location & { kind: "Location" })
+  | (RouteNode & { kind: "Route Node" })
+  | (Pathway & { kind: "Pathway" });
 
 export interface SearchableMapData {
   directoryLocations: Location[];
@@ -21,7 +19,7 @@ export interface SearchableMapData {
 /** Campus place search: query state, matching results, and picking a result. */
 export function useMapSearch(
   data: SearchableMapData,
-  selectObject: (type: "location" | "node" | "pathway", id: string) => void,
+  selectObject: (selection: MapSelection) => void,
   flyTo: (point: [number, number]) => void,
 ) {
   const { directoryLocations, directoryNodes, overlayLocations, overlayNodes, pathways } = data;
@@ -48,15 +46,13 @@ export function useMapSearch(
 
   const selectResult = (item: MapSearchResult) => {
     if (item.kind === "Location") {
-      selectObject("location", item.id);
-      const loc = directoryLocations.find((l) => l.id === item.id) || overlayLocations.find((l) => l.id === item.id);
-      if (loc && isPositionedLocation(loc)) flyTo([loc.lat, loc.lng]);
+      selectObject(locationSelection(item));
+      if (isPositionedLocation(item)) flyTo([item.lat, item.lng]);
     } else if (item.kind === "Route Node") {
-      selectObject("node", item.id);
-      const n = directoryNodes.find((node) => node.id === item.id) || overlayNodes.find((node) => node.id === item.id);
-      if (n) flyTo([n.lat, n.lng]);
+      selectObject({ type: "node", id: item.id });
+      flyTo([item.lat, item.lng]);
     } else if (item.kind === "Pathway") {
-      selectObject("pathway", item.id);
+      selectObject({ type: "pathway", id: item.id });
       const p = pathways.find((path) => path.id === item.id);
       if (p) {
         const src = directoryNodes.find((n) => n.id === p.sourceNodeId) || overlayNodes.find((n) => n.id === p.sourceNodeId);
