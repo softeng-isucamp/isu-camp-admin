@@ -7,10 +7,11 @@ import type { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocat
 import { LocationMapLayer } from "./location/LocationMapLayer";
 import { PathwayDraftLayer, PathwaysLayer } from "./pathway/PathwayMapLayers";
 import type { usePathwayEditing } from "./pathway/usePathwayEditing";
-import { RouteNodeMarkersLayer, RouteNodeMoveLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
+import { RouteNodeMarkersLayer, RouteNodePlacementMarker } from "./routeNode/RouteNodeMapLayers";
 import type { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import type { MapSelection } from "./selection/useMapSelection";
 import type { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
+import { PointMoveLayer } from "./PointMoveLayer";
 import type { PointSnapTarget } from "./pointInteractions";
 import type { EditorMode } from "./types";
 
@@ -125,15 +126,20 @@ export function MapLayers({ view, visible, current, editors, move, actions }: Ma
         onError={actions.onError}
       />
 
-      <RouteNodeMoveLayer
-        pointTool={pointTool}
-        mode={mode}
-        snapTargets={move.snapTargets}
-        campusBoundary={campusBoundary}
-        outsideBoundary={move.outsideBoundary}
-        distanceMeters={move.distanceMeters}
-        isOverviewZoom={isOverviewZoom}
-      />
+      {!isOverviewZoom && mode === "move" && pointTool.moveOrigin && pointTool.position && (
+        <PointMoveLayer
+          origin={pointTool.moveOrigin}
+          position={pointTool.position}
+          snapTargets={move.snapTargets}
+          campusBoundary={campusBoundary}
+          outsideBoundary={move.outsideBoundary}
+          distanceMeters={move.distanceMeters}
+          snapped={pointTool.snapped}
+          onPositionChange={pointTool.updateMovePosition}
+          onDropRejected={pointTool.rejectDrop}
+          onDraggingChange={pointTool.setDragging}
+        />
+      )}
 
       <RouteNodePlacementMarker
         pointTool={pointTool}

@@ -199,7 +199,6 @@ export const normalizeBackendLocationMutation = (raw: unknown): Location => {
 export const API_MODE: ApiMode = import.meta.env.VITE_TEST_LOCAL_ADAPTER === "true"
   ? ((import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "local")
   : "real";
-export const USE_GENERATED_MAP_FIXTURE = import.meta.env.VITE_MAP_FIXTURE === "osm";
 // The generated fixture is a very large JSON module. Load it only when needed
 // so production bundles and unit tests never parse it: in fixture mode
 // (VITE_MAP_FIXTURE=osm) it replaces all map data; in local adapter mode outside

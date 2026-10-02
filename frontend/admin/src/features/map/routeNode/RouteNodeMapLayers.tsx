@@ -3,9 +3,7 @@ import type L from "leaflet";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
-import { createNodeIcon, createTempIcon } from "../mapIcons";
-import type { PointSnapTarget } from "../pointInteractions";
-import { PointMoveLayer } from "../PointMoveLayer";
+import { createNodeIcon, tempIcon } from "../mapIcons";
 import type { useRouteNodePointTool } from "./useRouteNodePointTool";
 
 interface RouteNodeMarkersLayerProps {
@@ -57,46 +55,6 @@ export function RouteNodeMarkersLayer({
   );
 }
 
-interface RouteNodeMoveLayerProps {
-  pointTool: ReturnType<typeof useRouteNodePointTool>;
-  mode: EditorMode;
-  snapTargets: PointSnapTarget[];
-  campusBoundary: MapPoint[];
-  outsideBoundary: boolean;
-  distanceMeters: number;
-  isOverviewZoom: boolean;
-}
-
-/** The point tool's move preview: origin, draggable position, and snap targets. */
-export function RouteNodeMoveLayer({
-  pointTool,
-  mode,
-  snapTargets,
-  campusBoundary,
-  outsideBoundary,
-  distanceMeters,
-  isOverviewZoom,
-}: RouteNodeMoveLayerProps) {
-  return (
-    <>
-      {!isOverviewZoom && mode === "move" && pointTool.moveOrigin && pointTool.position && (
-        <PointMoveLayer
-          origin={pointTool.moveOrigin}
-          position={pointTool.position}
-          snapTargets={snapTargets}
-          campusBoundary={campusBoundary}
-          outsideBoundary={outsideBoundary}
-          distanceMeters={distanceMeters}
-          snapped={pointTool.snapped}
-          onPositionChange={pointTool.updateMovePosition}
-          onDropRejected={pointTool.rejectDrop}
-          onDraggingChange={pointTool.setDragging}
-        />
-      )}
-    </>
-  );
-}
-
 interface RouteNodePlacementMarkerProps {
   pointTool: ReturnType<typeof useRouteNodePointTool>;
   mode: EditorMode;
@@ -112,7 +70,7 @@ export function RouteNodePlacementMarker({ pointTool, mode, campusBoundary, isOv
       {!isOverviewZoom && pointTool.position && mode !== "move" && (
         <Marker
           position={pointTool.position}
-          icon={createTempIcon()}
+          icon={tempIcon}
           draggable={mode === "place"}
           eventHandlers={{
             drag: (event) => {

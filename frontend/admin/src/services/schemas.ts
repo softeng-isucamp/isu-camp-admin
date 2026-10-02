@@ -51,8 +51,3 @@ export const locationSchema = locationFields.extend({
   polygonCoordinates: z.array(z.tuple([z.number(), z.number()])).optional(),
   photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
 });
-export const userAccountSchema = z.object({
-  id: z.string().min(1),
-  username: z.string().min(1, "Username is required."),
-  createdAt: z.string().min(1),
-});

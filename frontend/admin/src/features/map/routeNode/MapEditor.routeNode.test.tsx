@@ -101,6 +101,30 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7214,121.6908"]')).toBeTruthy());
   });
 
+  it("shows the move distance and outside-campus feedback until the move is cancelled", async () => {
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
+    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
+
+    const panel = screen.getByRole("region", { name: "Move North Entrance" });
+    expect(panel).toHaveTextContent("Δ 0.0m");
+    expect(panel).not.toHaveClass("outside-boundary");
+    expect(screen.getByTestId("point-move-tether-badge")).toHaveTextContent("Δ 0.0m");
+    expect(screen.getByTestId("point-move-tether")).toHaveAttribute("data-color", "#005931");
+
+    clickMap(16.7214, 121.6908);
+    expect(screen.getByTestId("point-move-tether-badge")).not.toHaveTextContent("Δ 0.0m");
+    expect(screen.getByTestId("point-move-tether")).toHaveAttribute("data-color", "#005931");
+
+    fireEvent.change(screen.getByLabelText("Move latitude"), { target: { value: "16.7100" } });
+    expect(screen.getByTestId("point-move-tether")).toHaveAttribute("data-color", "#b42318");
+    expect(panel).toHaveClass("outside-boundary");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("point-move-tether")).not.toBeInTheDocument();
+  });
+
   it("records Route Node inspector edits and clears an Entrance association when changing type", async () => {
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "loc-1", lat: 16.7205, lng: 121.6895 },

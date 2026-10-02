@@ -41,7 +41,6 @@ import { SelectionPopover } from "./selection/SelectionPopover";
 import { BasemapTileLayer, BasemapToggle, MapPageHeader, OverviewZoomNotice } from "./MapChrome";
 import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLocations";
 import { networkSelectionFocus } from "./selection/networkSelectionFocus";
-import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
 import { selectedMapObjects } from "./selection/selectedMapObjects";
 import { MapModals, type OwnerModal } from "./MapModals";
 import { MapLayers } from "./MapLayers";
@@ -256,12 +255,8 @@ export function MapEditor() {
     refreshMapData,
     onError: setError,
   });
-  const { movingObjectName, movingOutsideBoundary, moveDistanceMeters } = routeNodeMoveStatus(
-    mode,
-    pointTool,
-    selectedNode,
-    campusBoundary,
-  );
+  const { moveDistanceMeters, movingOutsideBoundary } = pointTool;
+  const movingObjectName = selectedNode?.name ?? "Route Node";
   const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
@@ -752,12 +747,9 @@ export function MapEditor() {
             mode={mode}
             error={error}
             savingAction={savingAction}
-            selection={{ building: selectedBuildingView, location: selectedLocation, node: selectedNode, path: selectedPath }}
-            editors={{ buildingEditor, pointTool, pathway, nodeFrame }}
+            editors={{ buildingEditor, pointTool, pathway }}
             data={{
               nodes: currentNodes,
-              locations: currentLocations,
-              contentLocations: buildingContentLocations,
               buildingAssociationOptions,
               directoryPathways,
               overlayPathways: overlay.pathways,
@@ -773,18 +765,6 @@ export function MapEditor() {
               onNewPathway: startNewPathway,
               onBrowseNetwork: () => { setMode("select"); setNetworkBrowserOpen(true); },
               onSavePathShape: handleSavePathShape,
-              onUpdateBuilding: overlay.putBuilding,
-              onEditBuildingFootprint: startSelectedBuildingGeometryEdit,
-              onPlaceEntrance: (view) => {
-                pointTool.setPlacingNodeType("Entrance");
-                pointTool.setPlacingNodeName("");
-                pointTool.setPlacingAssociatedBuildingId(view.associationId);
-                setMode("place");
-              },
-              onUpdateLocation: overlay.putLocation,
-              onMoveNode: handleStartMoveNode,
-              onReshapePathway: reshapePathway,
-              onClearSelection: () => setSelected(null),
             }}
           />
         )}
