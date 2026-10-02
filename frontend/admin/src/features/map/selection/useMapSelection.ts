@@ -4,12 +4,19 @@ import type { MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
 import {
   findSelectionCandidates,
-  type CanvasSelectionType,
   type SelectionCandidate,
 } from "../selectionCandidates";
 
 export type MapSelectionType = "location" | "node" | "pathway" | "building" | "area" | "path_point";
-export type MapSelection = { type: MapSelectionType; id: string };
+export type MapSelection =
+  | { type: "location"; id: string; locationType: Location["type"] }
+  | { type: Exclude<MapSelectionType, "location">; id: string; locationType?: never };
+
+export const locationSelection = (location: Pick<Location, "id" | "type">): MapSelection => ({
+  type: "location",
+  id: location.id,
+  locationType: location.type,
+});
 
 export interface SelectionPopoverState {
   anchor: MapPoint;
@@ -37,25 +44,31 @@ export function useMapSelection(
   const [popover, setPopover] = useState<SelectionPopoverState | null>(null);
   const clearPopover = useCallback(() => setPopover(null), []);
 
-  const selectObject = useCallback((type: MapSelectionType, id: string) => {
-    setSelected({ type, id });
+  const selectObject = useCallback((selection: MapSelection) => {
+    setSelected(selection);
     setPopover(null);
-    onSelected(type, id);
+    onSelected(selection.type, selection.id);
   }, [onSelected, setSelected]);
 
-  const selectCanvasObject = (type: CanvasSelectionType, id: string, anchor: MapPoint) => {
+  const selectCanvasObject = (selection: MapSelection, anchor: MapPoint) => {
     if (mode !== "select") {
-      selectObject(type, id);
+      selectObject(selection);
       return;
     }
     const candidates = findSelectionCandidates(anchor, objects);
     if (candidates.length <= 1) {
-      selectObject(type, id);
+      selectObject(selection);
       return;
     }
     setSelected(null);
     setPopover({ anchor, candidates });
   };
 
-  return { popover, clearPopover, selectObject, selectCanvasObject };
+  const selectCandidate = (candidate: SelectionCandidate) => {
+    selectObject(candidate.type === "location"
+      ? { type: "location", id: candidate.id, locationType: candidate.locationType }
+      : { type: candidate.type, id: candidate.id });
+  };
+
+  return { popover, clearPopover, selectObject, selectCanvasObject, selectCandidate };
 }
