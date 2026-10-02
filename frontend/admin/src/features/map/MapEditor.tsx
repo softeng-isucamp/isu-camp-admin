@@ -752,12 +752,9 @@ export function MapEditor() {
             mode={mode}
             error={error}
             savingAction={savingAction}
-            selection={{ building: selectedBuildingView, location: selectedLocation, node: selectedNode, path: selectedPath }}
-            editors={{ buildingEditor, pointTool, pathway, nodeFrame }}
+            editors={{ buildingEditor, pointTool, pathway }}
             data={{
               nodes: currentNodes,
-              locations: currentLocations,
-              contentLocations: buildingContentLocations,
               buildingAssociationOptions,
               directoryPathways,
               overlayPathways: overlay.pathways,
@@ -773,18 +770,6 @@ export function MapEditor() {
               onNewPathway: startNewPathway,
               onBrowseNetwork: () => { setMode("select"); setNetworkBrowserOpen(true); },
               onSavePathShape: handleSavePathShape,
-              onUpdateBuilding: overlay.putBuilding,
-              onEditBuildingFootprint: startSelectedBuildingGeometryEdit,
-              onPlaceEntrance: (view) => {
-                pointTool.setPlacingNodeType("Entrance");
-                pointTool.setPlacingNodeName("");
-                pointTool.setPlacingAssociatedBuildingId(view.associationId);
-                setMode("place");
-              },
-              onUpdateLocation: overlay.putLocation,
-              onMoveNode: handleStartMoveNode,
-              onReshapePathway: reshapePathway,
-              onClearSelection: () => setSelected(null),
             }}
           />
         )}
