@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
+import { distanceInMeters } from "../pointInteractions";
 import type { ActiveToolDraft, EditorMode } from "../types";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
@@ -51,6 +52,9 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
     locations: context.locations,
     campusBoundary: context.campusBoundary,
   };
+
+  const moveDistanceMeters = moveOrigin && position ? distanceInMeters(moveOrigin, position) : 0;
+  const movingOutsideBoundary = editorContext.mode === "move" && position !== null && !pointOnCampus(position, context.campusBoundary);
 
   /** Clears the provisional position and its draft. */
   const reset = () => {
@@ -250,6 +254,8 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
     moveOrigin,
     dragging,
     dropRejected,
+    moveDistanceMeters,
+    movingOutsideBoundary,
     placingNodeType,
     placingNodeName,
     placingAssociatedBuildingId,

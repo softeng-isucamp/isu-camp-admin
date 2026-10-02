@@ -41,7 +41,6 @@ import { SelectionPopover } from "./selection/SelectionPopover";
 import { BasemapTileLayer, BasemapToggle, MapPageHeader, OverviewZoomNotice } from "./MapChrome";
 import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLocations";
 import { networkSelectionFocus } from "./selection/networkSelectionFocus";
-import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
 import { selectedMapObjects } from "./selection/selectedMapObjects";
 import { MapModals, type OwnerModal } from "./MapModals";
 import { MapLayers } from "./MapLayers";
@@ -256,12 +255,8 @@ export function MapEditor() {
     refreshMapData,
     onError: setError,
   });
-  const { movingObjectName, movingOutsideBoundary, moveDistanceMeters } = routeNodeMoveStatus(
-    mode,
-    pointTool,
-    selectedNode,
-    campusBoundary,
-  );
+  const { moveDistanceMeters, movingOutsideBoundary } = pointTool;
+  const movingObjectName = selectedNode?.name ?? "Route Node";
   const selectedBuildingView = selectedBuildingViewFor(selectedBuilding, currentLocations, currentNodes);
   const selectedBuildingLocation = selectedBuildingView?.location;
 
