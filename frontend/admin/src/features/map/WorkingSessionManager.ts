@@ -434,22 +434,3 @@ export function restoreEntityOperation(
     timestamp: Date.now(),
   };
 }
-
-export function compoundBatchOperation(
-  domain: SpatialDomain,
-  entityId: string,
-  nestedOperations: WorkingOperation[],
-  description?: string
-): WorkingOperation {
-  return {
-    id: generateOperationId("compound"),
-    type: "compound_batch",
-    domain,
-    entityId,
-    before: null,
-    after: null,
-    nestedOperations: [...nestedOperations],
-    description: description ?? `Compound batch with ${nestedOperations.length} operations`,
-    timestamp: Date.now(),
-  };
-}

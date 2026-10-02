@@ -4,7 +4,7 @@ import type { Building } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
 import type L from "leaflet";
-import { createLocationPinIcon, createSplitIcon, createVertexIcon } from "../mapIcons";
+import { createLocationPinIcon, createVertexIcon, splitIcon } from "../mapIcons";
 import { polygonFeatureAnchor } from "../mapEditing";
 import type { useBuildingFootprintEditing } from "./useBuildingFootprintEditing";
 
@@ -147,7 +147,7 @@ export function BuildingDraftLayer({ editor, mode, campusBoundary, isOverviewZoo
           <Marker
             key={`split-${index}`}
             position={[(point[0] + next[0]) / 2, (point[1] + next[1]) / 2]}
-            icon={createSplitIcon()}
+            icon={splitIcon}
             eventHandlers={{ click: () => insertPolygonVertex(index) }}
           />
         );

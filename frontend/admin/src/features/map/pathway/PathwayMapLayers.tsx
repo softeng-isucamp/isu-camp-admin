@@ -3,7 +3,7 @@ import type L from "leaflet";
 import type { Pathway, RouteNode } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
-import { createPointIcon, createSplitIcon } from "../mapIcons";
+import { createPointIcon, splitIcon } from "../mapIcons";
 import type { usePathwayEditing } from "./usePathwayEditing";
 import { segmentMidpoints } from "./pathwayTopology";
 
@@ -181,7 +181,7 @@ export function PathwayDraftLayer({
             <Marker
               key={`path-split-handle-${segmentIndex}`}
               position={[midpoint.latitude, midpoint.longitude]}
-              icon={createSplitIcon()}
+              icon={splitIcon}
               eventHandlers={{ click: () => insertPathPoint(segmentIndex) }}
             />
           );

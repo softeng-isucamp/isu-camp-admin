@@ -64,8 +64,7 @@ export const createMovingPointIcon = (outsideBoundary: boolean, elevated: boolea
     iconAnchor: [17, 36],
   });
 
-const splitIcon = L.divIcon({ className: "polygon-split-handle", html: "<span>+</span>", iconSize: [24, 24], iconAnchor: [12, 12] });
-export const createSplitIcon = () => splitIcon;
+export const splitIcon = L.divIcon({ className: "polygon-split-handle", html: "<span>+</span>", iconSize: [24, 24], iconAnchor: [12, 12] });
 
 const vertexIcons = new Map<number, L.DivIcon>();
 export const createVertexIcon = (index: number) => {

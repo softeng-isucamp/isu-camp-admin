@@ -261,8 +261,6 @@ export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
   });
 };
 
-export const emptyNetworkSnapshot = (): NetworkSnapshot => ({ buildings: [], routeNodes: [], pathways: [] });
-
 export type LegacyNetworkData = {
   buildings: LegacyBuilding[];
   nodes: LegacyRouteNode[];
