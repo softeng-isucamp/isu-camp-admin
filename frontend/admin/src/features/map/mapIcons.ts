@@ -40,29 +40,27 @@ export const createPointIcon = (selected = false) => {
   return icon;
 };
 
-export const createTempIcon = () =>
-  L.divIcon({
-    className: "temp-marker-icon",
-    html: `<div class="temp-icon"></div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  });
+export const tempIcon = L.divIcon({
+  className: "temp-marker-icon",
+  html: `<div class="temp-icon"></div>`,
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
 
-export const createGhostPointIcon = () =>
-  L.divIcon({
-    className: "point-move-ghost-icon",
-    html: `<div class="point-move-ghost"></div>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-  });
+export const ghostPointIcon = L.divIcon({
+  className: "point-move-ghost-icon",
+  html: `<div class="point-move-ghost"></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
 
-export const createMovingPointIcon = (outsideBoundary: boolean, elevated: boolean) =>
-  L.divIcon({
-    className: `point-moving-icon${outsideBoundary ? " outside-boundary" : ""}${elevated ? " elevated" : ""}`,
-    html: `<div class="point-moving-marker${outsideBoundary ? " outside-boundary" : ""}${elevated ? " elevated" : ""}"><span></span></div>`,
-    iconSize: [34, 42],
-    iconAnchor: [17, 36],
-  });
+/** One cached instance, so dragging never swaps the icon; the outside-boundary class is toggled on the element. */
+export const movingPointIcon = L.divIcon({
+  className: "point-moving-icon elevated",
+  html: `<div class="point-moving-marker elevated"><span></span></div>`,
+  iconSize: [34, 42],
+  iconAnchor: [17, 36],
+});
 
 export const splitIcon = L.divIcon({ className: "polygon-split-handle", html: "<span>+</span>", iconSize: [24, 24], iconAnchor: [12, 12] });
 

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Marker, Polyline, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import { pointOnCampus, type MapPoint } from "./campusBoundary";
-import { createGhostPointIcon, createMovingPointIcon } from "./mapIcons";
+import { ghostPointIcon, movingPointIcon } from "./mapIcons";
 import { findPointSnap, type PointSnapTarget } from "./pointInteractions";
 
 interface PointMoveLayerProps {
@@ -31,6 +31,20 @@ export function PointMoveLayer({
   onDraggingChange,
 }: PointMoveLayerProps) {
   const map = useMap();
+  const movingMarkerRef = useRef<L.Marker>(null);
+  useEffect(() => {
+    const marker = movingMarkerRef.current;
+    const applyOutsideBoundary = () => {
+      const element = marker?.getElement();
+      element?.classList.toggle("outside-boundary", outsideBoundary);
+      element?.querySelector(".point-moving-marker")?.classList.toggle("outside-boundary", outsideBoundary);
+    };
+    applyOutsideBoundary();
+    marker?.on("add", applyOutsideBoundary);
+    return () => {
+      marker?.off("add", applyOutsideBoundary);
+    };
+  }, [outsideBoundary]);
   const resolvePosition = (event: L.LeafletEvent) => {
     const candidateLatLng = (event.target as L.Marker).getLatLng();
     const candidate: MapPoint = [candidateLatLng.lat, candidateLatLng.lng];
@@ -51,7 +65,7 @@ export function PointMoveLayer({
 
   return (
     <>
-      <Marker position={origin} icon={createGhostPointIcon()} />
+      <Marker position={origin} icon={ghostPointIcon} />
       <Polyline
         positions={[origin, position]}
         pathOptions={{
@@ -68,8 +82,9 @@ export function PointMoveLayer({
         </Tooltip>
       </Polyline>
       <Marker
+        ref={movingMarkerRef}
         position={position}
-        icon={createMovingPointIcon(outsideBoundary, true)}
+        icon={movingPointIcon}
         draggable
         eventHandlers={{
           dragstart: () => onDraggingChange(true),

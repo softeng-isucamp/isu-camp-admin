@@ -3,7 +3,7 @@ import type L from "leaflet";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
-import { createNodeIcon, createTempIcon } from "../mapIcons";
+import { createNodeIcon, tempIcon } from "../mapIcons";
 import type { useRouteNodePointTool } from "./useRouteNodePointTool";
 
 interface RouteNodeMarkersLayerProps {
@@ -70,7 +70,7 @@ export function RouteNodePlacementMarker({ pointTool, mode, campusBoundary, isOv
       {!isOverviewZoom && pointTool.position && mode !== "move" && (
         <Marker
           position={pointTool.position}
-          icon={createTempIcon()}
+          icon={tempIcon}
           draggable={mode === "place"}
           eventHandlers={{
             drag: (event) => {
