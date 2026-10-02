@@ -1,4 +1,5 @@
 import type { MapSearchResult } from "./useMapSearch";
+import { locationIdentityKey } from "../../../lib/locationPolicy";
 
 interface MapSearchBoxProps {
   search: string;
@@ -34,7 +35,7 @@ export function MapSearchBox({ search, results, onSearchChange, onSelectResult }
         <div className="mt-2 pt-2 border-t border-[#e1e3e4] max-h-56 overflow-y-auto text-xs">
           {results.map((item) => (
             <button
-              key={`${item.kind}:${item.id}`}
+              key={item.kind === "Location" ? locationIdentityKey(item) : `${item.kind}:${item.id}`}
               type="button"
               className="w-full text-left p-2 hover:bg-[#f8f9fa] rounded-lg flex items-center justify-between transition"
               onClick={() => onSelectResult(item)}

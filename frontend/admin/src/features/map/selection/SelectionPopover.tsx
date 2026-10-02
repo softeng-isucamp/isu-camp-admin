@@ -1,11 +1,11 @@
 import type { MapPoint } from "../campusBoundary";
-import type { CanvasSelectionType } from "../selectionCandidates";
+import type { SelectionCandidate } from "../selectionCandidates";
 import type { SelectionPopoverState } from "./useMapSelection";
 
 interface SelectionPopoverProps {
   popover: SelectionPopoverState;
   navigationBounds: [MapPoint, MapPoint];
-  onSelect: (type: CanvasSelectionType, id: string) => void;
+  onSelect: (candidate: SelectionCandidate) => void;
 }
 
 export function SelectionPopover({ popover, navigationBounds, onSelect }: SelectionPopoverProps) {
@@ -27,11 +27,13 @@ export function SelectionPopover({ popover, navigationBounds, onSelect }: Select
       <div className="flex flex-col gap-1">
         {popover.candidates.map((candidate) => (
           <button
-            key={`${candidate.type}-${candidate.id}`}
+            key={candidate.type === "location"
+              ? `${candidate.type}-${candidate.locationType}-${candidate.id}`
+              : `${candidate.type}-${candidate.id}`}
             type="button"
             aria-label={`Select ${candidate.label} ${candidate.kindLabel}`}
             className="rounded-xl px-3 py-2 text-left text-xs hover:bg-[#edf3ef]"
-            onClick={() => onSelect(candidate.type, candidate.id)}
+            onClick={() => onSelect(candidate)}
           >
             <strong className="block">{candidate.label}</strong>
             <span className="text-[#59645e]">{candidate.kindLabel}</span>

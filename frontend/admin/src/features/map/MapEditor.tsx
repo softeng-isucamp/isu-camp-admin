@@ -33,7 +33,7 @@ import { useSessionMapData } from "./session/useSessionMapData";
 import { useSavingAction } from "./session/useSavingAction";
 import { useToolSession } from "./session/useToolSession";
 import { createWorkingSessionJournal, type WorkingSessionKey } from "./WorkingSessionJournal";
-import { useMapSelection, type MapSelection, type MapSelectionType } from "./selection/useMapSelection";
+import { locationSelection, useMapSelection, type MapSelection, type MapSelectionType } from "./selection/useMapSelection";
 import { useMapSearch } from "./selection/useMapSearch";
 import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
@@ -277,10 +277,10 @@ export function MapEditor() {
         setError("");
         if (isPositionedLocation(location) && !place) {
           indoor.setPlacement(null);
-          setSelected({ type: "location", id: location.id });
+          setSelected(locationSelection(location));
           flyTo([location.lat, location.lng], 20);
         } else {
-          setSelected({ type: "location", id: location.id });
+          setSelected(locationSelection(location));
           indoor.startPlacement(parentBuilding, location);
           flyTo(polygonFeatureAnchor(parentBuilding.points), 20);
         }
@@ -304,7 +304,7 @@ export function MapEditor() {
       case "locate-location": {
         const { location } = intent;
         setMode("select");
-        setSelected({ type: "location", id: location.id });
+        setSelected(locationSelection(location));
         if (isPositionedLocation(location)) {
           setFrameBounds(null);
           flyTo([location.lat, location.lng]);
@@ -347,7 +347,7 @@ export function MapEditor() {
     }
     pointTool.setPosition(null);
   }, [currentNodes, currentPathways]);
-  const { popover: selectionPopover, clearPopover: clearSelectionPopover, selectObject, selectCanvasObject } = useMapSelection(
+  const { popover: selectionPopover, clearPopover: clearSelectionPopover, selectObject, selectCanvasObject, selectCandidate } = useMapSelection(
     mode,
     setSelected,
     { locations: currentLocations, nodes: currentNodes, pathways: currentPathways, buildings: currentBuildings },
@@ -367,7 +367,7 @@ export function MapEditor() {
   );
 
   const handleNetworkBrowserSelection = (networkSelection: NonNullable<NetworkBrowserSelection>) => {
-    selectObject(networkSelection.type, networkSelection.id);
+    selectObject(networkSelection);
     const focus = networkSelectionFocus(networkSelection, currentNodes, currentPathways);
     if (focus?.kind === "fly") {
       setFrameBounds(null);
@@ -442,14 +442,14 @@ export function MapEditor() {
 
   const beginIndoorLocationPlacement = (building: Building, location: Location) => {
     if (!indoor.begin(building, location)) return;
-    setSelected({ type: "location", id: location.id });
+    setSelected(locationSelection(location));
     flyTo(polygonFeatureAnchor(building.points), 20);
   };
 
   const saveIndoorLocationPosition = async () => {
     const positioned = await indoor.save();
     if (!positioned) return;
-    setSelected({ type: "location", id: positioned.id });
+    setSelected(locationSelection(positioned));
     flyTo([positioned.lat!, positioned.lng!], 20);
   };
 
@@ -583,7 +583,7 @@ export function MapEditor() {
       if (nextSelection) setSelected(nextSelection);
       return;
     }
-    selectCanvasObject("node", node.id, [node.lat, node.lng]);
+    selectCanvasObject({ type: "node", id: node.id }, [node.lat, node.lng]);
   };
 
   const inspectorModel = mapInspectorModel({
@@ -673,9 +673,9 @@ export function MapEditor() {
             actions={{
               onSelectCanvasObject: selectCanvasObject,
               onSelectObject: selectObject,
-              onSelectIndoorLocation: (locationId) => {
+              onSelectIndoorLocation: (location) => {
                 clearSelectionPopover();
-                setSelected({ type: "location", id: locationId });
+                setSelected(locationSelection(location));
               },
               onClickNode: handleRouteNodeClick,
               onSelect: setSelected,
@@ -710,7 +710,7 @@ export function MapEditor() {
         )}
 
         {selectionPopover && (
-          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} onSelect={selectObject} />
+          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} onSelect={selectCandidate} />
         )}
 
         {outsideBoundaryCount > 0 && <OutsideBoundaryNotice count={outsideBoundaryCount} />}

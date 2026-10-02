@@ -3,13 +3,15 @@ import { pointInPolygon, type MapPoint } from "./campusBoundary";
 
 export type CanvasSelectionType = "location" | "node" | "pathway" | "building";
 
-export interface SelectionCandidate {
-  id: string;
-  type: CanvasSelectionType;
+interface SelectionCandidateDetails {
   label: string;
   kindLabel: string;
   distance: number;
 }
+
+export type SelectionCandidate =
+  | (SelectionCandidateDetails & { id: string; type: "location"; locationType: Location["type"] })
+  | (SelectionCandidateDetails & { id: string; type: Exclude<CanvasSelectionType, "location">; locationType?: never });
 
 interface SelectionCandidatesInput {
   locations: Location[];
@@ -51,6 +53,7 @@ export function findSelectionCandidates(
         candidates.push({
           id: location.id,
           type: "location",
+          locationType: location.type,
           label: location.name,
           kindLabel: location.type,
           distance,
@@ -124,7 +127,11 @@ export function findSelectionCandidates(
   for (const candidate of candidates) {
     const canonicalBuilding = candidate.type === "building"
       || (candidate.type === "location" && (candidate.kindLabel === "Building" || candidate.kindLabel === "Facility"));
-    const key = canonicalBuilding ? `building:${candidate.id}` : `${candidate.type}:${candidate.id}`;
+    const key = canonicalBuilding
+      ? `building:${candidate.id}`
+      : candidate.type === "location"
+        ? `location:${candidate.locationType}:${candidate.id}`
+        : `${candidate.type}:${candidate.id}`;
     const existing = uniqueCandidates.get(key);
     if (!existing || (candidate.type === "building" && existing.type === "location")) {
       uniqueCandidates.set(key, candidate);

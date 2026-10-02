@@ -32,9 +32,9 @@ export function useVisibleMapObjects(
       (loc) => !isIndoorLocation(loc)
         && loc.type !== "Building"
         && (loc.type !== "Facility" || !buildings.some((building) => building.id === loc.id))
-        && (isPointInBounds(loc.lat, loc.lng, mapBounds) || (selected?.type === "location" && selected.id === loc.id))
+        && (isPointInBounds(loc.lat, loc.lng, mapBounds) || (selected?.type === "location" && selected.id === loc.id && selected.locationType === loc.type))
     );
-  }, [buildings, locations, mapBounds, mode, selected?.id, selected?.type]);
+  }, [buildings, locations, mapBounds, mode, selected?.id, selected?.locationType, selected?.type]);
 
   const visibleNodes = useMemo(() => {
     if (mode === "place" || mode === "area") return [];
