@@ -1,5 +1,5 @@
 import { PropsWithChildren, useEffect, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { Button } from "./UI";
 import logo from "../assets/figma/brand/kumpas-logo.png";
@@ -10,7 +10,6 @@ import usersIcon from "../assets/figma/navigation/users.svg";
 import logsIcon from "../assets/figma/navigation/logs.svg";
 import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
 import signOutIcon from "../assets/figma/navigation/sign-out.svg";
-import searchIcon from "../assets/figma/navigation/search.svg";
 
 export const links = [
   {
@@ -53,9 +52,7 @@ export function Shell({ children }: PropsWithChildren) {
   });
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const location = useLocation();
-  const navigate = useNavigate();
 
   const title =
     links.find((l) => l.to === location.pathname)?.label ?? "Dashboard Overview";
@@ -63,17 +60,6 @@ export function Shell({ children }: PropsWithChildren) {
   useEffect(() => {
     localStorage.setItem("isucamp_sidebar_minimized", String(minimized));
   }, [minimized]);
-
-  const handleSearchSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && searchQuery.trim()) {
-      const q = searchQuery.trim();
-      if (q.toLowerCase().startsWith("dev-") || q.toLowerCase().startsWith("usr-")) {
-        navigate(`/users?q=${encodeURIComponent(q)}`);
-      } else {
-        navigate(`/locations?q=${encodeURIComponent(q)}`);
-      }
-    }
-  };
 
   const handleToggleMinimize = () => {
     setMinimized((current) => !current);
@@ -214,25 +200,6 @@ export function Shell({ children }: PropsWithChildren) {
           </button>
           <div className="crumb">
             ISU Echague <span>/</span> <b>{title}</b>
-          </div>
-          <div className="global-search">
-            <img src={searchIcon} alt="" />
-            <input
-              placeholder="Search entities..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={handleSearchSubmit}
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                className="search-clear-btn"
-                aria-label="Clear search"
-              >
-                ×
-              </button>
-            )}
           </div>
           <div
             className="avatar small"

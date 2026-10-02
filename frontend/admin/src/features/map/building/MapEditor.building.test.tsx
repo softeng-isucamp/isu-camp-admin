@@ -366,6 +366,7 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
       buildings: [expect.objectContaining({ id: "building-open" })],
     })));
+    fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
     expect(await screen.findByRole("alert", { name: "Building is not routable" })).toBeInTheDocument();
   });
 
@@ -395,6 +396,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
     fireEvent.click(await screen.findByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
 
     expect(screen.getByRole("button", { name: "Route Node" })).toHaveAttribute("aria-pressed", "true");

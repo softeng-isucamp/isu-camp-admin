@@ -451,6 +451,9 @@ button {
   top: 0;
   z-index: 10;
 }
+.content > header .avatar {
+  margin-left: auto;
+}
 .crumb {
   font-size: 12px;
   color: #4c5751;
@@ -459,7 +462,6 @@ button {
 .crumb span {
   margin: 0 8px;
 }
-.global-search,
 .map-search {
   margin-left: auto;
   position: relative;
@@ -472,14 +474,12 @@ button {
   width: 313px;
   color: #9ca3af;
 }
-.global-search > img,
 .map-search > img {
   display: block;
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
 }
-.global-search input,
 .map-search input {
   border: 0;
   outline: 0;
@@ -2771,20 +2771,6 @@ td small {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-}
-
-/* Search clear button */
-.search-clear-btn {
-  background: transparent;
-  border: none;
-  color: #87938d;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-.search-clear-btn:hover {
-  color: var(--text);
 }
 
 /* Map Legend Overlay */

@@ -2,22 +2,49 @@ import type { MapPoint } from "../campusBoundary";
 import type { SelectionCandidate } from "../selectionCandidates";
 import type { SelectionPopoverState } from "./useMapSelection";
 
+/** The slice of a Leaflet LatLngBounds needed to place the popover. */
+export interface ViewportBounds {
+  getNorth: () => number;
+  getSouth: () => number;
+  getWest: () => number;
+  getEast: () => number;
+}
+
 interface SelectionPopoverProps {
   popover: SelectionPopoverState;
+  /** Fixed campus bounds, used until the live map viewport is known. */
   navigationBounds: [MapPoint, MapPoint];
+  /** The map's current visible bounds. */
+  viewportBounds: ViewportBounds | null;
   onSelect: (candidate: SelectionCandidate) => void;
 }
 
-export function SelectionPopover({ popover, navigationBounds, onSelect }: SelectionPopoverProps) {
+const POPOVER_HALF_WIDTH = "8.5rem";
+const ANCHOR_GAP = "12px";
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+export function SelectionPopover({ popover, navigationBounds, viewportBounds, onSelect }: SelectionPopoverProps) {
+  const south = viewportBounds?.getSouth() ?? navigationBounds[0][0];
+  const west = viewportBounds?.getWest() ?? navigationBounds[0][1];
+  const north = viewportBounds?.getNorth() ?? navigationBounds[1][0];
+  const east = viewportBounds?.getEast() ?? navigationBounds[1][1];
+  const [lat, lng] = popover.anchor;
+  const x = clamp01((lng - west) / (east - west));
+  const y = clamp01((north - lat) / (north - south));
+  const placement = y < 0.5 ? "below" : "above";
+
   return (
     <div
       role="dialog"
       aria-label="Choose overlapping object"
       data-anchor={popover.anchor.join(",")}
-      className="absolute z-[1100] w-64 -translate-x-1/2 -translate-y-full rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
+      data-placement={placement}
+      className="absolute z-[1100] w-64 rounded-2xl border border-[#dbe0e2] bg-white p-3 shadow-xl"
       style={{
-        left: `${Math.max(8, Math.min(92, ((popover.anchor[1] - navigationBounds[0][1]) / (navigationBounds[1][1] - navigationBounds[0][1])) * 100))}%`,
-        top: `${Math.max(8, Math.min(92, (1 - (popover.anchor[0] - navigationBounds[0][0]) / (navigationBounds[1][0] - navigationBounds[0][0])) * 100))}%`,
+        left: `clamp(${POPOVER_HALF_WIDTH}, ${x * 100}%, calc(100% - ${POPOVER_HALF_WIDTH}))`,
+        top: `${y * 100}%`,
+        transform: placement === "below" ? `translate(-50%, ${ANCHOR_GAP})` : `translate(-50%, calc(-100% - ${ANCHOR_GAP}))`,
         maxHeight: "min(50vh, 420px)",
         overflowY: "auto",
         overscrollBehavior: "contain",
