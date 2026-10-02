@@ -31,7 +31,6 @@ export function selectedPathwayInspectorModel({
   nodes: currentNodes,
   buildings: currentBuildings,
   savingAction,
-  onSelect,
   onApply,
   onCancel,
   onReshape,
@@ -43,8 +42,6 @@ export function selectedPathwayInspectorModel({
     pathwayFrameIssues,
     pathwayFrameDirty,
     setPathwayDraft,
-    selectedPathPointIndex,
-    setSelectedPathPointIndex,
     adoptSuggestedPathwayName,
     switchEndpoints: switchPathwayEndpoints,
   } = pathway;
@@ -57,8 +54,6 @@ export function selectedPathwayInspectorModel({
     summary: [
       { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
       { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
-      { label: "Path Sequence", value: `${selectedPath.pathPoints.length} intermediate point${selectedPath.pathPoints.length === 1 ? "" : "s"}` },
-      { label: "Distance", value: selectedPath.distance },
     ],
     details: (
       <>
@@ -73,18 +68,11 @@ export function selectedPathwayInspectorModel({
           </div>
           <fieldset className="mt-2 rounded-xl border border-[#dbe0e2] p-2.5"><legend className="px-1 text-xs font-semibold text-[#3f4941]">Allowed modes</legend><div className="grid grid-cols-2 gap-2 text-xs">{["Walking", "Vehicle"].map((mode) => { const allowedModes = pathwayFrame?.allowedModes ?? ["Walking"]; const vehicleBlocked = pathwayFrame?.type === "Walkway" && mode === "Vehicle"; return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>; })}</div></fieldset>
         </section>
-        <section className="inspector-related-section" aria-label="Path Sequence editor">
-          <h3>Path Sequence</h3>
+        <section className="inspector-related-section" aria-label="Pathway geometry">
+          <h3>Pathway geometry</h3>
           <button type="button" className="inspector-secondary-action" onClick={switchPathwayEndpoints} disabled={!pathwayFrame} aria-label="Switch source and destination">
             ⇄ Switch source and destination
           </button>
-          <label className="inspector-point-selector">Select Path Point
-            <select aria-label="Select Path Point" value={selectedPathPointIndex ?? ""} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); onSelect({ type: "path_point", id: `${selectedPath.id}:point:${index}` }); }}>
-              <option value="" disabled>Choose an ordered point</option>
-              {selectedPath.pathPoints.map((point, index) => <option key={`${index}-${point.join(",")}`} value={index}>Path Point #{index + 1} · {point[0].toFixed(6)}, {point[1].toFixed(6)}</option>)}
-            </select>
-          </label>
-          {selectedPath.pathPoints.length === 0 && <p>No intermediate Path Points.</p>}
           {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
           <h3 className="inspector-subheading">Network findings</h3>
           <p>{pathwayFrameIssues.length ? `${pathwayFrameIssues.length} local finding${pathwayFrameIssues.length === 1 ? "" : "s"} require attention.` : "No locally known blocking findings."}</p>
@@ -155,18 +143,12 @@ export function pathPointInspectorModel({
     summary: [
       { label: "Source Route Node", value: currentNodes.find((node) => node.id === activePathway?.sourceNodeId)?.name ?? activePathway?.sourceNodeId ?? "—" },
       { label: "Destination Route Node", value: currentNodes.find((node) => node.id === activePathway?.destinationNodeId)?.name ?? activePathway?.destinationNodeId ?? "—" },
-      { label: "Path Sequence", value: `${pathPoints.length} intermediate point${pathPoints.length === 1 ? "" : "s"}` },
       { label: "Latitude", value: point[0].toFixed(6) },
       { label: "Longitude", value: point[1].toFixed(6) },
     ],
     details: (
       <>
         <section className="inspector-related-section" aria-label="Parent Pathway context"><h3>Parent Pathway</h3><p>{activePathway?.name ?? editingPathId}</p><p>{activePathway?.shade} · {activePathway?.type} · {activePathway?.direction} · {activePathway?.status}</p></section>
-        <label className="inspector-point-selector">Select Path Point
-          <select aria-label="Select Path Point" value={selectedPathPointIndex} onChange={(event) => { const index = Number(event.target.value); setSelectedPathPointIndex(index); onSelect({ type: "path_point", id: `${editingPathId}:point:${index}` }); }}>
-            {pathPoints.map((candidate, index) => <option key={`${index}-${candidate.join(",")}`} value={index}>Path Point #{index + 1} · {candidate[0].toFixed(6)}, {candidate[1].toFixed(6)}</option>)}
-          </select>
-        </label>
         <div className="inspector-point-inputs"><label>Latitude
           <input aria-label="Path Point latitude" type="number" step="any" value={point[0]} onChange={(event) => {
             setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [Number(event.target.value), item[1]] : item));
