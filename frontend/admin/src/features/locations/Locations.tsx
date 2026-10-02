@@ -67,7 +67,10 @@ export function Locations() {
   const [buildingId, setBuildingId] = useState("All Buildings");
   const [floorId, setFloorId] = useState("All Floors");
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
-  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set());
+  // Nodes with children start collapsed; with search/filters/deep link active they start expanded. toggledNodes flips that default.
+  const [toggledNodes, setToggledNodes] = useState<Set<string>>(new Set());
+  const expandByDefault = query.trim() !== "" || !!targetKey || type !== "All Types" || buildingId !== "All Buildings" || floorId !== "All Floors" || status !== "All Statuses";
+  useEffect(() => setToggledNodes(new Set()), [expandByDefault]);
 
   const [dialog, setDialog] = useState<
     "add" | "edit" | "history" | "remove" | null
@@ -342,10 +345,12 @@ export function Locations() {
       matchingKeys.has(locationIdentityKey(loc)) || allLocations.some((child) => matchingKeys.has(locationIdentityKey(child)) && child.parentId === loc.id)
     ));
     const standalone = hierarchyItems.filter((loc) => loc.parentId === null && loc.type === "Facility");
+    // Rows nested under a Building, including ones hidden by a collapsed node.
+    const nestedKeys = new Set<string>();
 
     for (const bldg of rootBuildings) {
       const rootWasMatched = matchingKeys.has(locationIdentityKey(bldg));
-      const bldgCollapsed = collapsedNodes.has(bldg.id);
+      const bldgCollapsed = expandByDefault === toggledNodes.has(bldg.id);
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && loc.type !== "Building" &&
         loc.parentId === bldg.id &&
@@ -377,12 +382,16 @@ export function Locations() {
           positioned: false,
         }));
       const childFloors = [...explicitFloors, ...inferredFloors];
+      const childFloorIds = new Set(childFloors.map((floor) => floor.id));
+      for (const loc of [...childFloors, ...childLocations, ...allLocations.filter((loc) => loc.parentId && childFloorIds.has(loc.parentId))]) {
+        nestedKeys.add(locationIdentityKey(loc));
+      }
       const family: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
       family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
 
       if (!bldgCollapsed) {
         childFloors.forEach((flr, flrIndex) => {
-          const flrCollapsed = collapsedNodes.has(flr.id);
+          const flrCollapsed = expandByDefault === toggledNodes.has(flr.id);
           const childRooms = allLocations.filter(
             (loc) => matchingKeys.has(locationIdentityKey(loc)) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building"))
           );
@@ -416,7 +425,7 @@ export function Locations() {
     }
 
     // If filter produced items not in tree, include them
-    const includedKeys = new Set(result.flat().map((r) => locationIdentityKey(r.item)));
+    const includedKeys = new Set([...nestedKeys, ...result.flat().map((r) => locationIdentityKey(r.item))]);
     for (const item of hierarchyItems) {
       if (!includedKeys.has(locationIdentityKey(item))) {
         result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
@@ -424,7 +433,7 @@ export function Locations() {
     }
 
     return result;
-  }, [items, hierarchyItems, matchingKeys, allLocations, viewMode, collapsedNodes]);
+  }, [items, hierarchyItems, matchingKeys, allLocations, viewMode, toggledNodes, expandByDefault]);
 
   const hierarchyRows = hierarchyFamilies.flat();
   const hierarchyTotal = hierarchyFamilies.length;
@@ -449,7 +458,7 @@ export function Locations() {
   }, [data, viewMode]);
 
   const toggleCollapse = (id: string) => {
-    setCollapsedNodes((prev) => {
+    setToggledNodes((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -886,7 +895,6 @@ export function Locations() {
                 <th style={{ padding: "14px 20px" }}>NAME & ID</th>
                 <th style={{ padding: "14px 20px" }}>TYPE</th>
                 <th style={{ padding: "14px 20px" }}>FUNCTION / PURPOSE</th>
-                <th style={{ padding: "14px 20px" }}>KEYWORDS</th>
                 <th style={{ padding: "14px 20px" }}>STATUS</th>
                 <th style={{ padding: "14px 20px", textAlign: "right" }}>ACTIONS</th>
               </tr>
@@ -896,7 +904,7 @@ export function Locations() {
                 const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
-                  <td colSpan={item.type === "Floor" ? 6 : undefined} style={{ padding: "16px 20px" }}>
+                  <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: "16px 20px" }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
                       {/* Tree connector graphics */}
                       {level === 1 && (
@@ -966,9 +974,6 @@ export function Locations() {
                   </td>
                   <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
                     {item.function || "—"}
-                  </td>
-                  <td style={{ padding: "16px 20px", color: "#6b7280", fontSize: "13px" }}>
-                    {item.keywords || "—"}
                   </td>
                   <td style={{ padding: "16px 20px" }}>
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: item.status === "Active" ? "#e6f7ec" : "#fee2e2", color: item.status === "Active" ? "#0c7441" : "#dc2626" }}>
