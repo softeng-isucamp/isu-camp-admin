@@ -345,6 +345,8 @@ export function Locations() {
       matchingKeys.has(locationIdentityKey(loc)) || allLocations.some((child) => matchingKeys.has(locationIdentityKey(child)) && child.parentId === loc.id)
     ));
     const standalone = hierarchyItems.filter((loc) => loc.parentId === null && loc.type === "Facility");
+    // Rows nested under a Building, including ones hidden by a collapsed node.
+    const nestedKeys = new Set<string>();
 
     for (const bldg of rootBuildings) {
       const rootWasMatched = matchingKeys.has(locationIdentityKey(bldg));
@@ -380,6 +382,10 @@ export function Locations() {
           positioned: false,
         }));
       const childFloors = [...explicitFloors, ...inferredFloors];
+      const childFloorIds = new Set(childFloors.map((floor) => floor.id));
+      for (const loc of [...childFloors, ...childLocations, ...allLocations.filter((loc) => loc.parentId && childFloorIds.has(loc.parentId))]) {
+        nestedKeys.add(locationIdentityKey(loc));
+      }
       const family: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
       family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
 
@@ -419,7 +425,7 @@ export function Locations() {
     }
 
     // If filter produced items not in tree, include them
-    const includedKeys = new Set(result.flat().map((r) => locationIdentityKey(r.item)));
+    const includedKeys = new Set([...nestedKeys, ...result.flat().map((r) => locationIdentityKey(r.item))]);
     for (const item of hierarchyItems) {
       if (!includedKeys.has(locationIdentityKey(item))) {
         result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);

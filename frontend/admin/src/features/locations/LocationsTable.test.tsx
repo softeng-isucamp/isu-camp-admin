@@ -332,6 +332,16 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await tableBody().findByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
   });
 
+  it("keeps collapsed nested locations out of the top-level rows", async () => {
+    renderLocations();
+    await screen.findByRole("button", { name: "Expand Administration Building" });
+    const collapsedTotal = screen.getByText(/Showing 1–10 of \d+/).textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Expand Administration Building" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand 2nd Floor" }));
+    await screen.findByRole("button", { name: "Collapse 2nd Floor" });
+    expect(screen.getByText(/Showing 1–10 of \d+/).textContent).toBe(collapsedTotal);
+  });
+
   it("expands nested matches by default when searching", async () => {
     const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "search-room", name: "Searchable Nested Room", code: "SRCH-R", type: "Room", parentId: building.id, building: building.name, floor: "Search Floor", status: "Active", lat: null, lng: null, positioned: false });
