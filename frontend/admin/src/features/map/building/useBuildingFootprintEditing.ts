@@ -16,6 +16,14 @@ import {
 } from "./buildingFootprint";
 import { createBuildingFootprintWorkflow } from "./BuildingFootprintWorkflow";
 
+const blankBuildingForm = (): BuildingIdentityInput => ({
+  name: "",
+  code: `BLDG-${Date.now().toString().slice(-4)}`,
+  function: "",
+  keywords: "",
+  status: "Active",
+});
+
 export interface BuildingEditingContext {
   sessionBuildings: Building[];
   associationOptions: Building[];
@@ -88,19 +96,13 @@ export function useBuildingFootprintEditing({
   const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
   const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
-  const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>({
-    name: "",
-    code: "",
-    function: "",
-    keywords: "",
-    status: "Active",
-  });
+  const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>(blankBuildingForm);
   const buildingName = buildingForm.name;
   const buildingCode = buildingForm.code;
   const buildingFunction = buildingForm.function ?? "";
   const buildingKeywords = buildingForm.keywords ?? "";
   const resetBuildingForm = () => {
-    setBuildingForm({ name: "", code: "", function: "", keywords: "", status: "Active" });
+    setBuildingForm(blankBuildingForm());
     setBuildingClassification("Building");
   };
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
