@@ -1,26 +1,33 @@
 from extensions import db
+from model.photo_columns import PhotoColumns
 
 
-class LocationPhoto(db.Model):
+class LocationPhoto(PhotoColumns, db.Model):
+    """An indoor Location's gallery photos, one row per image.
+
+    This table used to hold Building photos too, addressed by
+    ``(owner_type, owner_id)``. That pair could not carry a foreign key, so
+    every delete path purged its rows by hand. Buildings now have their own
+    ``model.building_photo.BuildingPhoto`` and this column is a real key.
+    """
+
     __tablename__ = "location_photo"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        # Matches services.location_photos.list_photos: filter by owner,
+        # order by position.
+        db.Index("location_photo_owner_idx", "location_id", "position"),
+        # At most one cover per owner, enforced by the database rather
+        # than only by services.location_photos.apply_gallery.
+        db.Index(
+            "location_photo_one_cover_idx", "location_id", unique=True,
+            postgresql_where=db.text("is_cover"),
+            sqlite_where=db.text("is_cover"),
+        ),
+        {"schema": "public"},
+    )
 
-    photo_id = db.Column(db.BigInteger, primary_key=True)
-    owner_type = db.Column(db.String(8), nullable=False)
-    owner_id = db.Column(db.BigInteger, nullable=False)
-    position = db.Column(db.Integer, nullable=False)
-    filename = db.Column(db.String(255), nullable=False)
-    mime_type = db.Column(db.String(32), nullable=False)
-    # Deferred: a gallery is listed, reordered and re-covered far more often
-    # than an image is served, and an eager LargeBinary made every one of those
-    # operations download each photo the owner has.
-    content = db.deferred(db.Column(db.LargeBinary, nullable=False))
-    is_cover = db.Column(db.Boolean, nullable=False, default=False)
-
-    def to_metadata(self):
-        return {
-            "id": str(self.photo_id),
-            "name": self.filename,
-            "type": self.mime_type,
-            "isCover": self.is_cover,
-        }
+    location_id = db.Column(
+        db.BigInteger,
+        db.ForeignKey("public.location.location_id", ondelete="CASCADE"),
+        nullable=False,
+    )

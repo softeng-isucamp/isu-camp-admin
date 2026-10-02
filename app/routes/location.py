@@ -15,7 +15,7 @@ from services.floor_lookup import resolve_floor as _resolve_floor
 from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
 from services.geometry import polygon_error as _polygon_error
 from services.location_listing import list_location_page
-from services.location_photos import apply_gallery, read_gallery_change
+from services.location_photos import apply_gallery, read_photo_change
 
 location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
@@ -24,8 +24,6 @@ INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 # Facility is a Building classification, never a public.location type.  It
 # remains accepted here so the API can create a classified Building record.
 CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
-PHOTO_MAX_BYTES = 5 * 1024 * 1024
-PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 logger = logging.getLogger(__name__)
 
 
@@ -99,39 +97,19 @@ def _request_payload():
     )
 
 
-def _photo_upload():
-    """Read and validate an optional multipart photo before touching a row."""
+def _photo_change():
+    """The gallery edit this request asks for, or a 400 to return as-is.
 
-    upload = request.files.get("photo")
+    Both upload fields land in the owner's gallery now, so there is one reader
+    for them instead of a photo column written beside it.
+    """
 
-    if upload is None or not upload.filename:
-        return None, None, None
+    change, cover_last_upload, error = read_photo_change(request)
 
-    if upload.mimetype not in PHOTO_MIME_TYPES:
-        return (
-            None,
-            None,
-            _validation_error(
-                {
-                    "photo": "Choose a PNG, JPEG, or WebP image."
-                }
-            )
-        )
+    if error is not None:
+        return None, False, _validation_error({"photo": error})
 
-    content = upload.read(PHOTO_MAX_BYTES + 1)
-
-    if len(content) > PHOTO_MAX_BYTES:
-        return (
-            None,
-            None,
-            _validation_error(
-                {
-                    "photo": "Photo must be 5 MB or smaller."
-                }
-            )
-        )
-
-    return content, upload.mimetype, None
+    return change, cover_last_upload, None
 
 
 def _validation_error(fields=None, relationships=None):
@@ -418,13 +396,10 @@ def create_location():
     if error:
         return error
 
-    photo, photo_mime_type, error = _photo_upload()
+    gallery_change, cover_last_upload, error = _photo_change()
 
     if error:
         return error
-    gallery_change, gallery_error = read_gallery_change(request)
-    if gallery_error:
-        return _validation_error({"photo": gallery_error})
 
     try:
 
@@ -456,14 +431,10 @@ def create_location():
                 ],
             )
 
-            if photo is not None:
-                building.photo = photo
-                building.photo_mime_type = photo_mime_type
-
             db.session.add(building)
 
             db.session.flush()
-            gallery_error = apply_gallery(building, gallery_change)
+            gallery_error = apply_gallery(building, gallery_change, cover_last_upload)
             if gallery_error:
                 db.session.rollback()
                 return _validation_error({"photo": gallery_error})
@@ -495,14 +466,10 @@ def create_location():
             keywords=values["keywords"],
         )
 
-        if photo is not None:
-            location.photo = photo
-            location.photo_mime_type = photo_mime_type
-
         db.session.add(location)
 
         db.session.flush()
-        gallery_error = apply_gallery(location, gallery_change)
+        gallery_error = apply_gallery(location, gallery_change, cover_last_upload)
         if gallery_error:
             db.session.rollback()
             return _validation_error({"photo": gallery_error})

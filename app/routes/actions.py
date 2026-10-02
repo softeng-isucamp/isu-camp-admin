@@ -8,13 +8,14 @@ from model.building import Building
 from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from model.building_photo import BuildingPhoto
 from model.location_photo import LocationPhoto
 from services.audit import log_audit
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
-from services.location_photos import apply_gallery, find_photo, list_photos, read_gallery_change
+from services.location_photos import apply_gallery, find_cover, find_photo, list_photos, read_photo_change
 
 actions_bp = Blueprint(
     "actions",
@@ -25,7 +26,6 @@ actions_bp = Blueprint(
 TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
-PHOTO_MAX_BYTES = 5 * 1024 * 1024
 PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 logger = logging.getLogger(__name__)
 
@@ -120,17 +120,16 @@ def _request_payload():
     return (request.get_json(silent=True) or {}) if request.is_json else request.form.to_dict()
 
 
-def _photo_upload():
-    """Read and validate an optional multipart photo before touching a row."""
-    upload = request.files.get("photo")
-    if upload is None or not upload.filename:
-        return None, None, None
-    if upload.mimetype not in PHOTO_MIME_TYPES:
-        return None, None, _validation_error({"photo": "Choose a PNG, JPEG, or WebP image."})
-    content = upload.read(PHOTO_MAX_BYTES + 1)
-    if len(content) > PHOTO_MAX_BYTES:
-        return None, None, _validation_error({"photo": "Photo must be 5 MB or smaller."})
-    return content, upload.mimetype, None
+def _photo_change():
+    """The gallery edit this request asks for, or a 400 to return as-is.
+
+    Both upload fields land in the owner's gallery now, so there is one reader
+    for them instead of a photo column written beside it.
+    """
+    change, cover_last_upload, error = read_photo_change(request)
+    if error is not None:
+        return None, False, _validation_error({"photo": error})
+    return change, cover_last_upload, None
 
 
 # Magic numbers for the three formats the uploader accepts.
@@ -141,10 +140,12 @@ PHOTO_MAGIC_NUMBERS = (
 
 
 def _sniff_photo_mime_type(content):
-    """Recover a Content-Type for rows written before photo_mime_type existed.
+    """Recover a Content-Type when the stored one is not servable.
 
-    Only the formats the uploader accepts are probed; anything else falls back
-    to a generic binary type rather than guessing wrongly.
+    Both gallery tables store mime_type NOT NULL and the uploader only accepts
+    the three types below, so this is a fallback rather than a normal path.
+    Only those formats are probed; anything else falls back to a generic binary
+    type rather than guessing wrongly.
     """
     for signature, mime_type in PHOTO_MAGIC_NUMBERS:
         if content.startswith(signature):
@@ -256,10 +257,8 @@ def add_room_to_building(building_id):
     values, error = _validate(data, records, buildings)
     if error: return error
 
-    photo, photo_mime_type, error = _photo_upload()
+    gallery_change, cover_last_upload, error = _photo_change()
     if error: return error
-    gallery_change, gallery_error = read_gallery_change(request)
-    if gallery_error: return _validation_error({"photo": gallery_error})
 
     try:
         floor_id = (
@@ -278,13 +277,9 @@ def add_room_to_building(building_id):
             keywords=values["keywords"]
         )
 
-        if photo is not None:
-            location.photo = photo
-            location.photo_mime_type = photo_mime_type
-
         db.session.add(location)
         db.session.flush()
-        gallery_error = apply_gallery(location, gallery_change)
+        gallery_error = apply_gallery(location, gallery_change, cover_last_upload)
         if gallery_error:
             db.session.rollback()
             return _validation_error({"photo": gallery_error})
@@ -333,10 +328,8 @@ def edit_location(location_id):
     values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
     if error: return error
 
-    photo, photo_mime_type, error = _photo_upload()
+    gallery_change, cover_last_upload, error = _photo_change()
     if error: return error
-    gallery_change, gallery_error = read_gallery_change(request)
-    if gallery_error: return _validation_error({"photo": gallery_error})
 
     try:
         if building is not None:
@@ -346,12 +339,8 @@ def edit_location(location_id):
             building.description = values["description"]
             building.keywords = values["keywords"]
 
-            if photo is not None:
-                building.photo = photo
-                building.photo_mime_type = photo_mime_type
-
             db.session.flush()
-            gallery_error = apply_gallery(building, gallery_change)
+            gallery_error = apply_gallery(building, gallery_change, cover_last_upload)
             if gallery_error:
                 db.session.rollback()
                 return _validation_error({"photo": gallery_error})
@@ -374,12 +363,8 @@ def edit_location(location_id):
         location.description = values["description"]
         location.keywords = values["keywords"]
 
-        if photo is not None:
-            location.photo = photo
-            location.photo_mime_type = photo_mime_type
-
         db.session.flush()
-        gallery_error = apply_gallery(location, gallery_change)
+        gallery_error = apply_gallery(location, gallery_change, cover_last_upload)
         if gallery_error:
             db.session.rollback()
             return _validation_error({"photo": gallery_error})
@@ -400,12 +385,16 @@ def edit_location(location_id):
 
 @actions_bp.route("/locations/<int:location_id>/photo", methods=["GET"])
 def view_location_photo(location_id):
-    """Serve the stored image bytes for a Location, Building, or Facility.
+    """Serve the cover image for a Location, Building, or Facility.
 
     Buildings and Locations are separate tables with independent id sequences,
     so an explicit ``?type=`` disambiguates which one the id belongs to. With
     no hint the Location table is searched first, matching how the rest of the
     directory resolves an ambiguous id.
+
+    The bytes come from the owner's ``is_cover`` gallery row. They used to be
+    mirrored into a photo column on the owner itself; this reads the one copy
+    that is left.
     """
 
     _, error = admin_required()
@@ -432,13 +421,14 @@ def view_location_photo(location_id):
                 "message": "Location not found."
             }), 404
 
-        if record.photo is None:
+        cover = find_cover(record)
+        if cover is None:
             return jsonify({
                 "success": False,
                 "message": "Location has no photo."
             }), 404
 
-        return _photo_response(record.photo, record.photo_mime_type)
+        return _photo_response(cover.content, cover.mime_type)
 
     except Exception:
         logger.exception("Failed to load location photo")
@@ -573,10 +563,16 @@ def delete_location(location_id):
                 "message": "Location not found."
             }), 404
 
+        # public.building_photo and public.location_photo both cascade on their
+        # owner, but the indoor Locations under a Building are reached through
+        # ``location.building_id``, which is not a database foreign key. Their
+        # photos are cleared here so no blob outlives its record.
         if building is not None:
             for child in Location.query.filter_by(building_id=location_id).all() or []:
-                LocationPhoto.query.filter_by(owner_type="location", owner_id=child.location_id).delete()
-        LocationPhoto.query.filter_by(owner_type="building" if building else "location", owner_id=location_id).delete()
+                LocationPhoto.query.filter_by(location_id=child.location_id).delete()
+            BuildingPhoto.query.filter_by(building_id=location_id).delete()
+        else:
+            LocationPhoto.query.filter_by(location_id=location_id).delete()
         db.session.delete(building or location)
         log_audit("Admin", None, "delete", "Building" if building else "Location", location_id)
         db.session.commit()
