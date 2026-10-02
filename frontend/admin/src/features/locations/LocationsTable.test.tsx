@@ -84,6 +84,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("renders Floor Levels as grouping rows without location metadata", async () => {
     renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Administration Building" }));
     const floorRow = (await screen.findAllByRole("row"))
       .find((row) => row.querySelector("strong")?.textContent === "Ground Floor");
 
@@ -92,7 +93,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(floorRow).not.toHaveTextContent("Active");
     expect(floorRow).not.toHaveTextContent("BLD-ADM-01-Ground Floor");
     expect(floorRow?.querySelectorAll("td")).toHaveLength(1);
-    expect(floorRow?.querySelector("td")).toHaveAttribute("colspan", "6");
+    expect(floorRow?.querySelector("td")).toHaveAttribute("colspan", "5");
   });
 
   it("keeps flat-view pagination record-based and resets to page one after filtering", async () => {
@@ -302,20 +303,54 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       positioned: true,
     });
 
+    const { container } = renderLocations();
+    const tableBody = () => within(container.querySelector("tbody") as HTMLElement);
+    // Parents start collapsed; expand, then collapse again.
+    fireEvent.click(await screen.findByRole("button", { name: /expand Administration Building/i }));
+    expect((await tableBody().findAllByText("Administration Floor 2")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(await screen.findByRole("button", { name: /collapse Administration Building/i }));
+    await waitFor(() => expect(tableBody().queryByText("Administration Floor 2")).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: /expand Administration Building/i }));
+    expect((await tableBody().findAllByText("Administration Floor 2")).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not render a KEYWORDS column", async () => {
     renderLocations();
-    const administrationBuildingMatches = await screen.findAllByText("Administration Building", {}, { timeout: 4000 });
-    expect(administrationBuildingMatches.length).toBeGreaterThanOrEqual(1);
-    const administrationFloorMatches = await screen.findAllByText("Administration Floor 2", {}, { timeout: 4000 });
-    expect(administrationFloorMatches.length).toBeGreaterThanOrEqual(1);
+    await screen.findByRole("heading", { name: "Campus Locations" });
+    await screen.findAllByText("Administration Building");
+    expect(screen.queryByRole("columnheader", { name: "KEYWORDS" })).not.toBeInTheDocument();
+  });
 
-    // Find collapse button for Administration Building
-    const collapseButton = await screen.findByRole("button", { name: /collapse Administration Building/i });
-    fireEvent.click(collapseButton);
+  it("starts buildings and floors with nested locations collapsed until expanded", async () => {
+    const { container } = renderLocations();
+    const expandBuilding = await screen.findByRole("button", { name: "Expand Administration Building" });
+    const tableBody = () => within(container.querySelector("tbody") as HTMLElement);
+    expect(tableBody().queryByText("2nd Floor")).not.toBeInTheDocument();
+    expect(screen.queryByText("Administration Building 2nd Floor Laboratory 107")).not.toBeInTheDocument();
+    fireEvent.click(expandBuilding);
+    fireEvent.click(await screen.findByRole("button", { name: "Expand 2nd Floor" }));
+    expect(await tableBody().findByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
+  });
 
-    // Expand button is now available
-    const expandButton = await screen.findByRole("button", { name: /expand Administration Building/i });
-    fireEvent.click(expandButton);
-    expect((await screen.findAllByText("Administration Floor 2")).length).toBeGreaterThanOrEqual(1);
+  it("keeps collapsed nested locations out of the top-level rows", async () => {
+    renderLocations();
+    await screen.findByRole("button", { name: "Expand Administration Building" });
+    const collapsedTotal = screen.getByText(/Showing 1–10 of \d+/).textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Expand Administration Building" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Expand 2nd Floor" }));
+    await screen.findByRole("button", { name: "Collapse 2nd Floor" });
+    expect(screen.getByText(/Showing 1–10 of \d+/).textContent).toBe(collapsedTotal);
+  });
+
+  it("expands nested matches by default when searching", async () => {
+    const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "search-room", name: "Searchable Nested Room", code: "SRCH-R", type: "Room", parentId: building.id, building: building.name, floor: "Search Floor", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    await screen.findByRole("heading", { name: "Campus Locations" });
+    expect(screen.queryByText("Searchable Nested Room")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Searchable Nested Room" } });
+    expect(await screen.findByText("Searchable Nested Room")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Search Building" })).toBeInTheDocument();
   });
 
   it("opens and interacts with the Add Location modal with Figma fields", async () => {
@@ -563,7 +598,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Saved fields test" } });
     expect(await screen.findByText("Saved purpose")).toBeInTheDocument();
-    expect(screen.getByText("saved, keywords")).toBeInTheDocument();
+    // Keywords are no longer a table column; they stay persisted and searchable.
+    expect(screen.queryByText("saved, keywords")).not.toBeInTheDocument();
+    const saved = (await services.locations.list("saved, keywords", 1, 10)).items.find((item) => item.name === "Saved fields test");
+    expect(saved?.keywords).toBe("saved, keywords");
   });
 
   it("shows a delete failure alert and leaves the record visible", async () => {
