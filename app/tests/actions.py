@@ -2,6 +2,7 @@ from flask import Flask
 
 import actions as actions_module
 from actions import actions_bp
+from services.location_photos import GalleryChange
 import location as location_module
 from location import location_bp
 
@@ -18,7 +19,6 @@ class ListRecord:
         self.description = name
         self.keywords = "keyword"
         self.lat = self.lng = None
-        self.photo = None
 
     def to_location_dto(self, building=None, floor=None):
         return {
@@ -202,6 +202,7 @@ def test_actions_can_delete_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "Location", type("Location", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
     monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
+    monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
 
     response = app.test_client().delete("/api/actions/locations/42")
@@ -220,6 +221,7 @@ def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeyp
     monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
     monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
+    monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
 
     response = app.test_client().delete("/api/actions/locations/42?type=Room")
@@ -242,7 +244,7 @@ def test_actions_can_edit_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
     monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
-    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
+    monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
 
@@ -270,7 +272,7 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
     monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
-    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
+    monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
     monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
 
@@ -387,76 +389,81 @@ PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"body"
 JPEG_BYTES = bytes.fromhex("ffd8ff") + b"body"
 
 
-def _photo_app(monkeypatch, location=None, building=None):
+def _photo_app(monkeypatch, location=None, building=None, covers=None):
+    """A client whose owners resolve to the covers given in ``covers``."""
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    lookup = {id(record): cover for record, cover in (covers or {}).items()}
+    monkeypatch.setattr(actions_module, "find_cover", lambda record: lookup.get(id(record)))
     return app.test_client()
 
 
-def _photo_record(photo, mime_type):
-    return type("Record", (), {"photo": photo, "photo_mime_type": mime_type})()
+def _owner():
+    """An owner record: the image lives in its gallery, not on the row."""
+    return type("Record", (), {})()
+
+
+def _cover(content, mime_type):
+    return type("Cover", (), {"content": content, "mime_type": mime_type})()
+
+
+def _edit_building_app(monkeypatch, has_photo, photo_change, applied):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Building", (), {
+        "building_id": 42,
+        "building_code": "ENG",
+        "building_name": "Engineering Hall",
+        "classification": "Building",
+        "description": "A building",
+        "to_location_dto": lambda self: {"id": "42", "hasPhoto": has_photo},
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
+    monkeypatch.setattr(actions_module, "_photo_change", lambda: photo_change)
+    monkeypatch.setattr(
+        actions_module,
+        "apply_gallery",
+        lambda record, change, cover_last_upload=False: applied.append((record, change, cover_last_upload)),
+    )
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+    return app.test_client(), building
 
 
 def test_actions_can_attach_a_photo_when_editing_a_building(monkeypatch):
-    app = Flask(__name__)
-    app.register_blueprint(actions_bp)
-    building = type("Building", (), {
-        "building_id": 42,
-        "building_code": "ENG",
-        "building_name": "Engineering Hall",
-        "classification": "Building",
-        "description": "A building",
-        "photo": None,
-        "photo_mime_type": None,
-        "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
-    })()
-    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
-    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
-    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (PNG_BYTES, "image/png", None))
-    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+    """The single ``photo`` field lands in the gallery as a cover upload."""
+    change = GalleryChange([("cover.png", "image/png", PNG_BYTES)], [], None)
+    applied = []
+    client, building = _edit_building_app(monkeypatch, True, (change, True, None), applied)
 
-    response = app.test_client().put("/api/actions/locations/42", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    response = client.put("/api/actions/locations/42", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
 
     assert response.status_code == 200
-    assert building.photo == PNG_BYTES
-    assert building.photo_mime_type == "image/png"
+    assert applied == [(building, change, True)]
     assert response.json["hasPhoto"] is True
 
 
-def test_editing_a_building_without_an_upload_keeps_the_existing_photo(monkeypatch):
-    app = Flask(__name__)
-    app.register_blueprint(actions_bp)
-    building = type("Building", (), {
-        "building_id": 42,
-        "building_code": "ENG",
-        "building_name": "Engineering Hall",
-        "classification": "Building",
-        "description": "A building",
-        "photo": PNG_BYTES,
-        "photo_mime_type": "image/png",
-        "to_location_dto": lambda self: {"id": "42", "hasPhoto": self.photo is not None},
-    })()
-    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
-    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
-    monkeypatch.setattr(actions_module, "_photo_upload", lambda: (None, None, None))
-    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+def test_editing_a_building_without_an_upload_leaves_the_gallery_alone(monkeypatch):
+    applied = []
+    client, building = _edit_building_app(monkeypatch, True, (None, False, None), applied)
 
-    response = app.test_client().put("/api/actions/locations/42", json={"name": "Renamed Hall", "code": "ENG", "type": "Building"})
+    response = client.put("/api/actions/locations/42", json={"name": "Renamed Hall", "code": "ENG", "type": "Building"})
 
     assert response.status_code == 200
-    assert building.photo == PNG_BYTES
-    assert building.photo_mime_type == "image/png"
+    assert building.building_name == "Renamed Hall"
+    # Nothing to apply, so the existing cover is left where it is.
+    assert applied == [(building, None, False)]
+    assert response.json["hasPhoto"] is True
 
 
 def test_location_photo_is_served_with_its_stored_content_type(monkeypatch):
-    client = _photo_app(monkeypatch, location=_photo_record(PNG_BYTES, "image/png"))
+    record = _owner()
+    client = _photo_app(monkeypatch, location=record, covers={record: _cover(PNG_BYTES, "image/png")})
 
     response = client.get("/api/actions/locations/42/photo")
 
@@ -466,10 +473,12 @@ def test_location_photo_is_served_with_its_stored_content_type(monkeypatch):
 
 
 def test_building_photo_is_served_when_the_type_hint_names_a_footprint(monkeypatch):
+    indoor, footprint = _owner(), _owner()
     client = _photo_app(
         monkeypatch,
-        location=_photo_record(JPEG_BYTES, "image/jpeg"),
-        building=_photo_record(PNG_BYTES, "image/png"),
+        location=indoor,
+        building=footprint,
+        covers={indoor: _cover(JPEG_BYTES, "image/jpeg"), footprint: _cover(PNG_BYTES, "image/png")},
     )
 
     response = client.get("/api/actions/locations/42/photo?type=Building")
@@ -479,7 +488,8 @@ def test_building_photo_is_served_when_the_type_hint_names_a_footprint(monkeypat
 
 
 def test_photo_content_type_is_sniffed_when_the_stored_type_is_missing(monkeypatch):
-    client = _photo_app(monkeypatch, location=_photo_record(JPEG_BYTES, None))
+    record = _owner()
+    client = _photo_app(monkeypatch, location=record, covers={record: _cover(JPEG_BYTES, None)})
 
     response = client.get("/api/actions/locations/42/photo")
 
@@ -488,7 +498,8 @@ def test_photo_content_type_is_sniffed_when_the_stored_type_is_missing(monkeypat
 
 
 def test_photo_request_for_a_row_without_an_image_is_not_found(monkeypatch):
-    client = _photo_app(monkeypatch, location=_photo_record(None, None))
+    """An owner whose gallery is empty has no cover to serve."""
+    client = _photo_app(monkeypatch, location=_owner(), covers={})
 
     response = client.get("/api/actions/locations/42/photo")
 

@@ -9,6 +9,7 @@ from model.building import Building
 from model.floor import Floor
 from model.location import Location
 from model.location import LOCATION_TYPE_NAMES
+from model.building_photo import BuildingPhoto
 from model.location_photo import LocationPhoto
 from model.route_node import RouteNode
 from model.pathway import Pathway
@@ -79,18 +80,18 @@ def _building_dto(building):
 def _delete_building_photos(building_id):
     """Purge gallery photos owned by a Building and its Indoor Locations.
 
-    ``location_photo.owner_id`` is polymorphic, so the column carries no
-    foreign key and the database performs no cascade.  The rows are removed
-    before their owners are staged so the blobs cannot outlive the records
-    they belong to (see the same purge in ``routes.actions.delete_location``).
+    ``public.building_photo`` cascades on its own owner, but the Indoor
+    Locations under a Building are reached through ``location.building_id``,
+    which is not a database foreign key.  The rows are removed before their
+    owners are staged so the blobs cannot outlive the records they belong to
+    (see the same purge in ``routes.actions.delete_location``).
     """
     location_ids = [row.location_id for row in Location.query.filter_by(building_id=building_id).all()]
     if location_ids:
         LocationPhoto.query.filter(
-            LocationPhoto.owner_type == "location",
-            LocationPhoto.owner_id.in_(location_ids),
+            LocationPhoto.location_id.in_(location_ids),
         ).delete(synchronize_session=False)
-    LocationPhoto.query.filter_by(owner_type="building", owner_id=building_id).delete(synchronize_session=False)
+    BuildingPhoto.query.filter_by(building_id=building_id).delete(synchronize_session=False)
 
 
 def _delete_building_locations(building_id):

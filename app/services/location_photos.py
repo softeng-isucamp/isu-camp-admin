@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 
 from extensions import db
-from model.building import Building
+from model.building_photo import BuildingPhoto
 from model.location_photo import LocationPhoto
 
 MAX_PHOTOS = 10
@@ -17,25 +17,54 @@ class GalleryChange:
     cover_index: int | None
 
 
-def owner_key(record):
-    if isinstance(record, Building):
-        return "building", record.building_id
-    return "location", record.location_id
+def gallery_of(record):
+    """The photo model owning this record's gallery, and how to address it.
+
+    Buildings and indoor Locations keep their photos in separate tables, so a
+    caller holding either one asks here instead of branching itself. An indoor
+    Location is the one with a ``location_id``; a Building has only a
+    ``building_id``, while a Location has both. The models are read off the
+    module so a test can substitute them.
+    """
+    if hasattr(record, "location_id"):
+        return LocationPhoto, "location_id", record.location_id
+    return BuildingPhoto, "building_id", record.building_id
 
 
 def list_photos(record):
     """Gallery rows in display order. ``content`` stays deferred."""
-    owner_type, owner_id = owner_key(record)
-    return LocationPhoto.query.filter_by(owner_type=owner_type, owner_id=owner_id).order_by(LocationPhoto.position, LocationPhoto.photo_id).all()
+    model, column, owner_id = gallery_of(record)
+    return (
+        model.query
+        .filter_by(**{column: owner_id})
+        .order_by(model.position, model.photo_id)
+        .all()
+    )
 
 
 def find_photo(record, photo_id):
     """One of this owner's photos, with its bytes, without reading the others."""
-    owner_type, owner_id = owner_key(record)
+    model, column, owner_id = gallery_of(record)
     return (
-        LocationPhoto.query
-        .options(db.undefer(LocationPhoto.content))
-        .filter_by(owner_type=owner_type, owner_id=owner_id, photo_id=photo_id)
+        model.query
+        .options(db.undefer(model.content))
+        .filter_by(**{column: owner_id, "photo_id": photo_id})
+        .first()
+    )
+
+
+def find_cover(record):
+    """This owner's cover photo, with its bytes, or None.
+
+    The cover is what the single-image /photo endpoint serves. It used to be a
+    copy kept in ``building.photo`` / ``location.photo``; the ``is_cover`` flag
+    is now the only place the choice is recorded.
+    """
+    model, column, owner_id = gallery_of(record)
+    return (
+        model.query
+        .options(db.undefer(model.content))
+        .filter_by(**{column: owner_id, "is_cover": True})
         .first()
     )
 
@@ -68,7 +97,44 @@ def read_gallery_change(request):
     return GalleryChange(prepared, removed, cover_index), None
 
 
-def apply_gallery(record, change):
+def read_photo_change(request):
+    """The gallery edit a write request asks for, from either upload field.
+
+    Returns ``(change, cover_last_upload, error)``. ``photos`` with
+    ``coverIndex``/``removePhotoIds`` is the gallery editor. The older single
+    ``photo`` field wrote straight into the owner's own photo column; that
+    column is gone, so its image is appended to the gallery and becomes the
+    cover -- which is what the field always meant.
+
+    It appends rather than replacing the old cover on purpose. The admin sends
+    this field only when it could not load the gallery (see the ``gallery ===
+    undefined`` branch in the frontend's locations save), so the request is
+    made without knowing what is already there and must not delete any of it.
+    """
+    change, error = read_gallery_change(request)
+    if error is not None:
+        return None, False, error
+    if change is not None:
+        return change, False, None
+
+    upload = request.files.get("photo")
+    if upload is None or not upload.filename:
+        return None, False, None
+    if upload.mimetype not in MIME_TYPES:
+        return None, False, "Choose a PNG, JPEG, or WebP image."
+    content = upload.read(MAX_BYTES + 1)
+    if len(content) > MAX_BYTES:
+        return None, False, "Photo must be 5 MB or smaller."
+    filename = upload.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:255]
+    return GalleryChange([(filename, upload.mimetype, content)], [], None), True, None
+
+
+def apply_gallery(record, change, cover_last_upload=False):
+    """Apply uploads, removals, and a cover choice to one owner's gallery.
+
+    ``cover_last_upload`` covers the single-photo field, which has no index to
+    send: whatever it uploaded becomes the cover.
+    """
     if change is None:
         return None
     existing = list_photos(record)
@@ -84,62 +150,31 @@ def apply_gallery(record, change):
 
     for photo_id in change.removed_ids:
         db.session.delete(by_id[photo_id])
+    # Cleared and flushed before any row claims the cover: the database allows
+    # only one cover per owner, so the old one has to be gone first.
     for photo in remaining:
         photo.is_cover = False
     db.session.flush()
 
-    owner_type, owner_id = owner_key(record)
+    model, column, owner_id = gallery_of(record)
     for index, (filename, mime_type, content) in enumerate(change.uploads, start=len(remaining)):
-        photo = LocationPhoto(owner_type=owner_type, owner_id=owner_id, position=index,
-                              filename=filename, mime_type=mime_type, content=content, is_cover=False)
+        photo = model(position=index, filename=filename, mime_type=mime_type,
+                      content=content, is_cover=False, **{column: owner_id})
         db.session.add(photo)
         remaining.append(photo)
     for index, photo in enumerate(remaining):
         photo.position = index
+
     cover_index = change.cover_index
+    if cover_index is None and cover_last_upload and change.uploads:
+        cover_index = len(remaining) - 1
     if cover_index is None and remaining:
         previous_cover = next((index for index, photo in enumerate(remaining) if photo.photo_id == previous_cover_id), None)
         cover_index = previous_cover if previous_cover is not None else 0
-    cover = remaining[cover_index] if cover_index is not None else None
-    if cover is not None:
-        cover.is_cover = True
-    mirror_cover(record, cover)
-    return None
-
-
-# public.building and public.location each keep their own copy of the cover
-# image so the existing /photo endpoints stay unchanged.
-_OWNER_TABLES = {
-    "building": ("public.building", "building_id"),
-    "location": ("public.location", "location_id"),
-}
-
-
-def mirror_cover(record, cover):
-    """Copy the cover image into the owner's own photo columns, server-side.
-
-    Assigning ``record.photo = cover.content`` would pull the image down and
-    send the same megabytes straight back on every gallery save, even when the
-    cover did not change. One statement does the copy inside the database
-    instead, so the bytes never cross the wire.
-    """
-    owner_type, owner_id = owner_key(record)
-    table, id_column = _OWNER_TABLES[owner_type]
-    # Newly uploaded photos need their ids before one can be referenced.
+    if cover_index is not None:
+        remaining[cover_index].is_cover = True
+    # ``photo_present`` is a subquery over the rows just staged, so let the
+    # next read of it see them.
     db.session.flush()
-
-    if cover is None:
-        statement = f"update {table} set photo = null, photo_mime_type = null where {id_column} = :owner_id"
-        parameters = {"owner_id": owner_id}
-    else:
-        statement = (
-            f"update {table}"
-            f" set photo = (select content from public.location_photo where photo_id = :photo_id),"
-            f" photo_mime_type = :mime_type"
-            f" where {id_column} = :owner_id"
-        )
-        parameters = {"owner_id": owner_id, "photo_id": cover.photo_id, "mime_type": cover.mime_type}
-
-    db.session.execute(db.text(statement), parameters)
-    # Written behind the ORM's back, so let it re-read them if anything asks.
-    db.session.expire(record, ["photo", "photo_mime_type", "photo_present"])
+    db.session.expire(record, ["photo_present"])
+    return None
