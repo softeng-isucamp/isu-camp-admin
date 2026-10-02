@@ -1,6 +1,5 @@
-from sqlalchemy import inspect
-
 from extensions import db
+from model.building_photo import BuildingPhoto
 
 
 class Building(db.Model):
@@ -24,25 +23,12 @@ class Building(db.Model):
     # Stores the building polygon coordinates as JSON.
     polygon_coordinates = db.Column(db.JSON, nullable=True)
 
-    # Buildings carry an optional photo, mirroring public.location.photo. The
-    # MIME type is stored alongside the bytes so the image can be served back
-    # with a correct Content-Type.
-    #
-    # The bytes are deferred: a list or an edit reads whether a photo exists far
-    # more often than it reads the image, and an eager LargeBinary made every
-    # such query carry every photo. ``photo_present`` below answers that
-    # question instead, so only /photo endpoints pay for the transfer.
-    photo = db.deferred(db.Column(db.LargeBinary, nullable=True))
-    photo_mime_type = db.Column(db.String, nullable=True)
-
     def has_photo(self):
-        """Whether a photo exists, without undeferring the bytes.
+        """Whether this Building has a cover photo, without reading the image.
 
-        Bytes already in the session win over the stored flag, so a photo set
-        earlier in the current request is reported before it is written.
+        Answered by the ``photo_present`` subquery below, so a list can report
+        it for every row without any image crossing the wire.
         """
-        if "photo" in inspect(self).dict:
-            return self.photo is not None
         return bool(self.photo_present)
 
     def to_location_dto(self):
@@ -72,12 +58,21 @@ class Building(db.Model):
 
 
 # Declared out here because the expression needs the mapped table, which does
-# not exist until the class body has run. Selected with every Building, and it
-# reads the row's null bitmap rather than the TOASTed image.
-# expire_on_flush is off because the flag only changes when ``photo`` itself
-# does, and has_photo() reads the bytes from the session in that case: without
-# it, every write would be followed by a query to re-derive this boolean.
+# not exist until the class body has run. Selected with every Building as a
+# correlated EXISTS, so a list learns which rows have a cover without any
+# image being read: the planner stops at the first matching index entry.
 Building.photo_present = db.column_property(
-    Building.__table__.c.photo.isnot(None),
+    db.exists()
+    .where(
+        db.and_(
+            BuildingPhoto.building_id == Building.building_id,
+            BuildingPhoto.is_cover,
+        )
+    )
+    .correlate_except(BuildingPhoto),
+    # The flag only changes when the gallery does, and
+    # services.location_photos.apply_gallery expires it itself in that
+    # case. Without this, every metadata-only write would be followed by
+    # a query to re-derive a boolean that cannot have moved.
     expire_on_flush=False,
 )
