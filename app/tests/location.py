@@ -18,7 +18,7 @@ class FakeRecord:
         self.floor_id = floor_id
         self.description = "A searchable description"
         self.keywords = "directory keyword"
-        self.photo = None
+        self.gallery = []
 
     def to_location_dto(self, building=None, floor=None):
         return {
@@ -29,7 +29,7 @@ class FakeRecord:
             "keywords": self.keywords, "status": "Active",
             "lat": None, "lng": None,
             "positioned": False,
-            "hasPhoto": self.photo is not None,
+            "hasPhoto": bool(self.gallery),
         }
 
 
@@ -79,8 +79,7 @@ class FakeBuilding:
         self.longitude = None
         self.classification = classification
         self.polygon_coordinates = polygon_coordinates
-        self.photo = None
-        self.photo_mime_type = None
+        self.gallery = []
 
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
@@ -91,7 +90,7 @@ class FakeBuilding:
             "building": None, "floor": None, "function": self.description,
             "keywords": self.keywords, "status": "Active", "lat": lat, "lng": lng,
             "positioned": lat is not None and lng is not None,
-            "hasPhoto": self.photo is not None,
+            "hasPhoto": bool(self.gallery),
         }
         if self.polygon_coordinates is not None:
             dto["polygonCoordinates"] = self.polygon_coordinates
@@ -424,13 +423,13 @@ def make_mutation_client(monkeypatch):
             super().__init__(0, values["location_name"], values["location_code"], values["type_id"], values.get("building_id"), values.get("floor_id"))
             self.description = values.get("description")
             self.keywords = values.get("keywords")
-            self.photo = None
+            self.gallery = []
 
         def to_location_dto(self, building=None, floor=None):
             dto = super().to_location_dto(building, floor)
             dto["function"] = self.description
             dto["keywords"] = self.keywords
-            dto["hasPhoto"] = self.photo is not None
+            dto["hasPhoto"] = bool(self.gallery)
             return dto
 
     monkeypatch.setattr(location_module, "Location", MutationRecord)
@@ -463,6 +462,15 @@ def make_mutation_client(monkeypatch):
             self.floor_number = floor_number
 
     monkeypatch.setattr(location_module, "Floor", MutationFloor)
+
+    def fake_apply_gallery(record, change, cover_last_upload=False):
+        if change is None:
+            return None
+        for filename, mime_type, content in change.uploads:
+            record.gallery.append((filename, mime_type, content))
+        return None
+
+    monkeypatch.setattr(location_module, "apply_gallery", fake_apply_gallery)
     monkeypatch.setattr(location_module.db, "session", session)
     return app.test_client(), records, session
 
@@ -635,9 +643,11 @@ def test_building_photo_upload_records_the_uploaded_mime_type(monkeypatch):
     )
 
     assert response.status_code == 201
-    saved = session.buildings[-1]
-    assert saved.photo == b"webp-bytes"
-    assert saved.photo_mime_type == "image/webp"
+    # The single photo field is a gallery upload now: name, type and bytes
+    # all reach the gallery instead of a column on the building.
+    assert session.buildings[-1].gallery == [
+        ("library.webp", "image/webp", b"webp-bytes"),
+    ]
 
 
 def test_building_created_without_a_photo_reports_no_photo(monkeypatch):
