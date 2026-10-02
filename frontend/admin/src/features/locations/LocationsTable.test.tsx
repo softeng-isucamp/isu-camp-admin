@@ -497,6 +497,29 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
   });
 
+  it("keeps Pick on map labelled and disabled while indoor metadata is saving", async () => {
+    const building = { id: "saving-building", name: "Saving Building", code: "SAVE-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const room = { id: "saving-room", name: "Saving Room", code: "SAVE-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", status: "Active" as const, lat: null, lng: null, positioned: false };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 50 });
+    let completeSave!: () => void;
+    const saveLocation = vi.spyOn(services.locations, "save").mockImplementation(() => new Promise((resolve) => {
+      completeSave = () => resolve(room);
+    }));
+    renderLocations();
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: room.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${room.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    await waitFor(() => expect(saveLocation).toHaveBeenCalled());
+    try {
+      expect(screen.getByRole("button", { name: "Saving…" })).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("button", { name: "Pick on map" })).toBeDisabled();
+    } finally {
+      completeSave();
+    }
+    await screen.findByText(/saved successfully/i);
+  });
+
   it("opens Map Editor directly from an existing indoor location without saving its modal draft", async () => {
     const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
     const room = { id: "fast-pick-room", name: "Fast Pick Room", code: "FP-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", keywords: "class", status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };

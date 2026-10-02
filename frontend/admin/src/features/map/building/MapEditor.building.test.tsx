@@ -744,6 +744,6 @@ describe("Map Editor preview", () => {
     fireEvent.click(buildingPolygon);
 
     expect(screen.getByRole("complementary", { name: "Routable Hall object details" })).toBeInTheDocument();
-    expect(screen.getByText("Linked & Routable")).toBeInTheDocument();
+    expect(screen.getByText("Routable", { selector: ".inspector-card-header p" })).toBeInTheDocument();
   });
 });
