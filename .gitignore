@@ -17,6 +17,5 @@ mock-backend/
 .scratch/
 reference/
 
-# Local database migrations and feature specifications.
-/migrations/
+# Local feature specifications.
 /docs/specs/
