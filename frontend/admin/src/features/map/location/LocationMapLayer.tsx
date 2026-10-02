@@ -5,16 +5,16 @@ import { createLocationPinIcon } from "../mapIcons";
 
 interface LocationMapLayerProps {
   locations: Array<Location & { lat: number; lng: number }>;
-  selectedLocationId: string | null;
+  selectedLocation: Pick<Location, "id" | "type"> | null;
   campusBoundary: MapPoint[];
   isOverviewZoom: boolean;
-  onSelectLocation: (locationId: string, anchor: MapPoint) => void;
+  onSelectLocation: (location: Location, anchor: MapPoint) => void;
 }
 
 /** Campus Location pins; only the selected one stays visible at overview zoom. */
 export function LocationMapLayer({
   locations: filteredLocations,
-  selectedLocationId,
+  selectedLocation,
   campusBoundary,
   isOverviewZoom,
   onSelectLocation,
@@ -22,7 +22,7 @@ export function LocationMapLayer({
   return (
     <>
       {filteredLocations.map((loc) => {
-        const isSelected = selectedLocationId === loc.id;
+        const isSelected = selectedLocation !== null && selectedLocation.id === loc.id && selectedLocation.type === loc.type;
         if (isOverviewZoom && !isSelected) return null;
         return (
           <Marker
@@ -31,7 +31,7 @@ export function LocationMapLayer({
             icon={createLocationPinIcon(isSelected)}
             eventHandlers={{
               click: () => {
-                onSelectLocation(loc.id, [loc.lat, loc.lng]);
+                onSelectLocation(loc, [loc.lat, loc.lng]);
               },
             }}
           >

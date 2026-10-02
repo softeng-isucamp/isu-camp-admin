@@ -9,8 +9,8 @@ interface IndoorLocationMapLayersProps {
   visibleLocations: Location[];
   contentLocations: Location[];
   buildings: Building[];
-  selectedLocationId: string | null;
-  onSelectLocation: (locationId: string) => void;
+  selectedLocation: Pick<Location, "id" | "type"> | null;
+  onSelectLocation: (location: Location) => void;
 }
 
 /** Indoor Location markers, plus the preview marker for the Location being positioned. */
@@ -19,7 +19,7 @@ export function IndoorLocationMapLayers({
   visibleLocations: visibleIndoorLocations,
   contentLocations: buildingContentLocations,
   buildings: currentBuildings,
-  selectedLocationId,
+  selectedLocation,
   onSelectLocation,
 }: IndoorLocationMapLayersProps) {
   const indoorPlacement = indoor.placement;
@@ -27,7 +27,7 @@ export function IndoorLocationMapLayers({
     <>
       {visibleIndoorLocations.map((location) => {
         if (indoorPlacement?.locationId === location.id) return null;
-        const isSelected = selectedLocationId === location.id;
+        const isSelected = selectedLocation !== null && selectedLocation.id === location.id && selectedLocation.type === location.type;
         const building = currentBuildings.find((item) => belongsToBuilding(location, item));
         return (
           <Marker
@@ -35,7 +35,7 @@ export function IndoorLocationMapLayers({
             position={[location.lat!, location.lng!]}
             icon={createIndoorLocationIcon(location.type, isSelected)}
             eventHandlers={{
-              click: () => onSelectLocation(location.id),
+              click: () => onSelectLocation(location),
             }}
           >
             <Tooltip direction="top" offset={[0, -12]} className="map-label">
