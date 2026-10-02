@@ -10,10 +10,10 @@ const legendItems = [
 ];
 
 export function MapLegend() {
-  const [minimized, setMinimized] = useState(false);
+  const [minimized, setMinimized] = useState(true);
 
   return (
-    <div className={`map-glass-panel absolute bottom-4 left-4 z-[900] rounded-[24px] pointer-events-auto ${minimized ? "px-4 py-3" : "w-52 p-4"}`}>
+    <div className={`map-glass-panel rounded-[24px] pointer-events-auto ${minimized ? "px-4 py-3" : "w-52 p-4"}`}>
       <div className={`flex items-center justify-between text-xs font-extrabold text-[#191c1d] ${minimized ? "gap-3" : "mb-2"}`}>
         <span>Map Legend</span>
         <button

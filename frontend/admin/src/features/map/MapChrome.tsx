@@ -62,29 +62,6 @@ export function OverviewZoomNotice() {
   );
 }
 
-/** Warns that legacy features lie outside the campus boundary. */
-export function OutsideBoundaryNotice({ count }: { count: number }) {
-  return (
-    <div className="absolute bottom-4 right-4 z-[900] max-w-xs rounded-2xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-xs text-amber-900 shadow-lg" role="status">
-      <strong>{count} existing editable campus feature{count === 1 ? "" : "s"} outside campus boundary.</strong>
-      <div className="mt-1">Legacy data is retained. Move or edit it back inside the boundary before saving changes.</div>
-    </div>
-  );
-}
-
-/** Offers to add the first Entrance to a Building that has none. */
-export function NonRoutableBuildingNotice({ onAddEntrance }: { onAddEntrance: () => void }) {
-  return (
-    <div className="absolute bottom-4 left-4 z-[900] max-w-sm rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-xs text-amber-950 shadow-lg" role="alert" aria-label="Building is not routable">
-      <strong className="block">Building is not routable</strong>
-      <p className="mt-1">This Building has 0 active Entrance Route Nodes.</p>
-      <button type="button" onClick={onAddEntrance} className="mt-2 rounded-full bg-[#005931] px-3 py-2 font-bold text-white">
-        🚪 Add Entrance Route Node Now
-      </button>
-    </div>
-  );
-}
-
 interface BasemapTileLayerProps {
   basemap: "street" | "satellite";
   displaysOsmOverlays: boolean;
