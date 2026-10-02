@@ -41,11 +41,7 @@ export function buildingInspectorModel({
     kind: "building",
     title: selectedBuilding.name,
     domain: "Locations",
-    status: !selectedBuildingHasFootprint
-      ? "Building preserved · Footprint unlinked"
-      : selectedBuildingRoutable
-        ? "Linked & Routable"
-        : "Linked · Entrance needed",
+    status: selectedBuildingRoutable ? "Routable" : "Not routable",
     summary: [
       { label: "Code", value: selectedBuilding.code },
       { label: "Geometry", value: `Building Footprint · ${selectedBuilding.points.length} vertices` },
@@ -56,7 +52,7 @@ export function buildingInspectorModel({
         <section aria-label="Building summary" className="inspector-related-section">
           <h3>Building summary</h3>
           <p>{selectedBuilding.code} · {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building")}</p>
-          <p>{selectedBuildingHasFootprint ? "Linked Building Footprint" : "Footprint not linked"} · {selectedBuildingRoutable ? "Routable" : "Not routable"}</p>
+          <p>{selectedBuildingHasFootprint ? "Building Footprint" : "Footprint needed"} · {selectedBuildingRoutable ? "Routable" : "Not routable"}</p>
         </section>
         <section aria-label="Building content" className="inspector-related-section">
           <div className="flex items-center justify-between gap-2">
