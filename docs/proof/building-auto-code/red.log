@@ -1,0 +1,92 @@
+
+> isu-camp-admin@1.0.0 test
+> vitest run src/features/map/building/MapEditor.building.test.tsx -t manually|without requiring
+
+
+ RUN  v3.2.7 /home/jade/dev/projects/isu-camp/frontend/admin
+
+ ❯ src/features/map/building/MapEditor.building.test.tsx (32 tests | 2 failed | 30 skipped) 301ms
+   × Map Editor preview > creates a Building without requiring a manually entered code 202ms
+     → expected '' to match /^BLDG-\d{4}$/
+   × Map Editor preview > preserves a manually changed draft code and generates a default after discarding it 98ms
+     → expect(element).toHaveValue(StringMatching)
+
+Expected the element to have value:
+  StringMatching /^BLDG-\d{4}$/
+Received:
+
+   ↓ Map Editor preview > confirms, cancels, and hard-deletes a Building with its Indoor Location warning
+   ↓ Map Editor preview > changes a selected footprint-backed Building into a Facility
+   ↓ Map Editor preview > uses a geometry-only Change scope when reshaping an existing linked footprint
+   ↓ Map Editor preview > saves an existing footprint change without changing the Building Campus Location
+   ↓ Map Editor preview > uses Escape to cancel an incomplete drawing without retaining discarded geometry
+   ↓ Map Editor preview > does not render an ordinary marker for a positioned Building with a footprint
+   ↓ Map Editor preview > does not render an ordinary marker for a positioned Facility with a footprint
+   ↓ Map Editor preview > frames and selects a polygon Building queried from a parent-location handoff
+   ↓ Map Editor preview > keeps a persisted Building feature anchor after the Map Editor remounts
+   ↓ Map Editor preview > saves an Area polygon as the named Building
+   ↓ Map Editor preview > closes a Building Footprint from V1 without showing a separate closure overlay
+   ↓ Map Editor preview > opens Create-or-Attach when a footprint closes and preserves its geometry across tabs
+   ↓ Map Editor preview > opens Add Building after Save shape and preserves the footprint when details are cancelled
+   ↓ Map Editor preview > creates a Building through the canonical Locations service and uses the returned ID
+   ↓ Map Editor preview > keeps Building details open when the canonical create fails
+   ↓ Map Editor preview > exposes only eligible active Buildings without footprint in Attach Existing Building
+   ↓ Map Editor preview > creates the feature, Building, and link together
+   ↓ Map Editor preview > launches a guided Entrance Route Node draft for the completed Building
+   ↓ Map Editor preview > shows a building room directory and associated entrances in the inspector
+   ↓ Map Editor preview > locates a Building when its database ID collides with an Indoor Location ID
+   ↓ Map Editor preview > shows a center marker while drawing a building polygon
+   ↓ Map Editor preview > supports editing polygon draft with vertex removal, clear area, finish footprint, and cancel
+   ↓ Map Editor preview > collects descriptive fields and creates compound batch in correct order with null outdoor coordinates
+   ↓ Map Editor preview > does not report the in-progress polygon as an overlapping building
+   ↓ Map Editor preview > shows advisory overlap warning when polygon overlaps an existing building without blocking save
+   ↓ Map Editor preview > attaches footprint to eligible existing building without creating new location record
+   ↓ Map Editor preview > saves a created Building footprint through the canonical Locations service and refreshes the map
+   ↓ Map Editor preview > sources attach candidates from unpositioned Buildings in locations query
+   ↓ Map Editor preview > searches canonical attach candidates by Building name and code
+   ↓ Map Editor preview > evaluates footprint-derived Building as routable when entrance is linked even with positioned false
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/map/building/MapEditor.building.test.tsx > Map Editor preview > creates a Building without requiring a manually entered code
+AssertionError: expected '' to match /^BLDG-\d{4}$/
+
+- Expected: 
+/^BLDG-\d{4}$/
+
++ Received: 
+""
+
+ ❯ src/features/map/building/MapEditor.building.test.tsx:27:27
+     25| 
+     26|     const generatedCode = (screen.getByLabelText("Building code") as H…
+     27|     expect(generatedCode).toMatch(/^BLDG-\d{4}$/);
+       |                           ^
+     28|     fireEvent.change(screen.getByLabelText("Building name"), { target:…
+     29|     fireEvent.change(screen.getByLabelText("Building function"), { tar…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/features/map/building/MapEditor.building.test.tsx > Map Editor preview > preserves a manually changed draft code and generates a default after discarding it
+Error: expect(element).toHaveValue(StringMatching)
+
+Expected the element to have value:
+  StringMatching /^BLDG-\d{4}$/
+Received:
+
+ ❯ src/features/map/building/MapEditor.building.test.tsx:43:52
+     41|     clickMap(16.721, 121.690);
+     42|     fireEvent.click(screen.getByRole("button", { name: "Save shape" })…
+     43|     expect(screen.getByLabelText("Building code")).toHaveValue(expect.…
+       |                                                    ^
+     44|     fireEvent.change(screen.getByLabelText("Building code"), { target:…
+     45|     fireEvent.click(within(screen.getByRole("dialog", { name: "Add Bui…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 30 skipped (32)
+   Start at  20:35:44
+   Duration  3.47s (transform 921ms, setup 218ms, collect 1.10s, tests 301ms, environment 611ms, prepare 198ms)
+

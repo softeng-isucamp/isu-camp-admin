@@ -1,0 +1,19 @@
+
+> isu-camp-admin@1.0.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 263 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                         0.48 kB │ gzip:   0.30 kB
+dist/assets/kumpas-logo-DfOAFLQT.png  647.35 kB
+dist/assets/index-DTen1py8.css         91.93 kB │ gzip:  22.12 kB
+dist/assets/index-ovNGeCGw.js         871.22 kB │ gzip: 252.99 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.23s

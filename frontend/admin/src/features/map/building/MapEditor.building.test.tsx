@@ -15,6 +15,48 @@ vi.mock("../../auth/AuthContext", async () => (await import("../testing/mapEdito
 describe("Map Editor preview", () => {
   useMapEditorTestLifecycle();
 
+  it("creates a Building without requiring a manually entered code", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+
+    const generatedCode = screen.getByLabelText<HTMLInputElement>("Building code").value;
+    expect(generatedCode).toMatch(/^BLDG-\d{4}$/);
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Auto Code Hall" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
+
+    expect(await screen.findByRole("region", { name: "Building summary" })).toHaveTextContent(generatedCode);
+    expect(screen.getByRole("complementary", { name: "Auto Code Hall object details" })).toBeInTheDocument();
+  });
+
+  it("preserves a manually changed draft code and generates a default after discarding it", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Building code").value).toMatch(/^BLDG-\d{4}$/);
+    fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "CUSTOM-HALL" } });
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Building details" }));
+    expect(screen.getByLabelText("Building code")).toHaveValue("CUSTOM-HALL");
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard Geometry" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    expect(screen.getByLabelText<HTMLInputElement>("Building code").value).toMatch(/^BLDG-\d{4}$/);
+  });
+
   it("confirms, cancels, and hard-deletes a Building with its Indoor Location warning", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-eng", name: "Engineering Hall", code: "ENG", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },

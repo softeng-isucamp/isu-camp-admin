@@ -1,0 +1,162 @@
+
+> isu-camp-admin@1.0.0 test
+> vitest run
+
+
+ RUN  v3.2.7 /home/jade/dev/projects/isu-camp/frontend/admin
+
+ ✓ src/services/networkService.test.ts (1 test) 5538ms
+   ✓ canonical network service > exposes relational fixtures and persists a canonical pathway write  5535ms
+ ✓ src/features/map/session/MapEditor.session.test.tsx (4 tests) 2966ms
+   ✓ Map Editor preview > restores an in-progress polygon draft after a browser refresh  577ms
+   ✓ Map Editor preview > keeps an interrupted polygon draft on the suspended shelf and resumes it  614ms
+   ✓ Map Editor preview > restores the selected Path Point and drag mode when resuming a suspended pathway  779ms
+   ✓ Map Editor preview > suspends and restores polygon draft with all fields preserved  991ms
+ ✓ src/services/api.test.ts (50 tests) 9925ms
+   ✓ mock service contracts > authenticates the seeded administrator  1255ms
+   ✓ mock service contracts > persists map geometry edits through the service boundary  365ms
+   ✓ mock service contracts > persists a location position through the narrow position seam  368ms
+   ✓ mock service contracts > preserves hierarchical child locations and permanently deletes families  869ms
+   ✓ mock service contracts > keeps map-building compatibility behavior and records an exact-ID audit entry  515ms
+   ✓ mock service contracts > persists a drawn map area only when it has a valid polygon  611ms
+   ✓ mock service contracts > permanently deletes a building, its connected children, and audits each record  750ms
+   ✓ mock service contracts > cascades only the Indoor Locations directly owned by the deleted Building  735ms
+   ✓ mock service contracts > associates save and position audits exactly while keeping targets readable  486ms
+   ✓ mock service contracts > retains exact audit linkage through a rename  365ms
+   ✓ mock service contracts > persists new route nodes, moved locations, and updated path shapes  973ms
+ ✓ src/features/map/routeNode/MapEditor.routeNode.test.tsx (11 tests) 5454ms
+   ✓ Map Editor preview > uses the point command only for Route Node creation  574ms
+   ✓ Map Editor preview > moves an imported route node from the generated fixture  2700ms
+   ✓ Map Editor preview > deletes a Route Node only after confirmation and retains the dialog after failure  415ms
+   ✓ Map Editor preview > allows metadata edits immediately after creating a Route Node  392ms
+ ✓ src/services/generatedMapFixture.integration.test.ts (1 test) 3293ms
+   ✓ generated map fixture service mode > loads generated OSM data through the map service boundary  3284ms
+ ✓ src/features/map/MapEditor.test.tsx (5 tests) 2658ms
+   ✓ Map Editor preview > switches drawing tools from a minimizable command dock without losing the active mode  719ms
+   ✓ Map Editor preview > loads the generated OSM fixture and keeps boundary safeguards active  1534ms
+ ✓ src/features/map/pathway/MapEditor.pathway.test.tsx (18 tests) 8784ms
+   ✓ Map Editor preview > offers mutually exclusive browsing and Pathway editing choices  645ms
+   ✓ Map Editor preview > keeps Walking Network browser selection synchronized with the map  446ms
+   ✓ Map Editor preview > edits an imported pathway from the generated fixture  669ms
+   ✓ Map Editor preview > lets Reshape Pathway drag a point immediately and recomputes unknown distance before saving  548ms
+   ✓ Map Editor preview > blocks a zero-length Pathway before it can reach the backend  715ms
+   ✓ Map Editor preview > confirms, cancels, and hard-deletes a Pathway with its Path Point warning  364ms
+   ✓ Map Editor preview > browses an Active Pathway and applies its metadata from the unified card  365ms
+   ✓ Map Editor preview > adjusts a selected Path Point with coordinates  495ms
+   ✓ Map Editor preview > moves a selected Path Point immediately while reshaping  728ms
+   ✓ Map Editor preview > converts a saved Path Point after metadata entry and saves both replacement Pathways together  745ms
+   ✓ Map Editor preview > reuses a Route Node already at the selected Path Point  375ms
+   ✓ Map Editor preview > applies Parent Pathway metadata and selected Path Point geometry as one draft  779ms
+   ✓ Map Editor preview > switches a selected Pathway's endpoints and reverses its Path Sequence  562ms
+   ✓ Map Editor preview > starts a new Pathway with an endpoint name suggestion and constrained Way type  310ms
+   ✓ Map Editor preview > adds a midpoint Path Point without creating a Route Node  372ms
+ ✓ src/features/auth/AuthPages.test.tsx (8 tests) 1648ms
+   ✓ login screen > renders the admin login with placeholders and no pre-filled values  421ms
+   ✓ password recovery screen > validates the code with empty boxes and displays new password placeholders  356ms
+ ✓ src/features/map/selection/MapEditor.selection.test.tsx (8 tests) 2940ms
+   ✓ Map Editor preview > offers a choice when a clicked Pathway overlaps other map objects  1116ms
+   ✓ Map Editor preview > keeps a selected Location findable in overview zoom  410ms
+   ✓ Map Editor preview > recomputes viewport culling when selection changes type but keeps the same ID  524ms
+ ✓ src/features/map/building/MapEditor.building.test.tsx (32 tests) 12439ms
+   ✓ Map Editor preview > creates a Building without requiring a manually entered code  899ms
+   ✓ Map Editor preview > preserves a manually changed draft code and generates a default after discarding it  983ms
+   ✓ Map Editor preview > confirms, cancels, and hard-deletes a Building with its Indoor Location warning  365ms
+   ✓ Map Editor preview > changes a selected footprint-backed Building into a Facility  626ms
+   ✓ Map Editor preview > uses a geometry-only Change scope when reshaping an existing linked footprint  308ms
+   ✓ Map Editor preview > uses Escape to cancel an incomplete drawing without retaining discarded geometry  338ms
+   ✓ Map Editor preview > saves an Area polygon as the named Building  500ms
+   ✓ Map Editor preview > opens Add Building after Save shape and preserves the footprint when details are cancelled  731ms
+   ✓ Map Editor preview > creates a Building through the canonical Locations service and uses the returned ID  631ms
+   ✓ Map Editor preview > keeps Building details open when the canonical create fails  610ms
+   ✓ Map Editor preview > exposes only eligible active Buildings without footprint in Attach Existing Building  592ms
+   ✓ Map Editor preview > creates the feature, Building, and link together  509ms
+   ✓ Map Editor preview > launches a guided Entrance Route Node draft for the completed Building  534ms
+   ✓ Map Editor preview > supports editing polygon draft with vertex removal, clear area, finish footprint, and cancel  578ms
+   ✓ Map Editor preview > collects descriptive fields and creates compound batch in correct order with null outdoor coordinates  356ms
+   ✓ Map Editor preview > shows advisory overlap warning when polygon overlaps an existing building without blocking save  380ms
+   ✓ Map Editor preview > attaches footprint to eligible existing building without creating new location record  361ms
+   ✓ Map Editor preview > saves a created Building footprint through the canonical Locations service and refreshes the map  435ms
+   ✓ Map Editor preview > searches canonical attach candidates by Building name and code  392ms
+ ✓ src/features/map/session/MapEditor.routeIntents.test.tsx (3 tests) 1841ms
+   ✓ Map Editor URL intents > clears ?location= after locating a Building and does not re-select it on refetch  1047ms
+   ✓ Map Editor URL intents > clears ?pathway= after opening it and does not reset the Pathway on refetch  712ms
+ ✓ src/features/map/location/MapEditor.location.test.tsx (2 tests) 2056ms
+   ✓ Map Editor preview > preserves a Location rename while mapped geometry remains read-only  1386ms
+   ✓ Map Editor preview > edits Location details from the object card and records a Working Session operation  668ms
+ ✓ src/features/map/indoorLocation/MapEditor.indoorLocation.test.tsx (2 tests) 1395ms
+   ✓ Map Editor preview > omits parent building and spatial source from indoor location cards  794ms
+   ✓ Map Editor preview > previews an indoor location point and saves coordinates only from the position sidecard  598ms
+ ✓ src/features/auth/PasswordReset.integration.test.tsx (2 tests) 1071ms
+   ✓ forgot-password and rate-limit integration > walks username step → code entry → resend countdown → rate-limited resend  1027ms
+ ✓ src/components/Shell.test.tsx (4 tests) 977ms
+   ✓ Shell Sidebar Component > renders expanded sidebar by default and shows navigation labels  390ms
+ ✓ src/features/dashboard/Dashboard.test.tsx (2 tests) 1205ms
+   ✓ Dashboard backend boundary > loads the default range and refetches when the analytics range changes  1036ms
+ ✓ src/features/map/BorrowedOwnerModals.test.tsx (4 tests) 858ms
+   ✓ borrowed owner module forms > submits canonical Location details without changing spatial coordinates  604ms
+ ✓ src/features/map/NetworkBrowser.test.tsx (5 tests) 829ms
+   ✓ NetworkBrowser > filters the active entity type with meaningful filters and selects the map object  443ms
+ ✓ src/features/logs/Logs.test.tsx (4 tests) 665ms
+   ✓ Logs > uses normalized date/time values in the table and Log Details modal  594ms
+ ✓ src/features/locations/LocationPhotoUpload.test.tsx (2 tests) 527ms
+   ✓ location photo upload > keeps the chooser beside a collapsed gallery toggle and adds multiple photos  481ms
+ ✓ src/features/map/mapEditing.test.ts (11 tests) 46ms
+ ✓ src/features/map/InspectorCardHUD.test.tsx (3 tests) 419ms
+   ✓ InspectorCardHUD > shows identity, domain authority, one primary CTA, and overflow actions  328ms
+ ✓ src/components/UI.test.tsx (3 tests) 361ms
+ ✓ src/features/map/MapLegend.test.tsx (1 test) 358ms
+   ✓ MapLegend > starts minimized, then expands and minimizes  355ms
+ ✓ src/features/map/building/buildingFootprint.test.ts (20 tests) 27ms
+ ✓ src/features/map/WorkingSessionManager.test.ts (17 tests) 32ms
+ ✓ src/features/map/pathway/PathwayWorkflow.test.ts (6 tests) 39ms
+ ✓ src/features/map/building/BuildingFootprintWorkflow.test.ts (6 tests) 23ms
+ ✓ src/features/map/routeNode/RouteNodeWorkflow.test.ts (5 tests) 20ms
+ ✓ src/features/map/pathway/pathwayTopology.test.ts (6 tests) 76ms
+ ✓ src/services/network.test.ts (6 tests) 21ms
+ ✓ src/lib/locationPolicy.test.ts (45 tests) 32ms
+ ✓ src/features/map/selectionCandidates.test.ts (5 tests) 36ms
+ ✓ src/features/map/routeNode/routeNodeLifecycle.test.ts (5 tests) 20ms
+ ✓ src/features/map/WorkingSessionJournal.test.ts (6 tests) 12ms
+ ✓ src/features/map/MapIssuesTray.test.tsx (4 tests) 448ms
+ ✓ src/features/map/selection/SelectionPopover.test.tsx (4 tests) 320ms
+ ✓ src/services/indoorLocationMarker.test.ts (1 test) 11ms
+ ✓ src/features/map/pointInteractions.test.ts (3 tests) 7ms
+ ✓ src/features/map/outdoorPointLocation.test.ts (2 tests) 6ms
+ ✓ src/features/map/campusBoundary.test.ts (5 tests) 8ms
+ ✓ src/features/locations/LocationsTable.test.tsx (39 tests) 31216ms
+   ✓ Locations screen table and hierarchy toggle validation > uses ten rows in both views without communicating placement through the icon  549ms
+   ✓ Locations screen table and hierarchy toggle validation > renders Floor Levels as grouping rows without location metadata  457ms
+   ✓ Locations screen table and hierarchy toggle validation > keeps flat-view pagination record-based and resets to page one after filtering  496ms
+   ✓ Locations screen table and hierarchy toggle validation > paginates hierarchy families atomically across the old page boundary  3714ms
+   ✓ Locations screen table and hierarchy toggle validation > uses building IDs to isolate duplicate building names  1036ms
+   ✓ Locations screen table and hierarchy toggle validation > resets stale Building and Floor selections after the selected Building is deleted  1776ms
+   ✓ Locations screen table and hierarchy toggle validation > returns to the last hierarchy page after a mutation shrinks the result  2776ms
+   ✓ Locations screen table and hierarchy toggle validation > does not attach a normal child with a duplicate legacy building name to both roots  821ms
+   ✓ Locations screen table and hierarchy toggle validation > filters same-named floors by their distinct record IDs  1212ms
+   ✓ Locations screen table and hierarchy toggle validation > keeps only matching indoor locations while retaining building and floor context in search  343ms
+   ✓ Locations screen table and hierarchy toggle validation > omits empty compatibility Floor Levels from a filtered hierarchy family  584ms
+   ✓ Locations screen table and hierarchy toggle validation > uses the same neutral symbol treatment for an unpositioned location  422ms
+   ✓ Locations screen table and hierarchy toggle validation > allows expanding and collapsing parent nodes in hierarchy view  1036ms
+   ✓ Locations screen table and hierarchy toggle validation > starts buildings and floors with nested locations collapsed until expanded  774ms
+   ✓ Locations screen table and hierarchy toggle validation > keeps collapsed nested locations out of the top-level rows  788ms
+   ✓ Locations screen table and hierarchy toggle validation > expands nested matches by default when searching  755ms
+   ✓ Locations screen table and hierarchy toggle validation > opens and interacts with the Add Location modal with Figma fields  502ms
+   ✓ Locations screen table and hierarchy toggle validation > shows passive Map Editor guidance and no outdoor choices when adding  491ms
+   ✓ Locations screen table and hierarchy toggle validation > opens an indoor-location handoff with the Building parent locked and floor preselected  640ms
+   ✓ Locations screen table and hierarchy toggle validation > opens an indoor-location handoff for a newly created Building before directory refresh  353ms
+   ✓ Locations screen table and hierarchy toggle validation > creates a child location with a parent building and standard floor level  1865ms
+   ✓ Locations screen table and hierarchy toggle validation > populates the parent building and floor level when editing a child location  1138ms
+   ✓ Locations screen table and hierarchy toggle validation > keeps Pick on map labelled and disabled while indoor metadata is saving  773ms
+   ✓ Locations screen table and hierarchy toggle validation > opens Map Editor directly from an existing indoor location without saving its modal draft  603ms
+   ✓ Locations screen table and hierarchy toggle validation > offers only Building and Facility when editing a Building and excludes Facility for indoor locations  2511ms
+   ✓ Locations screen table and hierarchy toggle validation > keeps row action options above neighboring table rows  666ms
+   ✓ Locations screen table and hierarchy toggle validation > saves description and keywords to their independent directory columns  1348ms
+   ✓ Locations screen table and hierarchy toggle validation > shows a delete failure alert and leaves the record visible  336ms
+   ✓ Locations screen table and hierarchy toggle validation > warns about connected children and permanently deletes the building hierarchy  589ms
+   ✓ Locations screen table and hierarchy toggle validation > renders a selected location's real history entry  344ms
+
+ Test Files  42 passed (42)
+      Tests  371 passed (371)
+   Start at  20:36:37
+   Duration  36.62s (transform 12.00s, setup 13.87s, collect 39.76s, tests 100.61s, environment 50.60s, prepare 10.76s)
+
