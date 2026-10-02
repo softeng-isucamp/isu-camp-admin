@@ -3,11 +3,8 @@ import { describe, expect, it } from "vitest";
 import { MapLegend } from "./MapLegend";
 
 describe("MapLegend", () => {
-  it("minimizes and expands the legend", () => {
+  it("starts minimized, then expands and minimizes", () => {
     render(<MapLegend />);
-
-    expect(screen.getByText("Campus Location")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Minimize map legend" }));
 
     expect(screen.queryByText("Campus Location")).not.toBeInTheDocument();
     const expandButton = screen.getByRole("button", { name: "Expand map legend" });
@@ -15,5 +12,8 @@ describe("MapLegend", () => {
 
     fireEvent.click(expandButton);
     expect(screen.getByText("Campus Location")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimize map legend" }));
+    expect(screen.queryByText("Campus Location")).not.toBeInTheDocument();
   });
 });
