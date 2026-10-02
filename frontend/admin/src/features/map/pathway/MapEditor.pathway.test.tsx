@@ -430,6 +430,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
 
+    fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
     expect(await screen.findByRole("alert", { name: "Non-routable pathway crossing" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway" }));
     await waitFor(() => expect(services.map.createRouteNode).toHaveBeenCalledWith(expect.objectContaining({

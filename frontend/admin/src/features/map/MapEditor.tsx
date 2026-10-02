@@ -17,13 +17,13 @@ import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
+import { MapIssuesTray, type MapIssue } from "./MapIssuesTray";
 import type { EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
 import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
-import { PathwayCrossingWarning } from "./pathway/PathwayCrossingWarning";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
 import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
 import { useMapRouteIntents, type MapRouteIntent } from "./session/useMapRouteIntents";
@@ -38,7 +38,7 @@ import { useMapSearch } from "./selection/useMapSearch";
 import { useVisibleMapObjects } from "./selection/useVisibleMapObjects";
 import { MapSearchBox } from "./selection/MapSearchBox";
 import { SelectionPopover } from "./selection/SelectionPopover";
-import { BasemapTileLayer, BasemapToggle, MapPageHeader, NonRoutableBuildingNotice, OutsideBoundaryNotice, OverviewZoomNotice } from "./MapChrome";
+import { BasemapTileLayer, BasemapToggle, MapPageHeader, OverviewZoomNotice } from "./MapChrome";
 import { useVisibleIndoorLocations } from "./indoorLocation/useVisibleIndoorLocations";
 import { networkSelectionFocus } from "./selection/networkSelectionFocus";
 import { routeNodeMoveStatus } from "./routeNode/routeNodeMoveStatus";
@@ -710,12 +710,8 @@ export function MapEditor() {
         )}
 
         {selectionPopover && (
-          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} onSelect={selectCandidate} />
+          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} viewportBounds={currentMapBounds} onSelect={selectCandidate} />
         )}
-
-        {outsideBoundaryCount > 0 && <OutsideBoundaryNotice count={outsideBoundaryCount} />}
-        {pathwayCrossings[0] && <PathwayCrossingWarning onCreateJunction={createJunctionAtCrossing} />}
-        {nonRoutableBuildingId && mode === "select" && <NonRoutableBuildingNotice onAddEntrance={startGuidedEntranceDraft} />}
 
         <BasemapToggle basemap={basemap} onChange={setBasemap} />
 
@@ -800,7 +796,41 @@ export function MapEditor() {
           </>
         )}
 
-        <MapLegend />
+        <div className="pointer-events-none absolute bottom-4 left-4 z-[900] flex items-end gap-2">
+          <MapLegend />
+          <MapIssuesTray
+            issues={[
+              ...(outsideBoundaryCount > 0
+                ? [{
+                    id: "outside-boundary",
+                    severity: "info",
+                    title: `${outsideBoundaryCount} existing editable campus feature${outsideBoundaryCount === 1 ? "" : "s"} outside campus boundary.`,
+                    body: "Legacy data is retained. Move or edit it back inside the boundary before saving changes.",
+                  } satisfies MapIssue]
+                : []),
+              ...(pathwayCrossings[0]
+                ? [{
+                    id: "pathway-crossing",
+                    severity: "alert",
+                    ariaLabel: "Non-routable pathway crossing",
+                    title: "Pathways cross without a Junction",
+                    body: "This visual crossing is not routable until a shared Junction Route Node is created.",
+                    action: { label: "Create Junction & Split Pathway", onClick: createJunctionAtCrossing },
+                  } satisfies MapIssue]
+                : []),
+              ...(nonRoutableBuildingId && mode === "select"
+                ? [{
+                    id: "non-routable-building",
+                    severity: "alert",
+                    ariaLabel: "Building is not routable",
+                    title: "Building is not routable",
+                    body: "This Building has 0 active Entrance Route Nodes.",
+                    action: { label: "🚪 Add Entrance Route Node Now", onClick: startGuidedEntranceDraft },
+                  } satisfies MapIssue]
+                : []),
+            ]}
+          />
+        </div>
       </div>
 
       <MapModals
