@@ -203,7 +203,8 @@ def test_actions_can_delete_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
     monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
+    # The audit helper uses the same db singleton as the route.
+    monkeypatch.setattr(actions_module.db, "session", session)
 
     response = app.test_client().delete("/api/actions/locations/42")
 
@@ -222,7 +223,8 @@ def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeyp
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
     monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
+    # The audit helper uses the same db singleton as the route.
+    monkeypatch.setattr(actions_module.db, "session", session)
 
     response = app.test_client().delete("/api/actions/locations/42?type=Room")
 
@@ -246,7 +248,7 @@ def test_actions_can_edit_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+    monkeypatch.setattr(actions_module.db, "session", FakeSession())
 
     response = app.test_client().put("/api/actions/locations/42", json={"name": "New Hall", "code": "NEW", "type": "Facility"})
 
@@ -274,7 +276,7 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
     monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
     monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+    monkeypatch.setattr(actions_module.db, "session", FakeSession())
 
     response = app.test_client().put(
         "/api/actions/locations/42",
@@ -372,7 +374,7 @@ def test_building_history_rolls_back_and_returns_500_on_query_failure(monkeypatc
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(type("Building", (), {})())}))
     monkeypatch.setattr(actions_module, "BuildingHistory", type("BuildingHistoryModel", (), {"query": FailingQuery([]), "created_at": FakeColumn()}))
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(actions_module.db, "session", session)
 
     response = app.test_client().get("/api/actions/buildings/42/history")
 
@@ -431,7 +433,7 @@ def _edit_building_app(monkeypatch, has_photo, photo_change, applied):
         lambda record, change, cover_last_upload=False: applied.append((record, change, cover_last_upload)),
     )
     monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
-    monkeypatch.setattr(actions_module, "db", type("DB", (), {"session": FakeSession()}))
+    monkeypatch.setattr(actions_module.db, "session", FakeSession())
     return app.test_client(), building
 
 

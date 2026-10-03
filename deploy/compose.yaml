@@ -1,0 +1,36 @@
+services:
+  admin-api:
+    image: ${ADMIN_API_IMAGE:?Load images.tar.gz and use the release.env from the build}
+    pull_policy: never
+    env_file:
+      - ${ADMIN_RUNTIME_ENV:?Set an absolute path to a protected backend env file}
+    environment:
+      SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL:?Backend database URL is required}
+      SECRET_KEY: ${SECRET_KEY:?A production session secret is required}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+
+  admin-web:
+    image: ${ADMIN_WEB_IMAGE:?Load images.tar.gz and use the release.env from the build}
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${ADMIN_HTTP_PORT:-8080}:8080"
+    depends_on:
+      admin-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME:-isu-camp-admin}_network

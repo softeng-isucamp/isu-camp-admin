@@ -1,5 +1,15 @@
 # ISU-CAMP Development Server Runner
+param([string]$Mode = "--real")
 $ErrorActionPreference = "Stop"
+
+if ($Mode -eq "--help" -or $Mode -eq "-h") {
+    Write-Host "Usage: .\dev.ps1 [--real|--fixture] (default: --real)"
+    exit 0
+}
+if ($Mode -notin @("--real", "--fixture") -or $args.Count -gt 0) {
+    Write-Host "Usage: .\dev.ps1 [--real|--fixture]"
+    exit 1
+}
 
 $ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
@@ -9,7 +19,7 @@ Write-Host " Starting ISU-CAMP Backend & Frontend " -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 
 # Check for required commands
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+if ($Mode -eq "--real" -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Host "[ERROR] Required command not found: python" -ForegroundColor Red
     exit 1
 }
@@ -18,31 +28,9 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Free ports used by backend/frontend
-function Free-Port([int]$Port) {
-    try {
-        $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
-        if ($connections) {
-            foreach ($conn in $connections) {
-                $procId = $conn.OwningProcess
-                if ($procId -gt 0 -and $procId -ne $PID) {
-                    Write-Host "[SETUP] Killing stale process on port $Port (PID: $procId)..." -ForegroundColor Yellow
-                    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-                }
-            }
-            Start-Sleep -Seconds 1
-        }
-    } catch {
-        # Fallback or ignore if Get-NetTCPConnection lacks elevation
-    }
-}
-
-Free-Port 5000
-Free-Port 5173
-
 # Create venv + install deps if missing
 $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
-if (-not (Test-Path $VenvPython)) {
+if ($Mode -eq "--real" -and -not (Test-Path $VenvPython)) {
     Write-Host "[SETUP] Creating virtual environment..." -ForegroundColor Yellow
     python -m venv venv
     Write-Host "[SETUP] Installing Python dependencies..." -ForegroundColor Yellow
@@ -58,9 +46,24 @@ if (-not (Test-Path $NodeModules)) {
     Set-Location $ProjectRoot
 }
 
-# Point the admin frontend at the generated OSM development fixture.
-$env:VITE_API_MODE = "local"
-$env:VITE_MAP_FIXTURE = "osm"
+# Process environment overrides Vite's local .env file.
+if ($Mode -eq "--fixture") {
+    $env:VITE_TEST_LOCAL_ADAPTER = "true"
+    $env:VITE_API_MODE = "local"
+    $env:VITE_MAP_FIXTURE = "osm"
+    Write-Host "[MODE] Fixture: local OSM demo data; Flask and database are not used."
+    Write-Host "[LOGIN] Fixture only: admin_justine / password123"
+    Set-Location (Join-Path $ProjectRoot "frontend\admin")
+    npm run dev -- --host localhost --port 5173 --strictPort
+    exit $LASTEXITCODE
+}
+
+$env:VITE_TEST_LOCAL_ADAPTER = "false"
+$env:VITE_API_MODE = "real"
+$env:VITE_MAP_FIXTURE = "none"
+if (-not $env:VITE_API_BASE_URL) { $env:VITE_API_BASE_URL = "http://localhost:5000" }
+Write-Host "[MODE] Real: authenticated backend at $env:VITE_API_BASE_URL; database required."
+Write-Host "[LOGIN] Use a real backend account. Fixture credentials do not apply."
 
 Write-Host "[SETUP] Checking database connection..." -ForegroundColor Yellow
 & $VenvPython (Join-Path $ProjectRoot "app\services\check_db.py")
@@ -76,10 +79,12 @@ Write-Host "[2/2] Starting Admin Frontend on http://localhost:5173..." -Foregrou
 Set-Location (Join-Path $ProjectRoot "frontend\admin")
 
 try {
-    npm run dev
+    npm run dev -- --host localhost --port 5173 --strictPort
+    $FrontendExitCode = $LASTEXITCODE
 } finally {
     Write-Host "Stopping Flask Backend..." -ForegroundColor Yellow
     if ($BackendProcess -and -not $BackendProcess.HasExited) {
         Stop-Process -Id $BackendProcess.Id -Force
     }
 }
+exit $FrontendExitCode
