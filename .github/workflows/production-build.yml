@@ -36,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
+    env:
+      SUPABASE_DATABASE_URL: sqlite://
+      SECRET_KEY: ci-only-test-session-key
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
