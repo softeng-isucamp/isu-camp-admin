@@ -140,7 +140,7 @@ def test_create_pathway_with_points_is_atomic_and_returns_geometry(monkeypatch):
     monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
     monkeypatch.setattr(route_node_module, "PathPoint", FakePathPoint)
     monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
@@ -216,7 +216,7 @@ def test_convert_saved_point_creates_one_node_and_two_geometry_preserving_pathwa
     monkeypatch.setattr(route_node_module, "RouteNode", FakeNode)
     monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
     monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
-    monkeypatch.setattr(route_node_module, "db", SimpleNamespace(session=session))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     monkeypatch.setattr(route_node_module, "log_audit", lambda *_args: None)
     monkeypatch.setattr(route_node_module, "_replace_points", lambda pathway, points: setattr(pathway, "path_points", points))
 
@@ -256,7 +256,7 @@ def test_convert_point_rejects_stale_coordinates_without_writing(monkeypatch):
     original = SimpleNamespace(status="active", path_points=[SimpleNamespace(latitude=16.72, longitude=121.69)])
     session.get = lambda _model, _identifier, **_options: original
     monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": SimpleNamespace(get=lambda _id: original)}))
-    monkeypatch.setattr(route_node_module, "db", SimpleNamespace(session=session))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways/9/convert-point", json={
         "sequence_no": 1, "point": {"latitude": 16.73, "longitude": 121.69},
@@ -271,7 +271,7 @@ def test_convert_point_rejects_stale_coordinates_without_writing(monkeypatch):
 def test_invalid_atomic_pathway_geometry_does_not_create_any_records(monkeypatch):
     session = FakeSession()
     monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
@@ -286,7 +286,7 @@ def test_invalid_atomic_pathway_geometry_does_not_create_any_records(monkeypatch
 
 def test_path_point_requires_an_existing_pathway_and_positive_unique_order(monkeypatch):
     session = FakeSession()
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: None)})()}))
 
     response = app_with_route_node_blueprint().test_client().post("/api/path-points", json={
@@ -308,7 +308,7 @@ def test_path_point_rejects_duplicate_order_within_its_pathway(monkeypatch):
     )()
     monkeypatch.setattr(route_node_module, "PathPoint", type("PathPoint", (), {"query": point_query}))
     monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post("/api/path-points", json={
         "pathway_id": 9, "sequence_no": 1, "latitude": 16.72, "longitude": 121.69, "node_type": "Waypoint",
@@ -322,7 +322,7 @@ def test_pathway_delete_and_failed_update_roll_back_with_an_audit(monkeypatch):
     session = FakeSession()
     pathway = type("PathwayRecord", (), {"pathway_id": 9, "name": "Connector", "path_points": [], "allowed_modes": []})()
     monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: pathway)})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     audits = []
     monkeypatch.setattr(route_node_module, "log_audit", lambda *args: audits.append(args))
 
@@ -337,7 +337,7 @@ def test_route_node_delete_is_audited_as_a_cascade(monkeypatch):
     session = FakeSession()
     node = type("RouteNodeRecord", (), {"node_id": 4, "name": "North Gate"})()
     monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: node)})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     audits = []
     monkeypatch.setattr(route_node_module, "log_audit", lambda *args: audits.append(args))
 
@@ -369,7 +369,7 @@ def test_atomic_pathway_write_rolls_back_everything_when_commit_fails(monkeypatc
     monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
     monkeypatch.setattr(route_node_module, "PathPoint", lambda **values: type("Point", (), values)())
     monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
@@ -434,7 +434,7 @@ def test_create_route_node_persists_and_returns_the_created_record(monkeypatch):
             return {"node_id": self.node_id, "latitude": self.latitude, "longitude": self.longitude}
 
     monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post(
         "/api/route-nodes",
@@ -467,7 +467,7 @@ def test_route_node_name_round_trips_through_create_and_update(monkeypatch):
             return {"node_id": self.node_id, "name": self.name, "latitude": self.latitude, "longitude": self.longitude}
 
     monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     client = app_with_route_node_blueprint().test_client()
 
     created = client.post(
@@ -506,7 +506,7 @@ def test_pathway_metadata_and_allowed_modes_round_trip_through_create(monkeypatc
     monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
     monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
     monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode, raising=False)
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post(
         "/api/pathways",
@@ -567,7 +567,7 @@ def test_pathway_update_replaces_allowed_modes_and_preserves_metadata(monkeypatc
     monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
     monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode, raising=False)
     monkeypatch.setattr(route_node_module, "RouteNode", type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda identifier: object())})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().put(
         "/api/pathways/9",
@@ -630,7 +630,7 @@ def test_pathway_update_removes_old_points_before_reusing_sequence_numbers(monke
         "RouteNode",
         type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}),
     )
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().put(
         "/api/pathways/9",
@@ -672,7 +672,7 @@ def test_pathway_and_path_point_reject_unsupported_editor_enums(monkeypatch):
         type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}),
     )
     monkeypatch.setattr(route_node_module, "PathPoint", type("PathPoint", (), {}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
     client = app_with_route_node_blueprint().test_client()
 
     pathway = client.post(
@@ -721,7 +721,7 @@ def test_create_path_point_persists_the_ordered_coordinate(monkeypatch):
 
     monkeypatch.setattr(route_node_module, "PathPoint", FakePathPoint)
     monkeypatch.setattr(route_node_module, "Pathway", type("Pathway", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}))
-    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(route_node_module.db, "session", session)
 
     response = app_with_route_node_blueprint().test_client().post(
         "/api/path-points",

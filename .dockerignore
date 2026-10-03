@@ -1,0 +1,24 @@
+# Exported commits are the release source; also protect direct local builds.
+.git
+.github
+.agents
+.codex*
+.claude
+**/.env
+**/.env.*
+**/*.env
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/*.tsbuildinfo
+venv
+.venv
+mock-backend
+.scratch
+.local
+reference
+docs
+**/test-results
+**/playwright-report
+**/*secret*

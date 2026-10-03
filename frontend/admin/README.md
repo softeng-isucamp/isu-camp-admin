@@ -10,7 +10,9 @@ npm install
 npm run dev
 ```
 
-The frontend connects to the real backend at `http://127.0.0.1:5000` by default. Set `VITE_API_BASE_URL` when using another backend address. The backend must be running before starting the frontend.
+The frontend uses the real backend at `http://localhost:5000` by default. Set `VITE_API_BASE_URL` when using another backend address. The backend must be running before starting the frontend. Open the portal at `http://localhost:5173` to match backend CORS; Vite can choose another port if 5173 is occupied, so check its startup output.
+
+For an explicit runtime, use the root runners: `./dev.sh --real` starts Flask and the frontend; `./dev.sh --fixture` starts only the OSM demo with the local adapter. Windows equivalents and fixture-only credentials are in [fixture versus real backend](../../README.md#fixture-versus-real-backend). Unit and browser test configurations select their own adapters; running a test does not establish the mode of an already-running development server.
 
 ## Verification
 
@@ -19,7 +21,28 @@ npm test
 npm run build
 ```
 
+For release assets, use `npm run test:production`, `npm run build:production`, and `npm run verify:production`. The guarded build ignores dotenv files and enforces real-backend, same-origin API settings. Container builds, clean-commit releases, and CI are documented in the [production recipe](../../deploy/README.md).
+
 Feature code lives under `src/features`; shared models and replaceable service contracts are in `src/types.ts` and `src/services`.
+
+## Code navigation
+
+[MapEditor.tsx](src/features/map/MapEditor.tsx) composes the map workflows. Start with the owner below when changing a particular behavior.
+
+| Behavior | Start here |
+| --- | --- |
+| Selection and overlapping objects | [useMapSelection.ts](src/features/map/selection/useMapSelection.ts), [selectionCandidates.ts](src/features/map/selectionCandidates.ts), and [selectedMapObjects.ts](src/features/map/selection/selectedMapObjects.ts) own selection state, click disambiguation, and resolving the selected record. |
+| Building creation and footprint editing | [BuildingFootprintWorkflow.ts](src/features/map/building/BuildingFootprintWorkflow.ts) owns the creation/save sequence; [useBuildingFootprintEditing.ts](src/features/map/building/useBuildingFootprintEditing.ts) connects it to the editor. [BuildingDetailsModal.tsx](src/features/map/building/BuildingDetailsModal.tsx) edits metadata. |
+| Indoor markers | [useIndoorLocationPlacement.ts](src/features/map/indoorLocation/useIndoorLocationPlacement.ts) owns placement and position saves; [indoorLocations.ts](src/features/map/indoorLocation/indoorLocations.ts) resolves building membership; [useVisibleIndoorLocations.ts](src/features/map/indoorLocation/useVisibleIndoorLocations.ts) controls visibility. |
+| Location hierarchy and validation | [Locations.tsx](src/features/locations/Locations.tsx) owns the directory, hierarchy, and create/edit forms; [locationPolicy.ts](src/lib/locationPolicy.ts) owns identity keys, classification, and parent/floor validation. |
+| Server data and unsaved map edits | [useSessionMapData.ts](src/features/map/session/useSessionMapData.ts) combines directory data with session overlays. [api.ts](src/services/api.ts) selects the service adapter and translates HTTP records; [network.ts](src/services/network.ts) handles network contracts. |
+| Map integration tests | [mapEditorTestHarness.tsx](src/features/map/testing/mapEditorTestHarness.tsx) and [mapEditorMocks.tsx](src/features/map/testing/mapEditorMocks.tsx) provide shared setup. Workflow tests live beside their owners, including `MapEditor.selection.test.tsx`, `MapEditor.building.test.tsx`, and `MapEditor.indoorLocation.test.tsx`. |
+| Test runtime and browser coverage | [vitest.config.ts](vitest.config.ts) selects the local adapter for unit/integration tests; [src/test/setup.ts](src/test/setup.ts) sets up the test environment. [playwright.config.ts](playwright.config.ts) runs fixture browser tests; [playwright.locations-real.config.ts](playwright.locations-real.config.ts) covers the HTTP adapter with intercepted responses. The default browser suite excludes `indoor-location-marker.spec.ts`. |
+
+Two relationships matter when working across these owners:
+
+- **Identity is scoped by type.** A Building and a Room can have the same ID. Preserve the location subtype and ID when selecting or joining locations; use `locationIdentityKey` from `locationPolicy.ts` for mixed location collections.
+- **Building metadata and geometry share one building identity.** The Locations directory supplies its descriptive record, and the map supplies its footprint. `useSessionMapData.ts` combines these views by building ID; `selectionCandidates.ts` collapses the Building/Facility directory candidate and its footprint into one selectable object. Indoor locations remain separate records linked to their parent building.
 
 ## Locations and indoor map markers
 

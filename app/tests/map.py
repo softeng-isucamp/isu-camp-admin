@@ -171,7 +171,7 @@ def test_indoor_location_position_persists_marker_inside_building(monkeypatch):
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
 
     response = app_with_map_blueprint().test_client().patch(
         "/api/map/buildings/4/indoor-locations/12", json={"lat": 16.75, "lng": 121.65}
@@ -201,7 +201,7 @@ def test_indoor_location_position_accepts_polygon_boundary(monkeypatch):
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": FakeSession()}))
+    monkeypatch.setattr(map_module.db, "session", FakeSession())
 
     response = app_with_map_blueprint().test_client().patch(
         "/api/map/buildings/4/indoor-locations/12", json={"lat": 16.7, "lng": 121.65}
@@ -227,7 +227,7 @@ def test_indoor_location_position_can_be_cleared(monkeypatch):
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
 
     response = app_with_map_blueprint().test_client().patch(
         "/api/map/buildings/4/indoor-locations/12", json={"lat": None, "lng": None}
@@ -255,7 +255,7 @@ def test_indoor_location_position_rejects_invalid_marker(monkeypatch, payload, m
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": FakeSession()}))
+    monkeypatch.setattr(map_module.db, "session", FakeSession())
 
     response = app_with_map_blueprint().test_client().patch(
         "/api/map/buildings/4/indoor-locations/12", json=payload
@@ -281,7 +281,7 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
         "Building",
         type("BuildingModel", (), {"query": FakeQuery([building])}),
     )
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
     points = [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691], [16.72, 121.691]]
@@ -313,7 +313,7 @@ def test_map_save_persists_an_internal_anchor_for_a_closed_concave_polygon(monke
         "Building",
         type("BuildingModel", (), {"query": FakeQuery([building])}),
     )
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
 
     points = [
@@ -339,7 +339,7 @@ def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeyp
     })()
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
 
     response = app_with_map_blueprint().test_client().post(
         "/api/map/save",
@@ -362,7 +362,7 @@ def test_map_save_rejects_self_touching_footprint_without_mutating_the_building(
     })()
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
 
     response = app_with_map_blueprint().test_client().post(
         "/api/map/save",
@@ -388,7 +388,7 @@ def test_map_save_rejects_malformed_building_payload_before_mutating(monkeypatch
     })()
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
 
     response = app_with_map_blueprint().test_client().post(
         "/api/map/save", json={"buildings": {"id": "4", "points": []}},
@@ -432,7 +432,7 @@ def test_delete_map_building_deletes_indoor_locations_and_audits_in_one_transact
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([floor])}))
     monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes, "location_id"))
     monkeypatch.setattr(map_module, "BuildingPhoto", fake_photo_model(photo_deletes, "building_id"))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
@@ -455,7 +455,7 @@ def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
     monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model([], "location_id"))
     monkeypatch.setattr(map_module, "BuildingPhoto", fake_photo_model([], "building_id"))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: audits.append(args))
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
@@ -483,7 +483,7 @@ def test_delete_map_building_purges_gallery_photos_for_the_building_and_its_loca
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
     monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes, "location_id"))
     monkeypatch.setattr(map_module, "BuildingPhoto", fake_photo_model(photo_deletes, "building_id"))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
@@ -506,7 +506,7 @@ def test_delete_map_building_without_indoor_locations_only_purges_its_own_photos
     monkeypatch.setattr(map_module, "Floor", type("FloorModel", (), {"query": FakeQuery([])}))
     monkeypatch.setattr(map_module, "LocationPhoto", fake_photo_model(photo_deletes, "location_id"))
     monkeypatch.setattr(map_module, "BuildingPhoto", fake_photo_model(photo_deletes, "building_id"))
-    monkeypatch.setattr(map_module, "db", type("DB", (), {"session": session}))
+    monkeypatch.setattr(map_module.db, "session", session)
     monkeypatch.setattr(map_module, "log_audit", lambda *args: None)
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")

@@ -12,21 +12,21 @@ This repository contains the ISU-CAMP administration backend scaffold and the ad
 
 ### Unified Runner (Recommended)
 
-You can launch both the Flask backend and the React frontend simultaneously using a single command from the project root:
+Choose a runtime from the project root. The default is **real mode**: Flask plus the frontend, backed by the configured database.
 
 **Linux / macOS (Bash):**
 ```bash
-./dev.sh
+./dev.sh --real
 ```
 
 **Windows (Command Prompt):**
 ```cmd
-dev.bat
+dev.bat --real
 ```
 
 **Windows (PowerShell):**
 ```powershell
-.\dev.ps1
+.\dev.ps1 --real
 ```
 
 ---
@@ -55,7 +55,24 @@ If you prefer isolated logs or independent control:
    npm run dev
    ```
 
-See `frontend/admin/README.md` for demo credentials and verification commands.
+Open the frontend at `http://localhost:5173`. The backend allows this origin (and `http://localhost:5174`); using `127.0.0.1` for the frontend or an arbitrary worktree port requires updating backend CORS. The unified runner fixes port 5173 and fails if it is occupied; stop your own previous server or choose a separately configured origin.
+
+### Fixture versus real backend
+
+| Mode | Linux/macOS | Windows CMD | PowerShell | Data and login |
+| --- | --- | --- | --- | --- |
+| Real (default) | `./dev.sh --real` | `dev.bat --real` | `.\dev.ps1 --real` | Starts Flask and the frontend. Requires backend/database configuration and a real backend account. |
+| Fixture | `./dev.sh --fixture` | `dev.bat --fixture` | `.\dev.ps1 --fixture` | Starts only the frontend with the local adapter and OSM fixture. No Flask or database required. Login: `admin_justine` / `password123`. |
+
+The runners print the selected mode and login guidance. Fixture credentials apply only to fixture mode. Fixture edits stay in the local adapter and do not update the backend database.
+
+Real mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=false`, `VITE_API_MODE=real`, and `VITE_MAP_FIXTURE=none`. Its API address defaults to `http://localhost:5000`; set `VITE_API_BASE_URL` in the shell before running the script to override it. Fixture mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=true`, `VITE_API_MODE=local`, and `VITE_MAP_FIXTURE=osm`. These process variables override Vite's local `.env` settings. Setting only `VITE_API_MODE=local` does not enable the fixture adapter.
+
+For frontend-only commands and verification, see the [frontend README](frontend/admin/README.md#development). For feature ownership and identity relationships, see its [code navigation map](frontend/admin/README.md#code-navigation).
+
+## Production builds
+
+Use the tracked [production build and release recipe](deploy/README.md) for Dockerfiles, Nginx, locked dependencies, CI, and clean-commit image archives. The frontend's guarded command is `npm run build:production`; deployment uses the saved image IDs.
 
 ## Database prerequisites
 
