@@ -20,6 +20,29 @@ describe("UI Components", () => {
     expect(screen.getByRole("button", { name: "2" })).toHaveClass("active");
   });
 
+  it("condenses large page ranges around the current page", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <Pagination total={466} page={1} pageSize={10} onChange={onChange} />,
+    );
+
+    const pageButtons = () =>
+      screen.getAllByRole("button", { name: /^\d+$/ }).map((button) => button.textContent);
+    expect(pageButtons()).toEqual(["1", "2", "3", "47"]);
+    expect(screen.getAllByText("…")).toHaveLength(1);
+
+    rerender(<Pagination total={466} page={24} pageSize={10} onChange={onChange} />);
+    expect(pageButtons()).toEqual(["1", "23", "24", "25", "47"]);
+    expect(screen.getAllByText("…")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "24" })).toHaveClass("active");
+
+    rerender(<Pagination total={466} page={47} pageSize={10} onChange={onChange} />);
+    expect(pageButtons()).toEqual(["1", "45", "46", "47"]);
+    expect(screen.getAllByText("…")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    expect(onChange).toHaveBeenCalledWith(1);
+  });
+
   it("renders Modal with title and subtitle, handles close button click and Escape key", () => {
     const onClose = vi.fn();
     render(
