@@ -244,7 +244,18 @@ export function Pagination({
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(Math.max(page, 1), pages);
-  const pageNumbers = Array.from({ length: pages }, (_, i) => i + 1);
+  const pageItems: Array<number | "start-ellipsis" | "end-ellipsis"> = [];
+  if (pages <= 7) {
+    pageItems.push(...Array.from({ length: pages }, (_, i) => i + 1));
+  } else {
+    const start = currentPage <= 2 ? 2 : currentPage >= pages - 1 ? pages - 2 : currentPage - 1;
+    const end = currentPage <= 2 ? 3 : currentPage >= pages - 1 ? pages - 1 : currentPage + 1;
+    pageItems.push(1);
+    if (start > 2) pageItems.push("start-ellipsis");
+    for (let p = start; p <= end; p += 1) pageItems.push(p);
+    if (end < pages - 1) pageItems.push("end-ellipsis");
+    pageItems.push(pages);
+  }
   return (
     <div className="pagination">
       <span>
@@ -253,8 +264,10 @@ export function Pagination({
       </span>
       <div>
         <button type="button" disabled={currentPage === 1} onClick={() => onChange?.(currentPage - 1)}>Previous</button>
-        {pageNumbers.map((p) => (
-          <button key={p} type="button" className={p === currentPage ? "active" : ""} onClick={() => onChange?.(p)}>{p}</button>
+        {pageItems.map((item) => typeof item === "number" ? (
+          <button key={item} type="button" className={item === currentPage ? "active" : ""} aria-current={item === currentPage ? "page" : undefined} onClick={() => onChange?.(item)}>{item}</button>
+        ) : (
+          <span key={item} aria-hidden="true">…</span>
         ))}
         <button type="button" disabled={currentPage === pages} onClick={() => onChange?.(currentPage + 1)}>Next</button>
       </div>
