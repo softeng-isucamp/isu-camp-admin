@@ -37,16 +37,6 @@ class Pathway(db.Model):
         nullable=False
     )
 
-    distance_m = db.Column(
-        db.Numeric,
-        nullable=False
-    )
-
-    estimated_minutes = db.Column(
-        db.Numeric,
-        nullable=False
-    )
-
     name = db.Column(
         db.Text,
         nullable=False,
@@ -117,16 +107,6 @@ class Pathway(db.Model):
             "destination_node_id": self.destination_node_id,
             "path_type": self.path_type,
             "name": self.name,
-            "distance_m": (
-                float(self.distance_m)
-                if self.distance_m is not None
-                else None
-            ),
-            "estimated_minutes": (
-                float(self.estimated_minutes)
-                if self.estimated_minutes is not None
-                else None
-            ),
             "status": self.status,
             "shaded": self.shaded,
             "direction": self.direction,

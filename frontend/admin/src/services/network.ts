@@ -51,8 +51,6 @@ export interface Pathway {
   sourceNodeId: string;
   destinationNodeId: string;
   pathSequence: PathSequence;
-  distanceMeters: number | null;
-  estimatedTimeSeconds: number | null;
   type: string | null;
   shade: string | null;
   direction: "two_way" | "one_way" | null;
@@ -166,33 +164,6 @@ export const validatePathway = (
   }
 };
 
-export const parseDistanceMeters = (value: string | number | null | undefined): number | null => {
-  if (typeof value === "number") return finite(value) ? value : null;
-  if (!value || /^(unknown|—|-|n\/a)$/i.test(value.trim())) return null;
-  const match = value.match(/[\d.]+/);
-  if (!match) return null;
-  const amount = Number(match[0]);
-  if (!finite(amount)) return null;
-  return /km/i.test(value) ? amount * 1000 : amount;
-};
-
-export const parseEstimatedTimeSeconds = (value: string | number | null | undefined): number | null => {
-  if (typeof value === "number") return finite(value) ? value : null;
-  if (!value || /^(unknown|—|-|n\/a)$/i.test(value.trim())) return null;
-  const match = value.match(/[\d.]+/);
-  if (!match) return null;
-  const amount = Number(match[0]);
-  if (!finite(amount)) return null;
-  return /h(ours?)?/i.test(value) ? amount * 3600 : /s(ec(onds?)?)?/i.test(value) ? amount : amount * 60;
-};
-
-export const formatDistanceMeters = (value: number | null): string => value == null ? "—" : `${value % 1 ? value.toFixed(1) : value} m`;
-export const formatEstimatedTimeSeconds = (value: number | null): string => {
-  if (value == null) return "—";
-  if (value >= 3600) return `${Math.round(value / 3600)} hr`;
-  return `${Math.max(1, Math.round(value / 60))} min`;
-};
-
 const legacyCoordinate = ([latitude, longitude]: [number, number]): Coordinate => ({ latitude, longitude });
 const legacyStatus = (value: string | undefined): NetworkStatus => value === "Inactive" ? "inactive" : "active";
 
@@ -223,8 +194,6 @@ export const normalizePathway = (value: LegacyPathway): Pathway => ({
   sourceNodeId: value.sourceNodeId,
   destinationNodeId: value.destinationNodeId,
   pathSequence: { points: value.pathPoints.map(legacyCoordinate) },
-  distanceMeters: parseDistanceMeters(value.distance),
-  estimatedTimeSeconds: parseEstimatedTimeSeconds(value.time),
   type: value.type ? normalizePathwayWayType(value.type) : null,
   shade: value.shade === "Unknown" ? null : value.shade,
   direction: value.direction === "Two-way" ? "two_way" : value.direction === "One-way" ? "one_way" : null,
@@ -287,7 +256,9 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
           const normalized: NetworkSnapshot = {
             ...saved,
             pathways: saved.pathways.map((pathway) => ({
-              ...pathway,
+              ...(({ distanceMeters: _distanceMeters, estimatedTimeSeconds: _estimatedTimeSeconds, ...current }) => current)(
+                pathway as Pathway & { distanceMeters?: unknown; estimatedTimeSeconds?: unknown },
+              ),
               type: normalizePathwayWayType(pathway.type ?? undefined) === "Unknown" ? "Walkway" : normalizePathwayWayType(pathway.type ?? undefined),
               status: normalizePathwayLifecycleStatus(pathway.status) === "Active" ? "active" : "closed",
               allowedModes: normalizeAllowedModes(pathway.type, pathway.allowedModes),
@@ -342,8 +313,6 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
         sourceNodeId: straightPair[0].id,
         destinationNodeId: straightPair[1].id,
         pathSequence: { points: [] },
-        distanceMeters: null,
-        estimatedTimeSeconds: null,
         type: "Walkway",
         shade: null,
         direction: "two_way",

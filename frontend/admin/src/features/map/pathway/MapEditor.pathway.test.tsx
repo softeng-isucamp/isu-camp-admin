@@ -14,7 +14,7 @@ describe("Map Editor preview", () => {
 
   it("offers mutually exclusive browsing and Pathway editing choices", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
 
@@ -41,7 +41,7 @@ describe("Map Editor preview", () => {
 
   it("keeps Walking Network browser selection synchronized with the map", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
 
@@ -83,15 +83,10 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ id: generatedMapFixture.pathways[0].id })));
   });
 
-  it("lets Reshape Pathway drag a point immediately and recomputes unknown distance before saving", async () => {
+  it("lets Reshape Pathway drag a point immediately without calculating distance or ETA", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-unknown-distance", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "Unknown", time: "Unknown", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-unknown-distance", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
-    vi.mocked(services.map.updatePathway).mockImplementation(async (pathway) => {
-      const distanceMeters = Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0);
-      if (!(distanceMeters > 0)) throw new Error("distance_m must be greater than zero");
-      return pathway;
-    });
     vi.mocked(services.map.updatePathway).mockClear();
 
     renderEditor();
@@ -109,19 +104,19 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
-      distance: expect.stringMatching(/^[1-9][0-9]* m$/),
       pathPoints: [[16.7209, 121.6897]],
     })));
-    expect(screen.queryByRole("alert")?.textContent ?? "").not.toContain("distance_m must be greater than zero");
+    expect(services.map.updatePathway).not.toHaveBeenCalledWith(expect.objectContaining({ distance: expect.anything() }));
+    expect(services.map.updatePathway).not.toHaveBeenCalledWith(expect.objectContaining({ time: expect.anything() }));
   });
 
-  it("blocks a zero-length Pathway before it can reach the backend", async () => {
+  it("allows a geometry-only Pathway to save without distance validation", async () => {
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
       { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-zero-length", name: "Zero Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "Unknown", time: "Unknown", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-zero-length", name: "Zero Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     vi.mocked(services.map.updatePathway).mockClear();
 
@@ -136,9 +131,7 @@ describe("Map Editor preview", () => {
     expect(updateButton).toBeDefined();
     fireEvent.click(updateButton!);
 
-    const alerts = await screen.findAllByRole("alert");
-    expect(alerts.map((alert) => alert.textContent).join(" ")).toContain("Pathway geometry must have a positive distance.");
-    expect(services.map.updatePathway).not.toHaveBeenCalled();
+    await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalled());
   });
 
   it("confirms, cancels, and hard-deletes a Pathway with its Path Point warning", async () => {
@@ -150,7 +143,7 @@ describe("Map Editor preview", () => {
       { id: "node-junction", name: "Main Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.690, status: "Active" },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-library", name: "Library Walk", sourceNodeId: "node-entrance", destinationNodeId: "node-junction", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-entrance", destinationNodeId: "node-junction", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
 
@@ -170,7 +163,7 @@ describe("Map Editor preview", () => {
 
   it("browses an Active Pathway and applies its metadata from the unified card", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "active-path", name: "Active Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"], pathPoints: [] },
+      { id: "active-path", name: "Active Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"], pathPoints: [] },
     ]);
     renderEditor();
 
@@ -198,7 +191,7 @@ describe("Map Editor preview", () => {
 
   it("adjusts a selected Path Point with coordinates", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
@@ -214,7 +207,7 @@ describe("Map Editor preview", () => {
 
   it("moves a selected Path Point immediately while reshaping", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
     await screen.findByTestId("path-geometry");
@@ -237,8 +230,7 @@ describe("Map Editor preview", () => {
     vi.mocked(services.map.createRouteNode).mockClear();
     vi.mocked(services.map.createPathway).mockClear();
     vi.mocked(services.map.pathways).mockResolvedValue([{
-      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b",
-      distance: "40 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway",
+      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway",
       direction: "Two-way", status: "Open", allowedModes: ["Walking"],
       pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]],
     }]);
@@ -276,8 +268,7 @@ describe("Map Editor preview", () => {
       { id: "node-middle", name: "Existing Junction", nodeType: "Junction", lat: 16.7207, lng: 121.6897 },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([{
-      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b",
-      distance: "40 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway",
+      id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway",
       direction: "Two-way", status: "Open", allowedModes: ["Walking"], pathPoints: [[16.7207, 121.6897]],
     }]);
     renderEditor();
@@ -298,7 +289,7 @@ describe("Map Editor preview", () => {
 
   it("applies Parent Pathway metadata and selected Path Point geometry as one draft", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]] },
     ]);
     renderEditor();
 
@@ -327,7 +318,7 @@ describe("Map Editor preview", () => {
 
   it("switches a selected Pathway's endpoints and reverses its Path Sequence", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897], [16.7208, 121.6898]] },
     ]);
     renderEditor();
 
@@ -352,7 +343,7 @@ describe("Map Editor preview", () => {
 
   it("blocks drawing a duplicate direct Pathway in either direction", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
     await choosePathwayEditor();
@@ -384,14 +375,12 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
     await waitFor(() => expect(services.map.createPathway).toHaveBeenCalledWith(expect.objectContaining({
       name: "New Campus Walk",
-      distance: expect.stringMatching(/^[1-9]\d* m$/),
-      time: expect.stringMatching(/^[1-9]\d* min$/),
     })));
   });
 
   it("adds a midpoint Path Point without creating a Route Node", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
     fireEvent.click(await screen.findByTestId("path-geometry"));
@@ -404,7 +393,7 @@ describe("Map Editor preview", () => {
 
   it("allows close pathway editing and uses the building-footprint midpoint handle", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "Short Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-1", name: "Short Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
     fireEvent.click(await screen.findByTestId("path-geometry"));
@@ -425,8 +414,8 @@ describe("Map Editor preview", () => {
       { id: "node-d", name: "D", nodeType: "Junction", lat: 16.722, lng: 121.689 },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-ab", name: "A–B", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
-      { id: "path-cd", name: "C–D", sourceNodeId: "node-c", destinationNodeId: "node-d", distance: "10 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-ab", name: "A–B", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+      { id: "path-cd", name: "C–D", sourceNodeId: "node-c", destinationNodeId: "node-d", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
     ]);
     renderEditor();
 

@@ -8,8 +8,8 @@ const nodes: RouteNode[] = [
   { id: "node-quad", name: "Quad Junction", nodeType: "Junction", lat: 16.721, lng: 121.691, status: "Inactive" },
 ];
 const pathways: Pathway[] = [
-  { id: "path-library", name: "Library Walk", sourceNodeId: "node-library", destinationNodeId: "node-quad", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
-  { id: "path-service", name: "Service Link", sourceNodeId: "node-quad", destinationNodeId: "node-library", distance: "90 m", time: "1 min", shade: "Unshaded", type: "Service path", direction: "One-way", status: "Closed", pathPoints: [] },
+  { id: "path-library", name: "Library Walk", sourceNodeId: "node-library", destinationNodeId: "node-quad", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] },
+  { id: "path-service", name: "Service Link", sourceNodeId: "node-quad", destinationNodeId: "node-library", shade: "Unshaded", type: "Service path", direction: "One-way", status: "Closed", pathPoints: [] },
 ];
 
 describe("NetworkBrowser", () => {
@@ -22,6 +22,7 @@ describe("NetworkBrowser", () => {
     expect(screen.getByRole("status", { name: "Pathway results" })).toHaveTextContent("2 Pathways");
     fireEvent.change(screen.getByLabelText("Shade"), { target: { value: "Mostly Shaded" } });
     expect(screen.getByRole("button", { name: /Library Walk/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Library Walk/ })).not.toHaveTextContent(/\bm\b|min/);
     expect(screen.queryByRole("button", { name: /Service Link/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Library Walk/ }));

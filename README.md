@@ -77,3 +77,5 @@ Use the tracked [production build and release recipe](deploy/README.md) for Dock
 ## Database prerequisites
 
 The Map Editor's indoor-location markers require the `public.location` schema to support nullable latitude and longitude values. Coordinates must be stored as a complete pair and stay within the valid latitude and longitude ranges. Apply the database migration through the database team's deployment process before using indoor marker placement; the application does not alter the schema at startup.
+
+Pathway distance and estimated time are no longer stored or returned by the application. Before deploying the updated backend, apply [`database/migrations/2026-10-04-drop-pathway-metrics.sql`](database/migrations/2026-10-04-drop-pathway-metrics.sql) to remove the legacy `public.pathway.distance_m` and `public.pathway.estimated_minutes` columns. The application does not alter the schema at startup.

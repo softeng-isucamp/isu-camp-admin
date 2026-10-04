@@ -31,7 +31,7 @@ const renderWithClient = (entry: string) => {
   return { refetch };
 };
 
-const library: Pathway = { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] };
+const library: Pathway = { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [] };
 
 describe("Map Editor URL intents", () => {
   useMapEditorTestLifecycle();

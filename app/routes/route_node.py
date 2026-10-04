@@ -379,7 +379,7 @@ def get_pathway(pathway_id):
 
 
 def _pathway_values(data, current=None):
-    required = ("source_node_id", "destination_node_id", "path_type", "distance_m", "estimated_minutes")
+    required = ("source_node_id", "destination_node_id", "path_type")
     for key in required:
         if current is None and key not in data:
             raise ValidationError(f"{key} is required")
@@ -398,16 +398,6 @@ def _pathway_values(data, current=None):
         data.get("path_type", getattr(current, "path_type", None)),
         "path_type",
         PATHWAY_TYPES,
-    )
-    values["distance_m"] = _number(
-        data.get("distance_m", getattr(current, "distance_m", None)),
-        "distance_m",
-        positive=True,
-    )
-    values["estimated_minutes"] = _number(
-        data.get("estimated_minutes", getattr(current, "estimated_minutes", None)),
-        "estimated_minutes",
-        positive=True,
     )
     values["name"] = _text(
         data.get("name", getattr(current, "name", "Unnamed Pathway")),
@@ -454,18 +444,6 @@ def _apply_pathway(record, values):
     }
     _modes_on(record, modes)
     return points
-
-
-def _segment_metrics(coordinates):
-    distance = 0.0
-    for (lat_a, lng_a), (lat_b, lng_b) in zip(coordinates, coordinates[1:]):
-        a, b = math.radians(lat_a), math.radians(lat_b)
-        delta_lat, delta_lng = b - a, math.radians(lng_b - lng_a)
-        arc = math.sin(delta_lat / 2) ** 2 + math.cos(a) * math.cos(b) * math.sin(delta_lng / 2) ** 2
-        distance += 6371000 * 2 * math.atan2(math.sqrt(arc), math.sqrt(1 - arc))
-    if distance <= 0:
-        raise ValidationError("Each replacement Pathway must have positive length")
-    return max(1, round(distance)), max(1, math.ceil(distance / 80))
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>/convert-point", methods=["POST"])
@@ -520,16 +498,10 @@ def convert_path_point(pathway_id):
         endpoints = ((source, node), (node, destination))
         replacements = []
         for part, (start, end), details in zip(parts, endpoints, metadata):
-            coordinates = [(start.latitude, start.longitude)] + [
-                (float(point.latitude), float(point.longitude)) for point in part
-            ] + [(end.latitude, end.longitude)]
-            distance, minutes = _segment_metrics(coordinates)
             payload = {
                 "source_node_id": start.node_id,
                 "destination_node_id": end.node_id,
                 "path_type": details.get("path_type", original.path_type),
-                "distance_m": distance,
-                "estimated_minutes": minutes,
                 "name": details.get("name"),
                 "status": details.get("status", "active"),
                 "direction": details.get("direction", original.direction),
@@ -548,8 +520,6 @@ def convert_path_point(pathway_id):
                 source_node_id=start.node_id,
                 destination_node_id=end.node_id,
                 path_type=values["path_type"],
-                distance_m=distance,
-                estimated_minutes=minutes,
             )
             replacement_points = _apply_pathway(replacement, values)
             db.session.add(replacement)
@@ -585,8 +555,6 @@ def create_pathway():
             source_node_id=values["source_node_id"],
             destination_node_id=values["destination_node_id"],
             path_type=values["path_type"],
-            distance_m=values["distance_m"],
-            estimated_minutes=values["estimated_minutes"],
         )
         points = _apply_pathway(record, values)
         db.session.add(record)

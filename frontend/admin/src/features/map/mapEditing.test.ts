@@ -8,8 +8,7 @@ const node = (overrides: Partial<RouteNode> = {}): RouteNode => ({
   associatedPlaceId: "loc-1", lat: 16.975, lng: 121.731, ...overrides,
 });
 const pathway = (overrides: Partial<Pathway> = {}): Pathway => ({
-  id: "path-1", name: "Library walk", sourceNodeId: "node-1", destinationNodeId: "node-2",
-  distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway",
+  id: "path-1", name: "Library walk", sourceNodeId: "node-1", destinationNodeId: "node-2", shade: "Mostly Shaded", type: "Walkway",
   direction: "Two-way", status: "Open", pathPoints: [[16.9751, 121.7311]], ...overrides,
 });
 const building = (overrides: Partial<Building> = {}): Building => ({

@@ -264,8 +264,6 @@ type BackendPathway = {
   source_node_id: number;
   destination_node_id: number;
   path_type: string;
-  distance_m: number;
-  estimated_minutes: number;
   status: string;
   shaded?: boolean;
   shade?: string | null;
@@ -339,8 +337,6 @@ const normalizeBackendPathway = (raw: BackendPathway, points: BackendPathPoint[]
   name: raw.name?.trim() || `Pathway ${raw.pathway_id}`,
   sourceNodeId: String(raw.source_node_id),
   destinationNodeId: String(raw.destination_node_id),
-  distance: `${raw.distance_m} m`,
-  time: `${raw.estimated_minutes} min`,
   shade: raw.shade === "Fully Shaded" || raw.shade === "Mostly Shaded" || raw.shade === "Partial Shade" || raw.shade === "Unshaded" || raw.shade === "Unknown"
     ? raw.shade
     : raw.shaded ? "Fully Shaded" : "Unshaded",
@@ -356,8 +352,6 @@ const serializePathway = (pathway: Omit<Pathway, "id">) => ({
   source_node_id: Number(pathway.sourceNodeId),
   destination_node_id: Number(pathway.destinationNodeId),
   path_type: pathway.type,
-  distance_m: Number(pathway.distance.match(/[\d.]+/)?.[0] ?? 0),
-  estimated_minutes: Number(pathway.time.match(/[\d.]+/)?.[0] ?? 0),
   status: pathway.status === "Closed" ? "inactive" : "active",
   shade: pathway.shade,
   direction: pathway.direction,

@@ -46,8 +46,6 @@ const asPathway = (value: GeneratedFixture["walkingNetwork"]["pathways"][number]
   sourceOsmNodeIds: value.sourceOsmNodeIds,
   sourceWayId: value.sourceWayId,
   source: value.source,
-  distance: value.distance,
-  time: value.time,
   shade: value.shade as Pathway["shade"],
   type: normalizePathwayWayType(value.type) === "Unknown" ? "Walkway" : normalizePathwayWayType(value.type),
   direction: value.direction === "One-way" ? "One-way" : "Two-way",

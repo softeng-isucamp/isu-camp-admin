@@ -100,8 +100,6 @@ export interface Pathway {
   name: string;
   sourceNodeId: string;
   destinationNodeId: string;
-  distance: string;
-  time: string;
   shade: Shade;
   type: PathwayType | string;
   direction: "Two-way" | "One-way" | "Unknown";

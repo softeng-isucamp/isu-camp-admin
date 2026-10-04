@@ -13,7 +13,7 @@ describe("Map Editor preview", () => {
 
   it("offers a choice when a clicked Pathway overlaps other map objects", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
     ]);
     renderEditor();
 
@@ -57,7 +57,7 @@ describe("Map Editor preview", () => {
       { id: "building-admin", name: "Administration Building", code: "ADMIN", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "Campus Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", pathPoints: [], distance: "50 m", time: "1 min", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"] },
+      { id: "path-1", name: "Campus Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", pathPoints: [], shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"] },
     ]);
     renderEditor();
 
@@ -111,7 +111,7 @@ describe("Map Editor preview", () => {
       { id: "node-b", name: "South Junction", nodeType: "Junction", associatedPlaceId: null, lat: 16.721, lng: 121.69 },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
     ]);
     renderEditor();
 
@@ -134,7 +134,7 @@ describe("Map Editor preview", () => {
       { id: "node-b", name: "Remote Junction", nodeType: "Junction", associatedPlaceId: null, lat: 11, lng: 11 },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+      { id: "42", name: "Collision Pathway", sourceNodeId: "42", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
     ]);
     renderEditor();
 
@@ -153,7 +153,7 @@ describe("Map Editor preview", () => {
       { id: "42", name: "Collision Room", code: "42", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
     ]);
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "42", name: "Collision Pathway", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+      { id: "42", name: "Collision Pathway", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
     ]);
     renderEditor();
 
