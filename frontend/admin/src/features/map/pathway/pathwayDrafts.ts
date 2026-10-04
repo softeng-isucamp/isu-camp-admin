@@ -7,8 +7,6 @@ export const isPathwayDraft = (value: unknown): value is Pathway => {
     && typeof pathway.name === "string"
     && typeof pathway.sourceNodeId === "string"
     && typeof pathway.destinationNodeId === "string"
-    && typeof pathway.distance === "string"
-    && typeof pathway.time === "string"
     && typeof pathway.shade === "string"
     && typeof pathway.type === "string"
     && typeof pathway.direction === "string"

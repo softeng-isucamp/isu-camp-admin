@@ -13,8 +13,6 @@ const pathway = (overrides: Partial<Pathway> = {}): Pathway => ({
   name: "Library Walk",
   sourceNodeId: "node-1",
   destinationNodeId: "node-2",
-  distance: "111 m",
-  time: "2 min",
   shade: "Unshaded",
   type: "Walkway",
   direction: "Two-way",
@@ -71,7 +69,7 @@ describe("PathwayWorkflow", () => {
   it("records an authoritative create and completes the Tool Draft", async () => {
     const workingSession = new WorkingSessionManager();
     workingSession.startDraft({ toolType: "pathway", label: "Pathway draft", provisionalGeometry: {} });
-    const confirmed = pathway({ id: "path-42", distance: "112 m" });
+    const confirmed = pathway({ id: "path-42", });
     const adapter = {
       createPathway: vi.fn().mockResolvedValue(confirmed),
       updatePathway: vi.fn(),
@@ -84,7 +82,7 @@ describe("PathwayWorkflow", () => {
     expect(workingSession.getActiveDraft()).toBeNull();
   });
 
-  it("strips endpoint points and recomputes metrics before persistence", async () => {
+  it("strips endpoint points and persists geometry without calculating metrics", async () => {
     const workingSession = new WorkingSessionManager();
     const adapter = {
       createPathway: vi.fn(),
@@ -101,7 +99,9 @@ describe("PathwayWorkflow", () => {
 
     expect(result.ok && result.pathway.pathPoints).toEqual([[0, 0.0005]]);
     expect(result.ok && result.operation.type).toBe("update_geometry");
-    expect(adapter.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ distance: "111 m", time: "2 min" }));
+    expect(adapter.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ pathPoints: [[0, 0.0005]] }));
+    expect(result.ok && result.pathway).not.toHaveProperty("distance");
+    expect(result.ok && result.pathway).not.toHaveProperty("time");
   });
 
   it("records metadata and geometry together as one compound operation", async () => {

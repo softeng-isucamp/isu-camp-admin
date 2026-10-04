@@ -1,6 +1,5 @@
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
 import type { Pathway, RouteNode } from "../../../types";
-import { distanceInMeters } from "../pointInteractions";
 
 export type PathPointConversionDraft = {
   pathwayId: string;
@@ -23,20 +22,6 @@ type Props = {
   onPathwayChange: (index: 0 | 1, change: Partial<Pathway>) => void;
   onSave: () => void;
 };
-
-function segmentMetrics(pathway: Pathway, draft: PathPointConversionDraft, nodes: RouteNode[]) {
-  const coordinate = (id: string): [number, number] | null => {
-    if (id === "pending-conversion-node") return [draft.node.lat, draft.node.lng];
-    const node = nodes.find((item) => item.id === id);
-    return node ? [node.lat, node.lng] : null;
-  };
-  const source = coordinate(pathway.sourceNodeId);
-  const destination = coordinate(pathway.destinationNodeId);
-  if (!source || !destination) return "Calculated on Save";
-  const points = [source, ...pathway.pathPoints, destination];
-  const distance = points.slice(1).reduce((sum, point, index) => sum + distanceInMeters(points[index], point), 0);
-  return `${Math.max(1, Math.round(distance))} m · ${Math.max(1, Math.ceil(distance / 80))} min`;
-}
 
 export function PathPointConversionModal({ draft, parentName, nodes, buildings, error, saving, onClose, onNodeChange, onPathwayChange, onSave }: Props) {
   const canSave = Boolean(
@@ -82,7 +67,7 @@ export function PathPointConversionModal({ draft, parentName, nodes, buildings, 
           const segment = index === 0 ? "A" : "B";
           const update = (change: Partial<Pathway>) => onPathwayChange(index as 0 | 1, change);
           return <section key={segment} className="conversion-section conversion-pathway" aria-label={`Replacement Pathway ${segment}`}>
-            <div className="conversion-pathway-heading"><h4>Pathway {segment}</h4><span>{segmentMetrics(pathway, draft, nodes)}</span></div>
+            <div className="conversion-pathway-heading"><h4>Pathway {segment}</h4></div>
             <Field id={`conversion-pathway-${segment}-name`} aria-label={`Replacement Pathway ${segment} name`} label="PATHWAY NAME" required value={pathway.name} onChange={(event) => update({ name: event.target.value })} />
             <div className="form-grid-two">
               <SelectField id={`conversion-pathway-${segment}-type`} aria-label={`Replacement Pathway ${segment} way type`} label="WAY TYPE" value={pathway.type} onChange={(event) => update({ type: event.target.value, allowedModes: event.target.value === "Walkway" ? ["Walking"] : pathway.allowedModes })}><option>Walkway</option><option>Road</option></SelectField>

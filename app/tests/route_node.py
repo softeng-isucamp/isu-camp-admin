@@ -144,7 +144,6 @@ def test_create_pathway_with_points_is_atomic_and_returns_geometry(monkeypatch):
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
-        "distance_m": 12, "estimated_minutes": 1,
         "path_points": [{"latitude": 16.72, "longitude": 121.69}, {"latitude": 16.721, "longitude": 121.691}],
     })
 
@@ -210,7 +209,6 @@ def test_convert_saved_point_creates_one_node_and_two_geometry_preserving_pathwa
         def to_dict(self):
             return {"pathway_id": self.pathway_id, "source_node_id": self.source_node_id,
                     "destination_node_id": self.destination_node_id, "name": self.name,
-                    "distance_m": self.distance_m, "estimated_minutes": self.estimated_minutes,
                     "path_points": self.path_points}
 
     monkeypatch.setattr(route_node_module, "RouteNode", FakeNode)
@@ -246,7 +244,8 @@ def test_convert_saved_point_creates_one_node_and_two_geometry_preserving_pathwa
     assert first["path_points"] == []
     assert second["path_points"] == [{"sequence_no": 1, "latitude": 16.7208, "longitude": 121.6898,
                                       "building_id": None, "node_type": "Waypoint", "status": "active"}]
-    assert first["distance_m"] > 0 and second["distance_m"] > first["distance_m"]
+    assert "distance_m" not in first and "estimated_minutes" not in first
+    assert "distance_m" not in second and "estimated_minutes" not in second
 
 
 def test_convert_point_rejects_stale_coordinates_without_writing(monkeypatch):
@@ -275,7 +274,6 @@ def test_invalid_atomic_pathway_geometry_does_not_create_any_records(monkeypatch
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
-        "distance_m": 12, "estimated_minutes": 1,
         "path_points": [{"latitude": 16.72, "longitude": 121.69}, {"latitude": "bad", "longitude": 121.691}],
     })
 
@@ -373,7 +371,6 @@ def test_atomic_pathway_write_rolls_back_everything_when_commit_fails(monkeypatc
 
     response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
         "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
-        "distance_m": 12, "estimated_minutes": 1,
         "path_points": [{"latitude": 16.72, "longitude": 121.69}],
     })
 
@@ -515,8 +512,6 @@ def test_pathway_metadata_and_allowed_modes_round_trip_through_create(monkeypatc
             "source_node_id": 3,
             "destination_node_id": 4,
             "path_type": "Road",
-            "distance_m": 120,
-            "estimated_minutes": 2,
             "direction": "One-way",
             "shade": "Mostly Shaded",
             "allowed_modes": ["Walking", "Vehicle"],
@@ -546,8 +541,6 @@ def test_pathway_update_replaces_allowed_modes_and_preserves_metadata(monkeypatc
             "direction": "Two-way",
                 "shade": "Unshaded",
                 "path_type": "Walkway",
-                "distance_m": 20,
-                "estimated_minutes": 1,
                 "status": "active",
                 "surface_type": None,
             "allowed_modes": [],
@@ -595,8 +588,6 @@ def test_pathway_update_removes_old_points_before_reusing_sequence_numbers(monke
             "source_node_id": 3,
             "destination_node_id": 4,
             "path_type": "Walkway",
-            "distance_m": 20,
-            "estimated_minutes": 1,
             "name": "Connector",
             "status": "active",
             "direction": "Unknown",
@@ -650,8 +641,6 @@ def test_create_pathway_rejects_a_self_connection(monkeypatch):
             "source_node_id": 3,
             "destination_node_id": 3,
             "path_type": "walkway",
-            "distance_m": 10,
-            "estimated_minutes": 1,
         },
     )
 
@@ -681,8 +670,6 @@ def test_pathway_and_path_point_reject_unsupported_editor_enums(monkeypatch):
             "source_node_id": 3,
             "destination_node_id": 4,
             "path_type": "Trail",
-            "distance_m": 10,
-            "estimated_minutes": 1,
         },
     )
     path_point = client.post(

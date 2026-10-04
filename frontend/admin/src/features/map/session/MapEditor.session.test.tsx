@@ -63,7 +63,7 @@ describe("Map Editor preview", () => {
 
   it("restores the selected Path Point and drag mode when resuming a suspended pathway", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", distance: "10 m", time: "1 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     renderEditor();
 

@@ -201,7 +201,7 @@ describe("Map Editor preview", () => {
 
   it("deletes a Route Node only after confirmation and retains the dialog after failure", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
-      { id: "path-library", name: "Library Walk", sourceNodeId: "node-entrance", destinationNodeId: "node-junction", distance: "120 m", time: "2 min", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
+      { id: "path-library", name: "Library Walk", sourceNodeId: "node-entrance", destinationNodeId: "node-junction", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },
     ]);
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-entrance", name: "Library Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895, status: "Active" },

@@ -130,17 +130,11 @@ export function usePathwayEditing({
       setError(connectionError);
       return null;
     }
-    const directDistance = Math.max(
-      1,
-      Math.round(distanceInMeters([source.lat, source.lng], [node.lat, node.lng])),
-    );
     const newPath: Pathway = {
       id: `pathway-${Date.now()}`,
       name: "",
       sourceNodeId: source.id,
       destinationNodeId: node.id,
-      distance: `${directDistance} m`,
-      time: `${Math.max(1, Math.ceil(directDistance / 80))} min`,
       shade: "Unknown",
       type: "Walkway",
       direction: "Two-way",

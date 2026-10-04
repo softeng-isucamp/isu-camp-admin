@@ -12,8 +12,6 @@ const pathway: Pathway = {
   name: "Library Walk",
   sourceNodeId: "node-a",
   destinationNodeId: "node-b",
-  distance: "100 m",
-  time: "1 min",
   shade: "Unknown",
   type: "Walkway",
   direction: "Two-way",

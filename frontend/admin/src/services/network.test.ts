@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createCanonicalNetworkStore,
-  formatDistanceMeters,
-  formatEstimatedTimeSeconds,
   normalizePathway,
   normalizeRouteNode,
   evaluateBuildingRoutability,
-  parseDistanceMeters,
-  parseEstimatedTimeSeconds,
   filterPathwaysByMode,
   pathwayAllowsMode,
 } from "./network";
@@ -32,29 +28,29 @@ describe("canonical walking-network contract", () => {
     const cleared = store.clearEntranceAssociation("n");
     expect(cleared).toMatchObject({ id: "n", type: "access_point", buildingId: null, latitude: 1, longitude: 1 });
   });
-  it("adapts legacy tuples, associations, and display metrics at the boundary", () => {
+  it("adapts legacy tuples and associations at the boundary", () => {
     expect(normalizeRouteNode({ id: "entrance", name: "Main", nodeType: "Entrance", associatedPlaceId: "building", lat: 1, lng: 2 })).toMatchObject({
       type: "entrance", buildingId: "building", latitude: 1, longitude: 2,
     });
     expect(normalizePathway({
       id: "path", name: "Walk", sourceNodeId: "a", destinationNodeId: "b",
-      pathPoints: [[1, 2]], distance: "1.2 km", time: "2 min", shade: "Unknown",
+      pathPoints: [[1, 2]], shade: "Unknown",
       type: "", direction: "Unknown", status: "Unknown",
     })).toMatchObject({
       pathSequence: { points: [{ latitude: 1, longitude: 2 }] },
-      distanceMeters: 1200, estimatedTimeSeconds: 120, shade: null, type: null,
+      shade: null, type: null,
       direction: null, status: "closed",
     });
     expect(normalizePathway({
       id: "legacy-open", name: "Legacy", sourceNodeId: "a", destinationNodeId: "b",
-      pathPoints: [], distance: "—", time: "—", shade: "Unknown", type: "Campus walkway", direction: "Two-way", status: "Open",
+      pathPoints: [], shade: "Unknown", type: "Campus walkway", direction: "Two-way", status: "Open",
     })).toMatchObject({ type: "Walkway", status: "active", allowedModes: ["walking"] });
   });
 
   it("filters the shared graph independently for walking and vehicle travel", () => {
     const pathway = (id: string, status: "active" | "closed", allowedModes: ("walking" | "vehicle")[]) => ({
       id, name: id, sourceNodeId: "a", destinationNodeId: "b", pathSequence: { points: [] },
-      distanceMeters: null, estimatedTimeSeconds: null, type: "Walkway", shade: null,
+      type: "Walkway", shade: null,
       direction: "two_way" as const, status, allowedModes,
     });
     const pathways = [
@@ -67,14 +63,6 @@ describe("canonical walking-network contract", () => {
     expect(pathwayAllowsMode({ status: "closed", allowedModes: ["walking"] }, "walking")).toBe(false);
   });
 
-  it("uses named numeric transport values and a display-only formatter", () => {
-    expect(parseDistanceMeters("48 m")).toBe(48);
-    expect(parseEstimatedTimeSeconds("1 min")).toBe(60);
-    expect(parseDistanceMeters("Unknown")).toBeNull();
-    expect(formatDistanceMeters(48)).toBe("48 m");
-    expect(formatEstimatedTimeSeconds(60)).toBe("1 min");
-  });
-
   it("persists canonical writes and keeps ordered empty sequences", () => {
     const store = createCanonicalNetworkStore({
       buildings: [{ id: "b", name: "Building", code: "B", points: [[1, 1]], status: "Active" }],
@@ -82,11 +70,11 @@ describe("canonical walking-network contract", () => {
         { id: "a", name: "A", nodeType: "Junction", lat: 1, lng: 1 },
         { id: "b-node", name: "B", nodeType: "Access Point", lat: 2, lng: 2 },
       ],
-      pathways: [{ id: "p", name: "Straight", sourceNodeId: "a", destinationNodeId: "b-node", pathPoints: [], distance: "—", time: "—", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open" }],
+      pathways: [{ id: "p", name: "Straight", sourceNodeId: "a", destinationNodeId: "b-node", pathPoints: [], shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Open" }],
     }, null);
     const next = store.snapshot();
     next.pathways[0].name = "Renamed";
     store.save(next);
-    expect(store.pathways()[0]).toMatchObject({ name: "Renamed", pathSequence: { points: [] }, distanceMeters: null });
+    expect(store.pathways()[0]).toMatchObject({ name: "Renamed", pathSequence: { points: [] } });
   });
 });

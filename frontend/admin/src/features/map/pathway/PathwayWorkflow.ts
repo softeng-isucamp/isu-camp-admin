@@ -1,6 +1,5 @@
 import type { Pathway, RouteNode } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
-import { distanceInMeters } from "../pointInteractions";
 import {
   pathwayWithSuggestedName,
   validatePathwayDraft,
@@ -62,28 +61,19 @@ const prepare = (
   const source = pointFor(context.nodes, named.sourceNodeId);
   const destination = pointFor(context.nodes, named.destinationNodeId);
   const pathPoints = withoutEndpointPathPoints([...named.pathPoints], source, destination);
-  const metricPoints = [source, ...pathPoints, destination];
-  if (!metricPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))) {
+  const geometryPoints = [source, ...pathPoints, destination];
+  if (!geometryPoints.every(([latitude, longitude]) => Number.isFinite(latitude) && Number.isFinite(longitude))) {
     return { issue: "Pathway endpoints and Path Points must use valid coordinates." };
-  }
-  const distanceMeters = metricPoints.slice(1).reduce(
-    (total, point, index) => total + distanceInMeters(metricPoints[index], point),
-    0,
-  );
-  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
-    return { issue: "Pathway geometry must have a positive distance." };
   }
   return {
     pathway: {
       ...named,
       pathPoints,
-      distance: `${Math.max(1, Math.round(distanceMeters))} m`,
-      time: `${Math.max(1, Math.ceil(distanceMeters / 80))} min`,
     },
   };
 };
 
-const pathwayProperties = ({ pathPoints: _points, distance: _distance, time: _time, ...properties }: Pathway) => properties;
+const pathwayProperties = ({ pathPoints: _points, ...properties }: Pathway) => properties;
 
 export function createPathwayWorkflow(dependencies: {
   adapter: PathwayWriteAdapter;
@@ -125,9 +115,7 @@ export function createPathwayWorkflow(dependencies: {
             description: command.description ?? `Create ${pathway.name}`,
           });
         } else {
-          const geometryChanged = JSON.stringify(command.before.pathPoints) !== JSON.stringify(pathway.pathPoints)
-            || command.before.distance !== pathway.distance
-            || command.before.time !== pathway.time;
+          const geometryChanged = JSON.stringify(command.before.pathPoints) !== JSON.stringify(pathway.pathPoints);
           const propertiesChanged = JSON.stringify(pathwayProperties(command.before)) !== JSON.stringify(pathwayProperties(pathway));
           if (geometryChanged && propertiesChanged) {
             operation = workingSession.executeBatch(

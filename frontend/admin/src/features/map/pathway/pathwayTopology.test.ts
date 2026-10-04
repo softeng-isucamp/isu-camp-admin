@@ -13,8 +13,6 @@ const pathway = (overrides: Partial<Pathway> = {}): Pathway => ({
   name: "A–B Walk",
   sourceNodeId: "node-a",
   destinationNodeId: "node-b",
-  distance: "10 m",
-  time: "1 min",
   shade: "Unknown",
   type: "Campus walkway",
   direction: "Two-way",
