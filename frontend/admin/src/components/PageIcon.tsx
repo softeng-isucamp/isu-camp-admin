@@ -32,9 +32,9 @@ const glyphs: Record<PageIconName, ReactNode> = {
 };
 
 /** Module header icon: a mint tile holding a green line glyph. */
-export function PageIcon({ name, size = "md" }: { name: PageIconName; size?: "sm" | "md" }) {
+export function PageIcon({ name }: { name: PageIconName }) {
   return (
-    <span className={`page-icon page-icon-${size}`} aria-hidden="true">
+    <span className="page-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
         {glyphs[name]}
       </svg>

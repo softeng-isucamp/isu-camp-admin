@@ -1055,15 +1055,6 @@ main {
   width: 26px;
   height: 26px;
 }
-.page-icon-sm {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-}
-.page-icon-sm svg {
-  width: 20px;
-  height: 20px;
-}
 .page-hero p {
   font-size: 16px;
   color: #4c5751;

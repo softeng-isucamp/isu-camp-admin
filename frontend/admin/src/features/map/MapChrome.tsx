@@ -5,11 +5,11 @@ import { TileLayer } from "react-leaflet";
 export function MapPageHeader() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 bg-white px-5 py-3 rounded-[24px] border border-[#e1e3e4] shadow-sm shrink-0">
-      <div className="flex items-center gap-3">
-        <PageIcon name="map" size="sm" />
+      <div className="flex items-center gap-4">
+        <PageIcon name="map" />
         <div>
-          <h1 className="text-sm font-extrabold text-[#191c1d] leading-tight">Interactive Map Editor</h1>
-          <p className="text-[11px] text-[#3f4941]">Plot locations, calibrate route nodes, and adjust pathway curve vertices</p>
+          <h1 className="text-xl font-bold text-[#191c1d] leading-tight">Interactive Map Editor</h1>
+          <p className="text-sm text-[#4c5751]">Plot locations, calibrate route nodes, and adjust pathway curve vertices</p>
         </div>
       </div>
 
