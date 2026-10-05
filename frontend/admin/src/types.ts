@@ -111,10 +111,13 @@ export interface Pathway {
   sourceWayId?: number;
   source?: SourceProvenance;
 }
+export type UserAccountType = "student" | "teacher" | "visitor";
 export interface UserAccount {
   id: string;
   username: string;
   createdAt: string;
+  /** Read-only. Null when the backend value is missing or unrecognized. */
+  userType: UserAccountType | null;
 }
 export interface AuditEntry {
   id: string;
@@ -136,6 +139,8 @@ export interface DashboardSummary {
   buildingChange: number | null;
   indoorLocations: number;
   users: number;
+  /** All-time split by account type; null when the backend does not provide it. */
+  usersByType: Record<UserAccountType, number> | null;
   locations: number;
   pathways: number;
   searches: number;

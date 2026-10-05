@@ -14,6 +14,7 @@ import type {
   RouteNode,
   Session,
   UserAccount,
+  UserAccountType,
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
 import { z } from "zod";
@@ -30,6 +31,9 @@ import {
   locationSchema,
 } from "./schemas";
 import { createLocalAdapter } from "./localAdapter";
+import { parseAccountType } from "../lib/accountType";
+import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
+import { createMockUsers } from "./fixtures/mockUsers";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
@@ -57,12 +61,12 @@ type BackendLocation = {
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
   lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown; polygonCoordinates?: unknown;
 };
-type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown };
+type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown; userType?: unknown; user_type?: unknown };
 type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
   if (id === undefined || typeof raw.username !== "string") throw new Error("Backend returned a malformed user record.");
-  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? "") };
+  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), userType: parseAccountType(raw.userType ?? raw.user_type) };
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
@@ -74,6 +78,12 @@ const dashboardMetricsSchema = z.object({
   buildingChange: z.number().int().nullable(),
   indoorLocations: z.number().int().nonnegative(),
   users: z.number().int().nonnegative(),
+  // Assumed contract: optional until the backend ships it.
+  usersByType: z.object({
+    student: z.number().int().nonnegative(),
+    teacher: z.number().int().nonnegative(),
+    visitor: z.number().int().nonnegative(),
+  }).optional(),
   locations: z.number().int().nonnegative(),
   pathways: z.number().int().nonnegative(),
   searches: z.number().int().nonnegative(),
@@ -96,6 +106,7 @@ export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary
   try {
     return {
       ...parsed.data,
+      usersByType: parsed.data.usersByType ?? null,
       recent: parsed.data.recent.map((entry) => normalizeBackendAudit(entry as BackendAudit)),
     };
   } catch {
@@ -445,6 +456,12 @@ const wait = <T>(value: T, delay = 120) =>
 // Utility Functions
 // ==========================================
 
+const countUsersByType = (users: UserAccount[]): Record<UserAccountType, number> => {
+  const counts = { student: 0, teacher: 0, visitor: 0 };
+  users.forEach((user) => { if (user.userType) counts[user.userType] += 1; });
+  return counts;
+};
+
 const clone = <T>(value: T): T =>
   structuredClone(value);
 
@@ -546,7 +563,7 @@ export interface Services {
   };
 
   users: {
-    list(query?: string, page?: number, pageSize?: number, createdRange?: string): Promise<Page<UserAccount>>;
+    list(query?: string, page?: number, pageSize?: number, createdRange?: string, userType?: UserAccountType | "all"): Promise<Page<UserAccount>>;
   };
 
   logs: {
@@ -624,7 +641,8 @@ const addAudit = (
   });
 };
 
-const localAuditEntries: AuditEntry[] = [];
+const localAuditEntries: AuditEntry[] = createMockAuditLogs();
+const localUsers: UserAccount[] = createMockUsers();
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -994,7 +1012,9 @@ export const services: Services = {
           ["Room", "Office", "Laboratory", "Restroom"].includes(location.type),
         ).length,
 
-        users: 0,
+        users: localUsers.length,
+
+        usersByType: countUsersByType(localUsers),
 
         locations:
           locations.length,
@@ -1012,7 +1032,7 @@ export const services: Services = {
 
         recent:
             clone(
-            localAuditEntries.slice(0, 3)
+            localAuditEntries.slice(0, 6)
           ),
       });
     },
@@ -1227,13 +1247,24 @@ export const services: Services = {
 
   users: {
 
-    list: async (q = "", page = 1, pageSize = 20, createdRange = "all") => {
+    list: async (q = "", page = 1, pageSize = 20, createdRange = "all", userType = "all") => {
       if (USE_HTTP_API) {
         const params = new URLSearchParams({ q, page: String(page), pageSize: String(pageSize), created_range: createdRange });
+        // Assumed backend contract: optional `user_type` = student|teacher|visitor; omitted = all.
+        if (userType !== "all") params.set("user_type", userType);
         const raw = await apiJson<unknown>(`/api/users?${params.toString()}`);
         return normalizeBackendPage(raw, (row) => normalizeBackendUser(row as BackendUser), "users");
       }
-      return wait({ items: [], total: 0, page, pageSize });
+      const days = createdRange === "7d" ? 7 : createdRange === "30d" ? 30 : createdRange === "90d" ? 90 : null;
+      const start = days === null ? null : new Date(new Date().setHours(0, 0, 0, 0)).getTime() - days * 86400000;
+      const filtered = localUsers
+        .filter((user) =>
+          (!q.trim() || matches(user.username, q))
+          && (userType === "all" || user.userType === userType)
+          && (start === null || Date.parse(user.createdAt) >= start))
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      const offset = (page - 1) * pageSize;
+      return wait({ items: clone(filtered.slice(offset, offset + pageSize)), total: filtered.length, page, pageSize });
     },
   },
 

@@ -617,19 +617,61 @@ main {
   font-size: 34px;
   margin-top: 4px;
 }
-.registered-users-card {
-  min-height: 196px;
+.account-type-split {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 16px;
 }
-.registered-users-card > span {
-  display: block;
-  margin-top: 56px;
-  color: #4c5751;
+.account-type-split svg {
+  flex: none;
+}
+.account-type-slice {
+  cursor: pointer;
+}
+.account-type-slice:hover {
+  opacity: 0.85;
+}
+.account-type-legend {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.account-type-legend button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
   font-size: 14px;
+  color: #151a17;
+  cursor: pointer;
+  text-align: left;
 }
-.registered-users-card strong {
-  display: block;
-  font-size: 34px;
-  margin-top: 4px;
+.account-type-legend button:hover {
+  background: #f3f6f4;
+}
+.account-type-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.account-type-legend b {
+  margin-left: auto;
+}
+.account-type-legend small {
+  min-width: 28px;
+  text-align: right;
+  color: #64716a;
+  font-size: 13px;
 }
 .badge {
   display: inline-block;
@@ -988,51 +1030,6 @@ main {
   line-height: 1.4;
   margin: 0;
 }
-.quick-links {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-}
-.quick-links a {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 14px;
-  background: #f7faf8;
-  color: var(--text);
-  text-decoration: none;
-}
-.quick-links a > span {
-  width: 48px;
-  height: 48px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: #a0f5ba;
-  flex: 0 0 48px;
-}
-.quick-links a:nth-child(2) > span {
-  background: #d9e6da;
-}
-.quick-links a > span img {
-  width: 20px;
-  height: 20px;
-  object-fit: contain;
-}
-.quick-links a div {
-  flex: 1;
-}
-.quick-links strong,
-.quick-links small {
-  display: block;
-}
-.quick-links small {
-  color: #87938d;
-  font-size: 11px;
-  margin-top: 2px;
-}
 .page-hero {
   background: #fff;
   border-radius: 0 0 36px 36px;
@@ -1094,6 +1091,9 @@ main {
   font-size: 13px;
   letter-spacing: 0;
   min-width: 120px;
+}
+.filters .account-type-filter {
+  min-width: 150px;
 }
 .filters .field:first-child input {
   border-radius: 24px;

@@ -13,6 +13,7 @@ const summary: DashboardSummary = {
   buildingChange: 2,
   indoorLocations: 34,
   users: 56,
+  usersByType: { student: 40, teacher: 11, visitor: 5 },
   locations: 98,
   pathways: 21,
   searches: 55,
@@ -61,8 +62,8 @@ describe("Dashboard backend boundary", () => {
     expect(screen.getByText(formatDateTime("2026-09-12T08:30:00Z"))).toBeInTheDocument();
     expect(screen.queryByText("2026-09-12T08:30:00Z")).not.toBeInTheDocument();
     expect(screen.queryByText("Searched Location")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByText("Registered Users"));
-    expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users");
+    await userEvent.click(screen.getByRole("button", { name: "View Student accounts" }));
+    expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=student");
     const rankedLibrary = screen.getByTitle("View Library in directory");
     expect(within(rankedLibrary).getByText("Library")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("Student Services")).toBeInTheDocument();
@@ -86,5 +87,32 @@ describe("Dashboard backend boundary", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByText("Search analytics are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("Recent activity is unavailable.")).toBeInTheDocument();
+  });
+
+  it("shows the account type split with percentages, counts, and filtered links", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    renderDashboard();
+
+    const teacher = await screen.findByRole("button", { name: "View Teacher accounts" });
+    expect(within(teacher).getByText("20%")).toBeInTheDocument();
+    expect(within(teacher).getByText("11")).toBeInTheDocument();
+    const student = screen.getByRole("button", { name: "View Student accounts" });
+    expect(within(student).getByText("71%")).toBeInTheDocument();
+    expect(within(student).getByText("40")).toBeInTheDocument();
+    expect(within(screen.getByRole("button", { name: "View Visitor accounts" })).getByText("9%")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Registered users by account type" })).toBeInTheDocument();
+    expect(screen.getByText("Visitor: 5 (9%)")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Teacher: 11 (20%)"));
+    expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=teacher");
+  });
+
+  it("shows the total and dashes when the backend omits the account type split", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue({ ...summary, usersByType: null });
+    renderDashboard();
+
+    const student = await screen.findByRole("button", { name: "View Student accounts" });
+    expect(within(student).getAllByText("—")).toHaveLength(2);
+    expect(screen.getByText("56")).toBeInTheDocument();
   });
 });
