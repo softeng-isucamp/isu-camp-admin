@@ -55,21 +55,6 @@ describe("BuildingFootprintWorkflow", () => {
     expect(workingSession.getPastOperations()).toHaveLength(0);
   });
 
-  it("persists an attachment before recording its footprint", async () => {
-    const workingSession = new WorkingSessionManager();
-    const adapter = { createBuilding: vi.fn(), saveFootprint: vi.fn().mockResolvedValue(undefined) };
-    const workflow = createBuildingFootprintWorkflow({ adapter, workingSession });
-
-    const result = await workflow.finalize({ kind: "attach", building, points, context });
-
-    expect(adapter.saveFootprint).toHaveBeenCalledWith(building, points);
-    expect(result).toMatchObject({
-      ok: true,
-      building: { id: building.id, points },
-      operation: { type: "update_geometry", domain: "Locations", entityId: building.id },
-    });
-  });
-
   it("records a reshape as a geometry update", async () => {
     const workingSession = new WorkingSessionManager();
     const adapter = { createBuilding: vi.fn(), saveFootprint: vi.fn().mockResolvedValue(undefined) };
@@ -81,20 +66,5 @@ describe("BuildingFootprintWorkflow", () => {
 
     expect(adapter.saveFootprint).toHaveBeenCalledWith(shaped, reshaped);
     expect(result).toMatchObject({ ok: true, building: { points: reshaped }, operation: { type: "update_geometry" } });
-  });
-
-  it("rejects attaching to an inactive Building or one that already has a polygon", async () => {
-    const workingSession = new WorkingSessionManager();
-    const adapter = { createBuilding: vi.fn(), saveFootprint: vi.fn() };
-    const workflow = createBuildingFootprintWorkflow({ adapter, workingSession });
-
-    const inactive = await workflow.finalize({
-      kind: "attach", building: { ...building, status: "Inactive" }, points, context,
-    });
-    const shaped = await workflow.finalize({ kind: "attach", building: { ...building, points }, points, context });
-
-    expect(inactive).toMatchObject({ ok: false, reason: "validation", message: "Building is inactive" });
-    expect(shaped).toMatchObject({ ok: false, reason: "validation", message: "Building already has a footprint" });
-    expect(adapter.saveFootprint).not.toHaveBeenCalled();
   });
 });

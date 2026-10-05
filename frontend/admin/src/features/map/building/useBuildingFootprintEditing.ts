@@ -9,7 +9,6 @@ import type { ActiveToolDraft } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
 import {
   detectBuildingFootprintOverlap,
-  getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
@@ -26,7 +25,6 @@ const blankBuildingForm = (): BuildingIdentityInput => ({
 
 export interface BuildingEditingContext {
   sessionBuildings: Building[];
-  associationOptions: Building[];
   locations: Location[];
   nodes: RouteNode[];
   campusBoundary: MapPoint[];
@@ -51,8 +49,7 @@ interface UseBuildingFootprintEditingOptions {
 
 /**
  * The polygon tool: drawing, reshaping, and moving a Building footprint, then
- * creating a new Building, attaching the footprint to an existing one, or
- * saving the reshape.
+ * creating a new Building or saving the reshape.
  */
 export function useBuildingFootprintEditing({
   workingSession,
@@ -66,7 +63,6 @@ export function useBuildingFootprintEditing({
 }: UseBuildingFootprintEditingOptions) {
   const {
     sessionBuildings,
-    associationOptions: buildingAssociationOptions,
     locations: currentLocations,
     nodes: currentNodes,
     campusBoundary,
@@ -90,11 +86,8 @@ export function useBuildingFootprintEditing({
   const [points, setPoints] = useState<[number, number][]>([]);
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
-  const [buildingWorkflowMode, setBuildingWorkflowMode] = useState<"create" | "attach">("create");
   const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
   const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
-  const [attachBuildingSearch, setAttachBuildingSearch] = useState("");
-  const [selectedAttachBuildingId, setSelectedAttachBuildingId] = useState<string | null>(null);
   const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
   const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>(blankBuildingForm);
   const buildingName = buildingForm.name;
@@ -108,19 +101,6 @@ export function useBuildingFootprintEditing({
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
 
-  const buildingAttachmentEligibility = (building: Building) =>
-    getBuildingAttachmentEligibility(building);
-  const selectedAttachBuilding = buildingAssociationOptions.find((b) => b.id === selectedAttachBuildingId);
-  const selectedAttachEligibility = selectedAttachBuilding ? buildingAttachmentEligibility(selectedAttachBuilding) : null;
-  const attachCandidateBuildings = useMemo(() => {
-    const query = attachBuildingSearch.trim().toLowerCase();
-    return buildingAssociationOptions.filter((building) => {
-      if (building.id === "pending-building" || building.id === editingBuildingId) return false;
-      const eligibility = getBuildingAttachmentEligibility(building);
-      if (!eligibility.eligible) return false;
-      return !query || `${building.name} ${building.code}`.toLowerCase().includes(query);
-    });
-  }, [attachBuildingSearch, buildingAssociationOptions, editingBuildingId]);
   const currentBuildings = useMemo(() => {
     const validMerged = sessionBuildings.filter((building) => building.points.length >= 3);
     if (!drawing || points.length === 0) return validMerged;
@@ -140,14 +120,14 @@ export function useBuildingFootprintEditing({
     [currentBuildings, editingBuildingId, drawing, points],
   );
   const buildingIdentityIssues = useMemo(
-    () => drawing && (polygonClosed || points.length >= 3) && buildingWorkflowMode === "create"
+    () => drawing && (polygonClosed || points.length >= 3)
       ? validateBuildingIdentityDetails(
           { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
           currentLocations,
           editingBuildingId,
         )
       : [],
-    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingWorkflowMode, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
+    [buildingCode, buildingFunction, buildingKeywords, buildingName, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
   );
   const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
   const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
@@ -161,9 +141,9 @@ export function useBuildingFootprintEditing({
     }
     setPolygonClosed(true);
     setPolygonInteraction("draw");
-    if (buildingWorkflowMode === "create") setBuildingDetailsModalOpen(true);
+    setBuildingDetailsModalOpen(true);
     setError("");
-  }, [buildingWorkflowMode, campusBoundary, drawing, points]);
+  }, [campusBoundary, drawing, points]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -211,8 +191,6 @@ export function useBuildingFootprintEditing({
     setPoints([]);
     resetBuildingForm();
     setEditingBuildingId(null);
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     setError("");
@@ -270,8 +248,6 @@ export function useBuildingFootprintEditing({
     overlay.putBuilding(result.building);
     setPoints([]);
     resetBuildingForm();
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
     setPolygonClosed(false);
     setPolygonInteraction("draw");
     const hasActiveEntrance = currentNodes.some((node) =>
@@ -318,31 +294,6 @@ export function useBuildingFootprintEditing({
     endSaving();
   };
 
-  const attachBuilding = async () => {
-    const existing = buildingAssociationOptions.find((building) => building.id === selectedAttachBuildingId);
-    if (!existing) return;
-    if (!beginSaving("building")) return;
-    const result = await buildingFootprintWorkflow.finalize({
-      kind: "attach",
-      building: existing,
-      points: [...points],
-      context: { locations: currentLocations, campusBoundary },
-    });
-    if (!result.ok) {
-      setError(result.message);
-      endSaving();
-      return;
-    }
-    completeBuildingWorkflow(result);
-    try {
-      await refreshMapData();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
-    } finally {
-      endSaving();
-    }
-  };
-
   const initializeFootprintEdit = (
     building: Building,
     interaction: "draw" | "reshape" | "move" = "draw",
@@ -380,34 +331,22 @@ export function useBuildingFootprintEditing({
         polygonClosed,
         buildingDetailsModalOpen,
         polygonInteraction,
-        buildingWorkflowMode,
-        buildingRecordMode: buildingWorkflowMode,
-        selectedAttachBuildingId,
-        selectedBuildingRecordId: selectedAttachBuildingId,
-        attachBuildingSearch,
-        buildingRecordSearch: attachBuildingSearch,
       },
     }) : null;
   }, [
-    attachBuildingSearch,
     buildingDetailsModalOpen,
     buildingForm,
-    buildingWorkflowMode,
     editingBuildingId,
     points,
     polygonClosed,
     polygonInteraction,
-    selectedAttachBuildingId,
   ]);
 
   /** Discards the polygon tool's draft geometry and form. */
   const clearToolDraft = () => {
     setPoints([]);
     setPolygonClosed(false);
-    setBuildingWorkflowMode("create");
     setBuildingDetailsModalOpen(false);
-    setAttachBuildingSearch("");
-    setSelectedAttachBuildingId(null);
     resetBuildingForm();
     setEditingBuildingId(null);
   };
@@ -448,22 +387,6 @@ export function useBuildingFootprintEditing({
     } else {
       setPolygonInteraction("draw");
     }
-    const restoredWorkflowMode = records.buildingWorkflowMode ?? records.buildingRecordMode;
-    if (restoredWorkflowMode === "create" || restoredWorkflowMode === "attach") {
-      setBuildingWorkflowMode(restoredWorkflowMode);
-    }
-    const restoredSelectedId = typeof records.selectedAttachBuildingId === "string"
-      ? records.selectedAttachBuildingId
-      : typeof records.selectedBuildingRecordId === "string"
-        ? records.selectedBuildingRecordId
-        : null;
-    setSelectedAttachBuildingId(restoredSelectedId);
-    const restoredSearch = typeof records.attachBuildingSearch === "string"
-      ? records.attachBuildingSearch
-      : typeof records.buildingRecordSearch === "string"
-        ? records.buildingRecordSearch
-        : "";
-    setAttachBuildingSearch(restoredSearch);
   };
 
   return {
@@ -474,16 +397,10 @@ export function useBuildingFootprintEditing({
     polygonClosed,
     setPolygonClosed,
     polygonInvalid,
-    buildingWorkflowMode,
-    setBuildingWorkflowMode,
     buildingDetailsModalOpen,
     setBuildingDetailsModalOpen,
     buildingClassification,
     setBuildingClassification,
-    attachBuildingSearch,
-    setAttachBuildingSearch,
-    selectedAttachBuildingId,
-    setSelectedAttachBuildingId,
     nonRoutableBuildingId,
     setNonRoutableBuildingId,
     buildingForm,
@@ -495,10 +412,6 @@ export function useBuildingFootprintEditing({
     resetBuildingForm,
     editingBuildingId,
     setEditingBuildingId,
-    buildingAttachmentEligibility,
-    selectedAttachBuilding,
-    selectedAttachEligibility,
-    attachCandidateBuildings,
     currentBuildings,
     footprintGeometryIssues,
     footprintOverlapWarning,
@@ -515,7 +428,6 @@ export function useBuildingFootprintEditing({
     closeDetailsModal,
     saveBuilding,
     createBuilding,
-    attachBuilding,
     initializeFootprintEdit,
     draftSnapshot,
     clearToolDraft,

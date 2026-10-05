@@ -203,20 +203,6 @@ export function validateBuildingIdentityDetails(
   return issues;
 }
 
-export function getBuildingAttachmentEligibility(
-  building: Building,
-): { eligible: true; reason: null } | { eligible: false; reason: string } {
-  if (building.status === "Inactive") {
-    return { eligible: false, reason: "Building is inactive" };
-  }
-
-  if (building.points && building.points.length >= 3) {
-    return { eligible: false, reason: "Building already has a footprint" };
-  }
-
-  return { eligible: true, reason: null };
-}
-
 /** The Working Session record of a new Building saved together with its footprint polygon. */
 export function buildCreateBuildingOperation(
   input: BuildingIdentityInput,
@@ -252,12 +238,11 @@ export function buildCreateBuildingOperation(
   };
 }
 
-/** The Working Session record of a Building's polygon changing (attach when it had none, otherwise reshape). */
+/** The Working Session record of a Building's polygon changing (a reshape of its existing footprint). */
 export function buildBuildingFootprintOperation(
   building: Building,
   footprintPoints: MapPoint[],
 ): WorkingOperation {
-  const attaching = !building.points || building.points.length < 3;
   return {
     id: `footprint-${building.id}-${Date.now()}`,
     type: "update_geometry",
@@ -265,8 +250,6 @@ export function buildBuildingFootprintOperation(
     entityId: building.id,
     before: { points: [...(building.points ?? [])] },
     after: { points: [...footprintPoints] },
-    description: attaching
-      ? `Attach footprint to ${building.name}`
-      : `Reshape footprint for ${building.name}`,
+    description: `Reshape footprint for ${building.name}`,
   };
 }

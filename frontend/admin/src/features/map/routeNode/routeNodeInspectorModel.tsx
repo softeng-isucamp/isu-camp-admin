@@ -1,6 +1,5 @@
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
-import { validateRouteNodeDraft } from "../mapEditing";
 import type { MapPoint } from "../campusBoundary";
 import type { SaveAction } from "../session/useSavingAction";
 import { calculateDeleteImpact, type DeleteImpact } from "./routeNodeLifecycle";
@@ -46,11 +45,6 @@ export function routeNodeInspectorModel({
   };
   const connectedPathways = currentPathways.filter((pathway) => pathway.sourceNodeId === node.id || pathway.destinationNodeId === node.id);
   const connectedPaths = connectedPathways.length;
-  const nodeFindings = validateRouteNodeDraft(node, {
-    buildings: currentBuildings,
-    locations: currentLocations,
-    campusBoundary,
-  });
   const associatedBuilding = node.associatedPlaceId
     ? currentBuildings.find((building) => building.id === node.associatedPlaceId)
       ?? currentLocations.find((location) => location.id === node.associatedPlaceId && (location.type === "Building" || location.type === "Facility"))
@@ -66,7 +60,6 @@ export function routeNodeInspectorModel({
       { label: "Lifecycle", value: node.status ?? "Active" },
       { label: "Associated Building", value: associatedBuilding?.name ?? (node.associatedPlaceId ? "Missing" : "None") },
       { label: "Connected Pathways", value: String(connectedPaths) },
-      { label: "Network Findings", value: nodeFindings.length ? nodeFindings[0].message : "No blocking findings" },
       { label: "Latitude", value: node.lat.toFixed(6) },
       { label: "Longitude", value: node.lng.toFixed(6) },
     ],
