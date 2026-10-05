@@ -12,7 +12,7 @@ import {
 } from "../../components/UI";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
-import locationsModuleIcon from "../../assets/figma/modules/locations.svg";
+import { PageIcon } from "../../components/PageIcon";
 import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
@@ -631,12 +631,10 @@ export function Locations() {
   return (
     <div className="page locations-page">
       <div className="page-hero">
-        <span className="page-icon" style={{ background: "#d6ede0", borderRadius: "12px", width: "48px", height: "48px", display: "grid", placeItems: "center" }}>
-          <img src={locationsModuleIcon} alt="" style={{ width: "24px", height: "24px" }} />
-        </span>
+        <PageIcon name="locations" />
         <div>
-          <h1 style={{ fontSize: "28px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Campus Locations</h1>
-          <p style={{ color: "#525c57", marginTop: "4px", fontSize: "15px" }}>
+          <h1>Campus Locations</h1>
+          <p>
             Manage Buildings and Indoor Locations. Create mapped campus places in Map Editor.
           </p>
         </div>
