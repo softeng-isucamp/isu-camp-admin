@@ -138,6 +138,22 @@ export function Dashboard() {
           </Card>
         </div>
         <div className="stack">
+          <Card className="account-type-card">
+            <div className="card-heading">
+              <div>
+                <h2>Registered Users</h2>
+                <p>Share of accounts by account type.</p>
+              </div>
+              <Link to="/users">VIEW ALL</Link>
+            </div>
+            {isLoading ? (
+              <div className="dashboard-state" role="status" aria-live="polite">Loading registered users…</div>
+            ) : error && !data ? (
+              <Empty>Registered users are unavailable.</Empty>
+            ) : (
+              <AccountTypeSplit total={data?.users ?? null} counts={data?.usersByType ?? null} onSelect={(type) => navigate(`/users?${new URLSearchParams({ userType: type })}`)} />
+            )}
+          </Card>
           <Card>
             <div className="card-heading">
               <h2>Recent Activity</h2>
@@ -167,22 +183,6 @@ export function Dashboard() {
                 </div>
               ))}
             </div>
-          </Card>
-          <Card className="account-type-card">
-            <div className="card-heading">
-              <div>
-                <h2>Registered Users</h2>
-                <p>Share of accounts by account type.</p>
-              </div>
-              <Link to="/users">VIEW ALL</Link>
-            </div>
-            {isLoading ? (
-              <div className="dashboard-state" role="status" aria-live="polite">Loading registered users…</div>
-            ) : error && !data ? (
-              <Empty>Registered users are unavailable.</Empty>
-            ) : (
-              <AccountTypeSplit total={data?.users ?? null} counts={data?.usersByType ?? null} onSelect={(type) => navigate(`/users?${new URLSearchParams({ userType: type })}`)} />
-            )}
           </Card>
         </div>
       </div>
