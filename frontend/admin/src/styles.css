@@ -770,6 +770,8 @@ main {
   border-radius: 18px;
   background: #d7e7dc;
   position: relative;
+  /* Contain Leaflet's pane z-indexes (400+) so the map can't paint over the sticky header. */
+  isolation: isolate;
   overflow: hidden;
   margin-top: 24px;
 }
