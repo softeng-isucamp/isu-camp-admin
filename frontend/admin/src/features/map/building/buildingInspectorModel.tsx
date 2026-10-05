@@ -43,7 +43,6 @@ export function buildingInspectorModel({
     status: selectedBuildingRoutable ? "Routable" : "Not routable",
     summary: [
       { label: "Code", value: selectedBuilding.code },
-      { label: "Geometry", value: "Building Footprint" },
       { label: "Entrances", value: String(selectedBuildingEntrances.length) },
     ],
     details: (
