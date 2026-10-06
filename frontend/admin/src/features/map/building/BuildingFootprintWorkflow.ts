@@ -3,7 +3,6 @@ import type { MapPoint } from "../campusBoundary";
 import {
   buildBuildingFootprintOperation,
   buildCreateBuildingOperation,
-  getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
@@ -21,12 +20,6 @@ export type BuildingFootprintFinalizeCommand =
   | {
       kind: "create";
       identity: BuildingIdentityInput;
-      points: MapPoint[];
-      context: BuildingFootprintContext;
-    }
-  | {
-      kind: "attach";
-      building: Building;
       points: MapPoint[];
       context: BuildingFootprintContext;
     }
@@ -79,11 +72,6 @@ export function createBuildingFootprintWorkflow(dependencies: {
         if (identityIssues.length > 0) {
           return { ok: false, reason: "validation", message: identityIssues[0].message, issues: identityIssues };
         }
-      }
-
-      if (command.kind === "attach") {
-        const eligibility = getBuildingAttachmentEligibility(command.building);
-        if (!eligibility.eligible) return { ok: false, reason: "validation", message: eligibility.reason };
       }
 
       try {

@@ -74,8 +74,6 @@ export function selectedPathwayInspectorModel({
             ⇄ Switch source and destination
           </button>
           {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
-          <h3 className="inspector-subheading">Network findings</h3>
-          <p>{pathwayFrameIssues.length ? `${pathwayFrameIssues.length} local finding${pathwayFrameIssues.length === 1 ? "" : "s"} require attention.` : "No locally known blocking findings."}</p>
           <button type="button" className="inspector-secondary-action" onClick={() => onReshape(selectedPath)}>⌁ Reshape Pathway</button>
           <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
         </section>

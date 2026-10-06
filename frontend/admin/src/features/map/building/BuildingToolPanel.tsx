@@ -18,31 +18,21 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
     setPolygonInteraction,
     polygonClosed,
     setPolygonClosed,
-    buildingWorkflowMode,
-    setBuildingWorkflowMode,
     setBuildingDetailsModalOpen,
-    attachBuildingSearch,
-    setAttachBuildingSearch,
-    selectedAttachBuildingId,
-    setSelectedAttachBuildingId,
     buildingName,
     buildingCode,
     editingBuildingId,
-    selectedAttachEligibility,
-    attachCandidateBuildings,
     footprintGeometryIssues,
     footprintOverlapWarning,
     canFinishFootprint,
-    canSaveBuilding,
     closePolygon,
     deletePolygonVertex,
     cancelDraft: cancelBuildingDraft,
-    attachBuilding: handleAttachBuilding,
   } = editor;
   return (
     <div>
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
-      <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{editingBuildingId ? "Change Building Footprint" : polygonClosed ? "Create or Attach Building" : "Draw Building Footprint"}</h2>
+      <h2 className="text-base font-extrabold text-[#191c1d] mt-1">{editingBuildingId ? "Change Building Footprint" : polygonClosed ? "Create Building" : "Draw Building Footprint"}</h2>
       {editingBuildingId ? (
         <section aria-label="Change scope" className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
           <h3 className="text-xs font-extrabold text-[#005931]">Change scope</h3>
@@ -62,75 +52,20 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
           </button>
         </section>
       ) : polygonClosed ? (
-        <section aria-label="Create or attach Building" className="mt-3">
-          <p className="text-xs text-[#3f4941]">The footprint is complete. Choose the Building it should represent.</p>
+        <section aria-label="Create Building" className="mt-3">
+          <p className="text-xs text-[#3f4941]">The footprint is complete. Add the Building details to create it.</p>
           {footprintOverlapWarning && (
             <div className="my-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs font-semibold text-amber-800" role="status">
               ⚠️ {footprintOverlapWarning.message}
             </div>
           )}
-          <div role="tablist" aria-label="Building workflow" className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-[#edf3ef] p-1">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={buildingWorkflowMode === "create"}
-              onClick={() => setBuildingWorkflowMode("create")}
-              className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "create" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-            >
-              ★ Create New Building
+          <div className="mt-3 space-y-2">
+            <p className="text-xs text-[#3f4941]">Add the Building identity and descriptive details before committing this footprint.</p>
+            <button type="button" className="w-full rounded-xl border border-[#005931] bg-emerald-50 px-3 py-2 text-xs font-bold text-[#005931]" onClick={() => setBuildingDetailsModalOpen(true)}>
+              {buildingName.trim() || buildingCode.trim() ? "Open Building details" : "Add Building details"}
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={buildingWorkflowMode === "attach"}
-              onClick={() => setBuildingWorkflowMode("attach")}
-              className={`rounded-lg px-2 py-2 text-xs font-bold ${buildingWorkflowMode === "attach" ? "bg-white text-[#005931] shadow" : "text-[#526359]"}`}
-            >
-              🔗 Attach Existing Building
-            </button>
+            {(buildingName.trim() || buildingCode.trim()) && <p className="text-[11px] text-[#526359]">{buildingName || "Unnamed Building"} {buildingCode ? `· ${buildingCode}` : ""}</p>}
           </div>
-          {buildingWorkflowMode === "create" ? (
-            <div className="mt-3 space-y-2">
-              <p className="text-xs text-[#3f4941]">Add the Building identity and descriptive details before committing this footprint.</p>
-              <button type="button" className="w-full rounded-xl border border-[#005931] bg-emerald-50 px-3 py-2 text-xs font-bold text-[#005931]" onClick={() => setBuildingDetailsModalOpen(true)}>
-                {buildingName.trim() || buildingCode.trim() ? "Open Building details" : "Add Building details"}
-              </button>
-              {(buildingName.trim() || buildingCode.trim()) && <p className="text-[11px] text-[#526359]">{buildingName || "Unnamed Building"} {buildingCode ? `· ${buildingCode}` : ""}</p>}
-            </div>
-          ) : (
-            <div className="mt-3 space-y-2">
-              <input
-                type="search"
-                aria-label="Search existing Buildings"
-                value={attachBuildingSearch}
-                onChange={(event) => setAttachBuildingSearch(event.target.value)}
-                placeholder="Search by name or code"
-                className="w-full rounded-lg border border-[#dbe0e2] px-2 py-2 text-sm"
-              />
-              <div className="space-y-2 max-h-52 overflow-y-auto">
-                {attachCandidateBuildings.length === 0 ? (
-                  <p className="p-3 text-center text-xs text-[#526359]">No eligible Buildings available to attach.</p>
-                ) : (
-                  attachCandidateBuildings.map((building) => (
-                    <button
-                      key={building.id}
-                      type="button"
-                      aria-pressed={selectedAttachBuildingId === building.id}
-                      onClick={() => setSelectedAttachBuildingId(building.id)}
-                      className={`w-full rounded-xl border p-2 text-left text-xs transition cursor-pointer ${
-                        selectedAttachBuildingId === building.id
-                          ? "border-[#005931] bg-emerald-50 text-[#005931]"
-                          : "border-[#dbe0e2] hover:bg-[#f8f9fa]"
-                      }`}
-                    >
-                      <span className="block font-bold">{building.name} · {building.code}</span>
-                      <span className="mt-1 block text-emerald-700 font-medium">Eligible</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
         </section>
       ) : (
         <div>
@@ -235,19 +170,13 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
             ▱ Edit Shape
           </button>
         )}
-        {(editingBuildingId || (polygonClosed && buildingWorkflowMode === "attach")) && <button
+        {editingBuildingId && <button
           type="button"
-          disabled={savingAction === "building" || (editingBuildingId
-            ? !canFinishFootprint
-            : buildingWorkflowMode === "attach" ? !selectedAttachBuildingId || !selectedAttachEligibility?.eligible : !canSaveBuilding)}
-          onClick={editingBuildingId
-            ? handleSaveBuilding
-              : buildingWorkflowMode === "create" ? () => setBuildingDetailsModalOpen(true) : handleAttachBuilding}
+          disabled={savingAction === "building" || !canFinishFootprint}
+          onClick={handleSaveBuilding}
           className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
         >
-          {editingBuildingId
-        ? savingAction === "building" ? "Saving Building Footprint…" : "Update Building Footprint"
-            : buildingWorkflowMode === "create" ? "Open Building details" : savingAction === "building" ? "Saving Building…" : "Attach Selected Building"}
+          {savingAction === "building" ? "Saving Building Footprint…" : "Update Building Footprint"}
         </button>}
       </div>
     </div>

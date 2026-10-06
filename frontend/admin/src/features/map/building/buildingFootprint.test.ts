@@ -7,7 +7,6 @@ import {
   detectBuildingFootprintOverlap,
   findBuildingFootprintOverlaps,
   findFirstOverlappingBuilding,
-  getBuildingAttachmentEligibility,
   validateBuildingFootprintGeometry,
   validateBuildingIdentityDetails,
   type BuildingIdentityInput,
@@ -205,32 +204,6 @@ describe("validateBuildingIdentityDetails", () => {
   });
 });
 
-describe("getBuildingAttachmentEligibility", () => {
-  it("rejects inactive building", () => {
-    const bld: Building = { id: "bld-inactive", name: "Old Hall", code: "OLD", points: [], status: "Inactive" };
-    expect(getBuildingAttachmentEligibility(bld)).toEqual({
-      eligible: false,
-      reason: "Building is inactive",
-    });
-  });
-
-  it("rejects building with existing points", () => {
-    const bld: Building = { id: "bld-has-points", name: "Gym", code: "GYM", points: validPoints, status: "Active" };
-    expect(getBuildingAttachmentEligibility(bld)).toEqual({
-      eligible: false,
-      reason: "Building already has a footprint",
-    });
-  });
-
-  it("approves active building without a polygon", () => {
-    const bld: Building = { id: "bld-open", name: "Student Center", code: "STU", points: [], status: "Active" };
-    expect(getBuildingAttachmentEligibility(bld)).toEqual({
-      eligible: true,
-      reason: null,
-    });
-  });
-});
-
 describe("buildCreateBuildingOperation", () => {
   it("records the new Building with its polygon and no copied outdoor coordinate", () => {
     const input: BuildingIdentityInput = {
@@ -274,19 +247,6 @@ describe("buildCreateBuildingOperation", () => {
 });
 
 describe("buildBuildingFootprintOperation", () => {
-  it("records attaching a polygon to a Building that had none", () => {
-    const existing: Building = { id: "bld-existing-123", name: "Existing Administration", code: "ADM", points: [], status: "Active" };
-    const operation = buildBuildingFootprintOperation(existing, validPoints);
-    expect(operation).toMatchObject({
-      type: "update_geometry",
-      domain: "Locations",
-      entityId: "bld-existing-123",
-      before: { points: [] },
-      after: { points: validPoints },
-      description: "Attach footprint to Existing Administration",
-    });
-  });
-
   it("records reshaping an existing polygon", () => {
     const existing: Building = { id: "bld-1", name: "Hall", code: "H", points: validPoints };
     const reshaped: [number, number][] = [...validPoints.slice(0, -1), [0.5, 0.5]];

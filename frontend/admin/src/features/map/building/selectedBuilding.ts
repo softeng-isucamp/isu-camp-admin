@@ -7,7 +7,6 @@ export interface SelectedBuildingView {
   /** Location id when the Building has one, otherwise the Building id. */
   associationId: string;
   entrances: RouteNode[];
-  hasFootprint: boolean;
   routable: boolean;
 }
 
@@ -29,5 +28,5 @@ export function selectedBuildingViewFor(
     (location ? location.status === "Active" : (selectedBuilding.status ?? "Active") === "Active") &&
     entrances.some((node) => Number.isFinite(node.lat) && Number.isFinite(node.lng) && (node.status ? node.status === "Active" : true)),
   );
-  return { building: selectedBuilding, location, associationId, entrances, hasFootprint, routable };
+  return { building: selectedBuilding, location, associationId, entrances, routable };
 }

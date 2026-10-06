@@ -29,7 +29,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
-    expect(await screen.findByRole("region", { name: "Building summary" })).toHaveTextContent(generatedCode);
+    expect(await screen.findByRole("complementary", { name: "Auto Code Hall object details" })).toHaveTextContent(generatedCode);
     expect(screen.getByRole("complementary", { name: "Auto Code Hall object details" })).toBeInTheDocument();
   });
 
@@ -104,7 +104,7 @@ describe("Map Editor preview", () => {
       id: "building-eng",
       type: "Facility",
     }), []));
-    expect(await screen.findByRole("region", { name: "Building summary" })).toHaveTextContent("ENG · Facility");
+    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("ENG");
   });
 
   it("uses a geometry-only Change scope when reshaping an existing linked footprint", async () => {
@@ -124,7 +124,6 @@ describe("Map Editor preview", () => {
     );
     expect(screen.getByRole("button", { name: "Open Building details ↗" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "★ Create New Building" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "🔗 Attach Existing Building" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Building name")).not.toBeInTheDocument();
   });
 
@@ -236,7 +235,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor(["/map-editor?location=building-1"]);
 
-    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("Building summary");
+    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("Building content");
     await waitFor(() => expect(mapFitBounds).toHaveBeenCalledWith(
       [[16.72, 121.689], [16.722, 121.691]],
       expect.objectContaining({ maxZoom: 19 }),
@@ -296,7 +295,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
   });
 
-  it("opens Create-or-Attach when a footprint closes and preserves its geometry across tabs", async () => {
+  it("opens Create Building when a footprint closes and preserves its geometry", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
     clickMap(16.720, 121.689);
@@ -305,13 +304,8 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
 
-    expect(screen.getByRole("region", { name: "Create or attach Building" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "★ Create New Building" })).toHaveAttribute("aria-selected", "true");
-    expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
-
-    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Building" }));
-
-    expect(screen.getByRole("tab", { name: "🔗 Attach Existing Building" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: "Create Building" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
   });
 
@@ -386,32 +380,6 @@ describe("Map Editor preview", () => {
     expect(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("alert")).toHaveTextContent("Location code already exists.");
   });
 
-  it("exposes only eligible active Buildings without footprint in Attach Existing Building", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-open", name: "Science Hall", code: "SCI", points: [] },
-      { id: "building-linked", name: "University Gym", code: "GYM", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.click(screen.getByRole("tab", { name: "🔗 Attach Existing Building" }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search existing Buildings" }), { target: { value: "i" } });
-
-    expect(screen.queryByRole("button", { name: /University Gym/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Science Hall/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Science Hall/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
-
-    await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
-      buildings: [expect.objectContaining({ id: "building-open" })],
-    })));
-    fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
-    expect(await screen.findByRole("alert", { name: "Building is not routable" })).toBeInTheDocument();
-  });
-
   it("creates the feature, Building, and link together", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
@@ -472,7 +440,6 @@ describe("Map Editor preview", () => {
     const buildingContent = screen.getByRole("region", { name: "Building content" });
     expect(within(buildingContent).getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Floor Level for new Indoor Location")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Building summary" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Building content" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Walking access" })).toBeInTheDocument();
     expect(screen.queryByText(/Move footprint/i)).not.toBeInTheDocument();
@@ -530,7 +497,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    expect(screen.getByText("Create or Attach Building")).toBeInTheDocument();
+    expect(screen.getByText("Create Building")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "▱ Edit Shape" }));
     expect(screen.getByText("Draw Building Footprint")).toBeInTheDocument();
@@ -597,31 +564,6 @@ describe("Map Editor preview", () => {
     fireEvent.click(saveBtn);
 
     expect(await screen.findByRole("complementary", { name: "New Overlapping Hall object details" })).toBeInTheDocument();
-  });
-
-  it("attaches footprint to eligible existing building without creating new location record", async () => {
-    vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "bld-eligible", name: "Eligible Building", code: "ELIG-01", points: [] },
-    ]);
-    renderEditor();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
-
-    expect(screen.getByText("Eligible Building · ELIG-01")).toBeInTheDocument();
-    expect(screen.getAllByText("Eligible").length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByText("Eligible Building · ELIG-01"));
-    fireEvent.click(screen.getByRole("button", { name: "Attach Selected Building" }));
-
-    await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
-      buildings: [expect.objectContaining({ id: "bld-eligible" })],
-    })));
   });
 
   it("saves a created Building footprint through the canonical Locations service and refreshes the map", async () => {
@@ -694,55 +636,6 @@ describe("Map Editor preview", () => {
     expect(createdBuilding?.lat).toBeNull();
     expect(createdBuilding?.lng).toBeNull();
     expect(createdBuilding?.positioned).toBe(false);
-  });
-
-  it("sources attach candidates from unpositioned Buildings in locations query", async () => {
-    vi.mocked(services.map.locations).mockResolvedValue([
-      {
-        id: "bld-unpositioned",
-        name: "Unpositioned Annex",
-        code: "UNPOS-01",
-        type: "Building",
-        parentId: null,
-        status: "Active",
-        lat: null,
-        lng: null,
-        positioned: false,
-      },
-    ]);
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
-
-    // Unpositioned Building from locations is exposed as an attach candidate
-    expect(screen.getByRole("button", { name: /Unpositioned Annex/ })).toBeInTheDocument();
-  });
-
-  it("searches canonical attach candidates by Building name and code", async () => {
-    vi.mocked(services.locations.list).mockResolvedValue({
-      items: [{ id: "building-canonical", name: "Engineering Hall", code: "ENG-01", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false }],
-      total: 1,
-      page: 1,
-      pageSize: 100,
-    });
-    renderEditor();
-    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
-    clickMap(16.720, 121.689);
-    clickMap(16.721, 121.689);
-    clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
-    fireEvent.click(screen.getByRole("tab", { name: /Attach Existing Building/i }));
-
-    const search = screen.getByRole("searchbox", { name: "Search existing Buildings" });
-    fireEvent.change(search, { target: { value: "ENG-01" } });
-    expect(screen.getByRole("button", { name: /Engineering Hall · ENG-01/ })).toBeInTheDocument();
-    fireEvent.change(search, { target: { value: "engineering hall" } });
-    expect(screen.getByRole("button", { name: /Engineering Hall · ENG-01/ })).toBeInTheDocument();
   });
 
   it("evaluates footprint-derived Building as routable when entrance is linked even with positioned false", async () => {

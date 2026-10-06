@@ -162,7 +162,6 @@ export function MapEditor() {
     saving,
     context: {
       sessionBuildings,
-      associationOptions: buildingAssociationOptions,
       locations: currentLocations,
       nodes: currentNodes,
       campusBoundary,

@@ -57,7 +57,7 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
   return (
     <>
       {buildingEditor.buildingDetailsModalOpen && buildingEditor.polygonClosed
-        && buildingEditor.buildingWorkflowMode === "create" && !buildingEditor.editingBuildingId && (
+        && !buildingEditor.editingBuildingId && (
         <BuildingDetailsModal
           draft={buildingEditor.buildingForm}
           classification={buildingEditor.buildingClassification}
