@@ -7,7 +7,7 @@ import dashboard as dashboard_module
 from dashboard import dashboard_bp
 from extensions import db
 from model.audit_log import AuditLog
-from model.app_user import AppUser
+from model.app_user import AppUser, UserInfo
 from model.building import Building
 from model.location import Location
 from model.path_point import PathPoint  # noqa: F401 - registers Pathway.path_points relationship
@@ -63,6 +63,7 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
     assert data["buildings"] == 2
     assert data["indoorLocations"] == 2
     assert data["users"] == 1
+    assert data["usersByType"] == {"student": 0, "teacher": 0, "visitor": 0}
     assert data["locations"] == 4
     assert data["pathways"] == 1
     assert data["buildingChange"] == 1
@@ -151,6 +152,55 @@ def test_dashboard_filters_searches_by_range_and_limits_tied_results_determinist
     assert [row["name"] for row in all_time["topSearched"]] == [
         "Alpha", "Ancient", "Bravo", "Charlie", "Delta",
     ]
+
+
+def test_dashboard_folds_the_stored_spellings_into_one_count_per_type(app):
+    with app.app_context():
+        db.session.add_all([
+            # The User App writes its signup picker labels; the backfill and the
+            # admin's own vocabulary are lower case.
+            UserInfo(id=1, user_type="Student"),
+            UserInfo(id=2, user_type="Student"),
+            UserInfo(id=3, user_type="Staff"),
+            UserInfo(id=4, user_type="teacher"),
+            UserInfo(id=5, user_type="faculty"),
+            UserInfo(id=6, user_type=None),
+            AppUser(id=1, username="student01", info_id=1),
+            AppUser(id=2, username="student02", info_id=2),
+            AppUser(id=3, username="staff01", info_id=3),
+            AppUser(id=4, username="teacher01", info_id=4),
+            AppUser(id=5, username="unrecognized", info_id=5),
+            AppUser(id=6, username="typeless", info_id=6),
+            AppUser(id=7, username="without-info"),
+        ])
+        db.session.commit()
+
+    response = app.test_client().get("/api/dashboard?range=week")
+
+    assert response.status_code == 200
+    data = response.json["data"]
+    assert data["users"] == 7
+    # "Staff" and "teacher" are one category, so they share a bucket. No
+    # visitors registered yet, and the three accounts with no recognizable type
+    # are left out of the split rather than folded into one of the three - so it
+    # adds up to less than the users total.
+    assert data["usersByType"] == {"student": 2, "teacher": 2, "visitor": 0}
+
+
+def test_dashboard_counts_account_types_independently_of_the_selected_range(app):
+    with app.app_context():
+        db.session.add_all([
+            UserInfo(id=1, created_at=datetime.now(timezone.utc) - timedelta(days=400), user_type="Visitor"),
+            AppUser(id=1, username="long-standing-visitor", info_id=1),
+        ])
+        db.session.commit()
+
+    client = app.test_client()
+    split = {"student": 0, "teacher": 0, "visitor": 1}
+
+    assert client.get("/api/dashboard?range=week").json["data"]["usersByType"] == split
+    assert client.get("/api/dashboard?range=month").json["data"]["usersByType"] == split
+    assert client.get("/api/dashboard?range=all").json["data"]["usersByType"] == split
 
 
 def test_dashboard_all_time_omits_building_change(app):
