@@ -1,4 +1,5 @@
-import type { Pathway, RouteNode } from "../../../types";
+import { pathwayHasWayType, type Pathway, type RouteNode } from "../../../types";
+import { WayTypeChoice } from "./WayTypeChoice";
 import { suggestedPathwayName } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
 import type { usePathwayEditing } from "./usePathwayEditing";
@@ -68,11 +69,7 @@ export function PathwayToolPanel({
               <label className="text-xs font-semibold text-[#3f4941]">Pathway name
                 <input aria-label="New Pathway name" placeholder={suggestedPathwayName(activePathway, currentNodes) || "Select two named Route Nodes"} value={pathwayDraft?.name ?? activePathway.name} onKeyDown={(event) => { if (event.key === "Tab") adoptSuggestedPathwayName(activePathway); }} onBlur={() => adoptSuggestedPathwayName(activePathway)} onChange={(event) => setPathwayDraft((current) => current ? { ...current, name: event.target.value } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
               </label>
-              <label className="text-xs font-semibold text-[#3f4941]">Way type
-                <select aria-label="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs">
-                  {["Walkway", "Road"].map((wayType) => <option key={wayType}>{wayType}</option>)}
-                </select>
-              </label>
+              <WayTypeChoice ariaLabel="New Pathway type" value={pathwayDraft?.type ?? activePathway.type} allowedModes={pathwayDraft?.allowedModes ?? activePathway.allowedModes} onChange={(change) => setPathwayDraft((current) => current ? { ...current, ...change } : current)} />
               <label className="text-xs font-semibold text-[#3f4941]">Shade
                 <select aria-label="New Pathway shade" value={pathwayDraft?.shade ?? activePathway.shade} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs"><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select>
               </label>
@@ -85,7 +82,7 @@ export function PathwayToolPanel({
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   {["Walking", "Vehicle"].map((mode) => {
                     const allowedModes = pathwayDraft?.allowedModes ?? activePathway.allowedModes ?? ["Walking"];
-                    const vehicleBlocked = (pathwayDraft?.type ?? activePathway.type) === "Walkway" && mode === "Vehicle";
+                    const vehicleBlocked = mode === "Vehicle" && !pathwayHasWayType(pathwayDraft?.type ?? activePathway.type, "Road");
                     return <label key={mode} className="flex items-center gap-2 font-semibold"><input type="checkbox" disabled={vehicleBlocked} checked={!vehicleBlocked && allowedModes.includes(mode as "Walking" | "Vehicle")} onChange={(event) => setPathwayDraft((current) => current ? { ...current, allowedModes: event.target.checked ? [...new Set([...allowedModes, mode as "Walking" | "Vehicle"])] : allowedModes.filter((item) => item !== mode) } : current)} />{mode}</label>;
                   })}
                 </div>

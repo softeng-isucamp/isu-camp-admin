@@ -1,5 +1,6 @@
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
-import type { Pathway, RouteNode } from "../../../types";
+import { pathwayHasWayType, type Pathway, type RouteNode } from "../../../types";
+import { WayTypeChoice } from "./WayTypeChoice";
 
 export type PathPointConversionDraft = {
   pathwayId: string;
@@ -69,14 +70,14 @@ export function PathPointConversionModal({ draft, parentName, nodes, buildings, 
           return <section key={segment} className="conversion-section conversion-pathway" aria-label={`Replacement Pathway ${segment}`}>
             <div className="conversion-pathway-heading"><h4>Pathway {segment}</h4></div>
             <Field id={`conversion-pathway-${segment}-name`} aria-label={`Replacement Pathway ${segment} name`} label="PATHWAY NAME" required value={pathway.name} onChange={(event) => update({ name: event.target.value })} />
+            <WayTypeChoice className="conversion-modes" legendClassName="field-label" itemsClassName="" ariaLabel={`Replacement Pathway ${segment} way type`} value={pathway.type} allowedModes={pathway.allowedModes} onChange={(change) => update(change)} />
             <div className="form-grid-two">
-              <SelectField id={`conversion-pathway-${segment}-type`} aria-label={`Replacement Pathway ${segment} way type`} label="WAY TYPE" value={pathway.type} onChange={(event) => update({ type: event.target.value, allowedModes: event.target.value === "Walkway" ? ["Walking"] : pathway.allowedModes })}><option>Walkway</option><option>Road</option></SelectField>
               <SelectField id={`conversion-pathway-${segment}-direction`} aria-label={`Replacement Pathway ${segment} direction`} label="DIRECTION" value={pathway.direction} onChange={(event) => update({ direction: event.target.value as Pathway["direction"] })}><option>Two-way</option><option>One-way</option><option>Unknown</option></SelectField>
               <SelectField id={`conversion-pathway-${segment}-shade`} aria-label={`Replacement Pathway ${segment} shade`} label="SHADE" value={pathway.shade} onChange={(event) => update({ shade: event.target.value as Pathway["shade"] })}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></SelectField>
               <SelectField id={`conversion-pathway-${segment}-status`} aria-label={`Replacement Pathway ${segment} status`} label="STATUS" value={pathway.status} onChange={(event) => update({ status: event.target.value as Pathway["status"] })}>{pathway.status === "Open" && <option>Open</option>}<option>Active</option><option>Closed</option></SelectField>
             </div>
             <fieldset className="conversion-modes"><legend className="field-label">ALLOWED MODES</legend>
-              {(["Walking", "Vehicle"] as const).map((mode) => <label key={mode}><input type="checkbox" checked={pathway.allowedModes?.includes(mode) ?? mode === "Walking"} disabled={mode === "Vehicle" && pathway.type === "Walkway"} onChange={(event) => update({ allowedModes: event.target.checked ? [...new Set([...(pathway.allowedModes ?? []), mode])] : (pathway.allowedModes ?? []).filter((item) => item !== mode) })} />{mode}</label>)}
+              {(["Walking", "Vehicle"] as const).map((mode) => <label key={mode}><input type="checkbox" checked={pathway.allowedModes?.includes(mode) ?? mode === "Walking"} disabled={mode === "Vehicle" && !pathwayHasWayType(pathway.type, "Road")} onChange={(event) => update({ allowedModes: event.target.checked ? [...new Set([...(pathway.allowedModes ?? []), mode])] : (pathway.allowedModes ?? []).filter((item) => item !== mode) })} />{mode}</label>)}
             </fieldset>
           </section>;
         })}

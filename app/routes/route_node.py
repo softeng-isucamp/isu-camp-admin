@@ -7,7 +7,12 @@ from auth import admin_required
 from extensions import db
 from model.building import Building
 from model.path_point import PATH_POINT_TYPES, PathPoint
-from model.pathway import PATHWAY_TYPES, Pathway
+from model.pathway import (
+    PATHWAY_TYPES,
+    Pathway,
+    join_path_types,
+    split_path_types,
+)
 from model.pathway_allowed_mode import PathwayAllowedMode
 from model.route_node import RouteNode
 from services.audit import log_audit
@@ -112,9 +117,20 @@ def _modes(data, default=("Walking",)):
     if not isinstance(result, list) or not result or any(mode not in MODES for mode in result):
         raise ValidationError("allowed_modes must contain at least one of Walking or Vehicle")
     result = list(dict.fromkeys(result))
-    if data.get("path_type") == "Walkway" and "Vehicle" in result:
+    if "Vehicle" in result and "Road" not in split_path_types(data.get("path_type")):
         raise ValidationError("Walkways cannot allow Vehicle mode")
     return result
+
+
+def _path_type(value):
+    """Accept one Way type or several; store them in the canonical order."""
+    selected = split_path_types(value)
+    if not selected or any(item not in PATHWAY_TYPES for item in selected):
+        raise ValidationError(
+            "path_type must be one or more of "
+            f"{', '.join(sorted(PATHWAY_TYPES))}"
+        )
+    return join_path_types(selected)
 
 
 def _modes_on(pathway, modes):
@@ -394,10 +410,8 @@ def _pathway_values(data, current=None):
         if not RouteNode.query.get(values[key]):
             label = "Source" if key == "source_node_id" else "Destination"
             return f"{label} route node not found", 404
-    values["path_type"] = _enum(
-        data.get("path_type", getattr(current, "path_type", None)),
-        "path_type",
-        PATHWAY_TYPES,
+    values["path_type"] = _path_type(
+        data.get("path_type", getattr(current, "path_type", None))
     )
     values["name"] = _text(
         data.get("name", getattr(current, "name", "Unnamed Pathway")),

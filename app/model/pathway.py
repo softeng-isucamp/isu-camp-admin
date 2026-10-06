@@ -2,6 +2,27 @@ from extensions import db
 from sqlalchemy.sql import func
 
 PATHWAY_TYPES = frozenset({"Walkway", "Road"})
+# A Pathway may be both at once (a road with a sidewalk), so path_type stores the
+# selected Way types in this fixed order joined by PATHWAY_TYPE_SEPARATOR.
+PATHWAY_TYPE_ORDER = ("Walkway", "Road")
+PATHWAY_TYPE_SEPARATOR = ", "
+
+
+def split_path_types(value):
+    """Return the Way types carried by a stored or submitted path_type value."""
+    parts = (
+        value
+        if isinstance(value, (list, tuple, set, frozenset))
+        else str(value or "").split(",")
+    )
+    selected = {str(part).strip() for part in parts}
+    unknown = sorted(selected - set(PATHWAY_TYPE_ORDER) - {""})
+    return [item for item in PATHWAY_TYPE_ORDER if item in selected] + unknown
+
+
+def join_path_types(types):
+    """Canonicalize chosen Way types into the single stored path_type value."""
+    return PATHWAY_TYPE_SEPARATOR.join(split_path_types(types))
 
 
 class Pathway(db.Model):
@@ -106,6 +127,7 @@ class Pathway(db.Model):
             "source_node_id": self.source_node_id,
             "destination_node_id": self.destination_node_id,
             "path_type": self.path_type,
+            "path_types": split_path_types(self.path_type),
             "name": self.name,
             "status": self.status,
             "shaded": self.shaded,

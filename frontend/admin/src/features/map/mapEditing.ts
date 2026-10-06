@@ -1,5 +1,5 @@
 import type L from "leaflet";
-import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
+import { PATHWAY_ALLOWED_MODES, splitPathwayWayTypes, type Building, type Location, type Pathway, type RouteNode } from "../../types";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
 
 export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
@@ -186,9 +186,10 @@ export function validatePathwayDraft(
 ): PathwayDraftIssue[] {
   const issues: PathwayDraftIssue[] = [];
   if (!pathway.name.trim()) issues.push({ field: "name", message: "Pathway name is required." });
+  const wayTypes = splitPathwayWayTypes(pathway.type);
   if (!pathway.type.trim()) issues.push({ field: "type", message: "Way type is required." });
-  else if (!PATHWAY_WAY_TYPES.includes(normalizePathwayWayType(pathway.type) as typeof PATHWAY_WAY_TYPES[number])) {
-    issues.push({ field: "type", message: "Way type must be Walkway or Road." });
+  else if (!wayTypes.length) {
+    issues.push({ field: "type", message: "Way type must be Walkway, Road, or both." });
   }
   if (pathway.direction !== "Two-way" && pathway.direction !== "One-way") issues.push({ field: "direction", message: "Pathway direction must be Two-way or One-way." });
   if (pathway.status !== "Active" && pathway.status !== "Open" && pathway.status !== "Closed") issues.push({ field: "status", message: "Pathway status must be Active or Closed." });
@@ -196,7 +197,7 @@ export function validatePathwayDraft(
   if (!allowedModes.length || allowedModes.some((mode) => !PATHWAY_ALLOWED_MODES.includes(mode))) {
     issues.push({ field: "allowedModes", message: "Choose Walking, Vehicle, or both Allowed modes." });
   }
-  if (pathway.type === "Walkway" && allowedModes.includes("Vehicle")) {
+  if (wayTypes.length && !wayTypes.includes("Road") && allowedModes.includes("Vehicle")) {
     issues.push({ field: "allowedModes", message: "Walkways cannot allow Vehicle mode." });
   }
   const source = nodes.find((node) => node.id === pathway.sourceNodeId);

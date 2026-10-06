@@ -99,4 +99,12 @@ describe("map draft review", () => {
     ]);
     expect(validatePathwayDraft(pathway({ type: "Road", allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([]);
   });
+
+  it("accepts a Pathway that is both a Walkway and a Road", () => {
+    const nodes = [node(), node({ id: "node-2", lat: 16.976, lng: 121.732 })];
+    expect(validatePathwayDraft(pathway({ type: "Walkway, Road", allowedModes: ["Walking", "Vehicle"] }), nodes)).toEqual([]);
+    expect(validatePathwayDraft(pathway({ type: "Boardwalk" }), nodes)).toEqual([
+      { field: "type", message: "Way type must be Walkway, Road, or both." },
+    ]);
+  });
 });

@@ -2,6 +2,7 @@ from flask import Flask
 import pytest
 
 import route_node as route_node_module
+from model.pathway import split_path_types
 from route_node import route_node_bp
 
 
@@ -528,6 +529,75 @@ def test_pathway_metadata_and_allowed_modes_round_trip_through_create(monkeypatc
     }
 
 
+def test_create_pathway_stores_both_selected_way_types(monkeypatch):
+    session = FakeSession()
+
+    class FakeRouteNode:
+        query = type("Query", (), {"get": staticmethod(lambda identifier: object())})()
+
+    class FakePathway:
+        def __init__(self, **values):
+            self.pathway_id = 9
+            self.__dict__.update(values)
+            self.allowed_modes = []
+
+        def to_dict(self):
+            return {
+                "pathway_id": self.pathway_id,
+                "path_type": self.path_type,
+                "path_types": split_path_types(self.path_type),
+                "allowed_modes": [item.mode for item in self.allowed_modes],
+            }
+
+    monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
+    monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
+    monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode, raising=False)
+    monkeypatch.setattr(route_node_module, "db", type("DB", (), {"session": session}))
+    client = app_with_route_node_blueprint().test_client()
+
+    body = {
+        "name": "Road With Sidewalk",
+        "source_node_id": 3,
+        "destination_node_id": 4,
+        "distance_m": 120,
+        "estimated_minutes": 2,
+        "allowed_modes": ["Walking", "Vehicle"],
+    }
+    as_list = client.post("/api/pathways", json={**body, "path_type": ["Road", "Walkway"]})
+    as_text = client.post("/api/pathways", json={**body, "path_type": "Road, Walkway"})
+
+    # Either submission shape stores the same canonical column value, and a
+    # Pathway that is also a Road keeps its Vehicle permission.
+    for response in (as_list, as_text):
+        assert response.status_code == 201
+        assert response.json["pathway"]["path_type"] == "Walkway, Road"
+        assert response.json["pathway"]["path_types"] == ["Walkway", "Road"]
+        assert response.json["pathway"]["allowed_modes"] == ["Walking", "Vehicle"]
+
+
+def test_create_pathway_rejects_vehicle_mode_on_a_walkway_only_pathway(monkeypatch):
+    monkeypatch.setattr(
+        route_node_module,
+        "RouteNode",
+        type("RouteNode", (), {"query": type("Query", (), {"get": staticmethod(lambda _id: object())})()}),
+    )
+
+    response = app_with_route_node_blueprint().test_client().post(
+        "/api/pathways",
+        json={
+            "source_node_id": 3,
+            "destination_node_id": 4,
+            "path_type": "Walkway",
+            "distance_m": 10,
+            "estimated_minutes": 1,
+            "allowed_modes": ["Walking", "Vehicle"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json["message"] == "Walkways cannot allow Vehicle mode"
+
+
 def test_pathway_update_replaces_allowed_modes_and_preserves_metadata(monkeypatch):
     session = FakeSession()
     pathway = type(
@@ -684,7 +754,7 @@ def test_pathway_and_path_point_reject_unsupported_editor_enums(monkeypatch):
     )
 
     assert pathway.status_code == 400
-    assert pathway.json["message"] == "path_type must be one of Road, Walkway"
+    assert pathway.json["message"] == "path_type must be one or more of Road, Walkway"
     assert path_point.status_code == 400
     assert path_point.json["message"] == "node_type must be one of Waypoint"
 

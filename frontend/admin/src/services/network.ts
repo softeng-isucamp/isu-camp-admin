@@ -1,5 +1,5 @@
 import type { Building as LegacyBuilding, Pathway as LegacyPathway, RouteNode as LegacyRouteNode } from "../types";
-import { normalizePathwayLifecycleStatus, normalizePathwayWayType, PATHWAY_WAY_TYPES } from "../types";
+import { normalizePathwayLifecycleStatus, normalizePathwayWayType, pathwayHasWayType, splitPathwayWayTypes } from "../types";
 import { geometryOnCampus, type MapPoint } from "../features/map/campusBoundary";
 
 export type NetworkStatus = "active" | "inactive";
@@ -131,8 +131,8 @@ export const validatePathway = (
   if (pathway.direction !== "two_way" && pathway.direction !== "one_way") throw new Error("Pathway direction must be two_way or one_way.");
   if (pathway.status !== "active" && pathway.status !== "closed") throw new Error("Pathway lifecycle status must be active or closed.");
   if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error("At least one valid Allowed mode is required.");
-  if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error("Walkways cannot allow Vehicle mode.");
-  if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) {
+  if (!pathwayHasWayType(pathway.type ?? undefined, "Road") && pathway.allowedModes.includes("vehicle")) throw new Error("Walkways cannot allow Vehicle mode.");
+  if (!splitPathwayWayTypes(pathway.type ?? undefined).length) {
     throw new Error("Pathway Way type must use the fixed vocabulary: Walkway or Road.");
   }
   const source = snapshot.routeNodes.find((node) => node.id === pathway.sourceNodeId);
@@ -219,8 +219,8 @@ export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
     if (!pathway.direction) throw new Error(`Pathway ${pathway.id} must have a direction.`);
     if (pathway.status !== "active" && pathway.status !== "closed") throw new Error(`Pathway ${pathway.id} must have an active or closed lifecycle status.`);
     if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error(`Pathway ${pathway.id} must allow at least one valid travel mode.`);
-    if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error(`Pathway ${pathway.id} cannot allow Vehicle mode because it is a Walkway.`);
-    if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) throw new Error(`Pathway ${pathway.id} has an unsupported Way type.`);
+    if (!pathwayHasWayType(pathway.type ?? undefined, "Road") && pathway.allowedModes.includes("vehicle")) throw new Error(`Pathway ${pathway.id} cannot allow Vehicle mode because it is a Walkway.`);
+    if (!splitPathwayWayTypes(pathway.type ?? undefined).length) throw new Error(`Pathway ${pathway.id} has an unsupported Way type.`);
     if (!nodeIds.has(pathway.sourceNodeId) || !nodeIds.has(pathway.destinationNodeId)) throw new Error(`Pathway ${pathway.id} references a missing Route Node.`);
     if (pathway.sourceNodeId === pathway.destinationNodeId) throw new Error(`Pathway endpoints must be distinct.`);
     const key = pathwayKey(pathway.sourceNodeId, pathway.destinationNodeId);
@@ -244,7 +244,8 @@ const normalizeAllowedModes = (type: string | null | undefined, modes: readonly 
   const normalizedModes = (modes ?? ["walking"])
     .map((mode) => mode.toLowerCase() === "vehicle" ? "vehicle" : mode.toLowerCase() === "walking" ? "walking" : null)
     .filter((mode): mode is TravelMode => mode !== null);
-  return normalizePathwayWayType(type ?? undefined) === "Walkway" ? ["walking"] : normalizedModes.length ? [...new Set(normalizedModes)] : ["walking"];
+  // Vehicle mode is only meaningful while a Road Way type is selected.
+  return pathwayHasWayType(type ?? undefined, "Road") && normalizedModes.length ? [...new Set(normalizedModes)] : ["walking"];
 };
 
 export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: Storage | null) => {

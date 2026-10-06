@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Building, Pathway, RouteNode } from "../../types";
+import { pathwayHasWayType, splitPathwayWayTypes, type Building, type Pathway, type PathwayType, type RouteNode } from "../../types";
 
 export type NetworkBrowserSelection = { type: "pathway" | "node"; id: string } | null;
 
@@ -58,7 +58,7 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
     const matchesQuery = !normalizedQuery || `${pathway.id} ${pathway.name} ${endpoints}`.toLowerCase().includes(normalizedQuery);
     return matchesQuery
       && (pathStatus === "all" || pathway.status === pathStatus)
-      && (pathType === "all" || pathway.type === pathType)
+      && (pathType === "all" || pathwayHasWayType(pathway.type, pathType as PathwayType))
       && (pathDirection === "all" || pathway.direction === pathDirection)
       && (pathShade === "all" || pathway.shade === pathShade);
   }), [nodeById, normalizedQuery, pathDirection, pathShade, pathStatus, pathType, pathways]);
@@ -86,7 +86,7 @@ export function NetworkBrowser({ pathways, nodes, buildings, selected, onSelect,
       <input id="network-browser-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "pathways" ? "Search Pathways" : "Search Route Nodes"} className="w-full rounded-xl border border-[#cbd9d1] bg-white/90 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#005931]" />
       {tab === "pathways" ? <div className="grid grid-cols-2 gap-2">
         <Filter label="Status" value={pathStatus} onChange={setPathStatus} values={knownAndObservedValues(pathwayFilterOptions.status, pathways.map((pathway) => pathway.status))} />
-        <Filter label="Type" value={pathType} onChange={setPathType} values={knownAndObservedValues(pathwayFilterOptions.type, pathways.map((pathway) => pathway.type))} />
+        <Filter label="Type" value={pathType} onChange={setPathType} values={knownAndObservedValues(pathwayFilterOptions.type, pathways.flatMap((pathway) => splitPathwayWayTypes(pathway.type)))} />
         <Filter label="Direction" value={pathDirection} onChange={setPathDirection} values={knownAndObservedValues(pathwayFilterOptions.direction, pathways.map((pathway) => pathway.direction))} />
         <Filter label="Shade" value={pathShade} onChange={setPathShade} values={knownAndObservedValues(pathwayFilterOptions.shade, pathways.map((pathway) => pathway.shade))} />
       </div> : <div className="grid grid-cols-2 gap-2">

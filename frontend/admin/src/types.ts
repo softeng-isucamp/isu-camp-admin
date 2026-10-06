@@ -11,6 +11,8 @@ export type Shade =
   "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded" | "Unknown";
 export const PATHWAY_WAY_TYPES = ["Walkway", "Road"] as const;
 export type PathwayType = typeof PATHWAY_WAY_TYPES[number];
+/** Separator used when a Pathway carries both Way types. */
+export const PATHWAY_WAY_TYPE_SEPARATOR = ", ";
 export const PATHWAY_ALLOWED_MODES = ["Walking", "Vehicle"] as const;
 export type AllowedMode = typeof PATHWAY_ALLOWED_MODES[number];
 export type PathwayLifecycleStatus = "Active" | "Closed" | "Open" | "Unknown";
@@ -19,15 +21,35 @@ export type PathwayLifecycleStatus = "Active" | "Closed" | "Open" | "Unknown";
 export const normalizePathwayLifecycleStatus = (status: string | undefined): PathwayLifecycleStatus =>
   status === "Open" || status === "open" || status === "Active" || status === "active" ? "Active" : status === "Closed" || status === "closed" ? "Closed" : "Unknown";
 
-/** Convert historical labels into the controlled Way type vocabulary. */
-export const normalizePathwayWayType = (type: string | undefined): PathwayType | "Unknown" => {
-  const normalized = type?.trim().toLowerCase() ?? "";
+const normalizeSingleWayType = (type: string): PathwayType | null => {
+  const normalized = type.trim().toLowerCase();
   const fixedType = PATHWAY_WAY_TYPES.find((candidate) => candidate.toLowerCase() === normalized);
   if (fixedType) return fixedType;
   if (/^(campus )?walkway$|^pedestrian path$|^walk$|^path$/.test(normalized)) return "Walkway";
   if (/^(service road|vehicle path|ramp|stairs|service path)$/.test(normalized)) return "Road";
-  return "Unknown";
+  return null;
 };
+
+/** Split a stored Way type value into the controlled Way type vocabulary. */
+export const splitPathwayWayTypes = (type: string | undefined): PathwayType[] => {
+  const parsed = (type ?? "").split(",").map(normalizeSingleWayType);
+  return PATHWAY_WAY_TYPES.filter((candidate) => parsed.includes(candidate));
+};
+
+/** Join chosen Way types into the single canonical value persisted as path_type. */
+export const joinPathwayWayTypes = (types: readonly string[]): string =>
+  PATHWAY_WAY_TYPES.filter((candidate) => types.includes(candidate)).join(PATHWAY_WAY_TYPE_SEPARATOR);
+
+/** Whether a stored Way type value covers the given Way type. */
+export const pathwayHasWayType = (type: string | undefined, wayType: PathwayType): boolean =>
+  splitPathwayWayTypes(type).includes(wayType);
+
+/**
+ * Convert historical labels into the controlled Way type vocabulary. A Pathway
+ * may carry both Way types at once, so this returns the canonical joined value.
+ */
+export const normalizePathwayWayType = (type: string | undefined): string =>
+  joinPathwayWayTypes(splitPathwayWayTypes(type)) || "Unknown";
 export interface SourceProvenance {
   provider: string;
   sourceType: string;

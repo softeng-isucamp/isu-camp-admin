@@ -15,7 +15,7 @@ import type {
   Session,
   UserAccount,
 } from "../types";
-import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
+import { normalizePathwayWayType, pathwayHasWayType, PATHWAY_ALLOWED_MODES } from "../types";
 import { z } from "zod";
 
 import {
@@ -231,7 +231,7 @@ const normalizeMapPathway = (pathway: Pathway): Pathway => {
   return {
     ...pathway,
     type: normalizedType === "Unknown" ? "Walkway" : normalizedType,
-    allowedModes: normalizedType === "Walkway" ? ["Walking"] : pathway.allowedModes,
+    allowedModes: pathwayHasWayType(normalizedType, "Road") ? pathway.allowedModes : ["Walking"],
   };
 };
 
@@ -264,6 +264,7 @@ type BackendPathway = {
   source_node_id: number;
   destination_node_id: number;
   path_type: string;
+  path_types?: string[];
   status: string;
   shaded?: boolean;
   shade?: string | null;

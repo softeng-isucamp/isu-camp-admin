@@ -175,9 +175,14 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("complementary", { name: "Active Walk object details" })).toBeInTheDocument();
     expect(screen.queryByText("Calibrate Path Points")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "✎ Edit Pathway" })).not.toBeInTheDocument();
-    expect(Array.from((screen.getByLabelText("Pathway type") as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Walkway", "Road"]);
+    const wayTypes = within(screen.getByRole("group", { name: "Pathway type" }));
+    expect(wayTypes.getByRole("checkbox", { name: "Walkway" })).toBeChecked();
+    expect(wayTypes.getByRole("checkbox", { name: "Road" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Vehicle" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "Pathway name" }), { target: { value: "Renamed Active Walk" } });
+    // Ticking both Way types must persist both, and unblocks Vehicle mode.
+    fireEvent.click(wayTypes.getByRole("checkbox", { name: "Road" }));
+    expect(screen.getByRole("checkbox", { name: "Vehicle" })).toBeEnabled();
 
     const apply = screen.getByRole("button", { name: "Update Pathway" });
     expect(apply).toBeEnabled();
@@ -185,6 +190,7 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
       id: "active-path",
       name: "Renamed Active Walk",
+      type: "Walkway, Road",
     })));
     expect(screen.getByRole("complementary", { name: "Renamed Active Walk object details" })).toBeInTheDocument();
   });
@@ -243,12 +249,14 @@ describe("Map Editor preview", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Convert Path Point to Route Node" });
     expect(services.map.convertPathPoint).not.toHaveBeenCalled();
-    expect(within(dialog).getByLabelText("Replacement Pathway A way type")).toHaveValue("Walkway");
+    expect(within(within(dialog).getByRole("group", { name: "Replacement Pathway A way type" })).getByRole("checkbox", { name: "Walkway" })).toBeChecked();
     expect(within(dialog).getByLabelText("Replacement Pathway B shade")).toHaveValue("Mostly Shaded");
     expect(within(dialog).getByLabelText("Converted Route Node name")).toHaveValue("Junction near North Entrance");
     expect(within(dialog).getByLabelText("Converted Route Node type")).toHaveTextContent("Entrance");
     fireEvent.change(within(dialog).getByLabelText("Converted Route Node name"), { target: { value: "Library Junction" } });
-    fireEvent.change(within(dialog).getByLabelText("Replacement Pathway B way type"), { target: { value: "Road" } });
+    const replacementB = within(within(dialog).getByRole("group", { name: "Replacement Pathway B way type" }));
+    fireEvent.click(replacementB.getByRole("checkbox", { name: "Road" }));
+    fireEvent.click(replacementB.getByRole("checkbox", { name: "Walkway" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Save Route Node and Pathways" }));
 
     await waitFor(() => expect(services.map.convertPathPoint).toHaveBeenCalledWith(expect.objectContaining({
@@ -365,7 +373,8 @@ describe("Map Editor preview", () => {
     const name = screen.getByRole("textbox", { name: "Pathway name" });
     expect(name).toHaveValue("");
     expect(name).toHaveAttribute("placeholder", "North Entrance – South Junction");
-    expect(Array.from((screen.getByLabelText("Pathway type") as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Walkway", "Road"]);
+    expect(screen.getAllByRole("group", { name: /Pathway type/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("checkbox", { name: "Road" }).every((checkbox) => !(checkbox as HTMLInputElement).checked)).toBe(true);
     expect(
       screen.getAllByRole("checkbox", { name: "Vehicle" })
         .every((checkbox) => (checkbox as HTMLInputElement).disabled),
