@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeBackendDashboardSummary,
+  normalizeBackendUser,
   normalizeBackendLocationPage,
   services,
   setMockFailure,
@@ -578,7 +579,7 @@ describe("real dashboard service boundary", () => {
       new Response(JSON.stringify({ data: response }), { status: 200 }),
     );
 
-    await expect(httpServices.dashboard.summary("month")).resolves.toEqual(response);
+    await expect(httpServices.dashboard.summary("month")).resolves.toEqual({ ...response, usersByType: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/dashboard?range=month",
       expect.objectContaining({ credentials: "include" }),
@@ -1124,3 +1125,53 @@ describe("real walking network service boundary", () => {
     expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
   });
 });
+
+describe("account type contract", () => {
+  const dashboard = { buildings: 1, buildingChange: null, indoorLocations: 1, users: 10, locations: 1, pathways: 1, searches: 0, topSearched: [], recent: [] };
+
+  it("normalizes userType and user_type case-insensitively, with unknown values becoming null", () => {
+    expect(normalizeBackendUser({ id: 1, username: "a", userType: "Student" }).userType).toBe("student");
+    expect(normalizeBackendUser({ id: 2, username: "b", user_type: "TEACHER" }).userType).toBe("teacher");
+    expect(normalizeBackendUser({ id: 3, username: "c", user_type: "admin" }).userType).toBeNull();
+    expect(normalizeBackendUser({ id: 4, username: "d" }).userType).toBeNull();
+  });
+
+  it("treats dashboard usersByType as optional", () => {
+    expect(normalizeBackendDashboardSummary(dashboard).usersByType).toBeNull();
+    const split = { student: 7, teacher: 2, visitor: 1 };
+    expect(normalizeBackendDashboardSummary({ ...dashboard, usersByType: split }).usersByType).toEqual(split);
+    expect(() => normalizeBackendDashboardSummary({ ...dashboard, usersByType: { student: -1, teacher: 0, visitor: 0 } })).toThrow();
+  });
+
+  it("filters local fixture users by type, search, range and page, newest first", async () => {
+    const all = await services.users.list("", 1, 100);
+    expect(all.total).toBe(60);
+    expect(all.items.every((user) => user.userType !== null)).toBe(true);
+    const dates = all.items.map((user) => Date.parse(user.createdAt));
+    expect(dates).toEqual([...dates].sort((a, b) => b - a));
+
+    const teachers = await services.users.list("", 1, 100, "all", "teacher");
+    expect(teachers.total).toBeGreaterThan(0);
+    expect(teachers.items.every((user) => user.userType === "teacher")).toBe(true);
+    const counts = await Promise.all((["student", "teacher", "visitor"] as const).map((type) => services.users.list("", 1, 100, "all", type)));
+    expect(counts.reduce((sum, page) => sum + page.total, 0)).toBe(all.total);
+
+    const first = all.items[0];
+    const searched = await services.users.list(first.username.toUpperCase(), 1, 10);
+    expect(searched.items.map((user) => user.id)).toContain(first.id);
+    const recent = await services.users.list("", 1, 100, "7d");
+    expect(recent.total).toBeLessThan(all.total);
+    expect((await services.users.list("", 2, 25)).items).toHaveLength(25);
+  });
+
+  it("derives the local dashboard split and recent activity from fixtures", async () => {
+    const summary = await services.dashboard.summary();
+    const split = summary.usersByType!;
+    expect(summary.users).toBe(60);
+    expect(split.student + split.teacher + split.visitor).toBe(summary.users);
+    expect(summary.recent.length).toBeGreaterThan(0);
+    const logs = await services.logs.list("Admin", "", "All Actors", "all", 1, 100);
+    expect(logs.total).toBeGreaterThan(10);
+  });
+});
+

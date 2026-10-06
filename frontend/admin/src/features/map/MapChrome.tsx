@@ -1,18 +1,15 @@
+import { PageIcon } from "../../components/PageIcon";
 import { TileLayer } from "react-leaflet";
 
 /** The Map Editor page header. */
 export function MapPageHeader() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 bg-white px-5 py-3 rounded-[24px] border border-[#e1e3e4] shadow-sm shrink-0">
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl bg-[#005931] text-white flex items-center justify-center font-bold text-sm">
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-          </svg>
-        </div>
+      <div className="flex items-center gap-4">
+        <PageIcon name="map" />
         <div>
-          <h1 className="text-sm font-extrabold text-[#191c1d] leading-tight">Interactive Map Editor</h1>
-          <p className="text-[11px] text-[#3f4941]">Plot locations, calibrate route nodes, and adjust pathway curve vertices</p>
+          <h1 className="text-xl font-bold text-[#191c1d] leading-tight">Interactive Map Editor</h1>
+          <p className="text-sm text-[#4c5751]">Plot locations, calibrate route nodes, and adjust pathway curve vertices</p>
         </div>
       </div>
 

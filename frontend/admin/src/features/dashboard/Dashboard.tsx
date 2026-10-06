@@ -7,9 +7,8 @@ import { formatDateTime } from "../../lib/format";
 import type { DashboardRange } from "../../types";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
-import metricUsers from "../../assets/figma/navigation/profile-user.svg";
-import actionMap from "../../assets/figma/dashboard/action-map.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
+import { AccountTypeSplit } from "./AccountTypeSplit";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -139,6 +138,22 @@ export function Dashboard() {
           </Card>
         </div>
         <div className="stack">
+          <Card className="account-type-card">
+            <div className="card-heading">
+              <div>
+                <h2>Registered Users</h2>
+                <p>Share of accounts by account type.</p>
+              </div>
+              <Link to="/users">VIEW ALL</Link>
+            </div>
+            {isLoading ? (
+              <div className="dashboard-state" role="status" aria-live="polite">Loading registered users…</div>
+            ) : error && !data ? (
+              <Empty>Registered users are unavailable.</Empty>
+            ) : (
+              <AccountTypeSplit total={data?.users ?? null} counts={data?.usersByType ?? null} onSelect={(type) => navigate(`/users?${new URLSearchParams({ userType: type })}`)} />
+            )}
+          </Card>
           <Card>
             <div className="card-heading">
               <h2>Recent Activity</h2>
@@ -167,32 +182,6 @@ export function Dashboard() {
                   </div>
                 </div>
               ))}
-            </div>
-          </Card>
-          <Card className="registered-users-card" style={{ cursor: "pointer" }} onClick={() => navigate("/users")}>
-            <div className="metric-top">
-              <span className="metric-icon">
-                <img src={metricUsers} alt="" />
-              </span>
-            </div>
-            <span>Registered Users</span>
-            <strong>{data?.users?.toLocaleString() ?? "—"}</strong>
-          </Card>
-          <Card>
-            <div className="card-heading">
-              <h2>Quick Actions</h2>
-            </div>
-            <div className="quick-links">
-              <Link to="/map-editor">
-                <span>
-                  <img src={actionMap} alt="" />
-                </span>
-                <div>
-                  <strong>Edit Campus Map</strong>
-                  <small>Modify structural layouts and markers.</small>
-                </div>
-                →
-              </Link>
             </div>
           </Card>
         </div>
