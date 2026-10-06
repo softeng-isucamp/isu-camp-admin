@@ -33,10 +33,14 @@ def app(monkeypatch):
 def add_users(app, *records):
     with app.app_context():
         users = []
-        for identifier, username, created_at, info_exists in records:
+        for record in records:
+            identifier, username, created_at, info_exists = record[:4]
+            user_type = record[4] if len(record) > 4 else "Visitor"
             info_id = identifier * 100
             if info_exists:
-                db.session.add(UserInfo(id=info_id, created_at=created_at))
+                db.session.add(
+                    UserInfo(id=info_id, created_at=created_at, user_type=user_type)
+                )
             users.append(
                 AppUser(
                     id=identifier,
@@ -141,10 +145,98 @@ def test_users_treats_search_wildcards_as_literal_characters(app):
     assert [item["username"] for item in response.json["items"]] == ["a_b"]
 
 
+def test_users_normalizes_the_account_type_the_user_app_stored(app):
+    created = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    add_users(
+        app,
+        # The User App writes its signup picker labels; the backfill and the
+        # admin's own vocabulary are lower case. Both read back the same way.
+        (1, "app-student", created, True, "Student"),
+        (2, "app-staff", created, True, "Staff"),
+        (3, "app-visitor", created, True, "Visitor"),
+        (4, "backfilled", created, True, "visitor"),
+        (5, "spelled-teacher", created, True, "teacher"),
+        (6, "padded", created, True, "  Staff  "),
+        (7, "unrecognized", created, True, "faculty"),
+        (8, "typeless", created, True, None),
+        (9, "without-info", None, False),
+    )
+
+    response = app.test_client().get("/api/users?pageSize=10")
+
+    assert response.status_code == 200
+    assert {item["username"]: item["userType"] for item in response.json["items"]} == {
+        "app-student": "student",
+        "app-staff": "teacher",
+        "app-visitor": "visitor",
+        "backfilled": "visitor",
+        "spelled-teacher": "teacher",
+        "padded": "teacher",
+        # Nothing recognizes these, so the admin reports no type rather than
+        # guessing at one.
+        "unrecognized": None,
+        "typeless": None,
+        "without-info": None,
+    }
+    assert response.json["total"] == 9
+
+
+def test_users_filters_by_account_type_across_every_stored_spelling(app):
+    created = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    add_users(
+        app,
+        (1, "app-staff", created, True, "Staff"),
+        (2, "spelled-teacher", created, True, "teacher"),
+        (3, "app-student", created, True, "Student"),
+        (4, "app-visitor", created, True, "Visitor"),
+        (5, "backfilled", created, True, "visitor"),
+    )
+
+    client = app.test_client()
+    teachers = client.get("/api/users?user_type=teacher")
+    visitors = client.get("/api/users?user_type=visitor")
+    students = client.get("/api/users?user_type=student")
+
+    assert teachers.status_code == 200
+    # "Staff" and "teacher" are one category, so one filter finds both.
+    assert sorted(item["username"] for item in teachers.json["items"]) == [
+        "app-staff",
+        "spelled-teacher",
+    ]
+    assert teachers.json["total"] == 2
+    assert sorted(item["username"] for item in visitors.json["items"]) == [
+        "app-visitor",
+        "backfilled",
+    ]
+    assert [item["username"] for item in students.json["items"]] == ["app-student"]
+
+
+def test_users_combines_the_account_type_filter_with_search_and_range(app):
+    now = datetime.now(timezone.utc)
+    add_users(
+        app,
+        (1, "student-recent", now - timedelta(days=2), True, "Student"),
+        (2, "student-old", now - timedelta(days=40), True, "Student"),
+        (3, "teacher-recent", now - timedelta(days=2), True, "Staff"),
+        (4, "other-recent", now - timedelta(days=2), True, "Student"),
+    )
+
+    response = app.test_client().get(
+        "/api/users?user_type=student&q=student&created_range=7d"
+    )
+
+    assert response.status_code == 200
+    assert [item["username"] for item in response.json["items"]] == ["student-recent"]
+    assert response.json["total"] == 1
+
+
 @pytest.mark.parametrize(
     "query_string",
     [
         {"created_range": "tomorrow"},
+        {"user_type": "faculty"},
+        {"user_type": ""},
+        {"user_type": "Student"},
         {"page": "0"},
         {"page": "not-a-number"},
         {"pageSize": "0"},

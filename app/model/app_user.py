@@ -2,6 +2,37 @@ from datetime import timezone
 
 from extensions import db
 
+# The account type an app user picks at signup, in the admin's spelling.
+USER_TYPES = ("student", "teacher", "visitor")
+
+# The User App stores the label its signup picker shows - "Student", "Staff",
+# "Visitor" - and nothing in the database pins that spelling, so the admin
+# normalizes on read instead of trusting the stored text. Keyed by the
+# lower-cased stored value; "staff" and "teacher" are one category under two
+# names. Add a row here, not a branch at the call site, when a spelling appears.
+USER_TYPE_ALIASES = {
+    "student": "student",
+    "teacher": "teacher",
+    "staff": "teacher",
+    "visitor": "visitor",
+}
+
+
+def normalize_user_type(stored):
+    """The admin's name for a stored user_type, or None if absent or unknown."""
+    if stored is None:
+        return None
+    return USER_TYPE_ALIASES.get(stored.strip().lower())
+
+
+def stored_user_type_aliases(user_type):
+    """Every lower-cased stored spelling that reads back as this account type."""
+    return [
+        stored
+        for stored, canonical in USER_TYPE_ALIASES.items()
+        if canonical == user_type
+    ]
+
 
 class UserInfo(db.Model):
     """Registration details for an app user."""
@@ -12,6 +43,7 @@ class UserInfo(db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     email = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    user_type = db.Column(db.String, nullable=True)
 
 
 class AppUser(db.Model):
@@ -30,6 +62,10 @@ class AppUser(db.Model):
     def registered_at(self):
         return self.info.created_at if self.info else None
 
+    @property
+    def user_type(self):
+        return normalize_user_type(self.info.user_type) if self.info else None
+
     def to_dict(self):
         created_at = self.registered_at
         if created_at is not None:
@@ -42,4 +78,5 @@ class AppUser(db.Model):
             "id": str(self.id),
             "username": self.username,
             "createdAt": created_at.isoformat() if created_at else None,
+            "userType": self.user_type,
         }

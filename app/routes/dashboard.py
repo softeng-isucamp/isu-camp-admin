@@ -4,9 +4,10 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from auth import admin_required
+from extensions import db
 from model.audit_log import AuditLog
 from model.building import Building
-from model.app_user import AppUser
+from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
 from services.search_analytics import summarize_user_searches
@@ -37,6 +38,27 @@ def _building_change(days):
     )
 
 
+def _users_by_type():
+    """All-time account count per type, keyed by every type the admin reports."""
+    counts = {name: 0 for name in USER_TYPES}
+    stored_counts = (
+        db.session.query(UserInfo.user_type, db.func.count(AppUser.id))
+        .select_from(AppUser)
+        .outerjoin(UserInfo, AppUser.info_id == UserInfo.id)
+        .group_by(UserInfo.user_type)
+        .all()
+    )
+    # The database groups the stored spellings, which the admin then folds into
+    # its own names - "Staff" and "teacher" land in the same bucket. An account
+    # with no type, or one nothing recognizes, is left out rather than guessed
+    # at, so the split can add up to less than the users total.
+    for stored, total in stored_counts:
+        name = normalize_user_type(stored)
+        if name is not None:
+            counts[name] += total
+    return counts
+
+
 @dashboard_bp.get("")
 def dashboard_summary():
     _, error = admin_required()
@@ -64,6 +86,7 @@ def dashboard_summary():
                 "buildingChange": _building_change(RANGES[range_key]),
                 "indoorLocations": indoor_locations,
                 "users": users,
+                "usersByType": _users_by_type(),
                 "locations": buildings + Location.query.count(),
                 "pathways": pathways,
                 **search_analytics,
