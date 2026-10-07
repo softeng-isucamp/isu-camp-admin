@@ -1,34 +1,6 @@
 from extensions import db
 from model.building_photo import BuildingPhoto
-
-# Stored vocabulary of public.building.status, matching the two status columns
-# that were already in the schema (public.route_node.status and
-# public.pathway.status). The Locations directory spells the same two values
-# "Active"/"Inactive"; the functions below translate between the two.
-BUILDING_STATUSES = ("active", "inactive")
-STATUS_LABELS = {"active": "Active", "inactive": "Inactive"}
-
-
-def normalized_status(value, default="active"):
-    """The stored spelling for a requested status, or None if there isn't one.
-
-    Accepts either spelling so the admin form's label and the column's own
-    value both round-trip. A missing or blank request field means the caller
-    did not touch the field, which keeps ``default``; anything else - the
-    form's third option "Unknown", say, which no column can hold - returns
-    None for the caller to reject.
-    """
-    if value is None or str(value).strip() == "":
-        return default
-
-    candidate = str(value).strip().lower()
-
-    return candidate if candidate in BUILDING_STATUSES else None
-
-
-def status_label(value):
-    """The directory's spelling of a stored status."""
-    return STATUS_LABELS.get(value, "Active")
+from model.record_status import status_label
 
 
 class Building(db.Model):
@@ -47,10 +19,10 @@ class Building(db.Model):
     # back as None.
     keywords = db.Column(db.Text, nullable=True)
 
-    # Lifecycle status, lowercase per BUILDING_STATUSES above. The column
-    # arrived after the directory contract did, so rows written before it
-    # carry the database default, 'active' - which is what the DTO used to
-    # claim about every row anyway.
+    # Lifecycle status, lowercase per model.record_status. The column arrived
+    # after the directory contract did, so rows written before it carry the
+    # database default, 'active' - which is what the DTO used to claim about
+    # every row anyway.
     status = db.Column(db.String(20), nullable=False, default="active")
     latitude = db.Column(db.Numeric, nullable=True)
     longitude = db.Column(db.Numeric, nullable=True)

@@ -6,48 +6,44 @@ import { LocationDetailsFields } from "./LocationDetailsModal";
 
 afterEach(cleanup);
 
-function Fixture({ type, statusPersistenceAvailable = false }: { type: LocationType; statusPersistenceAvailable?: boolean }) {
+function Fixture({ type }: { type: LocationType }) {
   const [draft, setDraft] = useState<LocationDraft>({
     name: "Old Hall", code: "OLD", type, parentId: null,
     status: "Active", lat: null, lng: null, positioned: false,
   });
   return (
     <>
-      <LocationDetailsFields draft={draft} statusPersistenceAvailable={statusPersistenceAvailable} onChange={setDraft} />
+      <LocationDetailsFields draft={draft} onChange={setDraft} />
       <output>{draft.status}</output>
     </>
   );
 }
 
 describe("location details status field", () => {
-  it("lets a Building be retired now that public.building.status persists it", () => {
-    render(<Fixture type="Building" />);
-    const status = screen.getByLabelText(/^status/i);
+  // public.building.status and public.location.status both persist the choice
+  // now, so no type needs a caller's permission to edit it and no option is
+  // offered that neither column can hold.
+  it.each<LocationType>(["Building", "Facility", "Room", "Laboratory", "Office", "Restroom"])(
+    "lets a %s be retired and offers only the two stored values",
+    (type) => {
+      render(<Fixture type={type} />);
+      const status = screen.getByLabelText(/^status/i);
 
-    expect(status).toBeEnabled();
-    expect(screen.queryByText("Indoor status changes are not saved yet. Saving resets status to Active.")).not.toBeInTheDocument();
-    // Only the two values the column accepts; "Unknown" has nowhere to go.
-    expect([...(status as HTMLSelectElement).options].map((option) => option.text)).toEqual(["Active", "Inactive"]);
+      expect(status).toBeEnabled();
+      expect([...(status as HTMLSelectElement).options].map((option) => option.text)).toEqual(["Active", "Inactive"]);
 
-    fireEvent.change(status, { target: { value: "Inactive" } });
-    expect(screen.getByRole("status")).toHaveTextContent("Inactive");
-  });
+      fireEvent.change(status, { target: { value: "Inactive" } });
+      expect(screen.getByRole("status")).toHaveTextContent("Inactive");
 
-  it("allows an Indoor Location status change and explains that the backend cannot save it", () => {
+      fireEvent.change(status, { target: { value: "Active" } });
+      expect(screen.getByRole("status")).toHaveTextContent("Active");
+    },
+  );
+
+  it("no longer warns that an Indoor Location's status cannot be saved", () => {
     render(<Fixture type="Room" />);
 
-    const status = screen.getByLabelText(/^status/i);
-    expect(status).toBeEnabled();
-    expect(screen.getByText("Indoor status changes are not saved yet. Saving resets status to Active.")).toBeInTheDocument();
-    fireEvent.change(status, { target: { value: "Inactive" } });
-    expect(screen.getByRole("status")).toHaveTextContent("Inactive");
-  });
-
-  it("omits the saving limitation when the fixture adapter persists Indoor Location status", () => {
-    render(<Fixture type="Room" statusPersistenceAvailable />);
-
-    expect(screen.queryByText("Indoor status changes are not saved yet. Saving resets status to Active.")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/^status/i), { target: { value: "Inactive" } });
-    expect(screen.getByRole("status")).toHaveTextContent("Inactive");
+    expect(screen.queryByText(/not saved yet/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/read-only/i)).not.toBeInTheDocument();
   });
 });

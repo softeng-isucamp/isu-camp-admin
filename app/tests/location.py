@@ -5,12 +5,12 @@ from flask import Flask
 
 import location as location_module
 from location import location_bp
-from model.building import status_label
+from model.record_status import status_label
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
 
 class FakeRecord:
-    def __init__(self, identifier, name, code, type_id, building_id=None, floor_id=None):
+    def __init__(self, identifier, name, code, type_id, building_id=None, floor_id=None, status="active"):
         self.location_id = identifier
         self.location_name = name
         self.location_code = code
@@ -19,6 +19,7 @@ class FakeRecord:
         self.floor_id = floor_id
         self.description = "A searchable description"
         self.keywords = "directory keyword"
+        self.status = status
         self.gallery = []
 
     def to_location_dto(self, building=None, floor=None):
@@ -27,7 +28,7 @@ class FakeRecord:
             "code": self.location_code, "type": LOCATION_TYPE_NAMES[self.type_id],
             "parentId": str(self.building_id) if self.building_id else None,
             "building": building, "floor": floor, "function": self.description,
-            "keywords": self.keywords, "status": "Active",
+            "keywords": self.keywords, "status": status_label(self.status),
             "lat": None, "lng": None,
             "positioned": False,
             "hasPhoto": bool(self.gallery),
@@ -422,7 +423,7 @@ def make_mutation_client(monkeypatch):
         location_id = FakeColumn()
 
         def __init__(self, **values):
-            super().__init__(0, values["location_name"], values["location_code"], values["type_id"], values.get("building_id"), values.get("floor_id"))
+            super().__init__(0, values["location_name"], values["location_code"], values["type_id"], values.get("building_id"), values.get("floor_id"), values.get("status", "active"))
             self.description = values.get("description")
             self.keywords = values.get("keywords")
             self.gallery = []
@@ -700,7 +701,7 @@ def test_building_lifecycle_status_is_persisted_and_projected(monkeypatch):
     )["status"] == "Inactive"
 
 
-def test_building_status_defaults_to_active_and_rejects_an_unsupported_value(monkeypatch):
+def test_status_defaults_to_active_and_rejects_an_unsupported_value(monkeypatch):
     """A caller that omits the field keeps active; one that invents a value fails.
 
     The form's third option, "Unknown", is one the column cannot hold, so it
@@ -722,6 +723,35 @@ def test_building_status_defaults_to_active_and_rejects_an_unsupported_value(mon
     assert rejected.status_code == 400
     assert "status" in rejected.json["fields"]
     assert len(session.buildings) == 1
+
+
+def test_indoor_location_lifecycle_status_is_persisted_and_projected(monkeypatch):
+    """public.location.status backs the same STATUS choice as its Building.
+
+    The two tables keep one vocabulary, so the directory can filter both
+    through the projected label.
+    """
+
+    client, records, _ = make_mutation_client(monkeypatch)
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    response = client.post(
+        "/api/locations",
+        json={
+            "name": "Room 204", "code": "ENG-204", "type": "Room",
+            "parentId": building.json["id"], "floor": "2nd Floor",
+            "status": "Inactive",
+        },
+    )
+
+    assert response.status_code == 201
+    assert records[-1].status == "inactive"
+    assert response.json["status"] == "Inactive"
+    # Matched by name: the fake session gives Buildings and Locations
+    # independent id sequences, so both rows here are id "1".
+    assert next(
+        item for item in client.get("/api/locations").json["items"]
+        if item["name"] == "Room 204"
+    )["status"] == "Inactive"
 
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):

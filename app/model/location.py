@@ -2,6 +2,7 @@ from datetime import datetime
 
 from extensions import db
 from model.location_photo import LocationPhoto
+from model.record_status import status_label
 
 # These are the IDs currently persisted by public.location_type. Buildings
 # and Floors are separate tables and are therefore not location type IDs.
@@ -80,6 +81,16 @@ class Location(db.Model):
     nullable=True
     )
 
+    # Lifecycle status, lowercase per model.record_status, mirroring
+    # public.building.status. The column arrived after the directory contract
+    # did, so rows written before it carry the database default, 'active' -
+    # which is what the DTO used to claim about every row anyway.
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="active"
+    )
+
     def has_photo(self):
         """Whether this Location has a cover photo, without reading the image.
 
@@ -109,18 +120,19 @@ class Location(db.Model):
                 else None
             ),
             "keywords": self.keywords,
+            "status": self.status,
             "has_photo": self.has_photo(),
         }
 
     def to_location_dto(self, building=None, floor=None):
         """Project the persisted row into the stable Locations API contract.
 
-        The persisted table predates the directory contract: it has no status
-        or coordinate columns and stores type/building/floor as IDs. Those
-        compatibility values are intentionally made explicit here instead of
-        leaking ORM names into the frontend. ``floor`` is the caller-resolved
-        Floor label (see ``services.floor_lookup``), since floors are owned by
-        ``public.floor`` and looked up via ``floor_id``.
+        The persisted table predates the directory contract: it stores
+        type/building/floor as IDs, and the compatibility values are
+        intentionally made explicit here instead of leaking ORM names into
+        the frontend. ``floor`` is the caller-resolved Floor label (see
+        ``services.floor_lookup``), since floors are owned by ``public.floor``
+        and looked up via ``floor_id``.
         """
         try:
             location_type = LOCATION_TYPE_NAMES[self.type_id]
@@ -139,7 +151,7 @@ class Location(db.Model):
             "floor": floor,
             "function": self.description,
             "keywords": self.keywords,
-            "status": "Active",
+            "status": status_label(self.status),
             "lat": float(self.latitude) if self.latitude is not None else None,
             "lng": float(self.longitude) if self.longitude is not None else None,
             "positioned": self.latitude is not None and self.longitude is not None,

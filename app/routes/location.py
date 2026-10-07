@@ -6,9 +6,9 @@ from auth import admin_required
 from extensions import db
 from model.audit_log import AuditLog
 from model.building import Building
-from model.building import normalized_status as _normalized_status
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from model.record_status import normalized_status as _normalized_status
 from services.audit import log_audit
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
@@ -202,16 +202,13 @@ def _validate(data, records, buildings):
             "Building classifications cannot have a Floor Level."
         )
 
-    # Only a Building classification has somewhere to keep this: public.location
-    # still has no status column, so an Indoor Location's status is dropped the
-    # way every type's used to be.
-    status = None
+    # Both tables carry the column now, so every type persists its own
+    # status. A caller that omits the field gets the default a new row would
+    # have had anyway.
+    status = _normalized_status(data.get("status"))
 
-    if location_type in {"Building", "Facility"}:
-        status = _normalized_status(data.get("status"))
-
-        if status is None:
-            fields["status"] = "Select either Active or Inactive."
+    if status is None:
+        fields["status"] = "Select either Active or Inactive."
 
     # Duplicate code validation
     duplicate = next(
@@ -478,6 +475,7 @@ def create_location():
             location_name=values["name"],
             description=values["description"],
             keywords=values["keywords"],
+            status=values["status"],
         )
 
         db.session.add(location)
