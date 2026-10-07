@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
-import { services } from "../../services/api";
+import { API_MODE, services } from "../../services/api";
 import { locationPolicy } from "../../lib/locationPolicy";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -11,7 +11,7 @@ interface LocationDetailsFieldsProps {
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: LocationType) => void;
-  statusEditable?: boolean;
+  statusPersistenceAvailable?: boolean;
 }
 
 const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
@@ -77,13 +77,9 @@ export function LocationDetailsFields({
   errors = {},
   onChange,
   onTypeChange,
-  statusEditable = true,
+  statusPersistenceAvailable = API_MODE === "local",
 }: LocationDetailsFieldsProps) {
-  // Only public.building carries a status column, so only a Building
-  // classification can be edited here whatever the caller allows. An Indoor
-  // Location still reads back as the Active the backend reports for every
-  // public.location row, and the column accepts just the two values.
-  const statusPersisted = draft.type === "Building" || draft.type === "Facility";
+  const statusPersisted = statusPersistenceAvailable || draft.type === "Building" || draft.type === "Facility";
   return (
     <>
       <div className="form-grid-two">
@@ -103,12 +99,10 @@ export function LocationDetailsFields({
           label="STATUS"
           required
           value={draft.status}
-          disabled={!statusEditable && !statusPersisted}
-          helper={!statusEditable && !statusPersisted ? "Status is read-only until the backend persists lifecycle status." : undefined}
+          helper={!statusPersisted ? "Indoor status changes are not saved yet. Saving resets status to Active." : undefined}
           onChange={(event) => onChange({ ...draft, status: event.target.value as Location["status"] })}
         >
           <option>Active</option><option>Inactive</option>
-          {!statusPersisted && <option>Unknown</option>}
         </SelectField>
       </div>
       <div className="form-grid-two">

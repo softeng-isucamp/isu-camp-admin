@@ -68,6 +68,7 @@ export const reactLeafletMock = () => ({
 });
 
 export const apiMock = () => ({
+  API_MODE: "local",
   setMockFailure: vi.fn(),
   services: {
     map: {
