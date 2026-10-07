@@ -6,6 +6,7 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
+from model.building import status_label as _status_label
 from model.floor import Floor
 from model.location import Location
 from model.location import LOCATION_TYPE_NAMES
@@ -72,7 +73,7 @@ def _building_dto(building):
         "name": building.building_name,
         "code": building.building_code,
         "points": building.polygon_coordinates or [],
-        "status": "Active",
+        "status": _status_label(building.status),
         "type": getattr(building, "classification", None) or "Building",
     }
 
