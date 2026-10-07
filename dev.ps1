@@ -61,7 +61,7 @@ if ($Mode -eq "--fixture") {
 $env:VITE_TEST_LOCAL_ADAPTER = "false"
 $env:VITE_API_MODE = "real"
 $env:VITE_MAP_FIXTURE = "none"
-if (-not $env:VITE_API_BASE_URL) { $env:VITE_API_BASE_URL = "http://localhost:5000" }
+if (-not $env:VITE_API_BASE_URL) { $env:VITE_API_BASE_URL = "http://127.0.0.1:5000" }
 Write-Host "[MODE] Real: authenticated backend at $env:VITE_API_BASE_URL; database required."
 Write-Host "[LOGIN] Use a real backend account. Fixture credentials do not apply."
 

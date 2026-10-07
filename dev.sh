@@ -66,7 +66,7 @@ fi
 export VITE_TEST_LOCAL_ADAPTER=false
 export VITE_API_MODE=real
 export VITE_MAP_FIXTURE=none
-export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:5000}"
+export VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://127.0.0.1:5000}"
 echo "[MODE] Real: authenticated backend at $VITE_API_BASE_URL; database required."
 echo "[LOGIN] Use a real backend account. Fixture credentials do not apply."
 
