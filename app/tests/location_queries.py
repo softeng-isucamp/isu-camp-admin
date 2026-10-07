@@ -383,3 +383,127 @@ def test_a_buildings_photos_and_its_locations_are_addressed_separately(client):
     with app.app_context():
         assert BuildingPhoto.query.filter_by(building_id=101).count() == 0
         assert LocationPhoto.query.filter_by(location_id=1).count() == 0
+
+
+def test_retiring_a_building_and_an_indoor_location_round_trips_through_both_tables(client):
+    """public.building.status and public.location.status, over a real session.
+
+    The fake-session tests show the handler assigns the column; this shows the
+    value survives the commit in each of the two tables and reads back as the
+    directory's spelling.
+    """
+    http, _, app = client
+
+    building = http.put("/api/actions/locations/1", json={
+        "name": "Building 1", "code": "B-1", "type": "Building", "status": "Inactive",
+    })
+    indoor = http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "status": "Inactive",
+    })
+
+    assert building.status_code == 200, building.get_json()
+    assert indoor.status_code == 200, indoor.get_json()
+    assert building.get_json()["status"] == "Inactive"
+    assert indoor.get_json()["status"] == "Inactive"
+    with app.app_context():
+        assert db.session.get(Building, 1).status == "inactive"
+        assert db.session.get(Location, 101).status == "inactive"
+        # The edit is scoped to the row it names.
+        assert db.session.get(Building, 2).status == "active"
+
+
+def test_an_edit_that_omits_the_status_leaves_a_retired_record_retired(client):
+    """A form that never touched STATUS cannot revive a retired record."""
+    http, _, app = client
+
+    http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "status": "Inactive",
+    })
+    response = http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "function": "after",
+    })
+
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["status"] == "Inactive"
+    with app.app_context():
+        record = db.session.get(Location, 101)
+        assert record.status == "inactive"
+        assert record.description == "after"
+
+
+# Room is seeded; the other three Indoor types are added per test so every
+# type named in the directory contract is covered, not just the one.
+INDOOR_TYPES = (("Room", 1, 101), ("Laboratory", 2, 102), ("Office", 3, 103), ("Restroom", 5, 104))
+
+
+def _seed_indoor_types(app):
+    with app.app_context():
+        db.session.add_all(
+            Location(
+                location_id=location_id, building_id=1, type_id=type_id, floor_id=1,
+                location_code=f"ENG-{location_id}", location_name=f"{name} {location_id}",
+                description="before",
+            )
+            for name, type_id, location_id in INDOOR_TYPES if location_id != 101
+        )
+        db.session.commit()
+
+
+def _retire(http, name, location_id, status):
+    return http.put(f"/api/actions/locations/{location_id}", json={
+        "name": f"{name} {location_id}" if location_id != 101 else "Room 101",
+        "code": f"ENG-{location_id}", "type": name,
+        "parentId": "1", "floor": "Ground Floor", "status": status,
+    })
+
+
+@pytest.mark.parametrize("name,type_id,location_id", INDOOR_TYPES)
+def test_every_indoor_type_persists_inactive_and_back_to_active(client, name, type_id, location_id):
+    """Room, Laboratory, Office and Restroom all keep the choice they are sent."""
+    http, _, app = client
+    _seed_indoor_types(app)
+
+    retired = _retire(http, name, location_id, "Inactive")
+    assert retired.status_code == 200, retired.get_json()
+    assert retired.get_json()["status"] == "Inactive"
+    with app.app_context():
+        assert db.session.get(Location, location_id).status == "inactive"
+
+    # A fresh read, not the mutation's own projection.
+    reread = http.get("/api/actions/locations?pageSize=100").get_json()
+    assert next(item for item in reread["items"] if item["id"] == str(location_id))["status"] == "Inactive"
+
+    revived = _retire(http, name, location_id, "Active")
+    assert revived.status_code == 200, revived.get_json()
+    assert revived.get_json()["status"] == "Active"
+    with app.app_context():
+        assert db.session.get(Location, location_id).status == "active"
+
+
+def test_an_unsupported_indoor_status_is_a_field_error_without_a_write(client):
+    """The form's old third option has nowhere to go, so it is reported."""
+    http, _, app = client
+
+    response = _retire(http, "Room", 101, "Unknown")
+
+    assert response.status_code == 400
+    assert "status" in response.get_json()["fields"]
+    with app.app_context():
+        assert db.session.get(Location, 101).status == "active"
+
+
+def test_directory_status_filter_reflects_the_saved_indoor_status(client):
+    """?status= filters Indoor Locations by what is stored, not a constant."""
+    http, _, app = client
+    _seed_indoor_types(app)
+    _retire(http, "Laboratory", 102, "Inactive")
+
+    inactive = http.get("/api/actions/locations?status=Inactive&pageSize=100").get_json()
+    active = http.get("/api/actions/locations?status=Active&pageSize=100").get_json()
+
+    assert [item["id"] for item in inactive["items"]] == ["102"]
+    assert "102" not in {item["id"] for item in active["items"]}
+    assert "101" in {item["id"] for item in active["items"]}

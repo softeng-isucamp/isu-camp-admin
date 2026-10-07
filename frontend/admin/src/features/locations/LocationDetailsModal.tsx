@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
-import { API_MODE, services } from "../../services/api";
+import { services } from "../../services/api";
 import { locationPolicy } from "../../lib/locationPolicy";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -11,7 +11,6 @@ interface LocationDetailsFieldsProps {
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: LocationType) => void;
-  statusPersistenceAvailable?: boolean;
 }
 
 const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
@@ -77,9 +76,7 @@ export function LocationDetailsFields({
   errors = {},
   onChange,
   onTypeChange,
-  statusPersistenceAvailable = API_MODE === "local",
 }: LocationDetailsFieldsProps) {
-  const statusPersisted = statusPersistenceAvailable || draft.type === "Building" || draft.type === "Facility";
   return (
     <>
       <div className="form-grid-two">
@@ -99,9 +96,10 @@ export function LocationDetailsFields({
           label="STATUS"
           required
           value={draft.status}
-          helper={!statusPersisted ? "Indoor status changes are not saved yet. Saving resets status to Active." : undefined}
           onChange={(event) => onChange({ ...draft, status: event.target.value as Location["status"] })}
         >
+          {/* The only two values public.building.status and
+              public.location.status accept. */}
           <option>Active</option><option>Inactive</option>
         </SelectField>
       </div>
