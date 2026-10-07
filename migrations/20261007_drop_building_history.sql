@@ -1,0 +1,29 @@
+-- 2026-10-07  Drop public.building_history.
+--
+-- The table was built as a per-field change log for a Building: action,
+-- field, old_value, new_value, changed_by. Nothing ever wrote to it. There is
+-- no insert anywhere in the codebase and no database trigger, so the one
+-- endpoint that read it - GET /api/actions/buildings/<id>/history - could only
+-- ever return an empty list, and no client called it.
+--
+-- Building history is served instead by public.audit_log, which
+-- services.audit.log_audit stages in the same transaction as the mutation it
+-- describes, and which the admin reads through
+-- GET /api/locations/<id>/history. That path had 480 rows against this
+-- table's 0 when this migration was written.
+--
+-- What is lost is the shape, not any data: audit_log records an event with a
+-- free-text detail ("Old Hall footprint updated") and cannot say that status
+-- went active -> inactive. If field-level history is wanted later, widening
+-- audit_log is the cheaper route than reviving a second mechanism, because
+-- every writer already uses it.
+--
+-- The table held 0 rows, no inbound foreign keys and no dependent views when
+-- dropped, so this loses nothing and nothing else needs changing. Deploy the
+-- backend that stops mapping it with or before this statement; until then the
+-- dead endpoint would 500 instead of returning its empty list.
+--
+-- Applied to the Supabase project on 2026-10-07 as migration
+-- "drop_building_history". Safe to re-run: the statement is guarded.
+
+drop table if exists public.building_history;

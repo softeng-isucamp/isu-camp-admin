@@ -5,7 +5,6 @@ from flask import Blueprint, Response, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
-from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.building_photo import BuildingPhoto
@@ -494,62 +493,6 @@ def view_gallery_photo(location_id, photo_id):
         logger.exception("Failed to load gallery photo")
         return jsonify({"success": False, "message": "Failed to load photo."}), 500
 
-
-@actions_bp.route("/buildings/<int:building_id>/history", methods=["GET"])
-def view_building_history(building_id):
-    """Return a building's audit records, newest first.
-
-    A building with no recorded changes is a valid response and returns
-    ``{"success": true, "data": []}``.  Timestamps are serialized as ISO 8601
-    strings so the response is safe for JSON clients and stable across ORM
-    implementations.
-    """
-
-    _, error = admin_required()
-    if error: return error
-
-    try:
-        building = Building.query.filter_by(
-            building_id=building_id
-        ).first()
-
-        if building is None:
-            return jsonify({
-                "success": False,
-                "message": "Building not found."
-            }), 404
-
-        history = BuildingHistory.query.filter_by(
-            building_id=building_id
-        ).order_by(
-            BuildingHistory.created_at.desc()
-        ).all()
-
-        return jsonify({
-            "success": True,
-            "data": [
-                {
-                    "history_id": item.history_id,
-                    "building_id": item.building_id,
-                    "action": item.action,
-                    "field": item.field,
-                    "old_value": item.old_value,
-                    "new_value": item.new_value,
-                    "changed_by": item.changed_by,
-                    "created_at": item.created_at.isoformat()
-                    if item.created_at is not None else None
-                }
-                for item in history
-            ]
-        }), 200
-
-    except Exception:
-        logger.exception("Failed to get building history")
-        db.session.rollback()
-        return jsonify({
-            "success": False,
-            "message": "Failed to get building history."
-        }), 500
 
 @actions_bp.route("/locations/<int:location_id>", methods=["DELETE"])
 def delete_location(location_id):
