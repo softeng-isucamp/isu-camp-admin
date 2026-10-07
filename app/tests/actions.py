@@ -288,6 +288,51 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
     assert response.json["keywords"] == "engineering, labs"
 
 
+def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
+    """The STATUS choice now reaches public.building.status on an edit.
+
+    An edit that leaves the field out keeps whatever the row already had,
+    rather than reviving a building the admin has retired.
+    """
+
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Building", (), {
+        "building_id": 42,
+        "building_code": "OLD",
+        "building_name": "Old Hall",
+        "classification": "Building",
+        "description": "Old description",
+        "keywords": None,
+        "status": "active",
+        "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "status": "Inactive" if self.status == "inactive" else "Active"},
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: ([], [building]))
+    monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module.db, "session", FakeSession())
+    client = app.test_client()
+
+    retired = client.put(
+        "/api/actions/locations/42",
+        json={"name": "Old Hall", "code": "OLD", "type": "Building", "status": "Inactive"},
+    )
+
+    assert retired.status_code == 200
+    assert building.status == "inactive"
+    assert retired.json["status"] == "Inactive"
+
+    untouched = client.put(
+        "/api/actions/locations/42",
+        json={"name": "Old Hall", "code": "OLD", "type": "Building"},
+    )
+
+    assert untouched.status_code == 200
+    assert building.status == "inactive"
+
+
 def _history_app(monkeypatch, building, history):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)

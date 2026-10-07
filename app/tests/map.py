@@ -123,6 +123,7 @@ def test_map_buildings_returns_polygon_points(monkeypatch):
             "building_id": 4,
             "building_name": "Engineering Hall",
             "building_code": "ENG-01",
+            "status": "active",
             "polygon_coordinates": [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]],
         },
     )()

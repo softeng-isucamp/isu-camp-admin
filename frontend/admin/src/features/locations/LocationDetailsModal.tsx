@@ -79,6 +79,11 @@ export function LocationDetailsFields({
   onTypeChange,
   statusEditable = true,
 }: LocationDetailsFieldsProps) {
+  // Only public.building carries a status column, so only a Building
+  // classification can be edited here whatever the caller allows. An Indoor
+  // Location still reads back as the Active the backend reports for every
+  // public.location row, and the column accepts just the two values.
+  const statusPersisted = draft.type === "Building" || draft.type === "Facility";
   return (
     <>
       <div className="form-grid-two">
@@ -98,11 +103,12 @@ export function LocationDetailsFields({
           label="STATUS"
           required
           value={draft.status}
-          disabled={!statusEditable}
-          helper={!statusEditable ? "Status is read-only until the backend persists lifecycle status." : undefined}
+          disabled={!statusEditable && !statusPersisted}
+          helper={!statusEditable && !statusPersisted ? "Status is read-only until the backend persists lifecycle status." : undefined}
           onChange={(event) => onChange({ ...draft, status: event.target.value as Location["status"] })}
         >
-          <option>Active</option><option>Inactive</option><option>Unknown</option>
+          <option>Active</option><option>Inactive</option>
+          {!statusPersisted && <option>Unknown</option>}
         </SelectField>
       </div>
       <div className="form-grid-two">

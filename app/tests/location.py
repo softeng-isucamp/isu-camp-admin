@@ -5,6 +5,7 @@ from flask import Flask
 
 import location as location_module
 from location import location_bp
+from model.building import status_label
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 
 
@@ -69,12 +70,13 @@ class FakeFloor:
 
 
 class FakeBuilding:
-    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None, keywords=None):
+    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None, keywords=None, status="active"):
         self.building_id = identifier
         self.building_name = name
         self.building_code = code
         self.description = description
         self.keywords = keywords
+        self.status = status
         self.latitude = None
         self.longitude = None
         self.classification = classification
@@ -88,7 +90,7 @@ class FakeBuilding:
             "id": str(self.building_id), "name": self.building_name,
             "code": self.building_code, "type": self.classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
-            "keywords": self.keywords, "status": "Active", "lat": lat, "lng": lng,
+            "keywords": self.keywords, "status": status_label(self.status), "lat": lat, "lng": lng,
             "positioned": lat is not None and lng is not None,
             "hasPhoto": bool(self.gallery),
         }
@@ -446,6 +448,7 @@ def make_mutation_client(monkeypatch):
                 values.get("classification", "Building"),
                 values.get("polygon_coordinates"),
                 values.get("keywords"),
+                values.get("status", "active"),
             )
             self.latitude = values.get("latitude")
             self.longitude = values.get("longitude")
@@ -673,6 +676,52 @@ def test_building_search_keywords_are_persisted_and_projected(monkeypatch):
         item for item in client.get("/api/locations").json["items"]
         if item["id"] == response.json["id"]
     )["keywords"] == "books, study"
+
+
+def test_building_lifecycle_status_is_persisted_and_projected(monkeypatch):
+    """public.building.status backs the admin Building form's STATUS choice.
+
+    The directory spells the two values Active/Inactive and the column keeps
+    them lowercase, so a create has to translate in both directions.
+    """
+
+    client, _, session = make_mutation_client(monkeypatch)
+    response = client.post(
+        "/api/locations",
+        json={"name": "Old Hall", "code": "OLD", "type": "Building", "status": "Inactive"},
+    )
+
+    assert response.status_code == 201
+    assert session.buildings[-1].status == "inactive"
+    assert response.json["status"] == "Inactive"
+    assert next(
+        item for item in client.get("/api/locations").json["items"]
+        if item["id"] == response.json["id"]
+    )["status"] == "Inactive"
+
+
+def test_building_status_defaults_to_active_and_rejects_an_unsupported_value(monkeypatch):
+    """A caller that omits the field keeps active; one that invents a value fails.
+
+    The form's third option, "Unknown", is one the column cannot hold, so it
+    is reported rather than quietly stored as something else.
+    """
+
+    client, _, session = make_mutation_client(monkeypatch)
+    default = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+
+    assert default.status_code == 201
+    assert session.buildings[-1].status == "active"
+    assert default.json["status"] == "Active"
+
+    rejected = client.post(
+        "/api/locations",
+        json={"name": "Annex", "code": "ANX", "type": "Building", "status": "Unknown"},
+    )
+
+    assert rejected.status_code == 400
+    assert "status" in rejected.json["fields"]
+    assert len(session.buildings) == 1
 
 
 def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeypatch):

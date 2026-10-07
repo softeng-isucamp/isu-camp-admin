@@ -5,6 +5,7 @@ from flask import Blueprint, Response, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.building import Building
+from model.building import normalized_status as _normalized_status
 from model.building_history import BuildingHistory
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
@@ -169,7 +170,7 @@ def _validation_error(fields=None, relationships=None):
     return jsonify({"success": False, "message": "Location validation failed.", "fields": fields or {}, "relationships": relationships or {}}), 400
 
 
-def _validate(data, records, buildings):
+def _validate(data, records, buildings, current_status=None):
     fields, relationships = {}, {}
     name, code = str(data.get("name", "")).strip(), str(data.get("code", "")).strip()
     location_type, parent_id = data.get("type"), data.get("parentId")
@@ -195,13 +196,20 @@ def _validate(data, records, buildings):
             fields["floor"] = "Select a valid Floor Level."
     elif parent_id not in (None, ""):
         fields["parentId"] = "Only Indoor Locations can belong to a Building."
+    # Only a Building classification has a status column to be kept in; an
+    # Indoor Location's status is still dropped, as every type's used to be.
+    status = None
+    if location_type in {"Building", "Facility"}:
+        status = _normalized_status(data.get("status"), default=current_status or "active")
+        if status is None:
+            fields["status"] = "Select either Active or Inactive."
     duplicate = next((item for item in records if item.location_code.lower() == code.lower()), None)
     if duplicate is None:
         duplicate = next((item for item in buildings if item.building_code.lower() == code.lower()), None)
     if duplicate:
         return None, (jsonify({"success": False, "message": "Location code already exists.", "fields": {"code": "Location code must be unique."}}), 409)
     if fields or relationships: return None, _validation_error(fields, relationships)
-    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords")}, None
+    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords"), "status": status}, None
 
 
 @actions_bp.route("/locations", methods=["GET"])
@@ -325,7 +333,12 @@ def edit_location(location_id):
     validation_buildings = [item for item in buildings if item.building_id != location_id]
     if building is not None:
         data["parentId"] = None
-    values, error = _validate(data, [item for item in records if item.location_id != location_id], validation_buildings)
+    values, error = _validate(
+        data,
+        [item for item in records if item.location_id != location_id],
+        validation_buildings,
+        current_status=getattr(building, "status", None),
+    )
     if error: return error
 
     gallery_change, cover_last_upload, error = _photo_change()
@@ -336,6 +349,7 @@ def edit_location(location_id):
             building.building_code = values["code"]
             building.building_name = values["name"]
             building.classification = values["type"]
+            building.status = values["status"]
             building.description = values["description"]
             building.keywords = values["keywords"]
 
