@@ -329,7 +329,7 @@ describe("Map Editor preview", () => {
     expect(screen.getByLabelText("Building name")).toHaveValue("Draft Annex");
   });
 
-  it("creates a Building through the canonical Locations service and uses the returned ID", async () => {
+  it("creates an Inactive Building through the canonical Locations service and uses the returned ID", async () => {
     const save = vi.fn(async (draft: Parameters<typeof services.locations.save>[0]) => ({
       ...draft,
       id: "42",
@@ -337,7 +337,7 @@ describe("Map Editor preview", () => {
       code: draft.code,
       type: "Building" as const,
       parentId: null,
-      status: "Active" as const,
+      status: draft.status,
       lat: null,
       lng: null,
       positioned: false,
@@ -352,10 +352,11 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Backend Hall" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "BACK-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
+    fireEvent.change(screen.getByLabelText(/^status/i), { target: { value: "Inactive" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Building" });
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Building", status: "Inactive" });
     expect(save.mock.calls[0]?.[0].id).toBeUndefined();
     expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload building photo")).not.toBeInTheDocument();

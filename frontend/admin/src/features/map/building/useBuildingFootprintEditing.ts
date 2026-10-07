@@ -94,6 +94,7 @@ export function useBuildingFootprintEditing({
   const buildingCode = buildingForm.code;
   const buildingFunction = buildingForm.function ?? "";
   const buildingKeywords = buildingForm.keywords ?? "";
+  const buildingStatus = buildingForm.status ?? "Active";
   const resetBuildingForm = () => {
     setBuildingForm(blankBuildingForm());
     setBuildingClassification("Building");
@@ -122,12 +123,12 @@ export function useBuildingFootprintEditing({
   const buildingIdentityIssues = useMemo(
     () => drawing && (polygonClosed || points.length >= 3)
       ? validateBuildingIdentityDetails(
-          { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: "Active" },
+          { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: buildingStatus },
           currentLocations,
           editingBuildingId,
         )
       : [],
-    [buildingCode, buildingFunction, buildingKeywords, buildingName, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
+    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingStatus, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
   );
   const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
   const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
@@ -273,7 +274,7 @@ export function useBuildingFootprintEditing({
         type: buildingClassification,
         function: buildingFunction,
         keywords: buildingKeywords,
-        status: "Active",
+        status: buildingStatus,
       },
       points: [...points],
       context: { locations: currentLocations, campusBoundary },
@@ -367,7 +368,7 @@ export function useBuildingFootprintEditing({
         code: typeof form.code === "string" ? form.code : "",
         function: typeof form.function === "string" ? form.function : "",
         keywords: typeof form.keywords === "string" ? form.keywords : "",
-        status: "Active",
+        status: form.status === "Inactive" ? "Inactive" : "Active",
       });
     } else {
       setBuildingForm({

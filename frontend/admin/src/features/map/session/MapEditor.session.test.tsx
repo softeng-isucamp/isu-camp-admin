@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { services } from "../../../services/api";
 import { useMapEditorTestLifecycle, renderEditor, clickMap, choosePathwayEditor } from "../testing/mapEditorTestHarness";
@@ -93,6 +93,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SUSP-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Administration" } });
     fireEvent.change(screen.getByLabelText("Building keywords"), { target: { value: "admin, office" } });
+    fireEvent.change(screen.getByLabelText(/^status/i), { target: { value: "Inactive" } });
 
     // Switch to pathway tool to trigger suspend modal
     await choosePathwayEditor();
@@ -107,5 +108,6 @@ describe("Map Editor preview", () => {
     expect(screen.getByLabelText("Building code")).toHaveValue("SUSP-01");
     expect(screen.getByLabelText("Building function")).toHaveValue("Administration");
     expect(screen.getByLabelText("Building keywords")).toHaveValue("admin, office");
+    expect(within(screen.getByRole("dialog", { name: "Add Building" })).getByLabelText(/^status/i)).toHaveValue("Inactive");
   });
 });

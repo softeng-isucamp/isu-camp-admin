@@ -27,8 +27,8 @@ export function BuildingDetailsModal({ draft, classification, error, onChange, o
           <option value="Building">Building</option>
           <option value="Facility">Facility</option>
         </SelectField>
-        <SelectField label="STATUS" required value="Active" disabled helper="Status is read-only for new map-created records.">
-          <option>Active</option>
+        <SelectField label="STATUS" required value={draft.status ?? "Active"} onChange={(event) => onChange({ ...draft, status: event.target.value as "Active" | "Inactive" })}>
+          <option>Active</option><option>Inactive</option>
         </SelectField>
       </div>
       <div className="form-grid-two">
