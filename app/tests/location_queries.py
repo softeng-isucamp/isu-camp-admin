@@ -383,3 +383,52 @@ def test_a_buildings_photos_and_its_locations_are_addressed_separately(client):
     with app.app_context():
         assert BuildingPhoto.query.filter_by(building_id=101).count() == 0
         assert LocationPhoto.query.filter_by(location_id=1).count() == 0
+
+
+def test_retiring_a_building_and_an_indoor_location_round_trips_through_both_tables(client):
+    """public.building.status and public.location.status, over a real session.
+
+    The fake-session tests show the handler assigns the column; this shows the
+    value survives the commit in each of the two tables and reads back as the
+    directory's spelling.
+    """
+    http, _, app = client
+
+    building = http.put("/api/actions/locations/1", json={
+        "name": "Building 1", "code": "B-1", "type": "Building", "status": "Inactive",
+    })
+    indoor = http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "status": "Inactive",
+    })
+
+    assert building.status_code == 200, building.get_json()
+    assert indoor.status_code == 200, indoor.get_json()
+    assert building.get_json()["status"] == "Inactive"
+    assert indoor.get_json()["status"] == "Inactive"
+    with app.app_context():
+        assert db.session.get(Building, 1).status == "inactive"
+        assert db.session.get(Location, 101).status == "inactive"
+        # The edit is scoped to the row it names.
+        assert db.session.get(Building, 2).status == "active"
+
+
+def test_an_edit_that_omits_the_status_leaves_a_retired_record_retired(client):
+    """A form that never touched STATUS cannot revive a retired record."""
+    http, _, app = client
+
+    http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "status": "Inactive",
+    })
+    response = http.put("/api/actions/locations/101", json={
+        "name": "Room 101", "code": "ENG-101", "type": "Room",
+        "parentId": "1", "floor": "Ground Floor", "function": "after",
+    })
+
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["status"] == "Inactive"
+    with app.app_context():
+        record = db.session.get(Location, 101)
+        assert record.status == "inactive"
+        assert record.description == "after"

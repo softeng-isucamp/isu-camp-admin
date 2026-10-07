@@ -1145,7 +1145,6 @@ export function Locations() {
                       ? ["Facility"]
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
-                statusEditable={API_MODE === "local"}
                 onChange={setDraft}
                 onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
               />

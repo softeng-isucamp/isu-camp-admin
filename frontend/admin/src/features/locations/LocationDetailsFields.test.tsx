@@ -13,30 +13,33 @@ function Fixture({ type }: { type: LocationType }) {
   });
   return (
     <>
-      <LocationDetailsFields draft={draft} statusEditable={false} onChange={setDraft} />
+      <LocationDetailsFields draft={draft} onChange={setDraft} />
       <output>{draft.status}</output>
     </>
   );
 }
 
 describe("location details status field", () => {
-  it("lets a Building be retired now that public.building.status persists it", () => {
-    render(<Fixture type="Building" />);
-    const status = screen.getByLabelText(/^status/i);
+  // public.building.status and public.location.status both persist the choice
+  // now, so no type is read-only and no option is offered that neither column
+  // can hold.
+  it.each<LocationType>(["Building", "Facility", "Room", "Laboratory", "Office", "Restroom"])(
+    "lets a %s be retired and offers only the two stored values",
+    (type) => {
+      render(<Fixture type={type} />);
+      const status = screen.getByLabelText(/^status/i);
 
-    expect(status).toBeEnabled();
-    expect(screen.queryByText("Status is read-only until the backend persists lifecycle status.")).not.toBeInTheDocument();
-    // Only the two values the column accepts; "Unknown" has nowhere to go.
-    expect([...(status as HTMLSelectElement).options].map((option) => option.text)).toEqual(["Active", "Inactive"]);
+      expect(status).toBeEnabled();
+      expect([...(status as HTMLSelectElement).options].map((option) => option.text)).toEqual(["Active", "Inactive"]);
 
-    fireEvent.change(status, { target: { value: "Inactive" } });
-    expect(screen.getByRole("status")).toHaveTextContent("Inactive");
-  });
+      fireEvent.change(status, { target: { value: "Inactive" } });
+      expect(screen.getByRole("status")).toHaveTextContent("Inactive");
+    },
+  );
 
-  it("keeps an Indoor Location's status read-only while public.location has no column", () => {
+  it("no longer explains the field away as read-only", () => {
     render(<Fixture type="Room" />);
 
-    expect(screen.getByLabelText(/^status/i)).toBeDisabled();
-    expect(screen.getByText("Status is read-only until the backend persists lifecycle status.")).toBeInTheDocument();
+    expect(screen.queryByText(/read-only until the backend persists lifecycle status/i)).not.toBeInTheDocument();
   });
 });
