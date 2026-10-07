@@ -139,7 +139,10 @@ def test_actions_blueprint_exposes_registered_action_routes(monkeypatch):
     assert "/api/actions/locations" in paths
     assert "/api/actions/locations/<int:location_id>" in paths
     assert "/api/actions/buildings/<int:building_id>/rooms" in paths
-    assert "/api/actions/buildings/<int:building_id>/history" in paths
+    # Building history comes from public.audit_log via
+    # GET /api/locations/<id>/history. The route that read the dropped
+    # public.building_history is gone and should not come back.
+    assert "/api/actions/buildings/<int:building_id>/history" not in paths
 
 
 def test_actions_blueprint_requires_authentication(monkeypatch):
@@ -331,101 +334,6 @@ def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
 
     assert untouched.status_code == 200
     assert building.status == "inactive"
-
-
-def _history_app(monkeypatch, building, history):
-    app = Flask(__name__)
-    app.register_blueprint(actions_bp)
-    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(
-        actions_module,
-        "Building",
-        type("BuildingModel", (), {"query": FakeQuery(building)}),
-    )
-    monkeypatch.setattr(
-        actions_module,
-        "BuildingHistory",
-        type(
-            "BuildingHistoryModel",
-            (),
-            {"query": FakeQuery(history), "created_at": FakeColumn()},
-        ),
-    )
-    return app
-
-
-def test_building_history_returns_a_documented_empty_result(monkeypatch):
-    app = _history_app(monkeypatch, type("Building", (), {})(), [])
-
-    response = app.test_client().get("/api/actions/buildings/42/history")
-
-    assert response.status_code == 200
-    assert response.json == {"success": True, "data": []}
-
-
-def test_building_history_serializes_records_and_timestamps(monkeypatch):
-    from datetime import datetime, timezone
-
-    timestamp = datetime(2026, 9, 2, 8, 30, tzinfo=timezone.utc)
-    record = type(
-        "HistoryRecord",
-        (),
-        {
-            "history_id": 7,
-            "building_id": 42,
-            "action": "Updated Building",
-            "field": "building_name",
-            "old_value": "Old Hall",
-            "new_value": "New Hall",
-            "changed_by": "admin01",
-            "created_at": timestamp,
-        },
-    )()
-    app = _history_app(monkeypatch, type("Building", (), {})(), [record])
-
-    response = app.test_client().get("/api/actions/buildings/42/history")
-
-    assert response.status_code == 200
-    assert response.json["data"] == [{
-        "history_id": 7,
-        "building_id": 42,
-        "action": "Updated Building",
-        "field": "building_name",
-        "old_value": "Old Hall",
-        "new_value": "New Hall",
-        "changed_by": "admin01",
-        "created_at": "2026-09-02T08:30:00+00:00",
-    }]
-
-
-def test_building_history_returns_404_for_a_missing_building(monkeypatch):
-    app = _history_app(monkeypatch, None, [])
-
-    response = app.test_client().get("/api/actions/buildings/42/history")
-
-    assert response.status_code == 404
-    assert response.json == {"success": False, "message": "Building not found."}
-
-
-def test_building_history_rolls_back_and_returns_500_on_query_failure(monkeypatch):
-    app = Flask(__name__)
-    app.register_blueprint(actions_bp)
-    session = FakeSession()
-
-    class FailingQuery(FakeQuery):
-        def all(self):
-            raise RuntimeError("database unavailable")
-
-    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(type("Building", (), {})())}))
-    monkeypatch.setattr(actions_module, "BuildingHistory", type("BuildingHistoryModel", (), {"query": FailingQuery([]), "created_at": FakeColumn()}))
-    monkeypatch.setattr(actions_module.db, "session", session)
-
-    response = app.test_client().get("/api/actions/buildings/42/history")
-
-    assert response.status_code == 500
-    assert response.json == {"success": False, "message": "Failed to get building history."}
-    assert session.rollbacks == 1
 
 
 # ==================================================
