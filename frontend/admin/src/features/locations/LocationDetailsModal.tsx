@@ -234,7 +234,7 @@ export function LocationDetailsModal({
       )}
       <div className="modal-actions">
         <Button variant="subtle" disabled={submitting} onClick={onClose}>Cancel</Button>
-        <Button disabled={submitting} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
+        <Button loading={submitting} onClick={save}>{submitting ? "Saving Location…" : "Save Location"}</Button>
       </div>
     </Modal>
   );

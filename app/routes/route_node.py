@@ -3,7 +3,7 @@ import math
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required
+from auth import admin_required, reauth_required
 from extensions import db
 from model.building import Building
 from model.path_point import PATH_POINT_TYPES, PathPoint
@@ -30,6 +30,12 @@ def _error(message, code=400):
 
 def _guard():
     _, error = admin_required()
+    return error
+
+
+def _delete_guard():
+    """Deletes also need a password confirmed within the reauth window."""
+    _, error = reauth_required()
     return error
 
 
@@ -320,7 +326,7 @@ def update_route_node(node_id):
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["DELETE"])
 def delete_route_node(node_id):
-    if error := _guard():
+    if error := _delete_guard():
         return error
     try:
         record = RouteNode.query.get(node_id)
@@ -613,7 +619,7 @@ def update_pathway(pathway_id):
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["DELETE"])
 def delete_pathway(pathway_id):
-    if error := _guard():
+    if error := _delete_guard():
         return error
     try:
         record = Pathway.query.get(pathway_id)

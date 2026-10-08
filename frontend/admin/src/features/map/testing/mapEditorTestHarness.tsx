@@ -5,7 +5,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { services } from "../../../services/api";
 import type { RouteNode } from "../../../types";
 import { MapEditor } from "../MapEditor";
-import { mapClickHandler, resetMapMockState } from "./mapEditorMocks";
+import { mapClickHandler, resetMapMockState, TEST_ADMIN_PASSWORD } from "./mapEditorMocks";
 
 export { mapClickHandler, mapFitBounds, mapFlyTo, mapTestState, mapZoomEndHandler } from "./mapEditorMocks";
 
@@ -46,6 +46,11 @@ export const useMapEditorTestLifecycle = () => {
 export const renderEditor = (initialEntries = ["/map-editor"]) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={initialEntries}><MapEditor /></MemoryRouter></QueryClientProvider>);
+};
+
+/** Deletes are re-authenticated: fill the open dialog's password prompt. */
+export const confirmDeletePassword = (password = TEST_ADMIN_PASSWORD) => {
+  fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: password } });
 };
 
 export const clickMap = (lat: number, lng: number) => {

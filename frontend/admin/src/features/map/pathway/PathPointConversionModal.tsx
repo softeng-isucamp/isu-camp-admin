@@ -85,7 +85,7 @@ export function PathPointConversionModal({ draft, parentName, nodes, buildings, 
     </div>
     <div className="modal-actions conversion-actions">
       <Button variant="subtle" disabled={saving} onClick={onClose}>Cancel</Button>
-      <Button disabled={saving || !canSave} onClick={onSave}>{saving ? "Saving…" : "Save Route Node and Pathways"}</Button>
+      <Button loading={saving} disabled={!canSave} onClick={onSave}>{saving ? "Saving…" : "Save Route Node and Pathways"}</Button>
     </div>
   </Modal>;
 }

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Button, Field, Modal, Pagination } from "./UI";
+import { Button, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner } from "./UI";
 
 describe("UI Components", () => {
   it("renders Pagination, calculates range, and handles page change", () => {
@@ -93,5 +93,55 @@ describe("UI Components", () => {
     expect(screen.getByRole("button", { name: "Save Pathway" })).toHaveClass(
       "btn-pill",
     );
+  });
+
+  it("reports an in-flight Button as busy and refuses further clicks", () => {
+    const onClick = vi.fn();
+    render(<Button loading onClick={onClick}>Saving…</Button>);
+
+    const button = screen.getByRole("button", { name: "Saving…" });
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".spinner")).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("leaves a settled Button clickable and free of progress markup", () => {
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Save Location</Button>);
+
+    const button = screen.getByRole("button", { name: "Save Location" });
+    expect(button).not.toHaveAttribute("aria-busy");
+    expect(button.querySelector(".spinner")).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces a LoadingState and hides its decorative Spinner", () => {
+    render(<LoadingState>Loading campus locations…</LoadingState>);
+
+    const state = screen.getByRole("status");
+    expect(state).toHaveTextContent("Loading campus locations…");
+    expect(state).toHaveAttribute("aria-live", "polite");
+    expect(state.querySelector(".spinner")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("names a standalone Spinner only when it carries no visible label", () => {
+    const { rerender } = render(<Spinner />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    rerender(<Spinner label="Refreshing locations" />);
+    expect(screen.getByRole("status")).toHaveAccessibleName("Refreshing locations");
+  });
+
+  it("shows the ProgressBar only while a refresh is in flight", () => {
+    const { rerender } = render(<ProgressBar active={false} />);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+    rerender(<ProgressBar active />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-busy", "true");
   });
 });

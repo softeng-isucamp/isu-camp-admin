@@ -12,12 +12,17 @@ import { cx } from "../lib/format";
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "subtle" | "danger" | "secondary";
   pill?: boolean;
+  /** An in-flight action: the button shows a spinner, reports aria-busy, and stops accepting clicks. */
+  loading?: boolean;
 }
 
 export function Button({
   className,
   variant = "primary",
   pill = true,
+  loading = false,
+  disabled,
+  children,
   ...props
 }: ButtonProps) {
   return (
@@ -29,7 +34,60 @@ export function Button({
         className,
       )}
       {...props}
+      disabled={disabled || loading}
+      aria-busy={props["aria-busy"] ?? (loading || undefined)}
+    >
+      {loading && <Spinner size={14} />}
+      {children}
+    </button>
+  );
+}
+
+export interface SpinnerProps {
+  /** Diameter in pixels. */
+  size?: number;
+  className?: string;
+  /** Announced name. Omit for a spinner that sits beside its own visible label. */
+  label?: string;
+}
+
+/** An indeterminate progress ring for any action or fetch still in flight. */
+export function Spinner({ size = 16, className, label }: SpinnerProps) {
+  return (
+    <span
+      className={cx("spinner", className)}
+      style={{ width: size, height: size, borderWidth: Math.max(2, Math.round(size / 8)) }}
+      role={label ? "status" : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
     />
+  );
+}
+
+/** A block-level loading placeholder: spinner plus the message it is loading. */
+export function LoadingState({
+  children,
+  className,
+  size = 18,
+}: PropsWithChildren<{ className?: string; size?: number }>) {
+  return (
+    <div className={cx("loading-state", className)} role="status" aria-live="polite">
+      <Spinner size={size} />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/**
+ * A thin indeterminate bar for a refresh that replaces data already on screen,
+ * where a full loading placeholder would hide readable content.
+ */
+export function ProgressBar({ active, className }: { active: boolean; className?: string }) {
+  if (!active) return null;
+  return (
+    <div className={cx("progress-bar", className)} role="progressbar" aria-label="Loading" aria-busy="true">
+      <span />
+    </div>
   );
 }
 

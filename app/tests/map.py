@@ -5,6 +5,12 @@ import map as map_module
 from map import map_bp
 
 
+@pytest.fixture(autouse=True)
+def confirmed_password(monkeypatch):
+    """Deletes require a confirmed password; that guard has its own coverage below."""
+    monkeypatch.setattr(map_module, "reauth_required", lambda: (object(), None), raising=False)
+
+
 class FakeQuery:
     def __init__(self, records):
         self.records = records
@@ -413,11 +419,23 @@ def test_map_save_rejects_non_object_json_payload(monkeypatch):
 
 
 def test_delete_map_building_requires_administrator(monkeypatch):
-    monkeypatch.setattr(map_module, "admin_required", lambda: (None, ({"error": "Authentication required"}, 401)))
+    monkeypatch.setattr(map_module, "reauth_required", lambda: (None, ({"error": "Authentication required"}, 401)))
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
 
     assert response.status_code == 401
+
+
+def test_delete_map_building_requires_a_confirmed_password(monkeypatch):
+    monkeypatch.setattr(map_module, "reauth_required", lambda: (None, (
+        {"success": False, "code": "password_confirmation_required", "message": "Confirm your password to delete this record."},
+        403,
+    )))
+
+    response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
 
 
 def test_delete_map_building_deletes_indoor_locations_and_audits_in_one_transaction(monkeypatch):

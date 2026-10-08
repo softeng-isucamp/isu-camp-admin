@@ -7,9 +7,14 @@ import {
   Card,
   Empty,
   Field,
+  LoadingState,
   Pagination,
+  ProgressBar,
   SelectField,
+  Spinner,
 } from "../../components/UI";
+import { FeedbackStack, useFeedback } from "../../components/Feedback";
+import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
@@ -17,6 +22,7 @@ import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloor
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
+import { ParentBuildingField } from "./ParentBuildingField";
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -91,7 +97,8 @@ export function Locations() {
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
-  const [notice, setNotice] = useState("");
+  const feedback = useFeedback();
+  const passwordConfirmation = usePasswordConfirmation();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
   const [page, setPage] = useState(1);
@@ -119,6 +126,7 @@ export function Locations() {
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
+  const directoryHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const processedIndoorHandoffRef = useRef<string | null>(null);
   const pendingRef = useRef(false);
   pendingRef.current = saving || deleting;
@@ -135,6 +143,7 @@ export function Locations() {
     setPhotos([]);
     setDialog(null);
     setSuccess(null);
+    passwordConfirmation.reset();
   };
 
   useEffect(() => {
@@ -184,7 +193,21 @@ export function Locations() {
         node.removeAttribute("aria-hidden");
         (node as HTMLElement).inert = false;
       });
-      if (openerRef.current?.isConnected) window.setTimeout(() => openerRef.current?.focus(), 0);
+      // Returning focus to whatever opened the dialog keeps the keyboard where
+      // the user was. After a delete that opener is gone with its row, so fall
+      // back to the directory heading instead of dropping focus on <body>,
+      // which would restart tabbing at the top of the page.
+      window.setTimeout(() => {
+        const opener = openerRef.current;
+        if (opener?.isConnected) {
+          opener.focus();
+          return;
+        }
+        // preventScroll keeps the viewport on the part of the directory the user
+        // was working in; scrolling the heading into view would throw them back
+        // up to the search field.
+        directoryHeadingRef.current?.focus({ preventScroll: true });
+      }, 0);
     };
   }, [activeOverlay]);
 
@@ -293,7 +316,7 @@ export function Locations() {
   }, [buildingId, buildingOptions, floorId, availableFloors]);
 
   const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
-  const { data, isLoading, error: listError } = useQuery({
+  const { data, isLoading, isFetching, error: listError } = useQuery({
     queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorRecord?.name],
     queryFn: () => services.locations.list(query, page, pageSize, {
       type: type === "All Types" ? undefined : type as LocationType,
@@ -514,7 +537,9 @@ export function Locations() {
       releasePhotoPreviews();
       setPhotos([]);
       setDialog(null);
-      setNotice(`${draft.name || "Location"} saved successfully.`);
+      feedback.reportSuccess(
+        `${saved.name || draft.name || "Location"} was ${adding ? "added" : "updated"} successfully.`,
+      );
       setSuccess({
         name: saved.name || "Location",
         id: saved.id,
@@ -558,15 +583,19 @@ export function Locations() {
   };
 
   const remove = async () => {
-    if (!selected) return;
+    if (!selected || deleting) return;
     setError("");
+    // A permanent delete is re-authenticated: the signed-in admin retypes their password.
+    if (!await passwordConfirmation.confirm()) return;
     setDeleting(true);
     try {
       await services.locations.remove(selected.id, selected.type);
       await refresh();
       setDialog(null);
-      setNotice(`${selected.name} permanently deleted.`);
+      passwordConfirmation.reset();
+      feedback.reportSuccess(`${selected.name} was deleted successfully.`);
     } catch (cause) {
+      if (passwordConfirmation.handleRejection(cause)) return;
       setError(cause instanceof Error ? cause.message : "Unable to delete location.");
     } finally {
       setDeleting(false);
@@ -813,11 +842,7 @@ export function Locations() {
         </div>
       </Card>
 
-      {notice && (
-        <div className="notice" role="status" style={{ background: "#e6f7ec", color: "#0c7441", padding: "10px 16px", borderRadius: "12px" }}>
-          {notice}
-        </div>
-      )}
+      <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
       {error && !dialog && (
         <div className="error" role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 16px", borderRadius: "12px" }}>
           {error}
@@ -859,9 +884,10 @@ export function Locations() {
       <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
         <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>
           <div>
-            <h2 style={{ fontSize: "18px", fontWeight: "bold", margin: "0", color: "#191c1d" }}>Location Directory</h2>
-            <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: "14px" }}>
+            <h2 ref={directoryHeadingRef} tabIndex={-1} style={{ fontSize: "18px", fontWeight: "bold", margin: "0", color: "#191c1d", outlineOffset: "4px" }}>Location Directory</h2>
+            <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
               {isLoading ? "Loading…" : `${viewMode === "hierarchy" ? hierarchyDisplayCount : data?.total ?? 0} locations`}
+              {isFetching && !isLoading && <Spinner size={13} />}
             </p>
           </div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -877,11 +903,11 @@ export function Locations() {
           </div>
         </div>
 
+        <ProgressBar active={isFetching && !isLoading} />
+
         <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
           {isLoading && !data ? (
-            <div role="status" aria-live="polite" style={{ padding: "48px 24px", textAlign: "center", color: "#525c57" }}>
-              Loading campus locations…
-            </div>
+            <LoadingState size={22}>Loading campus locations…</LoadingState>
           ) : listError ? (
             <div role="alert" style={{ padding: "48px 24px", textAlign: "center", color: "#991b1b" }}>
               Campus locations are unavailable. No location records were loaded.
@@ -1162,24 +1188,16 @@ export function Locations() {
 
               {(isChildType(draft.type) || draft.parentId !== null) && (
                 <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                  <SelectField
-                    label="PARENT BUILDING"
-                    aria-label="PARENT BUILDING"
-                    required
-                    error={errorFor("parentId")}
-                  value={draft.parentId ?? ""}
+                  <ParentBuildingField
+                    buildings={buildingOptions}
+                    value={draft.parentId}
                     disabled={lockedParentId !== null}
-                        onChange={(event) => {
-                          const parent = buildingOptions.find((item) => item.id === event.target.value);
-                          setCustomFloorMode(false);
-                          setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
+                    error={errorFor("parentId")}
+                    onChange={(parent) => {
+                      setCustomFloorMode(false);
+                      setDraft(normalizeDraft({ ...draft, parentId: parent?.id ?? null, building: parent?.name }));
                     }}
-                  >
-                    <option value="">None / Standalone</option>
-                    {buildingOptions.map((buildingOption) => (
-                      <option key={buildingOption.id} value={buildingOption.id}>{buildingOption.name}</option>
-                    ))}
-                  </SelectField>
+                  />
                   {lockedParentId && <p style={{ gridColumn: "1 / -1", margin: "-8px 0 0", color: "#365047", fontSize: "12px" }}>This Building was selected from its quick-add action and is locked to preserve that context.</p>}
                   {draft.type !== "Floor" && (
                     <div>
@@ -1228,7 +1246,7 @@ export function Locations() {
               <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button disabled={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
+              <Button loading={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
                 {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>
@@ -1259,12 +1277,17 @@ export function Locations() {
               </div>
             </div>
             {error && <div role="alert" aria-live="assertive" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px", marginBottom: "16px" }}>{error}</div>}
+            <PasswordConfirmationField
+              confirmation={passwordConfirmation}
+              disabled={deleting}
+              onSubmit={() => void remove()}
+            />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", marginTop: "24px" }}>
-              <Button disabled={deleting} data-modal-initial variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={closeOverlay}>
+              <Button disabled={deleting || passwordConfirmation.confirming} data-modal-initial variant="subtle" style={{ borderRadius: "999px", padding: "0 20px" }} onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button disabled={deleting} style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
-                {deleting ? "Deleting…" : "Delete"}
+              <Button loading={deleting || passwordConfirmation.confirming} style={{ background: "#dc2626", color: "#fff", borderRadius: "999px", padding: "0 22px" }} onClick={remove}>
+                {deleting ? "Deleting…" : passwordConfirmation.confirming ? "Confirming…" : "Delete"}
               </Button>
             </div>
           </div>

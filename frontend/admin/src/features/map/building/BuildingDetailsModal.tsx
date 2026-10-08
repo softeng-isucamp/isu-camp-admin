@@ -40,7 +40,7 @@ export function BuildingDetailsModal({ draft, classification, error, onChange, o
       <p className="text-[11px] text-[#526359]">The footprint supplies the Building’s map anchor; no copied outdoor coordinate stored on Building.</p>
       <div className="modal-actions">
         <Button variant="subtle" onClick={onClose}>Cancel</Button>
-        <Button disabled={submitting} onClick={onSubmit}>{submitting ? "Saving Building…" : "Save Building"}</Button>
+        <Button loading={submitting} onClick={onSubmit}>{submitting ? "Saving Building…" : "Save Building"}</Button>
       </div>
     </Modal>
   );

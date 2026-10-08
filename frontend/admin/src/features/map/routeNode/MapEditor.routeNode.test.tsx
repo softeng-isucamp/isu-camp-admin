@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { services } from "../../../services/api";
 import { generatedMapFixture } from "../../../services/generatedMapFixture";
 import type { RouteNode } from "../../../types";
-import { useMapEditorTestLifecycle, renderEditor, clickMap } from "../testing/mapEditorTestHarness";
+import { useMapEditorTestLifecycle, renderEditor, clickMap, confirmDeletePassword } from "../testing/mapEditorTestHarness";
 
 vi.mock("leaflet", async () => (await import("../testing/mapEditorMocks")).leafletMock());
 vi.mock("react-leaflet", async () => (await import("../testing/mapEditorMocks")).reactLeafletMock());
@@ -215,9 +215,11 @@ describe("Map Editor preview", () => {
     vi.mocked(services.map.deleteRouteNode).mockRejectedValueOnce(new Error("network unavailable"));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Route Node" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("Library Walk");
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete Route Node" }));
     await waitFor(() => expect(screen.getAllByRole("alert")[0]).toHaveTextContent("network unavailable"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete Route Node" }));
     await waitFor(() => expect(services.map.deleteRouteNode).toHaveBeenCalledTimes(2));
   });

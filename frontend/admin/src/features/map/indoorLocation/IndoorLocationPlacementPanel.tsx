@@ -1,3 +1,4 @@
+import { Spinner } from "../../../components/UI";
 import type { Building, Location } from "../../../types";
 import type { useIndoorLocationPlacement } from "./useIndoorLocationPlacement";
 
@@ -40,7 +41,7 @@ export function IndoorLocationPlacementPanel({
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="flex justify-end gap-2 border-t border-[#e6ece8] pt-3">
         <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoor.saving} onClick={indoor.cancel}>Cancel</button>
-        <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={onSave}>{indoor.saving ? "Saving Position…" : "Save Position"}</button>
+        <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={onSave}>{indoor.saving && <Spinner size={12} />}{indoor.saving ? "Saving Position…" : "Save Position"}</button>
       </div>
     </aside>
   );

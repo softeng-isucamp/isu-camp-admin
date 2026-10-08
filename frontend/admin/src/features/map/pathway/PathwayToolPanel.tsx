@@ -1,3 +1,4 @@
+import { Spinner } from "../../../components/UI";
 import type { Pathway, RouteNode } from "../../../types";
 import { suggestedPathwayName } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
@@ -167,6 +168,7 @@ export function PathwayToolPanel({
               onClick={handleSavePathShape}
               className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow transition cursor-pointer"
             >
+              {savingAction === "pathway" && <Spinner size={12} />}
               {savingAction === "pathway" ? "Saving Pathway…" : provisionalPathwayId === activePathway.id ? "Save Pathway" : "Update Pathway"}
             </button>
           </div>

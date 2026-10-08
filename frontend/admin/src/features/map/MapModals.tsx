@@ -2,6 +2,7 @@ import type { Building, Location, RouteNode } from "../../types";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
 import type { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
+import type { PasswordConfirmation } from "../auth/PasswordConfirmation";
 import { DeleteConfirmationModal, type DeleteConfirmation } from "./DeleteConfirmationModal";
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
 import { isIndoorLocation } from "./indoorLocation/indoorLocations";
@@ -36,6 +37,8 @@ interface MapModalsProps {
   };
   deletion: {
     confirmation: DeleteConfirmation | null;
+    deleting: boolean;
+    passwordConfirmation: PasswordConfirmation;
     onConfirm: () => void;
     onClose: () => void;
   };
@@ -110,6 +113,8 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         <DeleteConfirmationModal
           confirmation={deletion.confirmation}
           error={error}
+          deleting={deletion.deleting}
+          passwordConfirmation={deletion.passwordConfirmation}
           onConfirm={deletion.onConfirm}
           onClose={deletion.onClose}
         />

@@ -253,6 +253,97 @@ def admin_required():
 
 
 # ==========================================
+# PASSWORD CONFIRMATION FOR DESTRUCTIVE ACTIONS
+# ==========================================
+
+# How long one password confirmation authorizes deletes for. Short enough that
+# an unattended session cannot be used to delete records, long enough to clear
+# a hierarchy without retyping the password for every record.
+REAUTH_MAX_AGE_SECONDS = 300
+
+# The frontend prompts for the password again when it sees this code.
+REAUTH_REQUIRED_CODE = "password_confirmation_required"
+
+
+@auth_bp.route("/confirm-password", methods=["POST"])
+def confirm_password():
+    """Re-authenticate the signed-in admin before a destructive action."""
+
+    admin, error = admin_required()
+    if error:
+        return error
+
+    limited = _rate_limited(
+        "confirm-password",
+        str(admin.id),
+        5,
+        "Too many password confirmation attempts. Please try again later.",
+    )
+    if limited:
+        return limited
+
+    data = request.get_json(silent=True)
+    password = str(data.get("password") or "") if isinstance(data, dict) else ""
+
+    if not password:
+        return jsonify({
+            "success": False,
+            "message": "Password is required"
+        }), 400
+
+    if not secrets.compare_digest(str(admin.password), password):
+        session.pop("reauth_at", None)
+        log_audit(
+            "Admin",
+            admin,
+            "password confirmation failed",
+            "Admin",
+            admin.id,
+            "Incorrect password entered for a destructive action",
+        )
+        db.session.commit()
+        return jsonify({
+            "success": False,
+            "message": "Password is incorrect"
+        }), 401
+
+    session["reauth_at"] = time.time()
+
+    return jsonify({
+        "success": True,
+        "message": "Password confirmed",
+        "expiresInSeconds": REAUTH_MAX_AGE_SECONDS
+    }), 200
+
+
+def reauth_required():
+    """Guard a destructive route behind a recent password confirmation.
+
+    Returns ``(None, response)`` when the caller must confirm its password
+    again, mirroring :func:`admin_required` so routes can chain both guards.
+    """
+
+    admin, error = admin_required()
+    if error:
+        return None, error
+
+    confirmed_at = session.get("reauth_at")
+
+    if not isinstance(confirmed_at, (int, float)) or time.time() - confirmed_at > REAUTH_MAX_AGE_SECONDS:
+        session.pop("reauth_at", None)
+        return None, (
+            jsonify({
+                "success": False,
+                "code": REAUTH_REQUIRED_CODE,
+                "message": "Confirm your password to delete this record."
+            }),
+            403
+        )
+
+    return admin, None
+
+
+# ==========================================
 # REQUEST PASSWORD RESET OTP
 # ==========================================
 

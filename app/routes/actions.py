@@ -2,7 +2,7 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from auth import admin_required
+from auth import admin_required, reauth_required
 from extensions import db
 from model.building import Building
 from model.floor import Floor
@@ -497,7 +497,7 @@ def view_gallery_photo(location_id, photo_id):
 @actions_bp.route("/locations/<int:location_id>", methods=["DELETE"])
 def delete_location(location_id):
 
-    _, error = admin_required()
+    _, error = reauth_required()
     if error: return error
 
     try:

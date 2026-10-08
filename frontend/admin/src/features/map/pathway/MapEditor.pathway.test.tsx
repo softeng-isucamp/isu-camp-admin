@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { services } from "../../../services/api";
 import { generatedMapFixture } from "../../../services/generatedMapFixture";
-import { useMapEditorTestLifecycle, renderEditor, choosePathwayEditor, chooseWalkingNetworkBrowser, mapTestState } from "../testing/mapEditorTestHarness";
+import { useMapEditorTestLifecycle, renderEditor, choosePathwayEditor, chooseWalkingNetworkBrowser, confirmDeletePassword, mapTestState } from "../testing/mapEditorTestHarness";
 
 vi.mock("leaflet", async () => (await import("../testing/mapEditorMocks")).leafletMock());
 vi.mock("react-leaflet", async () => (await import("../testing/mapEditorMocks")).reactLeafletMock());
@@ -157,6 +157,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library Walk" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Pathway" }));
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete Pathway" }));
     await waitFor(() => expect(services.map.deletePathway).toHaveBeenCalledWith("path-library"));
   });

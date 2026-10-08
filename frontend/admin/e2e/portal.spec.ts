@@ -157,7 +157,9 @@ test("locations, users, logs, and map expose their key state transitions", async
     maxDiffPixels: 200,
   });
   await page.getByLabel("Location name").fill("Test Facility");
-  await page.getByLabel("PARENT BUILDING").selectOption({ label: "Administration Building" });
+  await page.getByLabel("PARENT BUILDING").fill("Administration Building");
+  // The listed option carries its code alongside the name; match the name exactly.
+  await page.locator('[role="option"] .parent-building-option-name', { hasText: /^Administration Building$/ }).click();
   await page.getByLabel("FLOOR LEVEL").selectOption({ label: "Ground Floor" });
   await page.getByRole("button", { name: /save location/i }).click();
   await expect(page.getByRole("heading", { name: "Location added" })).toBeVisible();
@@ -196,7 +198,9 @@ test("locations, users, logs, and map expose their key state transitions", async
   await page.goto("/locations?mockFailure=locationSave");
   await page.getByRole("button", { name: /add location/i }).click();
   await page.getByLabel("Location name").fill("Failed Facility");
-  await page.getByLabel("PARENT BUILDING").selectOption({ label: "Administration Building" });
+  await page.getByLabel("PARENT BUILDING").fill("Administration Building");
+  // The listed option carries its code alongside the name; match the name exactly.
+  await page.locator('[role="option"] .parent-building-option-name', { hasText: /^Administration Building$/ }).click();
   await page.getByLabel("FLOOR LEVEL").selectOption({ label: "Ground Floor" });
   await page.getByRole("button", { name: /save location/i }).click();
   await expect(page.getByRole("alert").first()).toContainText(
@@ -216,7 +220,7 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("permanently deleted");
+  await expect(page.getByRole("status")).toContainText("was deleted successfully");
 
   await page.goto("/users");
   await expect(

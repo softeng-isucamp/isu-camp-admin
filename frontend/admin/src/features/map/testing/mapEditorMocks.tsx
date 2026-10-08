@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { vi } from "vitest";
 import type { services } from "../../../services/api";
+import { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "../../../services/errors";
 
 export let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void) | undefined;
 export let mapZoomEndHandler: (() => void) | undefined;
@@ -67,9 +68,15 @@ export const reactLeafletMock = () => ({
   },
 });
 
+/** The fixture admin password every delete in these tests confirms with. */
+export const TEST_ADMIN_PASSWORD = "password123";
+
 export const apiMock = () => ({
   API_MODE: "local",
   setMockFailure: vi.fn(),
+  // Re-exported by the real module, so the mock must carry them too.
+  PASSWORD_CONFIRMATION_REQUIRED,
+  PasswordConfirmationRequiredError,
   services: {
     map: {
       buildings: vi.fn(async () => []),
@@ -90,6 +97,12 @@ export const apiMock = () => ({
       updatePathway: vi.fn(async (pathway) => pathway),
       deletePathway: vi.fn(async () => undefined),
       save: vi.fn(),
+    },
+    auth: {
+      // Mirrors the fixture adapter: only the admin's own password is accepted.
+      confirmPassword: vi.fn(async (password: string) => {
+        if (password !== TEST_ADMIN_PASSWORD) throw new Error("Password is incorrect");
+      }),
     },
     locations: {
       list: vi.fn(async () => ({

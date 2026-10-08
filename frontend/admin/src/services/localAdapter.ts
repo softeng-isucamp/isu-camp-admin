@@ -44,6 +44,11 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         storage?.removeItem(LOCAL_SESSION_KEY);
       },
       me: async (): Promise<Session | null> => session,
+      // The fixture only checks the password. Session ownership and the
+      // confirmation window are enforced by the backend, which owns the real guard.
+      confirmPassword: async (password: string): Promise<void> => {
+        if (password !== LOCAL_ADMIN.password) throw new Error("Password is incorrect");
+      },
       requestReset: async (username: string): Promise<void> => {
         if (username.trim() !== LOCAL_ADMIN.username) throw new Error("Admin username not found.");
         resetUsername = username.trim();
