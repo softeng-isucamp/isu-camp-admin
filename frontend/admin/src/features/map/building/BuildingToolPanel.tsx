@@ -1,3 +1,4 @@
+import { Spinner } from "../../../components/UI";
 import { polygonFeatureAnchor } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
 import type { useBuildingFootprintEditing } from "./useBuildingFootprintEditing";
@@ -176,6 +177,7 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
           onClick={handleSaveBuilding}
           className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
         >
+          {savingAction === "building" && <Spinner size={12} />}
           {savingAction === "building" ? "Saving Building Footprint…" : "Update Building Footprint"}
         </button>}
       </div>

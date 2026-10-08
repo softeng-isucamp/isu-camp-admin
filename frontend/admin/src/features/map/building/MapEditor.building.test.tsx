@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { services } from "../../../services/api";
 import type { Location, LocationDraft } from "../../../types";
-import { useMapEditorTestLifecycle, renderEditor, clickMap, mapFitBounds, mapFlyTo } from "../testing/mapEditorTestHarness";
+import { useMapEditorTestLifecycle, renderEditor, clickMap, confirmDeletePassword, mapFitBounds, mapFlyTo } from "../testing/mapEditorTestHarness";
 import { MapEditor } from "../MapEditor";
 
 vi.mock("leaflet", async () => (await import("../testing/mapEditorMocks")).leafletMock());
@@ -73,6 +73,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering Hall" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Building" }));
+    confirmDeletePassword();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete Building" }));
     await waitFor(() => expect(services.map.removeBuilding).toHaveBeenCalledWith("building-eng"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

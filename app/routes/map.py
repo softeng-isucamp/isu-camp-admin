@@ -3,7 +3,7 @@ import math
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required
+from auth import admin_required, reauth_required
 from extensions import db
 from model.building import Building
 from model.floor import Floor
@@ -146,7 +146,7 @@ def get_map_buildings():
 
 @map_bp.route("/buildings/<int:building_id>", methods=["DELETE"])
 def delete_map_building(building_id):
-    _, error = admin_required()
+    _, error = reauth_required()
     if error:
         return error
 

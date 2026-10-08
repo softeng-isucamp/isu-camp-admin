@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { Spinner } from "../../components/UI";
 import type { LocationPhotoDraft } from "../../types";
 
 const MAX_PHOTOS = 10;
@@ -51,7 +52,7 @@ export function LocationPhotoUpload({ photos, onChange, loading = false, disable
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 160 }}>
           {cover ? <img src={cover.previewUrl || undefined} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8 }} /> : <span aria-hidden="true" style={{ width: 48, height: 48, display: "grid", placeItems: "center", borderRadius: 8, background: "#d6ede0", color: "#0c7441", fontSize: 22 }}>⇧</span>}
-          <div><strong style={{ display: "block", color: "#191c1d", fontSize: 14 }}>Location photos ({photos.length}/10)</strong><span style={{ color: "#6b7280", fontSize: 12 }}>{loading ? "Loading photos…" : cover ? `${cover.name} · Cover photo` : "PNG, JPEG, or WebP · max 5 MB each"}</span></div>
+          <div><strong style={{ display: "block", color: "#191c1d", fontSize: 14 }}>Location photos ({photos.length}/10)</strong><span style={{ color: "#6b7280", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>{loading && <Spinner size={12} />}{loading ? "Loading photos…" : cover ? `${cover.name} · Cover photo` : "PNG, JPEG, or WebP · max 5 MB each"}</span></div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button type="button" disabled={loading || disabled || photos.length >= MAX_PHOTOS} onClick={() => inputRef.current?.click()} style={{ padding: "8px 12px", border: "1px solid #0c7441", borderRadius: 999, background: "white", color: "#0c7441", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Choose photos</button>

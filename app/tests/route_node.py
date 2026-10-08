@@ -73,6 +73,8 @@ def app_with_route_node_blueprint():
 def authenticated_admin(monkeypatch):
     """Keep unit tests focused on route behavior; auth has explicit coverage below."""
     monkeypatch.setattr(route_node_module, "admin_required", lambda: (object(), None), raising=False)
+    # Deletes additionally require a confirmed password; that guard has its own coverage below.
+    monkeypatch.setattr(route_node_module, "reauth_required", lambda: (object(), None), raising=False)
 
 
 def test_walking_network_mutations_require_an_administrator(monkeypatch):
@@ -329,6 +331,20 @@ def test_pathway_delete_and_failed_update_roll_back_with_an_audit(monkeypatch):
     assert response.status_code == 200
     assert session.deleted == [pathway]
     assert audits[-1][2:4] == ("delete", "Pathway")
+
+
+def test_walking_network_deletes_require_a_confirmed_password(monkeypatch):
+    monkeypatch.setattr(route_node_module, "reauth_required", lambda: (None, (
+        {"success": False, "code": "password_confirmation_required", "message": "Confirm your password to delete this record."},
+        403,
+    )), raising=False)
+    client = app_with_route_node_blueprint().test_client()
+
+    node = client.delete("/api/route-nodes/4")
+    pathway = client.delete("/api/pathways/4")
+
+    assert [node.status_code, pathway.status_code] == [403, 403]
+    assert node.json["code"] == "password_confirmation_required"
 
 
 def test_route_node_delete_is_audited_as_a_cascade(monkeypatch):

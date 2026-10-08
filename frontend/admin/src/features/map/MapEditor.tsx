@@ -3,6 +3,7 @@ import { MapContainer } from "react-leaflet";
 import L from "leaflet";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
+import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { services } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
@@ -100,6 +101,7 @@ export function MapEditor() {
   const { savingAction } = saving;
 
   const [error, setError] = useState("");
+  const feedback = useFeedback();
   const [basemap, setBasemap] = useState<"street" | "satellite">("street");
   const [currentMapBounds, setCurrentMapBounds] = useState<L.LatLngBounds | null>(null);
   const [currentMapZoom, setCurrentMapZoom] = useState(18);
@@ -173,6 +175,8 @@ export function MapEditor() {
       setMode("select");
       if (outcome.kind !== "cancelled") setSelected({ type: "building", id: outcome.buildingId });
       if (outcome.kind === "placed") pointTool.setPlacingAssociatedBuildingId(outcome.buildingId);
+      if (outcome.kind === "placed") feedback.reportSuccess("Building was added successfully.");
+      if (outcome.kind === "reshaped") feedback.reportSuccess("Building footprint was updated successfully.");
       completeToolDraft("polygon");
     },
   });
@@ -417,6 +421,7 @@ export function MapEditor() {
   const handleSavePosition = async () => {
     const movedId = await pointTool.savePosition();
     if (!movedId) return;
+    feedback.reportSuccess(`${movingObjectName || "Route Node"} position was saved successfully.`);
     setMode("select");
     setSelected({ type: "node", id: movedId });
     completeToolDraft("point");
@@ -428,6 +433,7 @@ export function MapEditor() {
     if (placed.draft.nodeType === "Entrance" && placed.draft.associatedPlaceId === nonRoutableBuildingId) {
       setNonRoutableBuildingId(null);
     }
+    feedback.reportSuccess(`${placed.node.name || "Route Node"} was added successfully.`);
     setMode("select");
     nodeFrame.load(placed.node);
     setSelected({ type: "node", id: placed.node.id });
@@ -443,6 +449,7 @@ export function MapEditor() {
   const saveIndoorLocationPosition = async () => {
     const positioned = await indoor.save();
     if (!positioned) return;
+    feedback.reportSuccess(`${positioned.name} indoor position was saved successfully.`);
     setSelected(locationSelection(positioned));
     flyTo([positioned.lat!, positioned.lng!], 20);
   };
@@ -468,7 +475,9 @@ export function MapEditor() {
   };
 
   const handleSavePathShape = async () => {
-    if (await pathway.saveShape()) finishPathwayTool();
+    if (!await pathway.saveShape()) return;
+    feedback.reportSuccess(`${pathway.activePathway?.name ?? "Pathway"} was saved successfully.`);
+    finishPathwayTool();
   };
 
   const startNewPathway = () => {
@@ -478,6 +487,7 @@ export function MapEditor() {
   };
 
   const createJunctionAtCrossing = () => pathway.createJunctionAtCrossing((junction) => {
+    feedback.reportSuccess(`${junction.name || "Junction"} was added successfully and the Pathway was split.`);
     nodeFrame.load(junction);
     setSelected({ type: "node", id: junction.id });
     finishPathwayTool();
@@ -492,12 +502,15 @@ export function MapEditor() {
   const startPathPointConversion = () => pathway.startConversion(currentBuildings);
 
   const savePathPointConversion = () => pathway.saveConversion((nodeId) => {
+    feedback.reportSuccess("Path Point was converted to a Route Node successfully.");
     setMode("select");
     setSelected({ type: "node", id: nodeId });
   });
 
   const applyPathwayFrame = async () => {
-    if (await pathway.applyFrame()) finishPathwayTool();
+    if (!await pathway.applyFrame()) return;
+    feedback.reportSuccess("Pathway details were updated successfully.");
+    finishPathwayTool();
   };
 
   const cancelPathwayFrame = () => {
@@ -553,11 +566,21 @@ export function MapEditor() {
   });
 
   const workingSessionState = toolSession.state;
-  const { deleteConfirmation, setDeleteConfirmation, confirmDelete } = useDeleteConfirmation({
+  const {
+    deleteConfirmation,
+    setDeleteConfirmation,
+    confirmDelete,
+    deleting,
+    passwordConfirmation: deletePasswordConfirmation,
+    closeConfirmation: closeDeleteConfirmation,
+  } = useDeleteConfirmation({
     overlay,
     refreshMapData,
     onError: setError,
-    onDeleted: () => setSelected(null),
+    onDeleted: (deleted) => {
+      feedback.reportSuccess(`${deleted.name} was deleted successfully.`);
+      setSelected(null);
+    },
   });
 
   const locationDetails = useLocationDetailsSave({
@@ -631,6 +654,8 @@ export function MapEditor() {
   return (
     <div className="flex flex-col gap-4 h-[calc(100vh-100px)] min-h-[580px] p-2">
       <MapPageHeader />
+
+      <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
 
       <div className="relative flex-1 rounded-[28px] overflow-hidden border border-[#e1e3e4] shadow-sm bg-[#dce8e2] min-h-[500px]">
         <MapContainer
@@ -830,8 +855,10 @@ export function MapEditor() {
         }}
         deletion={{
           confirmation: deleteConfirmation,
+          deleting,
+          passwordConfirmation: deletePasswordConfirmation,
           onConfirm: confirmDelete,
-          onClose: () => setDeleteConfirmation(null),
+          onClose: closeDeleteConfirmation,
         }}
         actions={{
           onCloseOwnerModal: () => setOwnerModal(null),
@@ -841,6 +868,7 @@ export function MapEditor() {
               updated,
               photos,
             );
+            feedback.reportSuccess(`${updated.name} was updated successfully.`);
             setOwnerModal(null);
           },
           onPickIndoorLocationOnMap: (location) => {

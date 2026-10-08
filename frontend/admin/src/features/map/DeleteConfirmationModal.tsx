@@ -1,4 +1,5 @@
 import { Button, Modal } from "../../components/UI";
+import { PasswordConfirmationField, type PasswordConfirmation } from "../auth/PasswordConfirmation";
 import type { DeleteImpact } from "./routeNode/routeNodeLifecycle";
 
 export interface DeleteConfirmation {
@@ -11,6 +12,10 @@ export interface DeleteConfirmation {
 interface DeleteConfirmationModalProps {
   confirmation: DeleteConfirmation;
   error: string;
+  /** The delete is in flight: the confirm button reports progress and the dialog stays open. */
+  deleting?: boolean;
+  /** Re-authentication state for the password this delete requires. */
+  passwordConfirmation: PasswordConfirmation;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -18,9 +23,15 @@ interface DeleteConfirmationModalProps {
 export function DeleteConfirmationModal({
   confirmation: deleteConfirmation,
   error,
+  deleting = false,
+  passwordConfirmation,
   onConfirm: confirmDelete,
   onClose,
 }: DeleteConfirmationModalProps) {
+  const busy = deleting || passwordConfirmation.confirming;
+  const recordLabel = deleteConfirmation.kind === "building"
+    ? "Building"
+    : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway";
   return (
     <Modal
       title={`Delete ${deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}?`}
@@ -36,13 +47,19 @@ export function DeleteConfirmationModal({
         {deleteConfirmation.kind === "pathway" && <p className="text-red-700">This Pathway and its {deleteConfirmation.impact?.connectedPathways[0]?.pathPoints.length ?? 0} Path Point(s) are permanently removed.</p>}
         {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-2 text-red-700">{error}</div>}
       </div>
+      <PasswordConfirmationField
+        confirmation={passwordConfirmation}
+        disabled={deleting}
+        onSubmit={confirmDelete}
+      />
       <div className="modal-actions">
-        <Button variant="subtle" onClick={() => onClose()}>Cancel</Button>
+        <Button variant="subtle" disabled={busy} onClick={() => onClose()}>Cancel</Button>
         <Button
           variant="danger"
+          loading={busy}
           onClick={confirmDelete}
         >
-          Delete {deleteConfirmation.kind === "building" ? "Building" : deleteConfirmation.kind === "route_node" ? "Route Node" : "Pathway"}
+          {deleting ? "Deleting\u2026" : passwordConfirmation.confirming ? "Confirming\u2026" : `Delete ${recordLabel}`}
         </Button>
       </div>
     </Modal>

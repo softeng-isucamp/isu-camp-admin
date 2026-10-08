@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { services } from "../../services/api";
 import type { AuditEntry } from "../../types";
 import { formatDateTime } from "../../lib/format";
@@ -37,11 +38,12 @@ const entries: AuditEntry[] = [
   },
 ];
 
-function renderLogs() {
+// Logs reads ?q= and ?category= so User Management can link to one account's activity.
+function renderLogs(initialEntry = "/system-logs") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <Logs />
+      <MemoryRouter initialEntries={[initialEntry]}><Logs /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -90,5 +92,30 @@ describe("Logs", () => {
     const dialog = await screen.findByRole("dialog", { name: "Log Details" });
     expect(within(dialog).getByText(readable(isoTimestamp))).toBeInTheDocument();
     expect(within(dialog).queryByText(isoTimestamp)).not.toBeInTheDocument();
+  });
+});
+
+describe("Logs deep links", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("starts filtered by the account named in the query string", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+
+    renderLogs("/system-logs?q=maria.santos1&category=User");
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("User", "maria.santos1", "All Actors", "all", 1, 10));
+    expect(screen.getByPlaceholderText(/search actions/i)).toHaveValue("maria.santos1");
+    expect(screen.getByRole("button", { name: "User Activity" })).toHaveClass("active");
+  });
+
+  it("ignores an unknown category and shows every log", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+
+    renderLogs("/system-logs?category=Nonsense");
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "", "All Actors", "all", 1, 10));
   });
 });

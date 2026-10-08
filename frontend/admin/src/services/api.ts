@@ -1,4 +1,6 @@
 import type {
+  AdminAccount,
+  AdminAccountDraft,
   AuditEntry,
   Building,
   DashboardRange,
@@ -17,6 +19,9 @@ import type {
   UserAccountType,
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
+import { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
+
+export { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
 import { z } from "zod";
 
 import {
@@ -226,14 +231,20 @@ const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
 const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
+// The directory and the local adapter must share ONE Locations array. Handing
+// the adapter `generatedMapFixture.locations` instead left fixture mode with two:
+// every save and delete landed in the adapter's copy while the Location
+// Directory kept listing the stale one, so a deleted record stayed on screen and
+// a new one never appeared. The generated records are already part of
+// `locations`, which additionally carries the seeded indoor Locations.
 const localAdapter = createLocalAdapter(
   generatedMapFixture
-    ? { buildings: generatedMapFixture.buildings, locations: generatedMapFixture.locations,
+    ? { buildings: generatedMapFixture.buildings, locations,
         nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways }
     : { buildings, locations, nodes: routeNodes, pathways },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
-const mapLocations = generatedMapFixture ? generatedMapFixture.locations : locations;
+const mapLocations = locations;
 const mapBuildings = generatedMapFixture ? generatedMapFixture.buildings : buildings;
 const mapNodes = generatedMapFixture ? generatedMapFixture.nodes : routeNodes;
 const mapPathways = generatedMapFixture ? generatedMapFixture.pathways : pathways;
@@ -421,6 +432,10 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   });
   const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
   if (!response.ok) {
+    const envelope = data as (typeof data) & { code?: string };
+    if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
+      throw new PasswordConfirmationRequiredError(envelope.message);
+    }
     const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
     error.fieldErrors = { ...data?.fields, ...data?.relationships };
     throw error;
@@ -531,6 +546,9 @@ export interface Services {
 
     me(): Promise<Session | null>;
 
+    /** Re-authenticates the signed-in admin before a destructive action. */
+    confirmPassword(password: string): Promise<void>;
+
     requestReset(username: string): Promise<void>;
 
     verifyReset(username: string, code: string): Promise<void>;
@@ -564,6 +582,13 @@ export interface Services {
 
   users: {
     list(query?: string, page?: number, pageSize?: number, createdRange?: string, userType?: UserAccountType | "all"): Promise<Page<UserAccount>>;
+  };
+
+  /** Administrator accounts for the portal itself. */
+  admins: {
+    list(): Promise<AdminAccount[]>;
+    save(draft: AdminAccountDraft): Promise<AdminAccount>;
+    remove(id: string): Promise<void>;
   };
 
   logs: {
@@ -643,6 +668,12 @@ const addAudit = (
 
 const localAuditEntries: AuditEntry[] = createMockAuditLogs();
 const localUsers: UserAccount[] = createMockUsers();
+// The fixture's own administrator directory. The signed-in fixture admin is
+// `admin_justine`, so that row is the one marked current.
+const localAdmins: AdminAccount[] = [
+  { id: "1", username: "admin_justine", email: "justine.admin@isu.edu.ph", isCurrent: true },
+  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", isCurrent: false },
+];
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -914,6 +945,41 @@ export const services: Services = {
         id: data.admin.id,
         username: data.admin.username,
       };
+    },
+
+    // --------------------------------------
+    // Confirm password before a destructive action
+    // --------------------------------------
+
+    confirmPassword: async (password) => {
+
+      if (!USE_HTTP_API) {
+        return localAdapter.auth.confirmPassword(password);
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/confirm-password`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        }
+      );
+
+      let data: any;
+
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Unable to connect to the backend.");
+      }
+
+      checkRateLimit(response, data.message);
+
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || "Password is incorrect");
+      }
     },
 
     requestReset: async (username) => {
@@ -1265,6 +1331,79 @@ export const services: Services = {
         .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
       const offset = (page - 1) * pageSize;
       return wait({ items: clone(filtered.slice(offset, offset + pageSize)), total: filtered.length, page, pageSize });
+    },
+  },
+
+
+  // ========================================
+  // ADMINISTRATOR ACCOUNTS
+  // ========================================
+
+  admins: {
+
+    list: async () => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ items: AdminAccount[] }>("/api/admins");
+        return response.items ?? [];
+      }
+      return wait(clone(localAdmins));
+    },
+
+    save: async (draft) => {
+      if (USE_HTTP_API) {
+        const body = JSON.stringify({
+          username: draft.username,
+          email: draft.email,
+          // An empty password on edit leaves the stored one alone.
+          ...(draft.password ? { password: draft.password } : {}),
+        });
+        const response = await apiJson<{ admin: AdminAccount }>(
+          draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",
+          { method: draft.id ? "PUT" : "POST", body },
+        );
+        return response.admin;
+      }
+
+      const username = draft.username.trim();
+      const email = draft.email.trim();
+      const duplicate = localAdmins.some((admin) =>
+        admin.username.toLowerCase() === username.toLowerCase() && admin.id !== draft.id);
+      if (duplicate) {
+        const error = new Error("That username is already taken") as Error & { fieldErrors?: Record<string, string> };
+        error.fieldErrors = { username: "That username is already taken" };
+        throw error;
+      }
+
+      const existing = draft.id ? localAdmins.find((admin) => admin.id === draft.id) : undefined;
+      if (existing) {
+        existing.username = username;
+        existing.email = email;
+        addAudit("Updated Administrator", username, "Admin", existing.id);
+        return wait(clone(existing));
+      }
+      const created: AdminAccount = {
+        id: `admin-${Date.now()}`,
+        username,
+        email,
+        isCurrent: false,
+      };
+      localAdmins.push(created);
+      addAudit("Created Administrator", username, "Admin", created.id);
+      return wait(clone(created));
+    },
+
+    remove: async (id) => {
+      if (USE_HTTP_API) {
+        await apiJson<unknown>(`/api/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
+        return;
+      }
+      const index = localAdmins.findIndex((admin) => admin.id === id);
+      if (index < 0) throw new Error("Administrator not found.");
+      if (localAdmins[index].isCurrent) throw new Error("You cannot remove your own administrator account.");
+      if (localAdmins.length <= 1) throw new Error("The last administrator account cannot be removed.");
+      const [removed] = localAdmins.splice(index, 1);
+      addAudit("Deleted Administrator", removed.username, "Admin", removed.id);
+      return wait(undefined);
     },
   },
 

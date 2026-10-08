@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { MapContainer, Polygon, Polyline, TileLayer, ZoomControl } from "react-leaflet";
+import { Spinner } from "../../components/UI";
 import { campusCenter } from "../../services/mockData";
 import { services } from "../../services/api";
 import type { Building, Pathway, RouteNode } from "../../types";
@@ -37,7 +38,7 @@ export function DashboardMapPreview() {
   return (
     <div className="map-preview dashboard-map-preview">
       {isLoading ? (
-        <div className="dashboard-map-state" role="status">Loading campus map…</div>
+        <div className="dashboard-map-state" role="status"><Spinner size={18} /> Loading campus map…</div>
       ) : error || !data ? (
         <div className="dashboard-map-state" role="status">Campus map preview is unavailable.</div>
       ) : (

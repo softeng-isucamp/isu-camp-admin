@@ -1,10 +1,17 @@
 from flask import Flask
+import pytest
 
 import actions as actions_module
 from actions import actions_bp
 from services.location_photos import GalleryChange
 import location as location_module
 from location import location_bp
+
+
+@pytest.fixture(autouse=True)
+def confirmed_password(monkeypatch):
+    """Deletes require a confirmed password; that guard has its own coverage below."""
+    monkeypatch.setattr(actions_module, "reauth_required", lambda: (object(), None), raising=False)
 
 
 class ListRecord:
@@ -191,6 +198,20 @@ def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
     }
     assert actions_module.TYPE_IDS == LOCATION_TYPE_IDS
     assert LOCATION_TYPE_NAMES[LOCATION_TYPE_IDS["Restroom"]] == "Restroom"
+
+
+def test_actions_delete_requires_a_confirmed_password(monkeypatch):
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    monkeypatch.setattr(actions_module, "reauth_required", lambda: (None, (
+        {"success": False, "code": "password_confirmation_required", "message": "Confirm your password to delete this record."},
+        403,
+    )))
+
+    response = app.test_client().delete("/api/actions/locations/42")
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
 
 
 def test_actions_can_delete_a_building(monkeypatch):

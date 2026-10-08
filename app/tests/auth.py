@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import time
 
 from flask import Flask
 
@@ -165,3 +166,129 @@ def test_final_reset_remains_authoritative_after_non_consuming_verification(monk
     assert correct_final.status_code == 200
     assert admin.password == "password123"
     assert "admin01" not in auth_module.reset_otps
+
+
+# ==========================================
+# PASSWORD CONFIRMATION FOR DESTRUCTIVE ACTIONS
+# ==========================================
+
+def signed_in_client(monkeypatch, password="password123", admin_id=7):
+    """A test client whose session is the given admin, as /api/login leaves it."""
+    admin = type("AdminRecord", (), {"id": admin_id, "username": "admin01", "password": password})()
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {
+        "get": lambda self, model, key: admin,
+        "commit": lambda self: None,
+    })())
+    client = auth_app().test_client()
+    with client.session_transaction() as flask_session:
+        flask_session["admin_id"] = admin_id
+        flask_session["admin_username"] = admin.username
+    return client, admin
+
+
+def test_confirm_password_rejects_an_unauthenticated_caller():
+    auth_module.rate_limit_buckets.clear()
+    client = auth_app().test_client()
+
+    response = client.post("/api/confirm-password", json={"password": "password123"})
+
+    assert response.status_code == 401
+
+
+def test_confirm_password_accepts_the_signed_in_admin_password(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+
+    response = client.post("/api/confirm-password", json={"password": "password123"})
+
+    assert response.status_code == 200
+    assert response.json["success"] is True
+    assert response.json["expiresInSeconds"] == auth_module.REAUTH_MAX_AGE_SECONDS
+    with client.session_transaction() as flask_session:
+        assert isinstance(flask_session["reauth_at"], float)
+
+
+def test_confirm_password_rejects_a_wrong_password_without_authorizing(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+
+    response = client.post("/api/confirm-password", json={"password": "not-the-password"})
+
+    assert response.status_code == 401
+    assert response.json["message"] == "Password is incorrect"
+    with client.session_transaction() as flask_session:
+        assert "reauth_at" not in flask_session
+
+
+def test_confirm_password_requires_a_password(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+
+    response = client.post("/api/confirm-password", json={})
+
+    assert response.status_code == 400
+    assert response.json["message"] == "Password is required"
+
+
+def test_confirm_password_is_rate_limited_per_admin(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+
+    responses = [client.post("/api/confirm-password", json={"password": "wrong"}) for _ in range(6)]
+
+    assert [response.status_code for response in responses[:5]] == [401] * 5
+    assert responses[5].status_code == 429
+    assert responses[5].headers["Retry-After"]
+
+
+def test_reauth_required_blocks_until_the_password_is_confirmed(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+    app = auth_app()
+
+    @app.route("/api/_delete_probe", methods=["DELETE"])
+    def delete_probe():
+        _, error = auth_module.reauth_required()
+        if error:
+            return error
+        return auth_module.jsonify({"success": True}), 200
+
+    probe = app.test_client()
+    with probe.session_transaction() as flask_session:
+        flask_session["admin_id"] = 7
+        flask_session["admin_username"] = "admin01"
+
+    blocked = probe.delete("/api/_delete_probe")
+    assert blocked.status_code == 403
+    assert blocked.json["code"] == auth_module.REAUTH_REQUIRED_CODE
+
+    with probe.session_transaction() as flask_session:
+        flask_session["reauth_at"] = time.time()
+    assert probe.delete("/api/_delete_probe").status_code == 200
+
+
+def test_reauth_expires_after_its_window(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    client, _ = signed_in_client(monkeypatch)
+    app = auth_app()
+
+    @app.route("/api/_expiry_probe", methods=["DELETE"])
+    def expiry_probe():
+        _, error = auth_module.reauth_required()
+        if error:
+            return error
+        return auth_module.jsonify({"success": True}), 200
+
+    probe = app.test_client()
+    with probe.session_transaction() as flask_session:
+        flask_session["admin_id"] = 7
+        flask_session["admin_username"] = "admin01"
+        flask_session["reauth_at"] = time.time() - auth_module.REAUTH_MAX_AGE_SECONDS - 1
+
+    expired = probe.delete("/api/_expiry_probe")
+
+    assert expired.status_code == 403
+    assert expired.json["code"] == auth_module.REAUTH_REQUIRED_CODE
+    # The stale stamp is cleared so it cannot be reused.
+    with probe.session_transaction() as flask_session:
+        assert "reauth_at" not in flask_session

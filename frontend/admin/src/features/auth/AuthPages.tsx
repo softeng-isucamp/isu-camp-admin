@@ -106,7 +106,7 @@ export function Login() {
               {error || errors.username?.message || errors.password?.message}
             </div>
           )}
-          <Button type="submit" disabled={loginPending || loginCountdown > 0}>
+          <Button type="submit" loading={loginPending} disabled={loginCountdown > 0}>
             {loginPending ? "Logging in…" : loginCountdown > 0 ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
           </Button>
         </form>
@@ -452,13 +452,15 @@ export function PasswordReset() {
                 type="button"
                 style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%", marginTop: "8px" }}
                 onClick={() => void submit(getValues())}
-                disabled={submitting}
+                loading={submitting}
               >
-                {step === "request"
-                  ? "Send Code →"
-                  : step === "code"
-                    ? "Continue"
-                    : "Reset Password"}
+                {submitting
+                  ? "Working…"
+                  : step === "request"
+                    ? "Send Code →"
+                    : step === "code"
+                      ? "Continue"
+                      : "Reset Password"}
               </Button>
               <Link className="back-link" to="/login" style={{ color: "#0c7441", textAlign: "center", fontSize: "14px", marginTop: "4px" }}>
                 Back to login

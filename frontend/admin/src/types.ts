@@ -119,6 +119,21 @@ export interface UserAccount {
   /** Read-only. Null when the backend value is missing or unrecognized. */
   userType: UserAccountType | null;
 }
+/** An administrator account for the portal itself, owned by this app. */
+export interface AdminAccount {
+  id: string;
+  username: string;
+  email: string;
+  /** True for the signed-in admin, whose own account cannot be removed. */
+  isCurrent: boolean;
+}
+export interface AdminAccountDraft {
+  id?: string;
+  username: string;
+  email: string;
+  /** Required when creating; blank on edit leaves the existing password alone. */
+  password?: string;
+}
 export interface AuditEntry {
   id: string;
   actor: string;

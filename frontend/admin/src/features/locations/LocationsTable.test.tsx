@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
+import { PasswordConfirmationRequiredError } from "../../services/errors";
 
 function LocationRouteProbe() {
   const location = useLocation();
@@ -23,6 +24,24 @@ function renderLocations(initialEntries: Array<string | { pathname: string; sear
     </QueryClientProvider>
   );
   return { ...rendered, queryClient };
+}
+
+/** Deletes are re-authenticated: fill the open dialog's password prompt. */
+function confirmDeletePassword(password = "password123") {
+  fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: password } });
+}
+
+/** Drives the parent-Building type-ahead: focus, type, then pick the listed match. */
+function chooseParentBuilding(name: string) {
+  const combobox = screen.getByLabelText("PARENT BUILDING");
+  fireEvent.focus(combobox);
+  fireEvent.change(combobox, { target: { value: name } });
+  // Several Buildings can contain the typed text, so match the option's name exactly.
+  const option = within(screen.getByRole("listbox"))
+    .getAllByRole("option")
+    .find((candidate) => candidate.querySelector(".parent-building-option-name")?.textContent === name);
+  if (!option) throw new Error(`No parent Building option named "${name}" is listed.`);
+  fireEvent.click(option);
 }
 
 describe("Locations screen table and hierarchy toggle validation", () => {
@@ -178,6 +197,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
@@ -197,6 +217,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Actions for Shrink Page 11" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
@@ -407,7 +428,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Add Location" });
     expect(screen.getByLabelText(/location type/i)).toHaveValue("Room");
-    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.name);
     expect(screen.getByLabelText("PARENT BUILDING")).toBeDisabled();
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("2nd Floor");
     expect(screen.getByLabelText("FLOOR LEVEL")).toBeRequired();
@@ -434,7 +455,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     }]);
 
     const dialog = await screen.findByRole("dialog", { name: "Add Location" });
-    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(pendingBuilding.id);
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(pendingBuilding.name);
     expect(screen.getByLabelText("PARENT BUILDING")).toBeDisabled();
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Ground Floor");
     expect(dialog).toHaveTextContent("Pending Map Building");
@@ -452,8 +473,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
     const parentBuilding = screen.getByLabelText("PARENT BUILDING");
     const floorLevel = screen.getByLabelText("FLOOR LEVEL");
-    expect(parentBuilding).toHaveDisplayValue("None / Standalone");
-    expect(Array.from((parentBuilding as HTMLSelectElement).options).find((option) => option.text === building.name)).toHaveValue(building.id);
+    expect(parentBuilding).toHaveValue("");
+    fireEvent.focus(parentBuilding);
+    expect(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(building.name) })).toBeInTheDocument();
+    fireEvent.keyDown(parentBuilding, { key: "Escape" });
     expect(Array.from((floorLevel as HTMLSelectElement).options).map((option) => option.text)).toEqual([
       "None",
       "Ground Floor",
@@ -466,10 +489,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     ]);
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Hierarchy Test Room" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "HIER-ROOM" } });
-    fireEvent.change(parentBuilding, { target: { value: building.id } });
+    chooseParentBuilding(building.name);
     fireEvent.change(floorLevel, { target: { value: "2nd Floor" } });
     fireEvent.click(screen.getByRole("button", { name: /save location/i }));
-    await screen.findByText(/saved successfully/i);
+    await screen.findByText(/added successfully/i);
     const room = (await services.locations.list("Hierarchy Test Room")).items[0];
     expect(room).toEqual(expect.objectContaining({
       type: "Room",
@@ -485,6 +508,84 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect((await screen.findAllByText("Hierarchy Test Room")).length).toBeGreaterThan(0);
   });
 
+  it("lists the matching parent Buildings while the name or code is typed", async () => {
+    const searched = await services.locations.save({ id: "search-parent-a", name: "Searchable Annex", code: "SRCH-ANX", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const other = await services.locations.save({ id: "search-parent-b", name: "Unrelated Pavilion", code: "UNREL-PAV", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+
+    const combobox = screen.getByLabelText("PARENT BUILDING");
+    const listed = () => within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent ?? "");
+
+    // Focus alone lists every Building, standalone first.
+    fireEvent.focus(combobox);
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+    expect(listed()[0]).toContain("None / Standalone");
+    expect(listed().some((option) => option.includes(searched.name))).toBe(true);
+    expect(listed().some((option) => option.includes(other.name))).toBe(true);
+
+    // Typing a name narrows the list as it goes.
+    fireEvent.change(combobox, { target: { value: "Searchable" } });
+    expect(listed().some((option) => option.includes(searched.name))).toBe(true);
+    expect(listed().some((option) => option.includes(other.name))).toBe(false);
+    expect(screen.getByText(/1 of \d+ buildings match/)).toBeInTheDocument();
+
+    // A code matches the same record.
+    fireEvent.change(combobox, { target: { value: "srch-anx" } });
+    expect(listed().some((option) => option.includes(searched.name))).toBe(true);
+    expect(listed().some((option) => option.includes(other.name))).toBe(false);
+
+    fireEvent.change(combobox, { target: { value: "no such building" } });
+    expect(screen.getByText(/No buildings match/)).toBeInTheDocument();
+
+    // Picking a listed match closes the list and shows the chosen Building.
+    fireEvent.change(combobox, { target: { value: "Searchable" } });
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(searched.name) }));
+    expect(combobox).toHaveValue(searched.name);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    // The chosen Building can be cleared back to standalone.
+    fireEvent.click(screen.getByRole("button", { name: "Clear parent building" }));
+    expect(combobox).toHaveValue("");
+  });
+
+  it("chooses a parent Building from the keyboard without submitting the dialog", async () => {
+    const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+
+    const combobox = screen.getByLabelText("PARENT BUILDING");
+    fireEvent.change(combobox, { target: { value: "Keyboard Hall" } });
+    // The first entry is standalone, so one step down lands on the match.
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    fireEvent.keyDown(combobox, { key: "Enter" });
+
+    expect(combobox).toHaveValue(building.name);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    // Enter chose an option; it must not have saved the half-filled form.
+    expect(screen.getByRole("dialog", { name: "Add Location" })).toBeInTheDocument();
+
+    // Escape dismisses the open list without closing the dialog behind it.
+    fireEvent.focus(combobox);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    fireEvent.keyDown(combobox, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Add Location" })).toBeInTheDocument();
+    expect(combobox).toHaveValue(building.name);
+  });
+
+  it("offers no parent Building search when the Building is locked by a quick-add handoff", async () => {
+    const building = { id: "locked-search-building", name: "Locked Search Building", code: "LCK-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    await services.locations.save(building);
+    renderLocations([{ pathname: "/locations", search: "?add=indoor&parentId=locked-search-building", state: { indoorLocationParent: building } }]);
+    const combobox = await screen.findByLabelText("PARENT BUILDING");
+    expect(combobox).toBeDisabled();
+    fireEvent.focus(combobox);
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
   it("populates the parent building and floor level when editing a child location", async () => {
     const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
@@ -493,7 +594,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Child Room" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
-    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.id);
+    expect(screen.getByLabelText("PARENT BUILDING")).toHaveValue(building.name);
     expect(screen.getByLabelText("FLOOR LEVEL")).toHaveValue("Basement");
   });
 
@@ -513,11 +614,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await waitFor(() => expect(saveLocation).toHaveBeenCalled());
     try {
       expect(screen.getByRole("button", { name: "Saving…" })).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByRole("button", { name: "Saving…" }).querySelector(".spinner")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Pick on map" })).toBeDisabled();
     } finally {
       completeSave();
     }
-    await screen.findByText(/saved successfully/i);
+    await screen.findByText(/updated successfully/i);
   });
 
   it("opens Map Editor directly from an existing indoor location without saving its modal draft", async () => {
@@ -615,7 +717,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "SAVED-FIELDS" } });
     fireEvent.change(screen.getByLabelText("DESCRIPTION"), { target: { value: "Saved purpose" } });
     fireEvent.change(screen.getByLabelText(/keywords/i), { target: { value: "saved, keywords" } });
-    fireEvent.change(screen.getByLabelText("PARENT BUILDING"), { target: { value: "osm-location-c5fb7a267a8ca63d" } });
+    chooseParentBuilding("Science Building");
     fireEvent.change(screen.getByLabelText("FLOOR LEVEL"), { target: { value: "Ground Floor" } });
     fireEvent.click(screen.getByRole("button", { name: /save location/i }));
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
@@ -627,12 +729,54 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(saved?.keywords).toBe("saved, keywords");
   });
 
+  it("refuses to delete until the admin password is confirmed", async () => {
+    const record = await services.locations.save({ id: "password-guard-test", name: "Password guard test", code: "PWD-GUARD", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const remove = vi.spyOn(services.locations, "remove");
+    renderLocations(["/locations?q=Password%20guard%20test"]);
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+
+    // An empty prompt stops the delete before it reaches the service.
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Enter your password to confirm this deletion.")).toBeInTheDocument();
+    expect(remove).not.toHaveBeenCalled();
+
+    // So does the wrong password.
+    confirmDeletePassword("not-my-password");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Password is incorrect")).toBeInTheDocument();
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: /delete location/i })).toBeInTheDocument();
+
+    // The admin's own password releases it.
+    confirmDeletePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(record.id, record.type));
+    expect(await screen.findByText(`${record.name} was deleted successfully.`)).toBeInTheDocument();
+  });
+
+  it("re-prompts when the backend reports the password confirmation expired", async () => {
+    const record = await services.locations.save({ id: "expired-confirmation", name: "Expired confirmation", code: "EXPIRED-CONF", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    vi.spyOn(services.locations, "remove").mockRejectedValueOnce(new PasswordConfirmationRequiredError());
+    renderLocations(["/locations?q=Expired%20confirmation"]);
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    confirmDeletePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText(/Your password confirmation expired/)).toBeInTheDocument();
+    // The record survives and the prompt is cleared for a fresh attempt.
+    expect(screen.getByRole("dialog", { name: /delete location/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+  });
+
   it("shows a delete failure alert and leaves the record visible", async () => {
     const record = await services.locations.save({ id: "delete-error-test", name: "Delete error test", code: "DELETE-ERROR", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     setMockFailure("locationRemove", true);
     renderLocations(["/locations?q=Delete%20error%20test"]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/Mock locationRemove failed/);
     expect(screen.getByText(record.name)).toBeInTheDocument();
@@ -647,10 +791,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
     expect(await screen.findByText("This Building contains 1 associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.")).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`Delete ${building.name}`))).toBeInTheDocument();
+    confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(async () => {
       expect((await services.locations.list()).items.some((item) => item.id === building.id || item.id === child.id)).toBe(false);
     });
+    expect(await screen.findByText(`${building.name} was deleted successfully.`)).toBeInTheDocument();
   });
 
   it("renders a selected location's real history entry", async () => {
@@ -706,6 +852,23 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add Location" })).not.toBeInTheDocument());
     expect(document.activeElement).toBe(addButton);
+  });
+
+  it("parks focus on the directory when the deleted row takes the opener with it", async () => {
+    const record = await services.locations.save({ id: "focus-after-delete", name: "Focus after delete", code: "FOCUS-DEL", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations(["/locations?q=Focus%20after%20delete"]);
+    const opener = await screen.findByRole("button", { name: `Actions for ${record.name}` });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+    confirmDeletePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await screen.findByText(`${record.name} was deleted successfully.`);
+    // The opener went away with its row, so focus must not be dropped on <body>:
+    // tabbing would otherwise restart at the top of the page.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Location Directory" })));
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("associates validation messages with their fields", async () => {

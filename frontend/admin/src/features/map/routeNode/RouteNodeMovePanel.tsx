@@ -1,3 +1,4 @@
+import { Spinner } from "../../../components/UI";
 import { PointCoordinateInputs } from "../PointMoveLayer";
 import type { EditorMode } from "../types";
 import type { SaveAction } from "../session/useSavingAction";
@@ -55,7 +56,7 @@ export function RouteNodeMovePanel({
         <span>{pointTool.dragging ? "Dragging · release to preview" : "Arrow keys 0.5m · Shift + Arrow 5.0m · Enter save · Esc cancel"}</span>
         <div>
           <button type="button" onClick={handleCancelMove}>Cancel</button>
-          <button type="button" className="primary" disabled={movingOutsideBoundary || savingAction === "position"} onClick={handleSavePosition}>{savingAction === "position" ? "Saving Position…" : "Save Position"}</button>
+          <button type="button" className="primary" disabled={movingOutsideBoundary || savingAction === "position"} onClick={handleSavePosition}>{savingAction === "position" && <Spinner size={12} />}{savingAction === "position" ? "Saving Position…" : "Save Position"}</button>
         </div>
       </div>
     </section>

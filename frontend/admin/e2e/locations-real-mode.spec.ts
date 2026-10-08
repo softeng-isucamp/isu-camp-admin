@@ -48,7 +48,8 @@ test("real-mode location creation survives a directory reload", async ({ page })
   await page.getByRole("button", { name: /add location/i }).click();
   const dialog = page.getByRole("dialog", { name: "Add Location" });
   await dialog.getByLabel("TYPE").selectOption("Room");
-  await dialog.getByLabel("PARENT BUILDING").selectOption("building-1");
+  await dialog.getByLabel("PARENT BUILDING").fill("Campus Building");
+  await dialog.locator('[role="option"] .parent-building-option-name', { hasText: /^Campus Building$/ }).click();
   await dialog.getByLabel("FLOOR LEVEL").selectOption("Ground Floor");
   await dialog.getByLabel("Location name").fill("Reloaded Room");
   await dialog.getByLabel("Location code").fill("RELOADED-ROOM");

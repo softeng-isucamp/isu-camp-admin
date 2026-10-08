@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Card, Badge, Empty } from "../../components/UI";
+import { Card, Badge, Empty, ProgressBar, Spinner } from "../../components/UI";
 import { services } from "../../services/api";
 import { formatDateTime } from "../../lib/format";
 import type { DashboardRange } from "../../types";
@@ -103,9 +103,10 @@ export function Dashboard() {
                 </select>
               </div>
             </div>
+            <ProgressBar active={isFetching && !isLoading} />
             <div className="rank-list">
               {isLoading ? (
-                <div className="dashboard-state" role="status" aria-live="polite">Loading search analytics…</div>
+                <div className="dashboard-state" role="status" aria-live="polite"><Spinner size={18} /> Loading search analytics…</div>
               ) : error && !data ? (
                 <Empty>Search analytics are unavailable.</Empty>
               ) : (data?.topSearched ?? []).length === 0 ? (
@@ -147,7 +148,7 @@ export function Dashboard() {
               <Link to="/users">VIEW ALL</Link>
             </div>
             {isLoading ? (
-              <div className="dashboard-state" role="status" aria-live="polite">Loading registered users…</div>
+              <div className="dashboard-state" role="status" aria-live="polite"><Spinner size={18} /> Loading registered users…</div>
             ) : error && !data ? (
               <Empty>Registered users are unavailable.</Empty>
             ) : (
@@ -161,7 +162,7 @@ export function Dashboard() {
             </div>
             <div className="activity">
               {isLoading ? (
-                <div className="dashboard-state" role="status" aria-live="polite">Loading recent activity…</div>
+                <div className="dashboard-state" role="status" aria-live="polite"><Spinner size={18} /> Loading recent activity…</div>
               ) : error && !data ? (
                 <Empty>Recent activity is unavailable.</Empty>
               ) : recentAdminActivity.length === 0 ? (

@@ -1,3 +1,4 @@
+import { Spinner } from "../../../components/UI";
 import type { Building } from "../../../types";
 import type { SaveAction } from "../session/useSavingAction";
 import type { MapPoint } from "../campusBoundary";
@@ -89,6 +90,7 @@ export function RouteNodePlacePanel({
           onClick={handleSavePlacedNode}
           className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
         >
+          {savingAction === "route-node" && <Spinner size={12} />}
           {savingAction === "route-node" ? "Saving Route Node…" : "Save Route Node"}
         </button>
       </div>
