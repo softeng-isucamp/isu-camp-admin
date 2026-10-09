@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
-import { RecoveryCodeStep } from "./RecoveryCodeStep";
+import { type DeadCode, RecoveryCodeStep } from "./RecoveryCodeStep";
 import { RecoveryEmailStep } from "./RecoveryEmailStep";
 import { RecoveryFrame } from "./RecoveryFrame";
 
@@ -19,13 +19,15 @@ interface RecoveryFlowProps {
   /**
    * The purpose-specific step shown once the code is verified. It renders inside
    * the recovery card and owns its own heading, actions and "Back to login".
+   * `codeDied` sends the admin back to the code step when the server turns the
+   * verified code down as used up or expired.
    */
-  renderFinal: (verified: VerifiedRecovery) => ReactNode;
+  renderFinal: (verified: VerifiedRecovery, controls: { codeDied: (kind: DeadCode) => void }) => ReactNode;
 }
 
 type FlowStep =
   | { step: "email"; email: string }
-  | { step: "code"; email: string; issued: CodeRequestResult }
+  | { step: "code"; email: string; issued: CodeRequestResult; dead?: DeadCode }
   | { step: "final"; verified: VerifiedRecovery };
 
 /**
@@ -36,12 +38,9 @@ type FlowStep =
 export function RecoveryFlow({ purpose, title, description, renderFinal }: RecoveryFlowProps) {
   const [flow, setFlow] = useState<FlowStep>({ step: "email", email: "" });
   const content = useRef<HTMLDivElement>(null);
-  const shownStep = useRef(flow.step);
 
-  // A new step replaces the old one under the keyboard or screen reader, so move focus to its heading.
+  // The first step on arrival and every later step replace what the keyboard or screen reader was on, so move focus to the heading.
   useEffect(() => {
-    if (shownStep.current === flow.step) return;
-    shownStep.current = flow.step;
     const heading = content.current?.querySelector("h2");
     heading?.setAttribute("tabindex", "-1");
     heading?.focus();
@@ -64,11 +63,16 @@ export function RecoveryFlow({ purpose, title, description, renderFinal }: Recov
             email={flow.email}
             purpose={purpose}
             issued={flow.issued}
+            dead={flow.dead}
             onVerified={(verified) => setFlow({ step: "final", verified: { email: flow.email, ...verified } })}
             onChangeEmail={() => setFlow({ step: "email", email: flow.email })}
           />
         )}
-        {flow.step === "final" && renderFinal(flow.verified)}
+        {flow.step === "final" &&
+          renderFinal(flow.verified, {
+            // No timing: the old cooldown is long over, so Resend is available at once.
+            codeDied: (dead) => setFlow({ step: "code", email: flow.verified.email, issued: {}, dead }),
+          })}
       </div>
     </RecoveryFrame>
   );

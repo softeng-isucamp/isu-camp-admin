@@ -7,47 +7,11 @@ vi.hoisted(() => vi.stubEnv("VITE_API_MODE", "real"));
 
 import { AuthProvider } from "./AuthContext";
 import { ForgotPassword } from "./ForgotPassword";
+import { expired, exhausted, issued, jsonResponse, mockBackend, settle, wrongCode } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
 const REQUEST = "/api/recovery/request";
 const VERIFY = "/api/recovery/verify";
-
-const jsonResponse = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-
-type Reply = Response | Promise<Response>;
-
-const mockBackend = (queues: Partial<Record<string, Reply[]>>) => {
-  const sent: Record<string, unknown[]> = {};
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/api/me")) return jsonResponse({ authenticated: false });
-    const path = Object.keys(queues).find((candidate) => url.endsWith(candidate));
-    if (!path) throw new Error(`Unexpected request to ${url}`);
-    (sent[path] ??= []).push(JSON.parse(String(init?.body)));
-    const next = queues[path]?.shift();
-    if (!next) throw new Error(`No reply queued for ${path}`);
-    return next;
-  });
-  return { sent };
-};
-
-const issued = (timing: { expiresInSeconds?: number; resendAfterSeconds?: number } = {}) =>
-  jsonResponse({ success: true, message: "If an account exists, a code has been sent.", ...timing });
-const wrongCode = (attemptsRemaining: number) =>
-  jsonResponse({ success: false, code: "invalid_code", message: "Invalid verification code", attemptsRemaining }, 400);
-const exhausted = () =>
-  jsonResponse({ success: false, code: "code_exhausted", message: "Too many incorrect codes.", attemptsRemaining: 0 }, 400);
-const expired = () => jsonResponse({ success: false, code: "code_expired", message: "Code expired." }, 400);
-
-const settle = async () => {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-};
 
 const tickSeconds = async (seconds: number) => {
   for (let i = 0; i < seconds; i += 1) {
@@ -366,7 +330,7 @@ describe("code step: assistive technology", () => {
     expect(heading).toHaveAccessibleDescription(/we sent a 6-digit verification code to it\.$/);
   });
 
-  it("does not steal focus when the page first loads", () => {
+  it("focuses the email step heading when the page first loads", () => {
     mockBackend({});
     render(
       <MemoryRouter initialEntries={["/forgot-password"]}>
@@ -378,7 +342,7 @@ describe("code step: assistive technology", () => {
       </MemoryRouter>,
     );
 
-    expect(document.body).toHaveFocus();
+    expect(screen.getByRole("heading", { name: /reset your password/i })).toHaveFocus();
   });
 
   it("announces the attempts left and the code-sent confirmation in live regions", async () => {

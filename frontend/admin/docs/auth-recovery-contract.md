@@ -13,7 +13,8 @@ You do not need to read the UI code. Anything the frontend does with a response 
 ## Conventions
 
 - All requests are `POST` with `Content-Type: application/json` and `credentials: include` (session cookie). CORS must keep allowing credentials for the frontend origin.
-- **Every response the frontend reads must have a JSON object body, including `429`.** The frontend parses the body before looking at the status. A body that is not valid JSON (empty `204`, HTML error page) is reported as "Unable to connect to the backend." and a `429` without a JSON body is not treated as a rate limit.
+- Success (`2xx`) responses must have a JSON object body. A success whose body is empty or not JSON (empty `204`, HTML page) is reported as "Unable to connect to the backend."
+- Error responses may have any body. A `429` is recognised from the status and `Retry-After` alone; an empty or HTML body is fine. Any other non-2xx without a JSON object body is also reported as "Unable to connect to the backend." (the admin does not see the body), so send JSON with `message` and `code` where this contract asks for them.
 - Error bodies use `message` (shown to the admin in some cases, see below) and an optional machine-readable `code`. This follows the existing `password_confirmation_required` convention.
 
 ### Error response shape the frontend parses
@@ -35,7 +36,7 @@ The frontend branches on `code`, not on the HTTP status, for recovery errors. Us
 Any `429` from login or a recovery endpoint is treated as a rate limit, whatever the body.
 
 - Send `Retry-After: <seconds>` as a positive integer. The frontend parses it with `parseInt`. It does not parse HTTP-date values. A missing, non-numeric or zero/negative header becomes **60 seconds**.
-- Include `message` in the JSON body. It is shown to the admin; if absent the frontend writes "Too many requests. Please wait N seconds."
+- `message` in a JSON body is optional. It is shown to the admin; if absent (or the body is not JSON) the frontend writes "Too many requests. Please wait N seconds."
 - The UI disables the triggering button and counts down: login (inputs locked), "Send code", "Verify", "Resend code", and the new-password submit. The typed code is kept after a `429` on verify.
 - Whether a rejected (`429`) request still counts as an attempt is the backend's choice.
 
@@ -141,7 +142,7 @@ Success `200`: `{ "username": "admin_justine" }` (same rule as verify). The fron
 
 Failures, `400`:
 
-- `invalid_code`, `code_exhausted`, `code_expired`: the code is checked again with the same rules and the same attempt budget as `/verify`. On this screen the frontend **does not** use the fixed texts above or restart the flow: it shows the server `message` under the form, so make it readable ("This code has expired. Request a new one."). The admin has to start over from login.
+- `invalid_code`, `code_exhausted`, `code_expired`: the code is checked again with the same rules and the same attempt budget as `/verify`. `code_exhausted` and `code_expired` mean the code is dead on the server, so the frontend sends the admin back to the code step in its exhausted or expired state (the same fixed texts as under `/verify`; the server `message` is not shown), with the email kept and "Resend code" available at once. The admin requests a new code and verifies it again before choosing a password. `invalid_code` here (a code that passed `/verify` and then went wrong) is a generic failure: the server `message` is shown under the form and the admin stays on the step.
 - `weak_password`: `{ "code": "weak_password", "message": "Password must include a number." }`. `message` is shown verbatim. `attemptsRemaining` is ignored. A weak password should **not** spend the code (the fixture does not count it), so the admin can fix it and resubmit.
 - The code check should run before the password check, as the fixture does.
 

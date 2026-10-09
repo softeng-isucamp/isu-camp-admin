@@ -182,6 +182,7 @@ describe("fixture account recovery", () => {
     ["UPPERCASE1!", "a lowercase letter"],
     ["NoNumbers!!", "a number"],
     ["NoSymbols123", "a symbol"],
+    ["Ab1😀😀😀", "at least 8 characters"], // 6 code points, 9 UTF-16 units
   ])("rejects %s as weak_password without spending the code", async (weak, reason) => {
     await adapter.auth.requestRecovery(EMAIL, "password");
 

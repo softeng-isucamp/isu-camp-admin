@@ -8,7 +8,7 @@ export function ForgotPassword() {
       purpose="password"
       title="Reset your password"
       description="Enter your admin email to receive a six-digit code."
-      renderFinal={(verified) => <NewPasswordStep verified={verified} />}
+      renderFinal={(verified, controls) => <NewPasswordStep verified={verified} onCodeDied={controls.codeDied} />}
     />
   );
 }

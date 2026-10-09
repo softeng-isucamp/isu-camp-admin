@@ -726,6 +726,20 @@ function checkRateLimit(response: Response, message?: string): void {
   }
 }
 
+/** The response body as an object, or `null` when it is empty, not JSON or not an object (an HTML error page, a bare `429`). */
+async function readJsonObject(response: Response): Promise<Record<string, any> | null> {
+  try {
+    const data = await response.json();
+    return data && typeof data === "object" && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `attemptsRemaining` is kept only when it is a non-negative integer; the UI never guesses a count. */
+const parseAttemptsRemaining = (data: Record<string, any>): number | undefined =>
+  Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0 ? data.attemptsRemaining : undefined;
+
 const recoveryErrorKinds: ReadonlySet<string> = new Set(["invalid_code", "code_exhausted", "code_expired", "weak_password"]);
 
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0;
@@ -738,20 +752,14 @@ async function recoveryPost(path: string, body: Record<string, unknown>): Promis
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  let data: Record<string, any>;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("Unable to connect to the backend.");
-  }
-  checkRateLimit(response, data.message);
+  const data = await readJsonObject(response);
+  // A rate limit needs only the status and Retry-After, so it must not depend on the body.
+  checkRateLimit(response, data?.message);
+  if (!data) throw new Error("Unable to connect to the backend.");
   if (!response.ok) {
     const message = data.message || "Account recovery failed.";
     if (typeof data.code === "string" && recoveryErrorKinds.has(data.code)) {
-      const attemptsRemaining = Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0
-        ? data.attemptsRemaining as number
-        : undefined;
-      throw new AuthError(data.code as AuthErrorKind, message, attemptsRemaining);
+      throw new AuthError(data.code as AuthErrorKind, message, parseAttemptsRemaining(data));
     }
     throw new Error(message);
   }
@@ -878,26 +886,21 @@ export const services: Services = {
         }
       );
 
-      let data: any;
+      const data = await readJsonObject(response);
 
-      try {
-        data = await response.json();
-      } catch {
+      checkRateLimit(response, data?.message);
+
+      if (!data) {
         throw new Error(
           "Unable to connect to the backend."
         );
       }
 
-      checkRateLimit(response, data.message);
-
       if (response.status === 401) {
-        const attemptsRemaining = Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0
-          ? data.attemptsRemaining as number
-          : undefined;
         throw new AuthError(
           "invalid_credentials",
           data.message || "Invalid username or password",
-          attemptsRemaining
+          parseAttemptsRemaining(data)
         );
       }
 

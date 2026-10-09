@@ -11,6 +11,9 @@ import { useCountdown } from "./useCountdown";
 /** Where the admin is in entering a code. `exhausted` and `expired` mean the code is dead and only a resend helps. */
 export type CodeStepState = "entering" | "verifying" | "exhausted" | "expired";
 
+/** The two dead states, which a code step can also open in. */
+export type DeadCode = "exhausted" | "expired";
+
 export interface VerifiedCode {
   code: string;
   username: string;
@@ -24,20 +27,24 @@ interface RecoveryCodeStepProps {
   onVerified: (verified: VerifiedCode) => void;
   /** Goes back to the email step, keeping the address for editing. */
   onChangeEmail: () => void;
+  /** Open already dead, for an admin sent back because a later step found the code used up or expired. */
+  dead?: DeadCode;
 }
 
 const CODE_INCOMPLETE = "Enter the 6-digit verification code.";
 const EXHAUSTED_MESSAGE = "You have used all your attempts. Request a new code to continue.";
 const EXPIRED_MESSAGE = "This code has expired. Request a new code to continue.";
 
+const deadMessage = (dead: DeadCode) => (dead === "exhausted" ? EXHAUSTED_MESSAGE : EXPIRED_MESSAGE);
+
 const formatRemaining = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
 /** Collects the 6-digit code, submits it once when complete, and offers a manual Verify and Resend. */
-export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail }: RecoveryCodeStepProps) {
+export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead }: RecoveryCodeStepProps) {
   const sentId = useId();
-  const [state, setState] = useState<CodeStepState>("entering");
+  const [state, setState] = useState<CodeStepState>(initialDead ?? "entering");
   const [code, setCode] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialDead ? deadMessage(initialDead) : "");
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
   const [resendMessage, setResendMessage] = useState("");
   const [resending, setResending] = useState(false);
@@ -52,10 +59,10 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const expiry = useCountdown(issued.expiresInSeconds ?? 0);
 
   // The code is dead: stop accepting digits and leave Resend as the way forward.
-  const retire = (dead: "exhausted" | "expired") => {
+  const retire = (dead: DeadCode) => {
     otp.current?.clear();
     setState(dead);
-    setError(dead === "exhausted" ? EXHAUSTED_MESSAGE : EXPIRED_MESSAGE);
+    setError(deadMessage(dead));
   };
 
   useEffect(() => {
@@ -163,9 +170,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         {!dead && (
           <small className="recovery-resend">
             <span>Didn't receive code?</span>
-            <button type="button" onClick={() => void resend()} disabled={resendBlocked}>
+            <Button type="button" variant="subtle" pill={false} onClick={() => void resend()} loading={resending} disabled={resendBlocked}>
               {resendLabel}
-            </button>
+            </Button>
           </small>
         )}
         <div className="recovery-confirmation" role="status">
@@ -178,7 +185,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </div>
       )}
       {dead ? (
-        <Button type="button" className="recovery-primary recovery-submit" onClick={() => void resend()} disabled={resendBlocked}>
+        <Button type="button" className="recovery-primary recovery-submit" onClick={() => void resend()} loading={resending} disabled={resendBlocked}>
           {resending ? "Sending…" : resendLabel}
         </Button>
       ) : (
