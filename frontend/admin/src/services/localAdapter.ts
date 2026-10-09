@@ -2,9 +2,12 @@ import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
 import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
+import { AuthError, RateLimitError } from "./errors";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
+const LOGIN_ATTEMPT_LIMIT = 5;
+const LOGIN_LOCKOUT_SECONDS = 60;
 
 type LocalMapData = {
   locations: Location[];
@@ -31,13 +34,28 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   let account: AccountProfile = { id: "local-admin", username: session?.username ?? LOCAL_ADMIN.username, email: session?.email ?? "justine@example.com", role: "superadmin" };
   let accountPassword: string = LOCAL_ADMIN.password;
   let resetUsername: string | null = null;
+  let failedLogins = 0;
+  let lockedUntil = 0;
 
   return {
     auth: {
       login: async (username: string, password: string): Promise<Session> => {
-        if (username.trim() !== account.username || password !== accountPassword) {
-          throw new Error("Invalid username or password");
+        const lockedForMs = lockedUntil - Date.now();
+        if (lockedForMs > 0) throw new RateLimitError(Math.ceil(lockedForMs / 1000));
+        if (lockedUntil) {
+          lockedUntil = 0;
+          failedLogins = 0;
         }
+        if (username.trim() !== account.username || password !== accountPassword) {
+          // Counted for unknown usernames too, so the count never hints at which exist.
+          failedLogins += 1;
+          if (failedLogins >= LOGIN_ATTEMPT_LIMIT) {
+            lockedUntil = Date.now() + LOGIN_LOCKOUT_SECONDS * 1000;
+            throw new RateLimitError(LOGIN_LOCKOUT_SECONDS);
+          }
+          throw new AuthError("invalid_credentials", "Invalid username or password", LOGIN_ATTEMPT_LIMIT - failedLogins);
+        }
+        failedLogins = 0;
         session = { ...account };
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
         return session;

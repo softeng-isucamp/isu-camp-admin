@@ -15,3 +15,34 @@ export class PasswordConfirmationRequiredError extends Error {
     this.name = "PasswordConfirmationRequiredError";
   }
 }
+
+/** The server asked the caller to wait; `retryAfterSeconds` drives the countdown. */
+export class RateLimitError extends Error {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number, message?: string) {
+    super(message ?? `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
+    this.name = "RateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * Why an auth request failed, for pages to branch on instead of parsing text.
+ * Rate limits are not a kind: they stay `RateLimitError`.
+ */
+export type AuthErrorKind = "invalid_credentials";
+
+/** A failed sign-in or recovery step, with the attempts the server says remain. */
+export class AuthError extends Error {
+  readonly kind: AuthErrorKind;
+  /** Absent when the backend does not send a count; never guess one. */
+  readonly attemptsRemaining?: number;
+
+  constructor(kind: AuthErrorKind, message: string, attemptsRemaining?: number) {
+    super(message);
+    this.name = "AuthError";
+    this.kind = kind;
+    if (attemptsRemaining !== undefined) this.attemptsRemaining = attemptsRemaining;
+  }
+}

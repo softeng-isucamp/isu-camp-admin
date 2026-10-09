@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { attemptsLeftText, isUrgentAttempts } from "./attemptsLeft";
+import { CapsLockWarning, useCapsLock } from "./capsLock";
+import { AuthError } from "../../services/errors";
 import { Button, Card, Field } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import {
@@ -22,6 +25,8 @@ export function Login() {
   const [error, setError] = useState("");
   const [loginCountdown, setLoginCountdown] = useState(0);
   const [loginPending, setLoginPending] = useState(false);
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
+  const capsLock = useCapsLock();
   const loginInFlight = useRef(false);
   useEffect(() => {
     if (loginCountdown <= 0) return;
@@ -35,9 +40,12 @@ export function Login() {
   } = useForm({
     defaultValues: { username: "", password: "" },
   });
+  const passwordField = register("password");
+  const lockedOut = loginCountdown > 0;
   const submit = async (values: { username: string; password: string }) => {
-    if (loginInFlight.current || loginCountdown > 0) return;
+    if (loginInFlight.current || lockedOut) return;
     setError("");
+    setAttemptsRemaining(undefined);
     const parsed = loginSchema.safeParse(values);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Check your credentials.");
@@ -49,7 +57,12 @@ export function Login() {
       await login(values.username, values.password);
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in.");
+      if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
+        setError(`Incorrect username or password. ${attemptsLeftText(err.attemptsRemaining)}`);
+        setAttemptsRemaining(err.attemptsRemaining);
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to sign in.");
+      }
       if (err instanceof RateLimitError) setLoginCountdown(err.retryAfterSeconds);
     } finally {
       loginInFlight.current = false;
@@ -74,6 +87,7 @@ export function Login() {
               <img src={userIcon} alt="" />
               <input
                 {...register("username")}
+                disabled={lockedOut}
                 autoComplete="username"
                 placeholder="Enter your username"
               />
@@ -84,7 +98,14 @@ export function Login() {
             <div className="password">
               <img className="password-icon" src={lockIcon} alt="" />
               <input
-                {...register("password")}
+                {...passwordField}
+                onBlur={(event) => {
+                  void passwordField.onBlur(event);
+                  capsLock.onBlur();
+                }}
+                onKeyDown={capsLock.onKeyDown}
+                onKeyUp={capsLock.onKeyUp}
+                disabled={lockedOut}
                 type={show ? "text" : "password"}
                 autoComplete="current-password"
                 placeholder="Enter your password"
@@ -99,15 +120,19 @@ export function Login() {
             </div>
           </label>
           <div className="forgot">
+            <CapsLockWarning visible={capsLock.capsLockOn && !lockedOut} />
             <Link to="/reset-password">Forgot password?</Link>
           </div>
           {(error || errors.username || errors.password) && (
-            <div className="error" role="alert">
+            <div
+              className={attemptsRemaining !== undefined && isUrgentAttempts(attemptsRemaining) ? "error error-urgent" : "error"}
+              role="alert"
+            >
               {error || errors.username?.message || errors.password?.message}
             </div>
           )}
-          <Button type="submit" loading={loginPending} disabled={loginCountdown > 0}>
-            {loginPending ? "Logging in…" : loginCountdown > 0 ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
+          <Button type="submit" loading={loginPending} disabled={lockedOut}>
+            {loginPending ? "Logging in…" : lockedOut ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
           </Button>
         </form>
       </Card>
