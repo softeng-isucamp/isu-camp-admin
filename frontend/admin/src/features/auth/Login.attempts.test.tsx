@@ -33,8 +33,8 @@ const renderLogin = () =>
   );
 
 const attemptSignIn = async () => {
-  fireEvent.change(screen.getByPlaceholderText("Enter your username"), { target: { value: "admin01" } });
-  fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "wrong-pass" } });
+  fireEvent.change(screen.getByLabelText(/^username$/i), { target: { value: "admin01" } });
+  fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "wrong-pass" } });
   fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
   await act(async () => {
     await Promise.resolve();
@@ -102,8 +102,8 @@ describe("login attempts left", () => {
     renderLogin();
     await attemptSignIn();
 
-    expect(screen.getByPlaceholderText("Enter your username")).toBeDisabled();
-    expect(screen.getByPlaceholderText("Enter your password")).toBeDisabled();
+    expect(screen.getByLabelText(/^username$/i)).toBeDisabled();
+    expect(screen.getByLabelText(/^password$/i)).toBeDisabled();
     expect(screen.getByRole("button", { name: /login in 2s/i })).toBeDisabled();
 
     // The countdown re-arms its timer on every render, so tick one second at a time.
@@ -112,8 +112,8 @@ describe("login attempts left", () => {
         await vi.advanceTimersByTimeAsync(1000);
       });
     }
-    expect(screen.getByPlaceholderText("Enter your username")).toBeEnabled();
-    expect(screen.getByPlaceholderText("Enter your password")).toBeEnabled();
+    expect(screen.getByLabelText(/^username$/i)).toBeEnabled();
+    expect(screen.getByLabelText(/^password$/i)).toBeEnabled();
     expect(screen.getByRole("button", { name: /^login$/i })).toBeEnabled();
   });
 
@@ -132,7 +132,7 @@ describe("Caps Lock warning on login", () => {
   it("warns while the password field is focused and Caps Lock is on", () => {
     mockBackend();
     renderLogin();
-    const password = screen.getByPlaceholderText("Enter your password");
+    const password = screen.getByLabelText(/^password$/i);
     expect(screen.queryByText(/caps lock is on/i)).toBeNull();
 
     fireEvent.keyDown(password, { key: "A", modifierCapsLock: true });
@@ -145,7 +145,7 @@ describe("Caps Lock warning on login", () => {
   it("hides the warning when the password field loses focus", () => {
     mockBackend();
     renderLogin();
-    const password = screen.getByPlaceholderText("Enter your password");
+    const password = screen.getByLabelText(/^password$/i);
     fireEvent.keyDown(password, { key: "A", modifierCapsLock: true });
     expect(screen.getByText(/caps lock is on/i)).toBeInTheDocument();
 
@@ -156,17 +156,29 @@ describe("Caps Lock warning on login", () => {
   it("does not warn for Caps Lock typed in the username field", () => {
     mockBackend();
     renderLogin();
-    fireEvent.keyDown(screen.getByPlaceholderText("Enter your username"), { key: "A", modifierCapsLock: true });
+    fireEvent.keyDown(screen.getByLabelText(/^username$/i), { key: "A", modifierCapsLock: true });
     expect(screen.queryByText(/caps lock is on/i)).toBeNull();
   });
 });
 
 describe("recovery link placement", () => {
-  it("places 'Forgot password?' directly after the password field", () => {
+  it("places 'Forgot password?' between the password field and the submit button", () => {
     mockBackend();
     renderLogin();
-    const passwordField = screen.getByPlaceholderText("Enter your password").closest("label");
+    const password = screen.getByLabelText(/^password$/i);
     const link = screen.getByRole("link", { name: /forgot password/i });
-    expect(passwordField?.nextElementSibling).toContainElement(link);
+    const submit = screen.getByRole("button", { name: /^login$/i });
+
+    expect(password.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(link.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const textboxesBetween = screen
+      .queryAllByRole("textbox")
+      .filter(
+        (box) =>
+          password.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING &&
+          box.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    expect(textboxesBetween).toHaveLength(0);
   });
 });
