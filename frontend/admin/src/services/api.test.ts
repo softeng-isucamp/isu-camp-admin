@@ -1195,6 +1195,41 @@ describe("dashboard analytics", () => {
   it("rejects a malformed analytics payload", () => {
     expect(() => normalizeBackendDashboardAnalytics({ range: "week" })).toThrow("malformed dashboard analytics");
   });
+
+  it("requests the selected range from the real backend and unwraps the envelope", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    // The shape app/services/dashboard_analytics.py returns, including the
+    // zeroed Visit figures it reports until an arrival event is recorded.
+    const served = {
+      range: "month",
+      current: { activeUsers: 5, searches: 59, visits: 0, arrivalRate: 0 },
+      previous: { activeUsers: 0, searches: 0, visits: 0, arrivalRate: 0 },
+      timeline: [{ date: "2026-09-11", searches: 3, visits: 0 }],
+      visitsByAccountType: { student: 0, teacher: 0, visitor: 0 },
+      visitsByDestinationType: { Building: 0, Room: 0, Laboratory: 0, Office: 0, Restroom: 0 },
+      registrations: [{ date: "2026-09-11", student: 1, teacher: 0, visitor: 0 }],
+      topDestinations: [{ rank: "1", locationId: "Building:1", name: "Admin Building", context: "Building", searches: 16, visits: 0 }],
+      completeness: [
+        { key: "photo", label: "Photo", complete: 15, total: 76 },
+        { key: "description", label: "Description", complete: 76, total: 76 },
+        { key: "keywords", label: "Search keywords", complete: 34, total: 76 },
+        { key: "mapPin", label: "Map pin", complete: 56, total: 76 },
+      ],
+      completenessTotal: 76,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: served }), { status: 200 }),
+    );
+
+    await expect(httpServices.dashboard.analytics("month")).resolves.toEqual(served);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/dashboard/analytics?range=month",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    vi.unstubAllEnvs();
+  });
 });
 
 

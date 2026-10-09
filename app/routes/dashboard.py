@@ -10,6 +10,7 @@ from model.building import Building
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
+from services.dashboard_analytics import RANGE_DAYS, summarize_dashboard_analytics
 from services.search_analytics import summarize_user_searches
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
@@ -96,3 +97,27 @@ def dashboard_summary():
     except Exception:
         logger.exception("Failed to load dashboard summary")
         return jsonify({"success": False, "message": "Failed to load dashboard summary."}), 500
+
+
+@dashboard_bp.get("/analytics")
+def dashboard_analytics():
+    """Serves the Analytics tab: Searches, Visits, registrations, completeness.
+
+    Shares the range vocabulary with the summary above, and reports a Visit
+    count of zero everywhere because no arrival event is recorded yet - see
+    ``services.dashboard_analytics``.
+    """
+
+    _, error = admin_required()
+    if error:
+        return error
+
+    range_key = request.args.get("range", "week")
+    if range_key not in RANGE_DAYS:
+        return jsonify({"success": False, "message": "Invalid range."}), 400
+
+    try:
+        return jsonify({"success": True, "data": summarize_dashboard_analytics(range_key)}), 200
+    except Exception:
+        logger.exception("Failed to load dashboard analytics")
+        return jsonify({"success": False, "message": "Failed to load dashboard analytics."}), 500

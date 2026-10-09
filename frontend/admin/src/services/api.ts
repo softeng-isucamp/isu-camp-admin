@@ -156,7 +156,12 @@ const dashboardAnalyticsSchema = z.object({
   completenessTotal: nonNegInt,
 });
 
-/** Assumed contract for `GET /api/dashboard/analytics`; the backend does not serve it yet. */
+/**
+ * Contract for `GET /api/dashboard/analytics`, served by
+ * `app/services/dashboard_analytics.py`. Visit figures arrive as zeros until the
+ * User App sends an arrival event, so an empty Visits chart is the backend
+ * reporting honestly rather than a fetch that failed.
+ */
 export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnalytics => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const parsed = dashboardAnalyticsSchema.safeParse(value);
