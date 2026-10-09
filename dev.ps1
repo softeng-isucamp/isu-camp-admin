@@ -54,7 +54,7 @@ if ($Mode -eq "--fixture") {
     Write-Host "[MODE] Fixture: local OSM demo data; Flask and database are not used."
     Write-Host "[LOGIN] Fixture only: admin_justine / password123"
     Set-Location (Join-Path $ProjectRoot "frontend\admin")
-    npm run dev -- --host localhost --port 5173 --strictPort
+    npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     exit $LASTEXITCODE
 }
 
@@ -75,11 +75,11 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "[1/2] Starting Flask Backend on http://127.0.0.1:5000..." -ForegroundColor Green
 $BackendProcess = Start-Process -FilePath $VenvPython -ArgumentList "app\services\database.py" -WorkingDirectory $ProjectRoot -PassThru
 
-Write-Host "[2/2] Starting Admin Frontend on http://localhost:5173..." -ForegroundColor Green
+Write-Host "[2/2] Starting Admin Frontend on http://127.0.0.1:5173..." -ForegroundColor Green
 Set-Location (Join-Path $ProjectRoot "frontend\admin")
 
 try {
-    npm run dev -- --host localhost --port 5173 --strictPort
+    npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     $FrontendExitCode = $LASTEXITCODE
 } finally {
     Write-Host "Stopping Flask Backend..." -ForegroundColor Yellow

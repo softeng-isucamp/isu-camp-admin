@@ -55,7 +55,7 @@ If you prefer isolated logs or independent control:
    npm run dev
    ```
 
-Open the frontend at `http://localhost:5173`. The backend allows this origin (and `http://localhost:5174`); using `127.0.0.1` for the frontend or an arbitrary worktree port requires updating backend CORS. The unified runner fixes port 5173 and fails if it is occupied; stop your own previous server or choose a separately configured origin.
+Open the frontend at `http://127.0.0.1:5173`, which is where the runners serve it. Use the same spelling as the backend address, not `localhost`: see [why the frontend and backend hosts must match](#why-the-frontend-and-backend-hosts-must-match). The unified runner fixes port 5173 and fails if it is occupied; stop your own previous server or choose a separately configured origin.
 
 ### Fixture versus real backend
 
@@ -68,7 +68,15 @@ The runners print the selected mode and login guidance. Fixture credentials appl
 
 Real mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=false`, `VITE_API_MODE=real`, and `VITE_MAP_FIXTURE=none`. Its API address defaults to `http://127.0.0.1:5000`; set `VITE_API_BASE_URL` in the shell before running the script to override it. Fixture mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=true`, `VITE_API_MODE=local`, and `VITE_MAP_FIXTURE=osm`. These process variables override Vite's local `.env` settings. Setting only `VITE_API_MODE=local` does not enable the fixture adapter.
 
-The backend allows both loopback spellings as browser origins - `http://localhost:5173`/`:5174` and `http://127.0.0.1:5173`/`:5174` - so the frontend works whichever one the browser is pointed at. They are distinct origins to a browser even though they are the same machine; a frontend served from any other host or port is refused at preflight, which the console reports as a CORS policy error. The allowlist is `ALLOWED_ORIGINS` in [app/services/database.py](app/services/database.py), covered by `app/tests/cors.py`.
+### Why the frontend and backend hosts must match
+
+`localhost` and `127.0.0.1` are the same machine but two different hosts to a browser, and that distinction bites twice.
+
+**CORS**, which is the easy half: `ALLOWED_ORIGINS` in [app/services/database.py](app/services/database.py) allows both spellings on ports 5173 and 5174, so a preflight succeeds either way. Any other host or port is refused, which the console reports as a CORS policy error. Covered by `app/tests/cors.py`.
+
+**The session cookie**, which is the half that looks like something else entirely. Flask does not set `SameSite` on the session cookie, so browsers treat it as `SameSite=Lax` and never attach it to a cross-site request. With the page on `http://localhost:5173` and the API on `http://127.0.0.1:5000`, every API call is cross-site: sign-in appears to succeed, the cookie is dropped, and the next request comes back `401 Authentication required`. The dashboard then reads "Unable to load the dashboard. Authentication required", which looks like an auth bug and is really a cookie that was never sent. `credentials: "include"` cannot override it, and `SameSite=None` is not an option either, because browsers only accept it with `Secure`, which needs HTTPS.
+
+So the two must agree on one spelling. The backend binds `127.0.0.1` (Flask listens on IPv4 only, and `localhost` resolves to `::1` first on some machines), so `127.0.0.1` is the one both sides use: the runners serve the frontend with `--host 127.0.0.1` and point `VITE_API_BASE_URL` at `http://127.0.0.1:5000`. If you start Vite yourself, pass the same flag - `npm run dev` alone binds `localhost` and the dashboard will report an authentication error.
 
 For frontend-only commands and verification, see the [frontend README](frontend/admin/README.md#development). For feature ownership and identity relationships, see its [code navigation map](frontend/admin/README.md#code-navigation).
 
