@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
@@ -34,6 +34,7 @@ const formatRemaining = (seconds: number) => `${Math.floor(seconds / 60)}:${Stri
 
 /** Collects the 6-digit code, submits it once when complete, and offers a manual Verify and Resend. */
 export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail }: RecoveryCodeStepProps) {
+  const sentId = useId();
   const [state, setState] = useState<CodeStepState>("entering");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -115,6 +116,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       const next = await services.auth.requestRecovery(email, purpose);
       otp.current?.clear();
       rejected.current.clear();
+      // Expiry may have retired the code while this request was pending; the new code supersedes that.
+      setError("");
       setState("entering");
       setTimed(next.expiresInSeconds !== undefined);
       expiry.start(next.expiresInSeconds ?? 0);
@@ -137,9 +140,12 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
 
   return (
     <>
-      <h2>Enter verification code</h2>
+      {/* The heading takes focus on arrival, so its description carries the code-sent confirmation to screen readers. */}
+      <h2 aria-describedby={sentId}>Enter verification code</h2>
       <p className="muted recovery-copy">
-        If an account exists for <strong>{email}</strong>, we sent a 6-digit verification code to it.{" "}
+        <span id={sentId}>
+          If an account exists for <strong>{email}</strong>, we sent a 6-digit verification code to it.
+        </span>{" "}
         <button type="button" className="recovery-link" onClick={onChangeEmail} disabled={verifying || resending}>
           Change email
         </button>

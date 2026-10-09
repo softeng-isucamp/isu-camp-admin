@@ -254,6 +254,29 @@ describe("code step: resend recovery", () => {
     expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
   });
 
+  it("drops the expired message when the code runs out while a resend is pending and the resend succeeds", async () => {
+    useCountdownTimers();
+    let release: (reply: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 3, resendAfterSeconds: 1 }), pending] });
+    await openCodeStep();
+    await tickSeconds(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await tickSeconds(2);
+    expect(screen.getByRole("alert")).toHaveTextContent("This code has expired");
+
+    release(issued({ expiresInSeconds: 600, resendAfterSeconds: 1 }));
+    await settle();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("A new code has been sent");
+    expect(box(1)).toBeEnabled();
+    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+  });
+
   it("keeps the dead state and shows the failure when the resend itself fails", async () => {
     useCountdownTimers();
     mockBackend({
@@ -331,6 +354,16 @@ describe("code step: assistive technology", () => {
     typeCode("000000");
     await settle();
     expect(screen.getByRole("heading", { name: /create a new password/i })).toHaveFocus();
+  });
+
+  it("describes the focused heading with the code-sent confirmation", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    useCountdownTimers();
+    await openCodeStep();
+
+    const heading = screen.getByRole("heading", { name: /verification code/i });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAccessibleDescription(/we sent a 6-digit verification code to it\.$/);
   });
 
   it("does not steal focus when the page first loads", () => {
