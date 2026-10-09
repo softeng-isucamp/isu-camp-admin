@@ -404,7 +404,7 @@ describe("forgot-password: resend", () => {
       { email: EMAIL, purpose: "password" },
       { email: EMAIL, purpose: "password" },
     ]);
-    expect(screen.getByText("A new 6-digit verification code has been sent.")).toBeInTheDocument();
+    expect(screen.getByText("A new code has been sent.")).toBeInTheDocument();
     expectBoxes("");
     expect(screen.getByRole("button", { name: "Resend code in 3s" })).toBeDisabled();
   });

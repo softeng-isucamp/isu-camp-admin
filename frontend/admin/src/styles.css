@@ -3651,3 +3651,26 @@ td small {
   justify-content: space-between;
   gap: 16px;
 }
+.recovery-modal h2:focus {
+  outline: none;
+}
+.recovery-modal .recovery-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0c7441;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.recovery-modal .recovery-link:disabled {
+  color: #999;
+  cursor: default;
+}
+.recovery-modal .recovery-timer {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #666e69;
+}

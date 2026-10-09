@@ -200,3 +200,72 @@ describe("fixture account recovery", () => {
     expect(await failure(adapter.auth.resetPassword(EMAIL, TEST_CODE, "NewPassw0rd!"))).toMatchObject({ kind: "code_expired" });
   });
 });
+
+describe("fixture code lifetime", () => {
+  const EMAIL = "admin@isu.edu.ph";
+  const TEST_CODE = "000000";
+  let adapter: ReturnType<typeof createLocalAdapter>;
+
+  const failure = (promise: Promise<unknown>) =>
+    promise.then(
+      () => { throw new Error("expected the recovery step to fail"); },
+      (error: unknown) => error,
+    );
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    adapter = createLocalAdapter({ locations: [] }, null);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps an expired code expired for wrong and right guesses alike, without counting attempts", async () => {
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    vi.advanceTimersByTime(600_000);
+
+    for (const code of ["111111", TEST_CODE, "111111"]) {
+      expect(await failure(adapter.auth.verifyRecovery(EMAIL, "password", code))).toMatchObject({ kind: "code_expired" });
+    }
+  });
+
+  it("starts a full ten minutes and five attempts again with each new request", async () => {
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    vi.advanceTimersByTime(600_000);
+    expect(await failure(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE))).toMatchObject({ kind: "code_expired" });
+
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    vi.advanceTimersByTime(599_000);
+    expect(await failure(adapter.auth.verifyRecovery(EMAIL, "password", "111111"))).toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });
+    await expect(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE)).resolves.toMatchObject({ username: "admin_justine" });
+  });
+
+  it("restarts the lifetime of a code that was already exhausted", async () => {
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    for (let i = 0; i < 5; i += 1) await failure(adapter.auth.verifyRecovery(EMAIL, "password", "111111"));
+    vi.advanceTimersByTime(300_000);
+
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    vi.advanceTimersByTime(599_000);
+    await expect(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE)).resolves.toMatchObject({ username: "admin_justine" });
+  });
+
+  it("refuses a password reset on an exhausted code even for the right code", async () => {
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    for (let i = 0; i < 5; i += 1) await failure(adapter.auth.resetPassword(EMAIL, "111111", "NewPassw0rd!"));
+
+    expect(await failure(adapter.auth.resetPassword(EMAIL, TEST_CODE, "NewPassw0rd!"))).toMatchObject({ kind: "code_exhausted" });
+    await expect(adapter.auth.login("admin_justine", "NewPassw0rd!")).rejects.toBeInstanceOf(AuthError);
+  });
+
+  it("treats an unknown email's code the same way: it expires and is invalidated like a real one", async () => {
+    await adapter.auth.requestRecovery("nobody@example.com", "password");
+    for (let i = 0; i < 5; i += 1) await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", "111111"));
+    expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", "111111"))).toMatchObject({ kind: "code_exhausted" });
+
+    await adapter.auth.requestRecovery("nobody@example.com", "username");
+    vi.advanceTimersByTime(600_000);
+    expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "username", "111111"))).toMatchObject({ kind: "code_expired" });
+  });
+});
