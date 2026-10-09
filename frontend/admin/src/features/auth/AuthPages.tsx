@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { OtpInput, type OtpInputHandle } from "./OtpInput";
 import { Button, Card, Field } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import {
@@ -162,7 +163,8 @@ export function PasswordReset() {
   const [resendCountdown, setResendCountdown] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const submissionInFlight = useRef(false);
-  const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
+  const [code, setCode] = useState("");
+  const otp = useRef<OtpInputHandle>(null);
 
   useEffect(() => {
     if (resendCountdown <= 0) return;
@@ -178,8 +180,7 @@ export function PasswordReset() {
     setSubmitting(true);
     try {
       await services.auth.requestReset(getValues("username"));
-      setDigits(["", "", "", "", "", ""]);
-      setValue("code", "");
+      otp.current?.clear();
       setResendMessage("A new 6-digit verification code has been sent.");
       setResendCountdown(60);
     } catch (err: unknown) {
@@ -191,78 +192,16 @@ export function PasswordReset() {
       setSubmitting(false);
     }
   };
-  const { register, getValues, setValue } = useForm({
+  const { register, getValues } = useForm({
     defaultValues: {
       username: "",
-      code: "",
       password: "",
       confirmPassword: "",
     },
   });
 
-  const handleDigitChange = (index: number, val: string) => {
-    const clean = val.replace(/\D/g, "");
-    if (!clean) {
-      const nextDigits = [...digits];
-      nextDigits[index] = "";
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      return;
-    }
-    const nextDigits = [...digits];
-    if (clean.length > 1) {
-      const chars = clean.slice(0, 6).split("");
-      const startIndex = chars.length === 6 ? 0 : index;
-      for (let i = 0; i < chars.length; i++) {
-        if (startIndex + i < 6) nextDigits[startIndex + i] = chars[i];
-      }
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      const nextInput = document.getElementById(`digit-${Math.min(5, startIndex + chars.length - 1)}`);
-      nextInput?.focus();
-      return;
-    }
-    nextDigits[index] = clean[clean.length - 1];
-    setDigits(nextDigits);
-    setValue("code", nextDigits.join(""));
-    if (index < 5) {
-      const nextInput = document.getElementById(`digit-${index + 1}`);
-      nextInput?.focus();
-    }
-  };
-
-  const handlePaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pasted) return;
-    const nextDigits = [...digits];
-    const startIndex = pasted.length === 6 ? 0 : index;
-    for (let i = 0; i < pasted.length; i++) {
-      if (startIndex + i < 6) {
-        nextDigits[startIndex + i] = pasted[i];
-      }
-    }
-    setDigits(nextDigits);
-    setValue("code", nextDigits.join(""));
-    const focusTarget = Math.min(5, startIndex + pasted.length - 1);
-    const nextInput = document.getElementById(`digit-${focusTarget}`);
-    nextInput?.focus();
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace" && !digits[index] && index > 0) {
-      const nextDigits = [...digits];
-      nextDigits[index - 1] = "";
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      const prevInput = document.getElementById(`digit-${index - 1}`);
-      prevInput?.focus();
-    }
-  };
-
   const submit = async (values: {
     username: string;
-    code: string;
     password: string;
     confirmPassword: string;
   }) => {
@@ -283,20 +222,17 @@ export function PasswordReset() {
         setResendCountdown(60);
         setStep("code");
       } else if (step === "code") {
-        const rawCode = values.code || digits.join("");
-        const parsed = resetSchema.shape.code.safeParse(rawCode);
+        const parsed = resetSchema.shape.code.safeParse(code);
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Enter the 6-digit verification code.",
           );
           return;
         }
-        setValue("code", parsed.data);
         await services.auth.verifyReset(values.username, parsed.data);
         setStep("new");
       } else if (step === "new") {
-        const rawCode = values.code || digits.join("");
-        const parsed = resetPasswordSchema.safeParse({ ...values, code: rawCode });
+        const parsed = resetPasswordSchema.safeParse({ ...values, code });
         if (!parsed.success) {
           setError(
             parsed.error.issues[0]?.message ?? "Check your new password.",
@@ -327,30 +263,30 @@ export function PasswordReset() {
         <Card className="recovery-modal">
           {step === "success" ? (
             <>
-              <div className="recovery-success-icon" style={{ background: "#0c7441", color: "#fff", width: "54px", height: "54px", borderRadius: "999px", display: "grid", placeItems: "center" }}>
+              <div className="recovery-success-icon">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
-              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>Password reset successful</h2>
-              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
+              <h2>Password reset successful</h2>
+              <p className="muted recovery-copy">
                 Your admin password has been updated. You can now sign in using your new password.
               </p>
-              <div style={{ flex: 1, minHeight: "12px" }} />
-              <Button style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%" }} onClick={() => navigate("/login")}>
+              <div className="recovery-spacer" />
+              <Button className="recovery-primary" onClick={() => navigate("/login")}>
                 Return to Login
               </Button>
             </>
           ) : (
             <>
-              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>
+              <h2>
                 {step === "request"
                   ? "Reset your password"
                   : step === "code"
                     ? "Enter verification code"
                     : "Create a new password"}
               </h2>
-              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
+              <p className="muted recovery-copy">
                 {step === "request"
                   ? "Enter your admin username to receive a six-digit code."
                   : step === "code"
@@ -359,86 +295,40 @@ export function PasswordReset() {
               </p>
               {step === "request" && (
                 <label className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN USERNAME</span>
+                  <span className="recovery-label">ADMIN USERNAME</span>
                   <input {...register("username")} type="text" placeholder="admin01" />
                 </label>
               )}
               {step === "code" && (
                 <div className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>VERIFICATION CODE</span>
-                  <div className="segmented-code-container" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", width: "100%", boxSizing: "border-box" }}>
-                    {digits.map((digit, i) => (
-                      <input
-                        key={i}
-                        id={`digit-${i}`}
-                        type="text"
-                        inputMode="numeric"
-                        value={digit}
-                        onChange={(e) => handleDigitChange(i, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(i, e)}
-                        onPaste={(e) => handlePaste(i, e)}
-                        onFocus={(e) => e.target.select()}
-                        className="segmented-code-input"
-                        style={{
-                          width: "100%",
-                          height: "52px",
-                          minWidth: 0,
-                          textAlign: "center",
-                          fontSize: "20px",
-                          fontWeight: "bold",
-                          borderRadius: "14px",
-                          background: "#e1e3e4",
-                          border: "1px solid #d1d5db",
-                          color: "#191c1d",
-                          boxSizing: "border-box",
-                        }}
-                        aria-label={`Digit ${i + 1}`}
-                      />
-                    ))}
-                  </div>
-                  {/* Accessible/Test input */}
-                  <input
-                    {...register("code")}
-                    type="text"
-                    aria-label="VERIFICATION CODE"
-                    style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
-                    onChange={(e) => {
-                      setValue("code", e.target.value);
-                      const chars = e.target.value.slice(0, 6).split("");
-                      const next = ["", "", "", "", "", ""];
-                      for (let i = 0; i < chars.length; i++) next[i] = chars[i];
-                      setDigits(next);
-                    }}
-                  />
-                  <small style={{ color: "#666e69", fontSize: "13px", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="recovery-label">VERIFICATION CODE</span>
+                  <OtpInput ref={otp} onChange={setCode} />
+                  <small className="recovery-resend">
                     <span>Didn't receive code?</span>
                     <button
                       type="button"
                       onClick={handleResendCode}
                       disabled={resendCountdown > 0 || submitting}
-                      style={{ background: "none", border: "none", color: resendCountdown > 0 || submitting ? "#999" : "#0c7441", fontWeight: 600, fontSize: "13px", cursor: resendCountdown > 0 || submitting ? "default" : "pointer", padding: 0 }}
                     >
                       {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : "Resend code"}
                     </button>
                   </small>
                   {resendMessage && (
-                    <div style={{ color: "#0c7441", fontSize: "13px", marginTop: "6px", fontWeight: 500 }}>
-                      {resendMessage}
-                    </div>
+                    <div className="recovery-confirmation">{resendMessage}</div>
                   )}
                 </div>
               )}
               {step === "new" && (
                 <>
                   <label className="field">
-                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>NEW PASSWORD</span>
+                    <span className="recovery-label">NEW PASSWORD</span>
                     <input {...register("password")} type="password" placeholder="Enter new password" />
                   </label>
                   <label className="field">
-                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>CONFIRM NEW PASSWORD</span>
+                    <span className="recovery-label">CONFIRM NEW PASSWORD</span>
                     <input {...register("confirmPassword")} type="password" placeholder="Confirm new password" />
                   </label>
-                  <div style={{ background: "#f0f8f3", borderRadius: "14px", padding: "12px 16px", color: "#0c5430", fontSize: "13px", lineHeight: "19px" }}>
+                  <div className="recovery-hint">
                     Use a strong password with at least one uppercase letter, one lowercase letter, one number, and one symbol.
                   </div>
                 </>
@@ -450,7 +340,7 @@ export function PasswordReset() {
               )}
               <Button
                 type="button"
-                style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%", marginTop: "8px" }}
+                className="recovery-primary recovery-submit"
                 onClick={() => void submit(getValues())}
                 loading={submitting}
               >
@@ -462,7 +352,7 @@ export function PasswordReset() {
                       ? "Continue"
                       : "Reset Password"}
               </Button>
-              <Link className="back-link" to="/login" style={{ color: "#0c7441", textAlign: "center", fontSize: "14px", marginTop: "4px" }}>
+              <Link className="back-link" to="/login">
                 Back to login
               </Link>
             </>

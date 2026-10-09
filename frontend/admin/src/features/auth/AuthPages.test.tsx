@@ -12,6 +12,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const pasteCode = (box: string, text: string) =>
+  fireEvent.paste(screen.getByLabelText(box), {
+    clipboardData: { getData: () => text },
+  });
+
 const mockResetRequest = () => {
   vi.spyOn(services.auth, "requestReset").mockResolvedValue(undefined);
   vi.spyOn(services.auth, "reset").mockResolvedValue(undefined);
@@ -71,18 +76,14 @@ describe("password recovery screen", () => {
     ).toBeInTheDocument();
 
     // Verify initial empty boxes state
-    expect(screen.getByLabelText("Digit 1")).toHaveValue("");
-    expect(screen.getByLabelText("Digit 6")).toHaveValue("");
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveValue("");
+    expect(screen.getByLabelText("Digit 6 of 6")).toHaveValue("");
 
-    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), {
-      target: { value: "123" },
-    });
+    pasteCode("Digit 1 of 6", "123");
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(screen.getByRole("alert")).toHaveTextContent(/6-digit verification code/i);
     await act(async () => { await Promise.resolve(); });
-    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), {
-      target: { value: "000000" },
-    });
+    pasteCode("Digit 1 of 6", "000000");
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     expect(await screen.findByPlaceholderText("Enter new password")).toBeInTheDocument();
@@ -117,22 +118,61 @@ describe("password recovery screen", () => {
       await screen.findByRole("heading", { name: /verification code/i }),
     ).toBeInTheDocument();
 
-    const firstDigitInput = screen.getByLabelText("Digit 1");
-    fireEvent.paste(firstDigitInput, {
-      clipboardData: {
-        getData: () => "123456",
-      },
-    });
+    pasteCode("Digit 1 of 6", "123456");
 
-    expect(screen.getByLabelText("Digit 1")).toHaveValue("1");
-    expect(screen.getByLabelText("Digit 2")).toHaveValue("2");
-    expect(screen.getByLabelText("Digit 3")).toHaveValue("3");
-    expect(screen.getByLabelText("Digit 4")).toHaveValue("4");
-    expect(screen.getByLabelText("Digit 5")).toHaveValue("5");
-    expect(screen.getByLabelText("Digit 6")).toHaveValue("6");
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveValue("1");
+    expect(screen.getByLabelText("Digit 2 of 6")).toHaveValue("2");
+    expect(screen.getByLabelText("Digit 3 of 6")).toHaveValue("3");
+    expect(screen.getByLabelText("Digit 4 of 6")).toHaveValue("4");
+    expect(screen.getByLabelText("Digit 5 of 6")).toHaveValue("5");
+    expect(screen.getByLabelText("Digit 6 of 6")).toHaveValue("6");
 
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(await screen.findByLabelText("NEW PASSWORD")).toBeInTheDocument();
+  });
+
+  it("fills every box from the start when a code with spaces or dashes is pasted into any box", async () => {
+    mockResetRequest();
+    render(<MemoryRouter><PasswordReset /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), { target: { value: "admin01" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await screen.findByRole("heading", { name: /verification code/i });
+
+    const expectCode = (code: string) =>
+      code.split("").forEach((digit, i) =>
+        expect(screen.getByLabelText(`Digit ${i + 1} of 6`)).toHaveValue(digit),
+      );
+
+    pasteCode("Digit 4 of 6", "123 456");
+    expectCode("123456");
+    expect(screen.getByLabelText("Digit 6 of 6")).toHaveFocus();
+
+    pasteCode("Digit 3 of 6", "654-321");
+    expectCode("654321");
+
+    fireEvent.change(screen.getByLabelText("Digit 2 of 6"), { target: { value: "98 76-54" } });
+    expectCode("987654");
+  });
+
+  it("moves focus forward while typing and back on Backspace from an empty box", async () => {
+    mockResetRequest();
+    render(<MemoryRouter><PasswordReset /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), { target: { value: "admin01" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await screen.findByRole("heading", { name: /verification code/i });
+
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveAttribute("autocomplete", "one-time-code");
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveAttribute("inputmode", "numeric");
+
+    fireEvent.change(screen.getByLabelText("Digit 1 of 6"), { target: { value: "4" } });
+    expect(screen.getByLabelText("Digit 2 of 6")).toHaveFocus();
+    fireEvent.change(screen.getByLabelText("Digit 2 of 6"), { target: { value: "7" } });
+    expect(screen.getByLabelText("Digit 3 of 6")).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByLabelText("Digit 3 of 6"), { key: "Backspace" });
+    expect(screen.getByLabelText("Digit 2 of 6")).toHaveValue("");
+    expect(screen.getByLabelText("Digit 2 of 6")).toHaveFocus();
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveValue("4");
   });
 
   it("supports resending verification code when requested", async () => {
@@ -163,12 +203,12 @@ describe("password recovery screen", () => {
     fireEvent.change(screen.getByLabelText("ADMIN USERNAME"), { target: { value: "admin01" } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await screen.findByRole("heading", { name: /verification code/i });
-    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), { target: { value: "111111" } });
+    pasteCode("Digit 1 of 6", "111111");
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid verification code");
     expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("VERIFICATION CODE"), { target: { value: "222222" } });
+    pasteCode("Digit 1 of 6", "222222");
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(await screen.findByLabelText("NEW PASSWORD")).toBeInTheDocument();
     expect(verify).toHaveBeenNthCalledWith(1, "admin01", "111111");
