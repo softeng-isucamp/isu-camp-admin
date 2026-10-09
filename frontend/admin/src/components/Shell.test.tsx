@@ -91,15 +91,12 @@ describe("Shell Sidebar Component", () => {
     expect(expandBtn).toHaveTextContent("»");
   });
 
-  it("links both profile entry points and preserves sign out in minimized mode", async () => {
+  it("links both profile entry points and leaves sign out to the profile page", () => {
     localStorage.setItem("isucamp_sidebar_minimized", "true");
     render(<MemoryRouter initialEntries={["/dashboard"]}><Shell><div>Child Content</div></Shell></MemoryRouter>);
     const sidebar = screen.getByRole("complementary", { name: /main navigation/i });
     expect(within(sidebar).getByRole("link", { name: "Open profile" })).toHaveAttribute("href", "/profile");
     expect(screen.getByRole("link", { name: "Open my profile" })).toHaveAttribute("href", "/profile");
-    await userEvent.click(within(sidebar).getByRole("button", { name: /sign out/i }));
-    expect(screen.getByText("Sign out?")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Sign Out" }));
-    expect(mockLogout).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /sign out/i })).not.toBeInTheDocument();
   });
 });

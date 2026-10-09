@@ -14,11 +14,11 @@ const errorText = (cause: unknown) => cause instanceof Error ? cause.message : '
 const roleLabel = (role: AccountProfile['role']) => role === 'superadmin' ? 'Superadmin' : 'Administrator';
 
 export function Profile() {
-  const { session, updateSession } = useAuth();
+  const { session, updateSession, logout } = useAuth();
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [loadError, setLoadError] = useState('');
   const [attempt, setAttempt] = useState(0);
-  const [dialog, setDialog] = useState<'details' | 'password' | null>(null);
+  const [dialog, setDialog] = useState<'details' | 'password' | 'signout' | null>(null);
   const feedback = useFeedback();
   useEffect(() => {
     let live = true;
@@ -39,6 +39,7 @@ export function Profile() {
           <Badge tone={profile.role === 'superadmin' ? 'green' : 'grey'}>{roleLabel(profile.role)}</Badge>
         </div>
         <div className="profile-actions">
+          <Button variant="subtle" className="profile-signout" onClick={() => setDialog('signout')}>Sign Out</Button>
           <Button variant="subtle" onClick={() => setDialog('password')}>Change Password</Button>
           <Button onClick={() => setDialog('details')}>Edit Profile</Button>
         </div>
@@ -53,6 +54,7 @@ export function Profile() {
       setDialog(null);
       feedback.reportSuccess('Your password was updated successfully.');
     }} />}
+    {dialog === 'signout' && <SignOutDialog onClose={() => setDialog(null)} onConfirm={logout} />}
   </div>;
 }
 
@@ -112,5 +114,19 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
         <Button type="submit" loading={changing}>Update Password</Button>
       </div>
     </form>
+  </Modal></DialogFocus>;
+}
+
+function SignOutDialog({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => Promise<void> }) {
+  const [signingOut, setSigningOut] = useState(false);
+  const confirm = () => { setSigningOut(true); onConfirm().catch(() => undefined); };
+  return <DialogFocus busy={signingOut}><Modal title="Sign out?" size="sm" variant="danger" onClose={() => { if (!signingOut) onClose(); }}>
+    <div className="admin-form">
+      <p className="admin-remove-copy">You’ll need to sign in again to access the KUMPAS admin dashboard.</p>
+      <div className="modal-actions">
+        <Button type="button" variant="subtle" disabled={signingOut} onClick={onClose}>Cancel</Button>
+        <Button type="button" variant="danger" loading={signingOut} onClick={confirm}>Sign Out</Button>
+      </div>
+    </div>
   </Modal></DialogFocus>;
 }

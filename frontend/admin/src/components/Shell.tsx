@@ -1,7 +1,6 @@
 import { PropsWithChildren, useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
-import { Button } from "./UI";
 import logo from "../assets/figma/brand/kumpas-logo.png";
 import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
 import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
@@ -9,7 +8,6 @@ import locationsIcon from "../assets/figma/navigation/locations.svg";
 import usersIcon from "../assets/figma/navigation/users.svg";
 import logsIcon from "../assets/figma/navigation/logs.svg";
 import profileUserIcon from "../assets/figma/navigation/profile-user.svg";
-import signOutIcon from "../assets/figma/navigation/sign-out.svg";
 
 export const links = [
   {
@@ -45,12 +43,11 @@ export const links = [
 ] as const;
 
 export function Shell({ children }: PropsWithChildren) {
-  const { session, logout } = useAuth();
+  const { session } = useAuth();
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(() => {
     return localStorage.getItem("isucamp_sidebar_minimized") === "true";
   });
-  const [confirm, setConfirm] = useState(false);
   const location = useLocation();
 
   const title =
@@ -122,7 +119,6 @@ export function Shell({ children }: PropsWithChildren) {
               <NavLink to="/profile" className="minimized-avatar-btn" aria-label="Open profile" title="My Profile" onClick={() => setOpen(false)}>
                 <img src={profileUserIcon} alt="" /><span className="online-indicator" />
               </NavLink>
-              <button type="button" className="profile-popover-signout" aria-label="Sign out" onClick={() => setConfirm(true)}><img src={signOutIcon} alt="" /></button>
             </div>
           ) : (
             <div className="profile">
@@ -135,14 +131,6 @@ export function Shell({ children }: PropsWithChildren) {
                 <small>{session?.role === "superadmin" ? "SUPERADMIN" : "ADMINISTRATOR"}</small>
               </div>
               </NavLink>
-              <button
-                type="button"
-                aria-label="Sign out"
-                title="Sign out"
-                onClick={() => setConfirm(true)}
-              >
-                <img src={signOutIcon} alt="" />
-              </button>
             </div>
           )}
         </div>
@@ -174,110 +162,6 @@ export function Shell({ children }: PropsWithChildren) {
         </header>
         <main>{children}</main>
       </div>
-
-      {confirm && (
-        <div className="modal-backdrop">
-          <div
-            className="modal-card"
-            style={{
-              background: "#fff",
-              borderRadius: "28px",
-              padding: "32px",
-              width: "460px",
-              maxWidth: "90%",
-              boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                gap: "16px",
-                alignItems: "flex-start",
-                marginBottom: "16px",
-              }}
-            >
-              <div
-                style={{
-                  width: "44px",
-                  height: "44px",
-                  borderRadius: "50%",
-                  background: "#fee2e2",
-                  color: "#dc2626",
-                  display: "grid",
-                  placeItems: "center",
-                  fontSize: "20px",
-                  flexShrink: 0,
-                }}
-              >
-                <img
-                  src={signOutIcon}
-                  alt=""
-                  style={{
-                    width: "22px",
-                    height: "22px",
-                    filter:
-                      "invert(24%) sepia(85%) saturate(3000%) hue-rotate(345deg) brightness(95%) contrast(95%)",
-                  }}
-                />
-              </div>
-              <div>
-                <h2
-                  style={{
-                    fontSize: "22px",
-                    fontWeight: "bold",
-                    margin: "0",
-                    color: "#191c1d",
-                  }}
-                >
-                  Sign out?
-                </h2>
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    color: "#525c57",
-                    fontSize: "14px",
-                    lineHeight: "20px",
-                  }}
-                >
-                  You’ll need to sign in again to access the KUMPAS admin
-                  dashboard.
-                </p>
-              </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "12px",
-                marginTop: "24px",
-              }}
-            >
-              <Button
-                variant="subtle"
-                style={{ borderRadius: "999px", padding: "0 22px" }}
-                onClick={() => setConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                style={{
-                  borderRadius: "999px",
-                  padding: "0 24px",
-                  background: "#dc2626",
-                  color: "#fff",
-                }}
-                onClick={() => {
-                  setConfirm(false);
-                  logout();
-                }}
-              >
-                Sign Out
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

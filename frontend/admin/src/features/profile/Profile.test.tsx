@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -46,6 +46,20 @@ it('requires matching passwords before submitting a change', async () => {
   expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument();
   expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+it('signs out from the profile after confirmation', async () => {
+  const logout = vi.spyOn(services.auth, 'logout');
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Sign Out' }));
+  expect(screen.getByRole('dialog', { name: 'Sign out?' })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(logout).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+  await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sign Out' }));
+  await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'My Profile' })).not.toBeInTheDocument());
 });
 
 it('reveals password fields while the show passwords checkbox is checked', async () => {

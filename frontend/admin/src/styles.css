@@ -271,17 +271,6 @@ button {
   font-size: 13px;
   display: block;
 }
-.profile button {
-  margin-left: auto;
-  background: transparent;
-  color: #b6e6c5;
-  font-size: 20px;
-}
-.profile button img {
-  display: block;
-  width: 20px;
-  height: 20px;
-}
 
 /* Minimized Profile & Popover */
 .minimized-profile-container {
@@ -305,13 +294,6 @@ button {
   border: 2px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease;
-}
-.minimized-profile-container .profile-popover-signout {
-  width: 44px;
-  height: 36px;
-  flex-shrink: 0;
-  justify-content: center;
-  padding: 0;
 }
 .minimized-avatar-btn:hover {
   border-color: #ffffff;
@@ -396,27 +378,6 @@ button {
   height: 1px;
   background: #e5e7eb;
   margin: 12px 0;
-}
-.profile-popover-signout {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #fee2e2;
-  color: #dc2626;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.15s ease;
-}
-.profile-popover-signout:hover {
-  background: #fecaca;
-}
-.profile-popover-signout img {
-  width: 16px;
-  height: 16px;
-  filter: invert(24%) sepia(85%) saturate(3000%) hue-rotate(345deg);
 }
 .avatar {
   display: grid;
