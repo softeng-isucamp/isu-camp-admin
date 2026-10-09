@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import { RateLimitError, services } from "../../services/api";
@@ -26,6 +26,12 @@ export function NewPasswordStep({ verified }: { verified: VerifiedRecovery }) {
   const confirmCaps = useCapsLock();
   const passwordId = useId();
   const confirmId = useId();
+  const successHeading = useRef<HTMLHeadingElement>(null);
+
+  // The success screen replaces the form, so move focus to its heading for screen reader users.
+  useEffect(() => {
+    if (username !== null) successHeading.current?.focus();
+  }, [username]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -58,7 +64,7 @@ export function NewPasswordStep({ verified }: { verified: VerifiedRecovery }) {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <h2>Password reset successful</h2>
+        <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
         <p className="muted recovery-copy">
           Your admin password has been updated. You can now sign in using your new password.
         </p>
@@ -98,9 +104,8 @@ export function NewPasswordStep({ verified }: { verified: VerifiedRecovery }) {
         {passwordRules.map((rule) => {
           const met = rule.test(password);
           return (
-            <li key={rule.id} className={met ? "rule-met" : "rule-unmet"}>
+            <li key={rule.id} className={met ? "rule-met" : "rule-unmet"} aria-label={`${met ? "Met" : "Not met"}: ${rule.label}`}>
               <span aria-hidden="true">{met ? "✓" : "○"}</span>
-              <span className="sr-only">{met ? "Met: " : "Not met: "}</span>
               {rule.label}
             </li>
           );

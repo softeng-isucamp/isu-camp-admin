@@ -14,7 +14,8 @@ export interface PasswordRule {
 export const PASSWORD_MIN_LENGTH = 8;
 
 export const passwordRules: readonly PasswordRule[] = [
-  { id: "length", label: `At least ${PASSWORD_MIN_LENGTH} characters`, message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`, test: (p) => p.length >= PASSWORD_MIN_LENGTH },
+  // Code points, not UTF-16 units, so an emoji counts once, as Python's len() does on the backend.
+  { id: "length", label: `At least ${PASSWORD_MIN_LENGTH} characters`, message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`, test: (p) => [...p].length >= PASSWORD_MIN_LENGTH },
   { id: "uppercase", label: "An uppercase letter", message: "Password must include an uppercase letter.", test: (p) => /\p{Lu}/u.test(p) },
   { id: "lowercase", label: "A lowercase letter", message: "Password must include a lowercase letter.", test: (p) => /\p{Ll}/u.test(p) },
   { id: "number", label: "A number", message: "Password must include a number.", test: (p) => /\d/.test(p) },

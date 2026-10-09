@@ -58,7 +58,13 @@ const type = (field: HTMLElement, value: string) => fireEvent.change(field, { ta
 const submit = () => fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
 
 const requirements = () => within(screen.getByRole("list", { name: "Password requirements" }));
-const rule = (name: RegExp) => requirements().getByText(name).closest("li") as HTMLElement;
+const requirement = (state: "Met" | "Not met", label: string) =>
+  requirements().getByRole("listitem", { name: `${state}: ${label}` });
+const LENGTH = "At least 8 characters";
+const UPPERCASE = "An uppercase letter";
+const LOWERCASE = "A lowercase letter";
+const NUMBER = "A number";
+const SYMBOL = "A symbol";
 
 afterEach(() => {
   cleanup();
@@ -71,30 +77,30 @@ describe("new password step: requirements checklist", () => {
     await reachNewPassword();
 
     expect(requirements().getAllByRole("listitem")).toHaveLength(5);
-    for (const item of requirements().getAllByRole("listitem")) expect(item).toHaveTextContent(/^.*Not met:/);
+    for (const label of [LENGTH, UPPERCASE, LOWERCASE, NUMBER, SYMBOL]) requirement("Not met", label);
   });
 
-  it("ticks each requirement as it is satisfied and reports the state in text", async () => {
+  it("ticks each requirement as it is satisfied and announces the state with it", async () => {
     mockBackend();
     await reachNewPassword();
 
     type(newPassword(), "abcdefgh");
-    expect(rule(/at least 8 characters/i)).toHaveTextContent("Met:");
-    expect(rule(/lowercase letter/i)).toHaveTextContent("Met:");
-    expect(rule(/uppercase letter/i)).toHaveTextContent("Not met:");
-    expect(rule(/a number/i)).toHaveTextContent("Not met:");
-    expect(rule(/a symbol/i)).toHaveTextContent("Not met:");
+    requirement("Met", LENGTH);
+    requirement("Met", LOWERCASE);
+    requirement("Not met", UPPERCASE);
+    requirement("Not met", NUMBER);
+    requirement("Not met", SYMBOL);
 
     type(newPassword(), "Abcdefg1");
-    expect(rule(/uppercase letter/i)).toHaveTextContent("Met:");
-    expect(rule(/a number/i)).toHaveTextContent("Met:");
-    expect(rule(/a symbol/i)).toHaveTextContent("Not met:");
+    requirement("Met", UPPERCASE);
+    requirement("Met", NUMBER);
+    requirement("Not met", SYMBOL);
 
     type(newPassword(), "Abcdef1!");
-    for (const item of requirements().getAllByRole("listitem")) expect(item).toHaveTextContent("Met:");
+    for (const label of [LENGTH, UPPERCASE, LOWERCASE, NUMBER, SYMBOL]) requirement("Met", label);
 
     type(newPassword(), "Abc1!");
-    expect(rule(/at least 8 characters/i)).toHaveTextContent("Not met:");
+    requirement("Not met", LENGTH);
   });
 });
 
@@ -187,6 +193,17 @@ describe("new password step: submit", () => {
 
     expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
     expect(resets).toEqual([{ email: EMAIL, code: "000000", password: STRONG }]);
+  });
+
+  it("moves focus to the success heading once the reset succeeds", async () => {
+    mockBackend([jsonResponse({ success: true, username: "admin_justine" })]);
+    await reachNewPassword();
+
+    type(newPassword(), STRONG);
+    type(confirmPassword(), STRONG);
+    submit();
+
+    expect(await screen.findByRole("heading", { name: /password reset successful/i })).toHaveFocus();
   });
 
   it("shows the server's weak_password message and stays on the step", async () => {
