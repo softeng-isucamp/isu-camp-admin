@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { RecoveryCodeStep } from "./RecoveryCodeStep";
 import { RecoveryEmailStep } from "./RecoveryEmailStep";
@@ -35,27 +35,41 @@ type FlowStep =
  */
 export function RecoveryFlow({ purpose, title, description, renderFinal }: RecoveryFlowProps) {
   const [flow, setFlow] = useState<FlowStep>({ step: "email", email: "" });
+  const content = useRef<HTMLDivElement>(null);
+  const shownStep = useRef(flow.step);
+
+  // A new step replaces the old one under the keyboard or screen reader, so move focus to its heading.
+  useEffect(() => {
+    if (shownStep.current === flow.step) return;
+    shownStep.current = flow.step;
+    const heading = content.current?.querySelector("h2");
+    heading?.setAttribute("tabindex", "-1");
+    heading?.focus();
+  }, [flow.step]);
 
   return (
     <RecoveryFrame>
-      {flow.step === "email" && (
-        <RecoveryEmailStep
-          purpose={purpose}
-          title={title}
-          description={description}
-          initialEmail={flow.email}
-          onSent={(email, issued) => setFlow({ step: "code", email, issued })}
-        />
-      )}
-      {flow.step === "code" && (
-        <RecoveryCodeStep
-          email={flow.email}
-          purpose={purpose}
-          issued={flow.issued}
-          onVerified={(verified) => setFlow({ step: "final", verified: { email: flow.email, ...verified } })}
-        />
-      )}
-      {flow.step === "final" && renderFinal(flow.verified)}
+      <div ref={content}>
+        {flow.step === "email" && (
+          <RecoveryEmailStep
+            purpose={purpose}
+            title={title}
+            description={description}
+            initialEmail={flow.email}
+            onSent={(email, issued) => setFlow({ step: "code", email, issued })}
+          />
+        )}
+        {flow.step === "code" && (
+          <RecoveryCodeStep
+            email={flow.email}
+            purpose={purpose}
+            issued={flow.issued}
+            onVerified={(verified) => setFlow({ step: "final", verified: { email: flow.email, ...verified } })}
+            onChangeEmail={() => setFlow({ step: "email", email: flow.email })}
+          />
+        )}
+        {flow.step === "final" && renderFinal(flow.verified)}
+      </div>
     </RecoveryFrame>
   );
 }
