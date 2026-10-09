@@ -21,7 +21,8 @@ import type {
   UserAccountType,
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
-import { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
+import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
+import { AuthError, type AuthErrorKind, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
 
 export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
 import { z } from "zod";
@@ -559,15 +560,21 @@ export interface Services {
     /** Re-authenticates the signed-in admin before a destructive action. */
     confirmPassword(password: string): Promise<void>;
 
-    requestReset(username: string): Promise<void>;
+    /**
+     * Asks for a 6-digit code by email. Resolves the same whether or not the
+     * email has an account. The timing fields are present only when the server
+     * sends them.
+     */
+    requestRecovery(email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult>;
 
-    verifyReset(username: string, code: string): Promise<void>;
+    /**
+     * Checks a code and returns the account's username. Rejects with `AuthError`
+     * (`invalid_code`, `code_exhausted`, `code_expired`) or `RateLimitError`.
+     */
+    verifyRecovery(email: string, purpose: RecoveryPurpose, code: string): Promise<RecoveryResult>;
 
-    reset(
-      username: string,
-      code: string,
-      password: string
-    ): Promise<void>;
+    /** Sets a new password with a verified code. Also rejects with `AuthError` `weak_password`. */
+    resetPassword(email: string, code: string, password: string): Promise<RecoveryResult>;
   };
 
   dashboard: {
@@ -718,6 +725,43 @@ function checkRateLimit(response: Response, message?: string): void {
     throw new RateLimitError(seconds, message);
   }
 }
+
+const recoveryErrorKinds: ReadonlySet<string> = new Set(["invalid_code", "code_exhausted", "code_expired", "weak_password"]);
+
+const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0;
+
+/** POSTs a recovery step and returns the JSON body, turning failures into `RateLimitError`, `AuthError` or a plain `Error`. */
+async function recoveryPost(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data: Record<string, any>;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("Unable to connect to the backend.");
+  }
+  checkRateLimit(response, data.message);
+  if (!response.ok) {
+    const message = data.message || "Account recovery failed.";
+    if (typeof data.code === "string" && recoveryErrorKinds.has(data.code)) {
+      const attemptsRemaining = Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0
+        ? data.attemptsRemaining as number
+        : undefined;
+      throw new AuthError(data.code as AuthErrorKind, message, attemptsRemaining);
+    }
+    throw new Error(message);
+  }
+  return data;
+}
+
+const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
+  if (typeof data.username !== "string" || !data.username) throw new Error("The server did not return a username.");
+  return { username: data.username };
+};
 
 const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
 const photoGalleryKey = (id: string, type: LocationType) => `${type === "Building" || type === "Facility" ? "building" : "location"}:${id}`;
@@ -1004,78 +1048,27 @@ export const services: Services = {
       }
     },
 
-    requestReset: async (username) => {
-      if (API_MODE === "local") {
-        try { return await localAdapter.auth.requestReset(username); } catch { /* fall through to the HTTP-compatible mock seam */ }
-      }
-      const response = await fetch(`${API_URL}/api/reset/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to send verification code");
-      }
-    },
-
-    verifyReset: async (username, code) => {
-      if (API_MODE === "local") {
-        if (username.trim() !== "admin_justine" || code !== "000000") {
-          throw new Error("Invalid verification code.");
-        }
-        return;
-      }
-      const response = await fetch(`${API_URL}/api/reset/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, code }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) throw new Error(data.message || "Invalid verification code");
-    },
-
-
     // --------------------------------------
-    // Password Reset
+    // Account recovery
     // --------------------------------------
 
-    reset: async (
-      username,
-      code,
-      password
-    ) => {
-      if (API_MODE === "local") {
-        try { return await localAdapter.auth.reset(username, code, password); } catch { /* fall through to the HTTP-compatible mock seam */ }
-      }
-      const response = await fetch(`${API_URL}/api/reset-password`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, code, password }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) {
-        throw new Error(data.message || "Password reset failed");
-      }
+    requestRecovery: async (email, purpose) => {
+      if (!USE_HTTP_API) return localAdapter.auth.requestRecovery(email, purpose);
+      const data = await recoveryPost("/api/recovery/request", { email, purpose });
+      return {
+        ...(positiveInteger(data.expiresInSeconds) ? { expiresInSeconds: data.expiresInSeconds } : {}),
+        ...(positiveInteger(data.resendAfterSeconds) ? { resendAfterSeconds: data.resendAfterSeconds } : {}),
+      };
+    },
+
+    verifyRecovery: async (email, purpose, code) => {
+      if (!USE_HTTP_API) return localAdapter.auth.verifyRecovery(email, purpose, code);
+      return recoveryResult(await recoveryPost("/api/recovery/verify", { email, purpose, code }));
+    },
+
+    resetPassword: async (email, code, password) => {
+      if (!USE_HTTP_API) return localAdapter.auth.resetPassword(email, code, password);
+      return recoveryResult(await recoveryPost("/api/recovery/reset-password", { email, code, password }));
     },
   },
 

@@ -3,11 +3,22 @@ import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } f
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
 import { AuthError, RateLimitError } from "./errors";
+import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
 const LOGIN_ATTEMPT_LIMIT = 5;
 const LOGIN_LOCKOUT_SECONDS = 60;
+const LOCAL_ADMIN_EMAIL = "admin@isu.edu.ph";
+const RECOVERY_TEST_CODE = "000000";
+const RECOVERY_ATTEMPT_LIMIT = 5;
+const RECOVERY_EXPIRES_SECONDS = 600;
+const RECOVERY_RESEND_SECONDS = 60;
+
+/** A code the fixture handed out. `valid` is false for emails with no account, which still behave like they have one. */
+type IssuedCode = { valid: boolean; attempts: number; expiresAt: number };
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 type LocalMapData = {
   locations: Location[];
@@ -31,11 +42,39 @@ const parseSession = (storage: Storage | null): Session | null => {
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
   let session = parseSession(storage);
-  let account: AccountProfile = { id: "local-admin", username: session?.username ?? LOCAL_ADMIN.username, email: session?.email ?? "justine@example.com", role: "superadmin" };
+  let account: AccountProfile = { id: "local-admin", username: session?.username ?? LOCAL_ADMIN.username, email: session?.email ?? LOCAL_ADMIN_EMAIL, role: "superadmin" };
   let accountPassword: string = LOCAL_ADMIN.password;
-  let resetUsername: string | null = null;
+  const issuedCodes = new Map<string, IssuedCode>();
   let failedLogins = 0;
   let lockedUntil = 0;
+
+  const issueCode = (email: string, purpose: RecoveryPurpose): IssuedCode => {
+    const issued = {
+      valid: normalizeEmail(email) === normalizeEmail(account.email),
+      attempts: 0,
+      expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000,
+    };
+    issuedCodes.set(`${purpose}:${normalizeEmail(email)}`, issued);
+    return issued;
+  };
+
+  // An email nobody asked a code for gets one on its first guess, so a wrong
+  // code looks the same whether or not the email has an account.
+  const checkCode = (email: string, purpose: RecoveryPurpose, code: string): IssuedCode => {
+    const key = `${purpose}:${normalizeEmail(email)}`;
+    const issued = issuedCodes.get(key) ?? issueCode(email, purpose);
+    if (Date.now() >= issued.expiresAt) throw new AuthError("code_expired", "This code has expired. Request a new one.");
+    if (issued.attempts >= RECOVERY_ATTEMPT_LIMIT) {
+      throw new AuthError("code_exhausted", "Too many incorrect codes. Request a new one.", 0);
+    }
+    if (!issued.valid || code !== RECOVERY_TEST_CODE) {
+      issued.attempts += 1;
+      const remaining = RECOVERY_ATTEMPT_LIMIT - issued.attempts;
+      if (remaining <= 0) throw new AuthError("code_exhausted", "Too many incorrect codes. Request a new one.", 0);
+      throw new AuthError("invalid_code", "Incorrect verification code", remaining);
+    }
+    return issued;
+  };
 
   return {
     auth: {
@@ -88,13 +127,21 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       confirmPassword: async (password: string): Promise<void> => {
         if (password !== accountPassword) throw new Error("Password is incorrect");
       },
-      requestReset: async (username: string): Promise<void> => {
-        if (username.trim() !== LOCAL_ADMIN.username) throw new Error("Admin username not found.");
-        resetUsername = username.trim();
+      // Always succeeds and reports the same timing, so the response never says whether the email has an account.
+      requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
+        issueCode(email, purpose);
+        return { expiresInSeconds: RECOVERY_EXPIRES_SECONDS, resendAfterSeconds: RECOVERY_RESEND_SECONDS };
       },
-      reset: async (username: string, code: string, _password: string): Promise<void> => {
-        if (resetUsername !== username.trim() || code !== "000000") throw new Error("Invalid verification code.");
-        resetUsername = null;
+      verifyRecovery: async (email: string, purpose: RecoveryPurpose, code: string): Promise<RecoveryResult> => {
+        checkCode(email, purpose, code);
+        return { username: account.username };
+      },
+      resetPassword: async (email: string, code: string, password: string): Promise<RecoveryResult> => {
+        const issued = checkCode(email, "password", code);
+        if (password.length < 8) throw new AuthError("weak_password", "Password must be at least 8 characters.");
+        accountPassword = password;
+        issued.valid = false; // a used code is dead, like any wrong guess from here on
+        return { username: account.username };
       },
     },
     locations: {
