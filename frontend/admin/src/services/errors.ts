@@ -31,7 +31,7 @@ export class RateLimitError extends Error {
  * Why an auth request failed, for pages to branch on instead of parsing text.
  * Rate limits are not a kind: they stay `RateLimitError`.
  */
-export type AuthErrorKind = "invalid_credentials";
+export type AuthErrorKind = "invalid_credentials" | "invalid_code" | "code_exhausted" | "code_expired" | "weak_password";
 
 /** A failed sign-in or recovery step, with the attempts the server says remain. */
 export class AuthError extends Error {

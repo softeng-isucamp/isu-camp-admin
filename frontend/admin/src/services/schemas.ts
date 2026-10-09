@@ -15,9 +15,7 @@ export const loginSchema = z.object({
   username: z.string().min(1, "Username is required."),
   password: z.string().min(1, "Password is required."),
 });
-export const resetRequestSchema = z.object({
-  username: z.string().min(1, "Username is required."),
-});
+export const recoveryEmailSchema = z.string().trim().email("Enter a valid email address.");
 export const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code."),
   password: z.string().min(8, "Password must be at least 8 characters."),
