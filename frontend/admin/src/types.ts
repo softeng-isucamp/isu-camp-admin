@@ -152,6 +152,9 @@ export interface AuditEntry {
 export interface Session {
   id: string;
   username: string;
+  email?: string;
+  /** Missing or unrecognized roles never grant superadmin access. */
+  role?: "admin" | "superadmin";
 }
 export type DashboardRange = "week" | "month" | "all";
 export interface DashboardSummary {

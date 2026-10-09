@@ -10,7 +10,7 @@ describe("Shell Sidebar Component", () => {
   const mockSession = {
     id: "usr-admin",
     username: "admin_justine",
-    role: "ADMINISTRATOR",
+    role: "admin" as const,
     token: "fake-jwt",
   };
 
@@ -22,6 +22,7 @@ describe("Shell Sidebar Component", () => {
       login: vi.fn(),
       logout: mockLogout,
       loading: false,
+      updateSession: vi.fn(),
     });
   });
 
@@ -90,34 +91,12 @@ describe("Shell Sidebar Component", () => {
     expect(expandBtn).toHaveTextContent("»");
   });
 
-  it("opens profile popover in minimized mode and allows signing out", async () => {
+  it("links both profile entry points and leaves sign out to the profile page", () => {
     localStorage.setItem("isucamp_sidebar_minimized", "true");
-    const user = userEvent.setup();
-
-    render(
-      <MemoryRouter initialEntries={["/dashboard"]}>
-        <Shell>
-          <div>Child Content</div>
-        </Shell>
-      </MemoryRouter>
-    );
-
+    render(<MemoryRouter initialEntries={["/dashboard"]}><Shell><div>Child Content</div></Shell></MemoryRouter>);
     const sidebar = screen.getByRole("complementary", { name: /main navigation/i });
-    const avatarBtn = within(sidebar).getByRole("button", { name: /open user profile menu/i });
-    await user.click(avatarBtn);
-
-    const popover = within(sidebar).getByRole("dialog", { name: /user details/i });
-    expect(popover).toBeInTheDocument();
-    expect(within(popover).getByText("admin_justine")).toBeInTheDocument();
-
-    const signOutBtn = within(popover).getByRole("button", { name: /sign out/i });
-    await user.click(signOutBtn);
-
-    expect(screen.getByText("Sign out?")).toBeInTheDocument();
-
-    const confirmBtn = screen.getByRole("button", { name: /^sign out$/i });
-    await user.click(confirmBtn);
-
-    expect(mockLogout).toHaveBeenCalledTimes(1);
+    expect(within(sidebar).getByRole("link", { name: "Open profile" })).toHaveAttribute("href", "/profile");
+    expect(screen.getByRole("link", { name: "Open my profile" })).toHaveAttribute("href", "/profile");
+    expect(screen.queryByRole("button", { name: /sign out/i })).not.toBeInTheDocument();
   });
 });
