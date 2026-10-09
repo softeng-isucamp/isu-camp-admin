@@ -44,10 +44,7 @@ export function Profile() {
         </div>
       </Card>
       {session?.role === 'superadmin' && profile.role === 'superadmin' && <BackupRecovery onSuccess={feedback.reportSuccess} />}
-      <Card className="profile-signout">
-        <p>Signed in as <strong>{profile.username}</strong></p>
-        <Button variant="danger" onClick={() => setDialog('signout')}>Sign Out</Button>
-      </Card>
+      <div><Button variant="danger" onClick={() => setDialog('signout')}>Sign Out</Button></div>
     </div>}
     {dialog === 'details' && profile && <DetailsDialog profile={profile} onClose={() => setDialog(null)} onSaved={(updated) => {
       setProfile(updated); updateSession(updated); setDialog(null);

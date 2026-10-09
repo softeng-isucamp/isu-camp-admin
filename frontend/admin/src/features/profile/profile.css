@@ -6,8 +6,6 @@
 .profile-identity-copy h2 { font-size: 20px; margin: 0 0 4px; overflow-wrap: anywhere; }
 .profile-identity-copy p { font-size: 13px; color: #64716a; margin: 0; overflow-wrap: anywhere; }
 .profile-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.profile-signout { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.profile-signout p { font-size: 14px; color: #64716a; margin: 0; overflow-wrap: anywhere; }
 .profile-unavailable { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
 .profile-show-password { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #64716a; cursor: pointer; }
 .profile-job { padding: 0 24px 16px; }
