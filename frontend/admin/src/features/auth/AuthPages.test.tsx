@@ -3,6 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "./AuthContext";
 import { Login, PasswordReset } from "./AuthPages";
+import { OtpInput, type OtpInputHandle } from "./OtpInput";
 import { RateLimitError, services } from "../../services/api";
 
 vi.spyOn(services.auth, "reset").mockResolvedValue(undefined);
@@ -250,5 +251,60 @@ describe("rate limiting", () => {
     expect(
       await screen.findByText(/too many requests/i),
     ).toBeInTheDocument();
+  });
+});
+
+// PasswordReset has no auto-submit yet, so the completion contract is checked on OtpInput directly.
+describe("one-time code input completion", () => {
+  const renderOtp = () => {
+    const onComplete = vi.fn();
+    const ref = { current: null as OtpInputHandle | null };
+    render(<OtpInput ref={ref} onComplete={onComplete} />);
+    return { onComplete, ref };
+  };
+  const type = (box: number, digit: string) =>
+    fireEvent.change(screen.getByLabelText(`Digit ${box} of 6`), { target: { value: digit } });
+  const typeCode = (code: string) => [...code].forEach((digit, i) => type(i + 1, digit));
+
+  it("completes once for typed, pasted and autofill-style input", () => {
+    const { onComplete } = renderOtp();
+
+    typeCode("123456");
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onComplete).toHaveBeenLastCalledWith("123456");
+
+    pasteCode("Digit 1 of 6", "654321");
+    expect(onComplete).toHaveBeenCalledTimes(2);
+    expect(onComplete).toHaveBeenLastCalledWith("654321");
+
+    fireEvent.change(screen.getByLabelText("Digit 1 of 6"), { target: { value: "246810" } });
+    expect(onComplete).toHaveBeenCalledTimes(3);
+    expect(onComplete).toHaveBeenLastCalledWith("246810");
+  });
+
+  it("does not resubmit the same code after deleting and retyping a digit", () => {
+    const { onComplete } = renderOtp();
+
+    typeCode("123456");
+    type(6, "");
+    type(6, "6");
+    expect(onComplete).toHaveBeenCalledTimes(1);
+
+    pasteCode("Digit 1 of 6", "123456");
+    expect(onComplete).toHaveBeenCalledTimes(1);
+
+    type(6, "7");
+    expect(onComplete).toHaveBeenCalledTimes(2);
+    expect(onComplete).toHaveBeenLastCalledWith("123457");
+  });
+
+  it("completes the same code again only after the parent clears the input", () => {
+    const { onComplete, ref } = renderOtp();
+
+    typeCode("123456");
+    act(() => ref.current?.clear());
+    expect(screen.getByLabelText("Digit 1 of 6")).toHaveValue("");
+    typeCode("123456");
+    expect(onComplete).toHaveBeenCalledTimes(2);
   });
 });

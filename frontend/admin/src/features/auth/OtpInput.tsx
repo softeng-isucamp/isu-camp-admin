@@ -21,7 +21,7 @@ export interface OtpInputProps {
   disabled?: boolean;
   /** Fires with the current digits joined together after every edit; shorter than 6 characters while incomplete. */
   onChange?: (code: string) => void;
-  /** Fires once per distinct completed code. Editing a box or calling `clear` re-arms it. */
+  /** Fires once per distinct completed code, so the same code is never reported twice in a row. Only `clear` forgets the last code. */
   onComplete?: (code: string) => void;
 }
 
@@ -42,9 +42,7 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
     setDigits(next);
     const code = next.join("");
     onChange?.(code);
-    if (code.length < LENGTH) {
-      lastCompleted.current = null;
-    } else if (code !== lastCompleted.current) {
+    if (code.length === LENGTH && code !== lastCompleted.current) {
       lastCompleted.current = code;
       onComplete?.(code);
     }

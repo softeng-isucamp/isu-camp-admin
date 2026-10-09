@@ -1452,6 +1452,10 @@ td small {
   color: #fff;
   font-size: 16px;
 }
+/* Outranks the later global .btn-primary:hover so the recovery button keeps its green. */
+.recovery-modal .recovery-primary:hover {
+  background: #0c7441;
+}
 .recovery-modal .recovery-submit {
   margin-top: 8px;
 }
