@@ -176,6 +176,22 @@ describe("fixture account recovery", () => {
     expect(await failure(adapter.auth.resetPassword(EMAIL, TEST_CODE, "Another1!pass"))).toMatchObject({ kind: "invalid_code" });
   });
 
+  it.each([
+    ["Sh0rt!a", "at least 8 characters"],
+    ["lowercase1!", "an uppercase letter"],
+    ["UPPERCASE1!", "a lowercase letter"],
+    ["NoNumbers!!", "a number"],
+    ["NoSymbols123", "a symbol"],
+  ])("rejects %s as weak_password without spending the code", async (weak, reason) => {
+    await adapter.auth.requestRecovery(EMAIL, "password");
+
+    const error = await failure(adapter.auth.resetPassword(EMAIL, TEST_CODE, weak));
+    expect(error).toMatchObject({ kind: "weak_password" });
+    expect((error as Error).message).toContain(reason);
+
+    await expect(adapter.auth.resetPassword(EMAIL, TEST_CODE, "NewPassw0rd!")).resolves.toEqual({ username: USERNAME });
+  });
+
   it("applies the same code rules when resetting the password", async () => {
     await adapter.auth.requestRecovery(EMAIL, "password");
     expect(await failure(adapter.auth.resetPassword(EMAIL, "111111", "NewPassw0rd!"))).toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });

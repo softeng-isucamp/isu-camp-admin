@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { passwordRules } from "./passwordRules";
 
 const locationTypeSchema = z.enum([
   "Building",
@@ -16,13 +17,19 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required."),
 });
 export const recoveryEmailSchema = z.string().trim().email("Enter a valid email address.");
+/** Every unmet rule is reported, in checklist order. */
+export const passwordSchema = z.string().superRefine((password, ctx) => {
+  for (const rule of passwordRules) {
+    if (!rule.test(password)) ctx.addIssue({ code: "custom", message: rule.message });
+  }
+});
 export const resetSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the 6-digit verification code."),
-  password: z.string().min(8, "Password must be at least 8 characters."),
+  password: passwordSchema,
 });
 export const resetPasswordSchema = resetSchema
   .extend({
-    confirmPassword: z.string().min(8, "Confirm your new password."),
+    confirmPassword: z.string().min(1, "Confirm your new password."),
   })
   .refine((value) => value.password === value.confirmPassword, {
     message: "Passwords do not match.",

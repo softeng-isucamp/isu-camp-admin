@@ -80,8 +80,8 @@ test("password recovery reaches verification step", async ({ page }) => {
     animations: "disabled",
   });
   await page.getByLabel("Digit 1 of 6").fill("000000");
-  await page.getByLabel("NEW PASSWORD", { exact: true }).fill("password123");
-  await page.getByLabel(/confirm new password/i).fill("password123");
+  await page.getByLabel("NEW PASSWORD", { exact: true }).fill("Passw0rd!x");
+  await page.getByLabel(/confirm new password/i).fill("Passw0rd!x");
   await page.getByRole("button", { name: /reset password/i }).click();
   await expect(
     page.getByRole("heading", { name: /password reset successful/i }),
