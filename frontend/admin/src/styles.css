@@ -1316,11 +1316,21 @@ td small {
   font-size: 12px;
   font-weight: 700;
 }
+/* Every text link on the login and recovery screens. */
 .forgot a,
-.back-link {
+.back-link,
+.recovery-modal .recovery-link,
+.recovery-modal .recovery-resend .btn {
   color: var(--green-2);
   font-weight: 700;
   font-size: 13px;
+  text-decoration: none;
+}
+.forgot a:hover,
+.back-link:hover,
+.recovery-modal .recovery-link:hover:not(:disabled),
+.recovery-modal .recovery-resend .btn:hover:not(:disabled) {
+  text-decoration: underline;
 }
 .error {
   background: #fff0f0;
@@ -1330,10 +1340,28 @@ td small {
   border-radius: 12px;
   font-size: 12px;
 }
-.error-urgent {
-  background: #ffe3e3;
-  border-color: var(--danger);
-  font-weight: 700;
+/* The one error box for login and recovery; urgency adds only the icon and a bold count. */
+.auth-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid #f0bcbc;
+  border-radius: 14px;
+  background: #fff0f0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: left;
+}
+.auth-alert-icon {
+  flex: none;
+  margin-top: 2px;
+}
+.auth-alert strong {
+  font-weight: 800;
 }
 .login-card footer {
   border-top: 1px solid #e1e3e4;
@@ -1361,35 +1389,61 @@ td small {
 .recovery-modal {
   width: 460px;
   max-width: 100%;
-  min-height: 300px;
-  padding: 34px;
+  padding: 32px;
   border-radius: 28px;
+}
+.recovery-step,
+.recovery-step > form,
+.recovery-success {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .recovery-modal h2 {
   margin: 0;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.3;
   color: #191c1d;
 }
+/* The subtext belongs to its heading, so it sits closer than the next block. */
+.recovery-modal h2 + .recovery-copy {
+  margin-top: -10px;
+}
 .recovery-modal .recovery-copy {
-  font-size: 16px;
-  line-height: 24px;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
   color: #525c57;
 }
+.recovery-modal .recovery-copy strong {
+  color: #191c1d;
+}
+.recovery-modal .recovery-copy .nowrap {
+  white-space: nowrap;
+}
 .recovery-modal .field {
-  gap: 6px;
+  gap: 8px;
+  color: #525c57;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 .recovery-modal .field input {
-  height: 54px;
-  border-radius: 999px;
+  height: 48px;
+  border-radius: 18px;
+  font-size: 14px;
 }
+/* Field labels share the login form's small caps style. */
+.login-card .field > span,
 .recovery-modal .recovery-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #191c1d;
+  color: #3f4941;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+/* Empty live regions stay in the tree for announcements but take no room. */
+.recovery-modal .field > [role="status"]:empty {
+  margin-top: -8px;
 }
 .recovery-modal .segmented-code-container {
   display: grid;
@@ -1419,34 +1473,37 @@ td small {
 }
 .recovery-modal .recovery-resend {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  margin-top: 4px;
+  gap: 6px;
+  margin: 2px 0 0;
   font-size: 13px;
-  color: #666e69;
 }
-.recovery-modal .recovery-resend button {
+.recovery-modal .recovery-resend .btn {
+  width: auto;
+  min-height: 0;
+  margin: 0;
   padding: 0;
+  gap: 6px;
   border: none;
   border-radius: 0;
   background: none;
-  color: #0c7441;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
 }
-.recovery-modal .recovery-resend button:disabled {
-  color: #999;
+.recovery-modal .recovery-link:disabled,
+.recovery-modal .recovery-resend .btn:disabled {
+  color: #8a948f;
   cursor: default;
 }
-.recovery-modal .recovery-confirmation {
-  margin-top: 6px;
-  color: #0c7441;
+/* Status lines (resend confirmation, passwords match) share one small bold style. */
+.recovery-modal .recovery-status,
+.recovery-modal .recovery-match {
+  margin: 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--green-2);
 }
 .recovery-modal .recovery-username {
-  margin: 8px 0 0;
+  margin: 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -1483,7 +1540,7 @@ td small {
 }
 .recovery-modal .recovery-rules {
   list-style: none;
-  margin: 0;
+  margin: -6px 0 0;
   padding: 12px 16px;
   border-radius: 14px;
   background: #f0f8f3;
@@ -1497,15 +1554,16 @@ td small {
   gap: 8px;
   color: #525c57;
 }
+.recovery-modal .recovery-rules li > span {
+  width: 12px;
+  text-align: center;
+}
 .recovery-modal .recovery-rules .rule-met {
   color: #0c5430;
   font-weight: 600;
 }
 .recovery-modal .recovery-match {
-  margin: 0;
   min-height: 18px;
-  font-size: 13px;
-  font-weight: 600;
 }
 .recovery-modal .recovery-match-match {
   color: #0c7441;
@@ -1524,36 +1582,36 @@ td small {
   white-space: nowrap;
   border: 0;
 }
-.recovery-modal .recovery-spacer {
-  flex: 1;
-  min-height: 12px;
-}
 .recovery-modal .btn {
   width: 100%;
   min-height: 50px;
-  margin-top: 4px;
 }
 .recovery-modal .recovery-primary {
   width: 100%;
   height: 50px;
   border-radius: 999px;
+  border-color: #0c7441;
   background: #0c7441;
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
 }
 /* Outranks the later global .btn-primary:hover so the recovery button keeps its green. */
-.recovery-modal .recovery-primary:hover {
-  background: #0c7441;
+.recovery-modal .recovery-primary:hover:not(:disabled) {
+  border-color: #0a6537;
+  background: #0a6537;
 }
 .recovery-modal .recovery-submit {
-  margin-top: 8px;
+  margin-top: 4px;
+}
+.recovery-success {
+  align-items: center;
+  text-align: center;
 }
 .recovery-success-icon {
   display: grid;
   place-items: center;
   width: 54px;
   height: 54px;
-  margin: 0 auto 4px;
   border-radius: 999px;
   background: #0c7441;
   color: #fff;
@@ -1565,9 +1623,8 @@ td small {
   text-decoration: none;
 }
 .recovery-modal .back-link {
-  margin-top: 4px;
-  color: #0c7441;
-  font-size: 14px;
+  align-self: center;
+  margin-top: -4px;
 }
 .modal-backdrop {
   position: fixed;
@@ -2770,7 +2827,8 @@ td small {
   height: 16px;
 }
 .login-card .btn {
-  min-height: 46px;
+  min-height: 50px;
+  font-size: 15px;
 }
 .pagination {
   display: flex;
@@ -3659,19 +3717,10 @@ td small {
   padding: 0;
   border: none;
   background: none;
-  color: #0c7441;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
+  font-family: inherit;
   cursor: pointer;
 }
-.recovery-modal .recovery-link:disabled {
-  color: #999;
-  cursor: default;
-}
-.recovery-modal .recovery-timer {
-  display: block;
-  margin-top: 4px;
-  font-size: 13px;
-  color: #666e69;
+/* "Change email" sits inside the subtext, so it takes the subtext's size. */
+.recovery-modal .recovery-copy .recovery-link {
+  font-size: inherit;
 }
