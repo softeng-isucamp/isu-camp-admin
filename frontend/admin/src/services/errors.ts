@@ -16,12 +16,12 @@ export class PasswordConfirmationRequiredError extends Error {
   }
 }
 
-/** The server asked the caller to wait; `retryAfterSeconds` drives the countdown. */
+/** The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number. */
 export class RateLimitError extends Error {
   readonly retryAfterSeconds: number;
 
   constructor(retryAfterSeconds: number, message?: string) {
-    super(message ?? `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
+    super(message ?? "Too many requests. Try again shortly.");
     this.name = "RateLimitError";
     this.retryAfterSeconds = retryAfterSeconds;
   }

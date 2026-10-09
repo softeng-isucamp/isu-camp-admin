@@ -40,7 +40,7 @@ const openCodeStep = async () => {
       </AuthProvider>
     </MemoryRouter>,
   );
-  fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+  fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await settle();
   expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
@@ -277,6 +277,43 @@ describe("code step: resend recovery", () => {
   });
 });
 
+describe("code step: messages stay current", () => {
+  it("clears the enter-the-code prompt as soon as the admin types", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter the 6-digit verification code.");
+
+    typeCode("1");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a rejected code's message while the admin types the next attempt", async () => {
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4)] });
+    await openCodeStep();
+    typeCode("111111");
+    await settle();
+
+    typeCode("2");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
+  });
+
+  it("drops the new-code confirmation when that code expires", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued({ resendAfterSeconds: 1 }), issued({ expiresInSeconds: 3 })] });
+    await openCodeStep();
+    await tickSeconds(1);
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+    expect(screen.getByRole("status")).toHaveTextContent("A new code has been sent.");
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("This code has expired");
+    expect(screen.queryByText("A new code has been sent.")).toBeNull();
+  });
+});
+
 describe("code step: change email", () => {
   it("returns to the email step with the address kept for editing, then sends to the corrected address", async () => {
     const { sent } = mockBackend({ [REQUEST]: [issued(), issued()] });
@@ -285,10 +322,10 @@ describe("code step: change email", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change email" }));
 
-    expect(screen.getByLabelText("ADMIN EMAIL")).toHaveValue(EMAIL);
+    expect(screen.getByLabelText("Admin email")).toHaveValue(EMAIL);
     expect(screen.queryByLabelText("Digit 1 of 6")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: "other@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: "other@isu.edu.ph" } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
@@ -362,6 +399,15 @@ describe("code step: assistive technology", () => {
     const heading = screen.getByRole("heading", { name: /verification code/i });
     expect(heading).toHaveFocus();
     expect(heading).toHaveAccessibleDescription(/we sent a 6-digit code to it\.$/);
+  });
+
+  it("keeps the blurred login preview behind the modal out of reach", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    // The preview is hidden from assistive technology, so its controls must not take keyboard focus either.
+    expect(screen.queryByRole("button", { name: "Login" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Login", hidden: true }).closest("[inert]")).not.toBeNull();
   });
 
   it("focuses the email step heading when the page first loads", () => {

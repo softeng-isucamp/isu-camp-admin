@@ -3,7 +3,7 @@ import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { resetSchema } from "../../services/schemas";
-import { AuthAlert } from "./AuthAlert";
+import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { OtpInput, type OtpInputHandle } from "./OtpInput";
 import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
@@ -52,6 +52,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
   const [resendMessage, setResendMessage] = useState("");
   const [resending, setResending] = useState(false);
+  // The resend wait came from a rate limit rather than the normal cooldown, so its button reads "Try again".
+  const [resendLimited, setResendLimited] = useState(false);
   const otp = useRef<OtpInputHandle>(null);
   const inFlight = useRef(false);
   // Codes the server rejected for the code currently issued. Auto-submit skips them; the Verify button is an explicit retry.
@@ -67,6 +69,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     otp.current?.clear();
     setState(dead);
     setError(deadMessage(dead));
+    setResendMessage("");
   };
 
   useEffect(() => {
@@ -104,7 +107,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setState("entering");
       if (err instanceof RateLimitError) {
         // Not a wrong code: keep what was typed and let the button count down.
-        setError(err.message);
+        setError(RATE_LIMIT_MESSAGE);
         verifyWait.start(err.retryAfterSeconds);
       } else {
         otp.current?.clear();
@@ -138,10 +141,16 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setLapsed(false);
       setCurrent(next);
       setResendMessage("A new code has been sent.");
+      setResendLimited(false);
       resendWait.start(next.resendAfterSeconds ?? 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to resend code.");
-      if (err instanceof RateLimitError) resendWait.start(err.retryAfterSeconds);
+      if (err instanceof RateLimitError) {
+        setError(RATE_LIMIT_MESSAGE);
+        setResendLimited(true);
+        resendWait.start(err.retryAfterSeconds);
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to resend code.");
+      }
     } finally {
       inFlight.current = false;
       setResending(false);
@@ -150,7 +159,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
 
   const verifying = state === "verifying";
   const dead = state === "exhausted" || state === "expired";
-  const resendLabel = resendWait.seconds > 0 ? `Resend code in ${resendWait.seconds}s` : "Resend code";
+  const rateLimited = verifyWait.seconds > 0 || (resendLimited && resendWait.seconds > 0);
+  const resendLabel =
+    resendWait.seconds > 0 ? (resendLimited ? tryAgainLabel(resendWait.seconds) : `Resend code in ${resendWait.seconds}s`) : "Resend code";
   const resendBlocked = resendWait.seconds > 0 || resending || verifying;
 
   return (
@@ -167,8 +178,16 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </button>
       </p>
       <div className="field">
-        <span className="recovery-label">VERIFICATION CODE</span>
-        <OtpInput ref={otp} disabled={verifying || dead} onChange={setCode} onComplete={(complete) => {
+        <span className="recovery-label">Verification code</span>
+        <OtpInput
+          ref={otp}
+          disabled={verifying || dead}
+          onChange={(next) => {
+            setCode(next);
+            // Typing answers "enter the code"; a rejected code's message stays until the next attempt.
+            setError((current) => (current === CODE_INCOMPLETE ? "" : current));
+          }}
+          onComplete={(complete) => {
             if (!rejected.current.has(complete)) void verify(complete);
           }} />
         {!dead && (
@@ -184,7 +203,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </p>
       </div>
       {error && (
-        <AuthAlert attemptsRemaining={attemptsRemaining} urgent={state === "exhausted"}>
+        <AuthAlert attemptsRemaining={attemptsRemaining} urgent={state === "exhausted" || rateLimited}>
           {error}
         </AuthAlert>
       )}
@@ -200,7 +219,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           loading={verifying}
           disabled={verifyWait.seconds > 0}
         >
-          {verifying ? "Verifying…" : verifyWait.seconds > 0 ? `Verify in ${verifyWait.seconds}s` : "Verify"}
+          {verifying ? "Verifying…" : verifyWait.seconds > 0 ? tryAgainLabel(verifyWait.seconds) : "Verify"}
         </Button>
       )}
       <BackToLogin />

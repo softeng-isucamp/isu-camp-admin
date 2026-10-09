@@ -3,8 +3,8 @@ import type { Page } from "@playwright/test";
 
 async function signIn(page: Page) {
   await page.goto("/login");
-  await page.getByLabel("USERNAME").fill("admin_justine");
-  await page.getByLabel(/PASSWORD/).fill("password123");
+  await page.getByLabel("Username").fill("admin_justine");
+  await page.getByLabel("Password", { exact: true }).fill("password123");
   await page.getByRole("button", { name: /login/i }).click();
   await expect(page).toHaveURL(/dashboard/);
 }
@@ -24,8 +24,8 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "KUMPAS" })).toBeVisible();
   await expect(page).toHaveScreenshot("login.png", { animations: "disabled" });
-  await page.getByLabel("USERNAME").fill("admin_justine");
-  await page.getByLabel(/PASSWORD/).fill("password123");
+  await page.getByLabel("Username").fill("admin_justine");
+  await page.getByLabel("Password", { exact: true }).fill("password123");
   await page.getByRole("button", { name: /login/i }).click();
   await expect(page).toHaveURL(/dashboard/);
   await expect(
@@ -69,7 +69,7 @@ test("password recovery reaches verification step", async ({ page }) => {
   await expect(page).toHaveScreenshot("password-recovery-request.png", {
     animations: "disabled",
   });
-  await page.getByLabel("ADMIN EMAIL").fill("admin@isu.edu.ph");
+  await page.getByLabel("Admin email").fill("admin@isu.edu.ph");
   await page.getByRole("button", { name: /send code/i }).click();
   await expect(
     page.getByRole("heading", { name: /enter verification code/i }),
@@ -80,7 +80,7 @@ test("password recovery reaches verification step", async ({ page }) => {
     animations: "disabled",
   });
   await page.getByLabel("Digit 1 of 6").fill("000000");
-  await page.getByLabel("NEW PASSWORD", { exact: true }).fill("Passw0rd!x");
+  await page.getByLabel("New password", { exact: true }).fill("Passw0rd!x");
   await page.getByLabel(/confirm new password/i).fill("Passw0rd!x");
   await page.getByRole("button", { name: /reset password/i }).click();
   await expect(
@@ -89,8 +89,8 @@ test("password recovery reaches verification step", async ({ page }) => {
   await expect(page).toHaveScreenshot("password-recovery-success.png", {
     animations: "disabled",
   });
-  await page.getByRole("button", { name: "Return to login" }).click();
-  await expect(page.getByLabel("USERNAME")).toHaveValue("admin_justine");
+  await page.getByRole("button", { name: "Continue to login" }).click();
+  await expect(page.getByLabel("Username")).toHaveValue("admin_justine");
 });
 
 test("protected modules have stable desktop visual states", async ({

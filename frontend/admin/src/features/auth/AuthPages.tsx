@@ -1,18 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
-import { AuthAlert } from "./AuthAlert";
+import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { AuthError } from "../../services/errors";
 import { readLoginPrefill } from "./loginPrefill";
+import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { Button, Card, Field } from "../../components/UI";
 import { RateLimitError } from "../../services/api";
 import { loginSchema } from "../../services/schemas";
 import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
 import userIcon from "../../assets/figma/login/login-icon-4.svg";
 import lockIcon from "../../assets/figma/login/login-icon-1.svg";
-import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
 export function Login() {
   const { login } = useAuth();
@@ -23,6 +23,9 @@ export function Login() {
   const [loginCountdown, setLoginCountdown] = useState(0);
   const [loginPending, setLoginPending] = useState(false);
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
+  // The field a client-side check rejected; it is marked invalid and points at the alert until edited.
+  const [invalidField, setInvalidField] = useState<"username" | "password" | null>(null);
+  const alertId = useId();
   const capsLock = useCapsLock();
   const loginInFlight = useRef(false);
   useEffect(() => {
@@ -30,22 +33,40 @@ export function Login() {
     const timer = setTimeout(() => setLoginCountdown((seconds) => seconds - 1), 1000);
     return () => clearTimeout(timer);
   }, [loginCountdown]);
+  const prefilledUsername = readLoginPrefill(location.state);
   const {
     register,
     handleSubmit,
+    setFocus,
     formState: { errors },
   } = useForm({
-    defaultValues: { username: readLoginPrefill(location.state), password: "" },
+    defaultValues: { username: prefilledUsername, password: "" },
   });
-  const passwordField = register("password");
+  // A recovery flow handed over the username, so the password is all that is left to type.
+  useEffect(() => {
+    if (prefilledUsername) setFocus("password");
+  }, [prefilledUsername, setFocus]);
+  // Editing the rejected field clears its validation error; server errors stay until the next attempt.
+  const clearInvalid = (field: "username" | "password") => {
+    if (invalidField !== field) return;
+    setInvalidField(null);
+    setError("");
+  };
+  const usernameField = register("username", { onChange: () => clearInvalid("username") });
+  const passwordField = register("password", { onChange: () => clearInvalid("password") });
+  const fieldErrorProps = (field: "username" | "password") =>
+    invalidField === field ? { "aria-invalid": true, "aria-describedby": alertId } : {};
   const lockedOut = loginCountdown > 0;
   const submit = async (values: { username: string; password: string }) => {
     if (loginInFlight.current || lockedOut) return;
     setError("");
     setAttemptsRemaining(undefined);
+    setInvalidField(null);
     const parsed = loginSchema.safeParse(values);
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Check your credentials.");
+      const issue = parsed.error.issues[0];
+      setError(issue?.message ?? "Check your credentials.");
+      setInvalidField(issue?.path[0] === "password" ? "password" : "username");
       return;
     }
     loginInFlight.current = true;
@@ -57,10 +78,12 @@ export function Login() {
       if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
         setError("Incorrect username or password.");
         setAttemptsRemaining(err.attemptsRemaining);
+      } else if (err instanceof RateLimitError) {
+        setError(RATE_LIMIT_MESSAGE);
+        setLoginCountdown(err.retryAfterSeconds);
       } else {
         setError(err instanceof Error ? err.message : "Unable to sign in.");
       }
-      if (err instanceof RateLimitError) setLoginCountdown(err.retryAfterSeconds);
     } finally {
       loginInFlight.current = false;
       setLoginPending(false);
@@ -79,11 +102,12 @@ export function Login() {
         </div>
         <form onSubmit={handleSubmit(submit)}>
           <label className="field">
-            <span>USERNAME</span>
+            <span>Username</span>
             <div className="input-with-icon">
               <img src={userIcon} alt="" />
               <input
-                {...register("username")}
+                {...usernameField}
+                {...fieldErrorProps("username")}
                 disabled={lockedOut}
                 autoComplete="username"
                 placeholder="Enter your username"
@@ -94,11 +118,12 @@ export function Login() {
             <Link to="/forgot-username">Forgot username?</Link>
           </div>
           <label className="field">
-            <span>PASSWORD</span>
+            <span>Password</span>
             <div className="password">
               <img className="password-icon" src={lockIcon} alt="" />
               <input
                 {...passwordField}
+                {...fieldErrorProps("password")}
                 onBlur={(event) => {
                   void passwordField.onBlur(event);
                   capsLock.onBlur();
@@ -110,12 +135,8 @@ export function Login() {
                 autoComplete="current-password"
                 placeholder="Enter your password"
               />
-              <button
-                type="button"
-                onClick={() => setShow(!show)}
-                aria-label="Toggle password visibility"
-              >
-                <img src={eyeIcon} alt="" />
+              <button type="button" onClick={() => setShow(!show)} aria-pressed={show} aria-label="Show password">
+                <PasswordVisibilityIcon shown={show} />
               </button>
             </div>
           </label>
@@ -124,12 +145,12 @@ export function Login() {
             <Link to="/forgot-password">Forgot password?</Link>
           </div>
           {(error || errors.username || errors.password) && (
-            <AuthAlert attemptsRemaining={attemptsRemaining}>
+            <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} urgent={lockedOut}>
               {error || errors.username?.message || errors.password?.message}
             </AuthAlert>
           )}
           <Button type="submit" loading={loginPending} disabled={lockedOut}>
-            {loginPending ? "Logging in…" : lockedOut ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
+            {loginPending ? "Logging in…" : lockedOut ? tryAgainLabel(loginCountdown) : <>Login <img src={arrowIcon} alt="" /></>}
           </Button>
         </form>
       </Card>

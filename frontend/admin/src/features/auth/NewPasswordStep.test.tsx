@@ -47,7 +47,7 @@ const reachNewPassword = async () => {
       </AuthProvider>
     </MemoryRouter>,
   );
-  fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+  fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await screen.findByRole("heading", { name: /verification code/i });
   [..."000000"].forEach((digit, i) =>
@@ -56,8 +56,8 @@ const reachNewPassword = async () => {
   await screen.findByRole("heading", { name: /create a new password/i });
 };
 
-const newPassword = () => screen.getByLabelText("NEW PASSWORD");
-const confirmPassword = () => screen.getByLabelText("CONFIRM NEW PASSWORD");
+const newPassword = () => screen.getByLabelText("New password");
+const confirmPassword = () => screen.getByLabelText("Confirm new password");
 const type = (field: HTMLElement, value: string) => fireEvent.change(field, { target: { value } });
 const submit = () => fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
@@ -208,6 +208,33 @@ describe("new password step: submit", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(reason);
     expect(resets).toEqual([]);
+  });
+
+  it("ties the rejected field to the alert and clears both once the admin edits", async () => {
+    mockBackend();
+    await reachNewPassword();
+
+    type(newPassword(), "abc");
+    type(confirmPassword(), "abc");
+    submit();
+    expect(newPassword()).toHaveAttribute("aria-invalid", "true");
+    expect(newPassword()).toHaveAccessibleDescription(/at least 8 characters/i);
+    expect(confirmPassword()).not.toHaveAttribute("aria-invalid");
+
+    type(newPassword(), STRONG);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(newPassword()).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("points a mismatch at the confirmation field", async () => {
+    mockBackend();
+    await reachNewPassword();
+
+    type(newPassword(), STRONG);
+    type(confirmPassword(), `${STRONG}y`);
+    submit();
+    expect(confirmPassword()).toHaveAttribute("aria-invalid", "true");
+    expect(confirmPassword()).toHaveAccessibleDescription("Passwords do not match.");
   });
 
   it("sends the new password once every rule passes and the fields match", async () => {

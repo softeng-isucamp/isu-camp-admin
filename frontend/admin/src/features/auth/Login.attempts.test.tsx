@@ -43,6 +43,13 @@ const attemptSignIn = async () => {
   });
 };
 
+/** Submits without filling anything in, so only the client-side checks run. */
+const submitLogin = async () => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+  });
+};
+
 const rejected = (attemptsRemaining?: number) =>
   jsonResponse(
     { success: false, message: "Invalid username or password", ...(attemptsRemaining === undefined ? {} : { attemptsRemaining }) },
@@ -104,7 +111,12 @@ describe("login attempts left", () => {
 
     expect(screen.getByLabelText(/^username$/i)).toBeDisabled();
     expect(screen.getByLabelText(/^password$/i)).toBeDisabled();
-    expect(screen.getByRole("button", { name: /login in 2s/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
+    // The button carries the live count; the alert names no number and takes the urgent icon.
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Too many attempts. Try again when the button unlocks.");
+    expect(alert).not.toHaveTextContent(/\d/);
+    expect(within(alert).getByRole("img", { name: "Warning" })).toBeInTheDocument();
 
     // The countdown re-arms its timer on every render, so tick one second at a time.
     for (let second = 0; second < 2; second += 1) {
@@ -125,6 +137,60 @@ describe("login attempts left", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Server error");
     expect(screen.getByRole("alert")).not.toHaveTextContent(/attempt/i);
+  });
+});
+
+describe("login field errors", () => {
+  it("marks the empty field invalid, ties it to the alert, and clears both once the field is edited", async () => {
+    mockBackend();
+    renderLogin();
+    const username = screen.getByLabelText(/^username$/i);
+    await submitLogin();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Username is required.");
+    expect(username).toHaveAttribute("aria-invalid", "true");
+    expect(username).toHaveAccessibleDescription("Username is required.");
+    expect(screen.getByLabelText(/^password$/i)).not.toHaveAttribute("aria-invalid");
+
+    fireEvent.change(username, { target: { value: "admin01" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(username).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("points at the password field when only the password is missing", async () => {
+    mockBackend();
+    renderLogin();
+    fireEvent.change(screen.getByLabelText(/^username$/i), { target: { value: "admin01" } });
+    await submitLogin();
+
+    const password = screen.getByLabelText(/^password$/i);
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAccessibleDescription("Password is required.");
+    expect(screen.getByLabelText(/^username$/i)).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("keeps a server error on screen while the admin edits", async () => {
+    mockBackend(rejected(4));
+    renderLogin();
+    await attemptSignIn();
+
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "another" } });
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect username or password.");
+  });
+});
+
+describe("show password on login", () => {
+  it("names the toggle 'Show password' and reports whether the password is shown", () => {
+    mockBackend();
+    renderLogin();
+    const toggle = screen.getByRole("button", { name: "Show password" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByLabelText(/^password$/i)).toHaveAttribute("type", "password");
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText(/^password$/i)).toHaveAttribute("type", "text");
   });
 });
 

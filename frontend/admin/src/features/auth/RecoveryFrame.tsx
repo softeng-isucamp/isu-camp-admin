@@ -4,12 +4,13 @@ import { Button, Card } from "../../components/UI";
 import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
 import userIcon from "../../assets/figma/login/login-icon-4.svg";
 import lockIcon from "../../assets/figma/login/login-icon-1.svg";
-import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
+import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 
+/** A picture of the login card behind the modal. `inert` keeps its controls out of the tab order and the accessibility tree. */
 function LoginPreview() {
   return (
-    <Card className="login-card" aria-hidden="true">
+    <Card className="login-card" aria-hidden="true" inert>
       <div className="auth-brand">
         <div className="auth-mark">
           <img src={kumpasLogo} alt="KUMPAS logo" />
@@ -19,7 +20,7 @@ function LoginPreview() {
       </div>
       <form>
         <label className="field">
-          <span>USERNAME</span>
+          <span>Username</span>
           <div className="input-with-icon">
             <img src={userIcon} alt="" />
             <input placeholder="Enter your username" readOnly />
@@ -29,12 +30,12 @@ function LoginPreview() {
           <a>Forgot username?</a>
         </div>
         <label className="field">
-          <span>PASSWORD</span>
+          <span>Password</span>
           <div className="password">
             <img className="password-icon" src={lockIcon} alt="" />
             <input placeholder="Enter your password" type="password" readOnly />
-            <button type="button" tabIndex={-1}>
-              <img src={eyeIcon} alt="" />
+            <button type="button">
+              <PasswordVisibilityIcon shown={false} />
             </button>
           </div>
         </label>
@@ -58,6 +59,17 @@ export function RecoveryFrame({ children }: PropsWithChildren) {
       <div className="recovery-overlay">
         <Card className="recovery-modal">{children}</Card>
       </div>
+    </div>
+  );
+}
+
+/** The check mark that heads both final screens. */
+export function SuccessIcon() {
+  return (
+    <div className="recovery-success-icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
     </div>
   );
 }
