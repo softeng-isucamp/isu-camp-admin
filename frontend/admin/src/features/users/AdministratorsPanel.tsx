@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
@@ -8,14 +9,28 @@ import type { AdminAccount, AdminAccountDraft } from "../../types";
 
 const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "" });
 
-type Dialog = { kind: "add" } | { kind: "edit"; account: AdminAccount } | { kind: "remove"; account: AdminAccount } | null;
+type Dialog =
+  | { kind: "add" }
+  | { kind: "deactivate"; account: AdminAccount }
+  | { kind: "reset"; account: AdminAccount }
+  | { kind: "remove"; account: AdminAccount }
+  | null;
 
 /**
  * Administrator accounts for the portal itself. Unlike the app users beside
- * them — owned by the User App and read-only here — these are this app's own
- * records, so they can be added, renamed and removed.
+ * them — owned by the User App — these are this app's own records, so they can
+ * be added, deactivated and removed here.
+ *
+ * Editing is deliberately absent: sign-in details belong to their holder, so
+ * each administrator changes their own through account customization rather
+ * than through this directory. What the row offers instead are the things one
+ * administrator can legitimately do about another — read their recorded
+ * activity, revoke or restore their access, mail them a reset code, or remove
+ * them outright. Deactivating is the reversible one, and usually the right one:
+ * the account and its audit trail survive, only the sign-in stops.
  */
 export function AdministratorsPanel() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const feedback = useFeedback();
   const passwordConfirmation = usePasswordConfirmation();
@@ -58,12 +73,32 @@ export function AdministratorsPanel() {
 
   const save = useMutation({
     mutationFn: (values: AdminAccountDraft) => services.admins.save(values),
-    onSuccess: async (saved, values) => {
+    onSuccess: async (saved) => {
       await refresh();
-      feedback.reportSuccess(`${saved.username} was ${values.id ? "updated" : "added"} successfully.`);
+      feedback.reportSuccess(`${saved.username} was added successfully.`);
       closeDialog();
     },
     onError: (cause) => reportFailure(cause, "Unable to save the administrator."),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: ({ account, status }: { account: AdminAccount; status: AdminAccount["status"] }) =>
+      services.admins.setStatus(account.id, status),
+    onSuccess: async (saved) => {
+      await refresh();
+      feedback.reportSuccess(`${saved.username} was ${saved.status === "Inactive" ? "deactivated" : "activated"} successfully.`);
+      closeDialog();
+    },
+    onError: (cause) => reportFailure(cause, "Unable to update the administrator's status."),
+  });
+
+  const sendReset = useMutation({
+    mutationFn: (account: AdminAccount) => services.admins.sendPasswordReset(account.id),
+    onSuccess: (message) => {
+      feedback.reportSuccess(message);
+      closeDialog();
+    },
+    onError: (cause) => reportFailure(cause, "Unable to send the password reset code."),
   });
 
   const remove = useMutation({
@@ -79,6 +114,19 @@ export function AdministratorsPanel() {
     },
   });
 
+  const viewActivity = (account: AdminAccount) => {
+    setActionMenuId(null);
+    navigate(`/system-logs?${new URLSearchParams({ q: account.username, category: "Admin" })}`);
+  };
+
+  /** Restoring access is harmless and immediate; revoking it asks first. */
+  const changeStatus = (account: AdminAccount) => {
+    setActionMenuId(null);
+    setError("");
+    if (account.status === "Inactive") setStatus.mutate({ account, status: "Active" });
+    else setDialog({ kind: "deactivate", account });
+  };
+
   const submitDraft = () => {
     setError("");
     setFieldErrors({});
@@ -88,8 +136,7 @@ export function AdministratorsPanel() {
     if (!username) issues.username = "Username is required.";
     if (!email) issues.email = "Email is required.";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) issues.email = "Enter a valid email address.";
-    // A blank password on edit keeps the stored one; a new account needs one.
-    if ((!draft.id || draft.password) && (draft.password ?? "").length < 8) {
+    if ((draft.password ?? "").length < 8) {
       issues.password = "Password must be at least 8 characters.";
     }
     if (Object.keys(issues).length) {
@@ -103,14 +150,6 @@ export function AdministratorsPanel() {
     setError("");
     if (!await passwordConfirmation.confirm()) return;
     remove.mutate(account);
-  };
-
-  const openEdit = (account: AdminAccount) => {
-    setDraft({ id: account.id, username: account.username, email: account.email, password: "" });
-    setFieldErrors({});
-    setError("");
-    setDialog({ kind: "edit", account });
-    setActionMenuId(null);
   };
 
   return (
@@ -138,7 +177,7 @@ export function AdministratorsPanel() {
       <div className="table-wrap" style={{ overflow: "visible" }}>
         <table>
           <thead>
-            <tr><th>Username</th><th>Email</th><th>Role</th><th style={{ textAlign: "right" }}>Actions</th></tr>
+            <tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th style={{ textAlign: "right" }}>Actions</th></tr>
           </thead>
           <tbody>
             {admins.map((account) => (
@@ -149,6 +188,9 @@ export function AdministratorsPanel() {
                   <Badge tone={account.isCurrent ? "green" : "grey"}>
                     {account.isCurrent ? "Administrator · You" : "Administrator"}
                   </Badge>
+                </td>
+                <td>
+                  <Badge tone={account.status === "Active" ? "green" : "grey"}>{account.status}</Badge>
                 </td>
                 <td style={{ textAlign: "right", position: "relative" }}>
                   <div
@@ -165,7 +207,31 @@ export function AdministratorsPanel() {
                     </button>
                     {actionMenuId === account.id && (
                       <div className="row-action-menu" role="menu">
-                        <button role="menuitem" onClick={() => openEdit(account)}>Edit administrator</button>
+                        <button role="menuitem" onClick={() => viewActivity(account)}>
+                          View activity
+                        </button>
+                        <button
+                          role="menuitem"
+                          disabled={account.isCurrent || setStatus.isPending}
+                          title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
+                          onClick={() => changeStatus(account)}
+                        >
+                          {account.status === "Active" ? "Deactivate account" : "Activate account"}
+                        </button>
+                        {/* Helps a locked-out colleague without touching their
+                            account: the code only reaches their own inbox. */}
+                        <button
+                          role="menuitem"
+                          disabled={!account.email}
+                          title={account.email ? undefined : "No email address on file."}
+                          onClick={() => {
+                            setError("");
+                            setDialog({ kind: "reset", account });
+                            setActionMenuId(null);
+                          }}
+                        >
+                          Send password reset code
+                        </button>
                         <button
                           role="menuitem"
                           className="danger"
@@ -194,12 +260,10 @@ export function AdministratorsPanel() {
           : !admins.length && !listError && <Empty>No administrator accounts found.</Empty>}
       </div>
 
-      {(dialog?.kind === "add" || dialog?.kind === "edit") && (
+      {dialog?.kind === "add" && (
         <Modal
-          title={dialog.kind === "add" ? "Add Administrator" : "Edit Administrator"}
-          subtitle={dialog.kind === "add"
-            ? "This account can sign in to the admin portal."
-            : "Update the sign-in details for this administrator."}
+          title="Add Administrator"
+          subtitle="This account can sign in to the admin portal."
           size="sm"
           onClose={closeDialog}
         >
@@ -230,11 +294,9 @@ export function AdministratorsPanel() {
               label="PASSWORD"
               aria-label="Password"
               type="password"
-              required={dialog.kind === "add"}
+              required
               autoComplete="new-password"
-              subhelper={dialog.kind === "add"
-                ? "At least 8 characters."
-                : "Leave blank to keep the current password."}
+              subhelper="At least 8 characters."
               value={draft.password ?? ""}
               error={fieldErrors.password}
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
@@ -243,7 +305,58 @@ export function AdministratorsPanel() {
           <div className="modal-actions">
             <Button variant="subtle" disabled={save.isPending} onClick={closeDialog}>Cancel</Button>
             <Button loading={save.isPending} onClick={submitDraft}>
-              {save.isPending ? "Saving…" : dialog.kind === "add" ? "Add Administrator" : "Save Changes"}
+              {save.isPending ? "Saving…" : "Add Administrator"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog?.kind === "deactivate" && (
+        <Modal
+          title="Deactivate this administrator?"
+          subtitle="They keep their account, but cannot sign in until it is reactivated."
+          size="sm"
+          onClose={closeDialog}
+        >
+          <p className="admin-remove-copy">
+            <strong>{dialog.account.username}</strong> will be signed out and refused at the login
+            page. Their activity in System Logs is kept, and you can activate the account again at
+            any time.
+          </p>
+          {error && <div role="alert" className="admin-form-error">{error}</div>}
+          <div className="modal-actions">
+            <Button variant="subtle" data-modal-initial disabled={setStatus.isPending} onClick={closeDialog}>
+              Cancel
+            </Button>
+            <Button
+              loading={setStatus.isPending}
+              onClick={() => setStatus.mutate({ account: dialog.account, status: "Inactive" })}
+            >
+              {setStatus.isPending ? "Deactivating…" : "Deactivate Account"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog?.kind === "reset" && (
+        <Modal
+          title="Send a password reset code?"
+          subtitle="The code goes to the account's own email address."
+          size="sm"
+          onClose={closeDialog}
+        >
+          <p className="admin-remove-copy">
+            <strong>{dialog.account.username}</strong> will receive a six-digit code at{" "}
+            <strong>{dialog.account.email}</strong>, valid for 10 minutes. You will not see the code —
+            they use it to set a new password themselves.
+          </p>
+          {error && <div role="alert" className="admin-form-error">{error}</div>}
+          <div className="modal-actions">
+            <Button variant="subtle" data-modal-initial disabled={sendReset.isPending} onClick={closeDialog}>
+              Cancel
+            </Button>
+            <Button loading={sendReset.isPending} onClick={() => sendReset.mutate(dialog.account)}>
+              {sendReset.isPending ? "Sending…" : "Send Reset Code"}
             </Button>
           </div>
         </Modal>

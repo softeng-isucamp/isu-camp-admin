@@ -2,15 +2,24 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, renamed and removed.
+they are created, deactivated and removed. Editing is limited to the signed-in
+account: every other administrator can be deactivated or removed, but not
+rewritten.
 """
 
 import re
 
 from flask import Blueprint, jsonify, request, session
 
-from auth import Admin, admin_required, reauth_required
+from auth import (
+    Admin,
+    admin_required,
+    rate_limited,
+    reauth_required,
+    send_password_reset_otp,
+)
 from extensions import db
+from model.record_status import normalized_status, status_label
 from services.audit import log_audit
 
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
@@ -31,8 +40,10 @@ def _as_dict(admin):
         "id": str(admin.id),
         "username": admin.username,
         "email": admin.gmail or "",
-        # The signed-in admin cannot remove their own account, so the client
-        # marks that row instead of offering an action that would be refused.
+        "status": status_label(admin.status),
+        # The signed-in admin is the only one that can be edited, and the only
+        # one that cannot be deactivated or removed, so the client marks that
+        # row rather than offering actions the server would refuse.
         "isCurrent": admin.id == session.get("admin_id"),
     }
 
@@ -122,6 +133,15 @@ def update_admin(admin_id):
     if not record:
         return _error("Administrator not found.", status=404)
 
+    # An administrator owns only their own sign-in details. Another account's
+    # username, email and password are theirs to change, so the rest of the
+    # directory is remove-only here.
+    if record.id != session.get("admin_id"):
+        return _error(
+            "You can only edit your own administrator account.",
+            status=403,
+        )
+
     values, invalid = _read_identity(request.get_json(silent=True), require_password=False)
     if invalid:
         return invalid
@@ -142,6 +162,106 @@ def update_admin(admin_id):
     except Exception:
         db.session.rollback()
         return _error("Failed to update the administrator.", status=500)
+
+
+@admins_bp.put("/<int:admin_id>/status")
+def set_admin_status(admin_id):
+    """Activates or deactivates one administrator's access to the portal.
+
+    The reversible counterpart to a delete: the account and its audit trail
+    stay, but it can no longer sign in. Unlike the account's own details, this
+    is another administrator's to set.
+    """
+
+    _, error = admin_required()
+    if error:
+        return error
+
+    record = db.session.get(Admin, admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    data = request.get_json(silent=True)
+    requested = (data or {}).get("status") if isinstance(data, dict) else None
+    status = normalized_status(requested, default=None)
+    if status is None:
+        return _error("Status must be Active or Inactive.", field="status")
+
+    if status == "inactive":
+        if record.id == session.get("admin_id"):
+            return _error("You cannot deactivate your own administrator account.", status=409)
+        # Someone has to be left who can sign in and undo this.
+        active_admins = Admin.query.filter(Admin.status == "active").count()
+        if active_admins <= 1:
+            return _error("The last active administrator cannot be deactivated.", status=409)
+
+    if record.status == status:
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} is already {status_label(status).lower()}.",
+            "admin": _as_dict(record),
+        }), 200
+
+    try:
+        record.status = status
+        action = "deactivate" if status == "inactive" else "activate"
+        log_audit("Admin", None, action, "Administrator", record.id, record.username)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} was "
+                       f"{'deactivated' if status == 'inactive' else 'activated'} successfully.",
+            "admin": _as_dict(record),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return _error("Failed to update the administrator's status.", status=500)
+
+
+@admins_bp.post("/<int:admin_id>/password-reset")
+def send_password_reset(admin_id):
+    """Emails a reset code to one administrator's registered address.
+
+    The way to help a locked-out colleague without editing their account: the
+    code goes to their own inbox, never to the caller's screen.
+    """
+
+    _, error = admin_required()
+    if error:
+        return error
+
+    record = db.session.get(Admin, admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    if not record.gmail:
+        return _error(
+            "That account has no email address on file, so a reset code cannot be sent.",
+            status=409,
+        )
+
+    # One code a minute per account, so a colleague's inbox cannot be flooded.
+    limited = rate_limited(
+        "admin-reset",
+        str(record.id),
+        1,
+        "A reset code was just sent to that account. Please wait before sending another.",
+    )
+    if limited:
+        return limited
+
+    try:
+        send_password_reset_otp(record)
+    except Exception:
+        return _error("Failed to send the password reset code.", status=502)
+
+    # Audited because it is an action taken against someone else's account.
+    log_audit("Admin", None, "send password reset", "Administrator", record.id, record.username)
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "message": f"A password reset code was sent to {record.gmail}.",
+    }), 200
 
 
 @admins_bp.delete("/<int:admin_id>")

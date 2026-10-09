@@ -10,6 +10,8 @@ from model.app_user import (
     UserInfo,
     stored_user_type_aliases,
 )
+from model.record_status import normalized_status, status_label
+from services.audit import log_audit
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/users")
 RANGES = {"all": None, "7d": 7, "30d": 30, "90d": 90}
@@ -82,3 +84,49 @@ def list_users():
     )
 
     return jsonify({"items": [record.to_dict() for record in records], "total": total, "page": page, "pageSize": page_size}), 200
+
+
+@users_bp.put("/<int:user_id>/status")
+def set_user_status(user_id):
+    """Activates or deactivates one app account.
+
+    The only field of an app account this portal writes: the profile is the
+    User App's, but whether the account may sign in is an administrative
+    decision. The User App enforces it at its own sign-in.
+    """
+
+    _, auth_error = admin_required()
+    if auth_error:
+        return auth_error
+
+    record = db.session.get(AppUser, user_id)
+    if not record:
+        return jsonify({"success": False, "message": "User not found."}), 404
+
+    data = request.get_json(silent=True)
+    requested = (data or {}).get("status") if isinstance(data, dict) else None
+    status = normalized_status(requested, default=None)
+    if status is None:
+        return _error("Status must be Active or Inactive.")
+
+    if record.status == status:
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} is already {status_label(status).lower()}.",
+            "user": record.to_dict(),
+        }), 200
+
+    try:
+        record.status = status
+        action = "deactivate" if status == "inactive" else "activate"
+        log_audit("Admin", None, action, "User", record.id, record.username)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} was "
+                       f"{'deactivated' if status == 'inactive' else 'activated'} successfully.",
+            "user": record.to_dict(),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"success": False, "message": "Failed to update the account's status."}), 500

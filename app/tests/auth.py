@@ -37,6 +37,74 @@ def test_login_rate_limits_invalid_request_bodies():
     assert responses[5].status_code == 429
 
 
+def test_sending_a_reset_code_mails_only_the_accounts_own_address(monkeypatch):
+    """The seam User Management's reset action shares with the sign-in page."""
+
+    auth_module.reset_otps.clear()
+    sent = []
+
+    class FakeMessage:
+        def __init__(self, **values):
+            self.__dict__.update(values)
+
+    monkeypatch.setattr(auth_module, "Message", FakeMessage)
+    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {
+        "send": lambda self, message: sent.append((message.recipients, message.body)),
+    })())
+    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin01@example.com"})()
+
+    auth_module.send_password_reset_otp(admin)
+
+    stored = auth_module.reset_otps["admin01"]["otp"]
+    assert len(stored) == 6 and stored.isdigit()
+    recipients, body = sent[0]
+    assert recipients == ["admin01@example.com"]
+    assert stored in body
+
+
+def test_login_refuses_a_deactivated_administrator(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    admin = type("AdminRecord", (), {
+        "id": 3, "username": "admin01", "password": "password123", "is_active": False,
+    })()
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(
+            lambda **values: type("Result", (), {"first": lambda self: admin})()
+        )})()
+    }))
+    monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
+    client = auth_app().test_client()
+
+    response = client.post("/api/login", json={"username": "admin01", "password": "password123"})
+
+    assert response.status_code == 403
+    assert "deactivated" in response.json["message"]
+    # No session was opened, so the refusal is not just cosmetic.
+    with client.session_transaction() as flask_session:
+        assert "admin_id" not in flask_session
+
+
+def test_a_session_ends_when_its_account_is_deactivated(monkeypatch):
+    """Deactivation takes effect on the deactivated admin's next request."""
+
+    admin = type("AdminRecord", (), {"id": 7, "username": "admin01", "is_active": False})()
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {
+        "get": lambda self, model, key: admin,
+        "commit": lambda self: None,
+    })())
+    client = auth_app().test_client()
+    with client.session_transaction() as flask_session:
+        flask_session["admin_id"] = 7
+        flask_session["admin_username"] = "admin01"
+
+    response = client.get("/api/me")
+
+    assert response.status_code == 401
+    with client.session_transaction() as flask_session:
+        assert "admin_id" not in flask_session
+
+
 def test_reset_request_enforces_resend_cooldown(monkeypatch):
     auth_module.rate_limit_buckets.clear()
     admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin@example.com"})()
@@ -174,7 +242,9 @@ def test_final_reset_remains_authoritative_after_non_consuming_verification(monk
 
 def signed_in_client(monkeypatch, password="password123", admin_id=7):
     """A test client whose session is the given admin, as /api/login leaves it."""
-    admin = type("AdminRecord", (), {"id": admin_id, "username": "admin01", "password": password})()
+    admin = type("AdminRecord", (), {
+        "id": admin_id, "username": "admin01", "password": password, "is_active": True,
+    })()
     monkeypatch.setattr(auth_module.db, "session", type("Session", (), {
         "get": lambda self, model, key: admin,
         "commit": lambda self: None,

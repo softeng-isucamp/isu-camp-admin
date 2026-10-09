@@ -17,6 +17,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
 
 from extensions import db, mail
@@ -205,6 +206,32 @@ def add_cors_headers(response):
         response.headers["Access-Control-Expose-Headers"] = "Retry-After"
 
     return response
+
+
+# ==========================================
+# Unhandled Errors
+# ==========================================
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Turn a crash into a JSON 500 that still carries the CORS headers.
+
+    Flask skips ``after_request`` when a view raises, so without this an
+    unhandled error reaches the browser with no Access-Control-Allow-Origin and
+    is reported as a CORS policy violation — which sends anyone debugging after
+    the wrong problem. The response goes through ``after_request`` instead, so
+    the console shows the real 500.
+    """
+
+    if isinstance(error, HTTPException):
+        return error
+
+    app.logger.exception("Unhandled error on %s %s", request.method, request.path)
+
+    return jsonify({
+        "success": False,
+        "message": "The server could not complete the request."
+    }), 500
 
 
 # ==========================================
