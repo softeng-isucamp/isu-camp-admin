@@ -21,9 +21,9 @@ import type {
   UserAccountType,
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
-import { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
+import { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
 
-export { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
+export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
 import { z } from "zod";
 
 import {
@@ -543,6 +543,10 @@ export interface Services {
 
   profile: ReturnType<typeof createProfileService>;
   auth: {
+    /**
+     * Rejects with `AuthError` (`invalid_credentials`, plus `attemptsRemaining`
+     * when the server reports it) or `RateLimitError` once attempts run out.
+     */
     login(
       username: string,
       password: string
@@ -706,16 +710,6 @@ enrichLegacyLocationAuditIds();
 // Services
 // ==========================================
 
-export class RateLimitError extends Error {
-  readonly retryAfterSeconds: number;
-
-  constructor(retryAfterSeconds: number, message?: string) {
-    super(message ?? `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
-    this.name = "RateLimitError";
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
 function checkRateLimit(response: Response, message?: string): void {
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
@@ -851,6 +845,17 @@ export const services: Services = {
       }
 
       checkRateLimit(response, data.message);
+
+      if (response.status === 401) {
+        const attemptsRemaining = Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0
+          ? data.attemptsRemaining as number
+          : undefined;
+        throw new AuthError(
+          "invalid_credentials",
+          data.message || "Invalid username or password",
+          attemptsRemaining
+        );
+      }
 
       if (!response.ok) {
         throw new Error(

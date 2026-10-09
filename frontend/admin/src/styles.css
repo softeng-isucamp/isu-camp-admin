@@ -1302,7 +1302,16 @@ td small {
   height: 13px;
 }
 .forgot {
-  text-align: right;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: -8px;
+}
+.caps-lock-warning {
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 700;
 }
 .forgot a,
 .back-link {
@@ -1317,6 +1326,11 @@ td small {
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 12px;
+}
+.error-urgent {
+  background: #ffe3e3;
+  border-color: var(--danger);
+  font-weight: 700;
 }
 .login-card footer {
   border-top: 1px solid #e1e3e4;
