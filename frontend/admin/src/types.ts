@@ -162,6 +162,49 @@ export interface DashboardSummary {
   topSearched: TopSearchedLocation[];
   recent: AuditEntry[];
 }
+/** Destination categories used by Visit analytics; Facility counts as Building. */
+export type DestinationType = "Building" | "Room" | "Laboratory" | "Office" | "Restroom";
+/** Visits are attributed to an account type, or to "guest" when the user was signed out. */
+export type VisitorKind = UserAccountType | "guest";
+export interface AnalyticsTotals {
+  /** Signed-in users with at least one Search in the period. */
+  activeUsers: number;
+  searches: number;
+  visits: number;
+  /** Visits divided by Searches, 0..1. */
+  arrivalRate: number;
+}
+export interface AnalyticsDestination {
+  rank: string;
+  locationId?: string;
+  name: string;
+  context: string;
+  searches: number;
+  visits: number;
+}
+export interface CompletenessCheck {
+  key: "photo" | "description" | "keywords" | "mapPin";
+  label: string;
+  complete: number;
+  total: number;
+}
+/** Response of `GET /api/dashboard/analytics?range=week|month|all`. Dates are Asia/Manila `YYYY-MM-DD` bucket starts. */
+export interface DashboardAnalytics {
+  range: DashboardRange;
+  current: AnalyticsTotals;
+  /** The previous equal period; null for "all". */
+  previous: AnalyticsTotals | null;
+  timeline: Array<{ date: string; searches: number; visits: number }>;
+  /** Searches per weekday (0 = Monday .. 6 = Sunday) and hour (0..23, Manila). */
+  peakHours: Array<{ day: number; hour: number; searches: number }>;
+  visitsByAccountType: Record<VisitorKind, number>;
+  visitsByDestinationType: Record<DestinationType, number>;
+  registrations: Array<{ date: string } & Record<UserAccountType, number>>;
+  topDestinations: AnalyticsDestination[];
+  /** Active buildings and indoor locations. */
+  completeness: CompletenessCheck[];
+  completenessTotal: number;
+}
 export interface TopSearchedLocation {
   rank: string;
   locationId?: string;

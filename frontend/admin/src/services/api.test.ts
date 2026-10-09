@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  normalizeBackendDashboardAnalytics,
   normalizeBackendDashboardSummary,
   normalizeBackendUser,
   normalizeBackendLocationPage,
@@ -9,6 +10,8 @@ import {
 import { resetPasswordSchema, resetSchema } from "./schemas";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 import { createLocalAdapter } from "./localAdapter";
+import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
+import type { Location } from "../types";
 
 describe("mock service contracts", () => {
   afterEach(() => {
@@ -1175,3 +1178,42 @@ describe("account type contract", () => {
   });
 });
 
+describe("dashboard analytics", () => {
+  it("generates deterministic fixture analytics that satisfy the backend contract", async () => {
+    const week = await services.dashboard.analytics("week");
+    const again = await services.dashboard.analytics("week");
+    expect(again).toEqual(week);
+    expect(normalizeBackendDashboardAnalytics({ data: week })).toEqual(week);
+    expect(week.timeline).toHaveLength(7);
+    expect(week.previous).not.toBeNull();
+    expect((await services.dashboard.analytics("month")).timeline).toHaveLength(30);
+    const all = await services.dashboard.analytics("all");
+    expect(all.timeline).toHaveLength(12);
+    expect(all.previous).toBeNull();
+  });
+
+  it("rejects a malformed analytics payload", () => {
+    expect(() => normalizeBackendDashboardAnalytics({ range: "week" })).toThrow("malformed dashboard analytics");
+  });
+});
+
+
+it("uses Manila dates and actual active directory metadata, including building footprints", () => {
+  const now = Date.parse("2026-10-08T16:30:00Z"); // October 9 in Manila
+  const directory: Location[] = [{
+    id: "42", name: "Library", code: "LIB", type: "Building", parentId: null,
+    status: "Active", lat: null, lng: null, positioned: false,
+    function: "Study space", keywords: "library", hasPhoto: true,
+  }];
+  const data = generateDashboardAnalytics("week", directory, now, [{
+    id: "42", name: "Library", code: "LIB", points: [[16, 121], [16.1, 121], [16, 121.1]],
+  }]);
+  expect(data.timeline.at(-1)?.date).toBe("2026-10-09");
+  expect(data.completeness.map((check) => check.complete)).toEqual([1, 1, 1, 1]);
+  expect(data.current.activeUsers).toBeLessThanOrEqual(600);
+  expect(data.timeline.reduce((sum, day) => sum + day.visits, 0)).toBe(data.current.visits);
+  directory[0] = { ...directory[0], name: "Renamed library", status: "Inactive" };
+  const changed = generateDashboardAnalytics("week", directory, now);
+  expect(changed.topDestinations).toEqual([]);
+  expect(changed.completenessTotal).toBe(0);
+});

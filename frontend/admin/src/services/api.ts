@@ -3,6 +3,7 @@ import type {
   AdminAccountDraft,
   AuditEntry,
   Building,
+  DashboardAnalytics,
   DashboardRange,
   DashboardSummary,
   Location,
@@ -39,6 +40,7 @@ import { createLocalAdapter } from "./localAdapter";
 import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
+import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
 import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
@@ -117,6 +119,46 @@ export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary
   } catch {
     throw new Error("Backend returned a malformed dashboard summary.");
   }
+};
+const nonNegInt = z.number().int().nonnegative();
+const analyticsTotalsSchema = z.object({
+  activeUsers: nonNegInt,
+  searches: nonNegInt,
+  visits: nonNegInt,
+  arrivalRate: z.number().min(0).max(1),
+});
+const dashboardAnalyticsSchema = z.object({
+  range: z.enum(["week", "month", "all"]),
+  current: analyticsTotalsSchema,
+  previous: analyticsTotalsSchema.nullable(),
+  timeline: z.array(z.object({ date: z.string().min(1), searches: nonNegInt, visits: nonNegInt })),
+  peakHours: z.array(z.object({ day: z.number().int().min(0).max(6), hour: z.number().int().min(0).max(23), searches: nonNegInt })),
+  visitsByAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt, guest: nonNegInt }),
+  visitsByDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
+  registrations: z.array(z.object({ date: z.string().min(1), student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt })),
+  topDestinations: z.array(z.object({
+    rank: z.string().min(1),
+    locationId: z.string().min(1).optional(),
+    name: z.string().min(1),
+    context: z.string(),
+    searches: nonNegInt,
+    visits: nonNegInt,
+  })),
+  completeness: z.array(z.object({
+    key: z.enum(["photo", "description", "keywords", "mapPin"]),
+    label: z.string(),
+    complete: nonNegInt,
+    total: nonNegInt,
+  })),
+  completenessTotal: nonNegInt,
+});
+
+/** Assumed contract for `GET /api/dashboard/analytics`; the backend does not serve it yet. */
+export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnalytics => {
+  const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const parsed = dashboardAnalyticsSchema.safeParse(value);
+  if (!parsed.success) throw new Error("Backend returned malformed dashboard analytics.");
+  return parsed.data;
 };
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
@@ -230,7 +272,7 @@ if (loadedMapFixture && !generatedMapFixture) buildings.push(...loadedMapFixture
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
-const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
+export const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 // The directory and the local adapter must share ONE Locations array. Handing
 // the adapter `generatedMapFixture.locations` instead left fixture mode with two:
 // every save and delete landed in the adapter's copy while the Location
@@ -562,6 +604,7 @@ export interface Services {
 
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
+    analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
   };
 
   locations: {
@@ -1063,6 +1106,14 @@ export const services: Services = {
   // ========================================
 
   dashboard: {
+
+    analytics: async (range = "week") => {
+      if (USE_HTTP_API) {
+        const raw = await apiJson<unknown>(`/api/dashboard/analytics?range=${encodeURIComponent(range)}`);
+        return normalizeBackendDashboardAnalytics(raw);
+      }
+      return wait(generateDashboardAnalytics(range, locations, Date.now(), localAdapter.buildings.list()));
+    },
 
     summary: async (range = "week") => {
       if (USE_HTTP_API) {
