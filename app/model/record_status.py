@@ -1,10 +1,12 @@
-"""Lifecycle status shared by public.building and public.location.
+"""Lifecycle status shared by the tables that have one.
 
-Both tables keep the value lowercase, matching the two status columns that
-were in the schema before them (public.route_node.status and
-public.pathway.status). The Locations directory spells the same two values
-"Active"/"Inactive", so a read projects and a write normalizes through here
-rather than each model inventing its own translation.
+public.building and public.location came first, followed by public.admin and
+public."user", whose status says whether the account may sign in. Every one of
+them keeps the value lowercase, matching the two status columns that were in
+the schema before them (public.route_node.status and public.pathway.status).
+The directories spell the same two values "Active"/"Inactive", so a read
+projects and a write normalizes through here rather than each model inventing
+its own translation.
 """
 
 RECORD_STATUSES = ("active", "inactive")

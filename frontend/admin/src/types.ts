@@ -112,19 +112,24 @@ export interface Pathway {
   source?: SourceProvenance;
 }
 export type UserAccountType = "student" | "teacher" | "visitor";
+/** Whether an account may sign in. Deactivating is the reversible alternative to a delete. */
+export type AccountStatus = "Active" | "Inactive";
 export interface UserAccount {
   id: string;
   username: string;
   createdAt: string;
   /** Read-only. Null when the backend value is missing or unrecognized. */
   userType: UserAccountType | null;
+  /** The one field of an app account this portal writes; the User App enforces it. */
+  status: AccountStatus;
 }
 /** An administrator account for the portal itself, owned by this app. */
 export interface AdminAccount {
   id: string;
   username: string;
   email: string;
-  /** True for the signed-in admin, whose own account cannot be removed. */
+  status: AccountStatus;
+  /** True for the signed-in admin, who cannot deactivate or remove their own account. */
   isCurrent: boolean;
 }
 export interface AdminAccountDraft {

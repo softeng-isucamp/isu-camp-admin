@@ -1,6 +1,7 @@
 from datetime import timezone
 
 from extensions import db
+from model.record_status import status_label
 
 # The account type an app user picks at signup, in the admin's spelling.
 USER_TYPES = ("student", "teacher", "visitor")
@@ -47,7 +48,12 @@ class UserInfo(db.Model):
 
 
 class AppUser(db.Model):
-    """A user account exposed by the read-only administrative directory."""
+    """A user account listed by the administrative directory.
+
+    The profile — username, email, account type — belongs to the User App and
+    is read-only here. Whether the account may sign in at all is the portal's
+    to set, which is the one field this app writes.
+    """
 
     __tablename__ = "user"
     __table_args__ = {"schema": "public"}
@@ -55,6 +61,10 @@ class AppUser(db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     username = db.Column(db.String, nullable=False)
     info_id = db.Column(db.BigInteger, db.ForeignKey("public.userInfo.id"), nullable=True)
+
+    # Lowercase per model.record_status. Written by the portal's User Management
+    # and enforced by the User App, which owns sign-in for these accounts.
+    status = db.Column(db.String(20), nullable=False, default="active")
 
     info = db.relationship("UserInfo", lazy="joined")
 
@@ -79,4 +89,5 @@ class AppUser(db.Model):
             "username": self.username,
             "createdAt": created_at.isoformat() if created_at else None,
             "userType": self.user_type,
+            "status": status_label(self.status),
         }

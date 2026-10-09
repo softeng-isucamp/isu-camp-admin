@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
@@ -8,15 +8,26 @@ import type { AdminAccount } from "../../types";
 import { Users } from "./Users";
 
 const directory: AdminAccount[] = [
-  { id: "1", username: "admin_justine", email: "justine@isu.edu.ph", isCurrent: true },
-  { id: "2", username: "admin_registrar", email: "registrar@isu.edu.ph", isCurrent: false },
+  { id: "1", username: "admin_justine", email: "justine@isu.edu.ph", status: "Active", isCurrent: true },
+  { id: "2", username: "admin_registrar", email: "registrar@isu.edu.ph", status: "Active", isCurrent: false },
 ];
+
+/** Stands in for the System Logs page so a row's link can be read off the URL. */
+function LogsProbe() {
+  const location = useLocation();
+  return <div data-testid="logs-route">{location.search}</div>;
+}
 
 function renderUsers() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/users"]}><Users /></MemoryRouter>
+      <MemoryRouter initialEntries={["/users"]}>
+        <Routes>
+          <Route path="/users" element={<Users />} />
+          <Route path="/system-logs" element={<LogsProbe />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -64,7 +75,7 @@ describe("Administrator accounts in User Management", () => {
 
   it("adds an administrator and reports the outcome", async () => {
     const save = vi.spyOn(services.admins, "save").mockResolvedValue({
-      id: "3", username: "admin_new", email: "new@isu.edu.ph", isCurrent: false,
+      id: "3", username: "admin_new", email: "new@isu.edu.ph", status: "Active", isCurrent: false,
     });
     await openAdministrators();
 
@@ -99,23 +110,134 @@ describe("Administrator accounts in User Management", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("edits an administrator and leaves a blank password alone", async () => {
-    const save = vi.spyOn(services.admins, "save").mockResolvedValue({
-      id: "2", username: "admin_renamed", email: "registrar@isu.edu.ph", isCurrent: false,
-    });
+  it("offers no way to edit an account from the directory", async () => {
+    await openAdministrators();
+
+    // Sign-in details are changed through account customization, so the row
+    // actions stop short of them — on your own row as much as anyone else's.
+    for (const username of ["admin_registrar", "admin_justine"]) {
+      openRowMenu(username);
+      const actions = within(screen.getByRole("menu")).getAllByRole("menuitem");
+      expect(actions.map((action) => action.textContent)).toEqual([
+        "View activity", "Deactivate account", "Send password reset code", "Remove administrator",
+      ]);
+      openRowMenu(username);
+    }
+  });
+
+  it("links a row to that administrator's recorded activity", async () => {
     await openAdministrators();
 
     openRowMenu("admin_registrar");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit administrator" }));
-    expect(screen.getByLabelText("Username")).toHaveValue("admin_registrar");
-    expect(screen.getByLabelText("Password")).toHaveValue("");
-    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
 
-    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
-      id: "2", username: "admin_renamed", password: "",
-    })));
-    expect(await screen.findByText("admin_renamed was updated successfully.")).toBeInTheDocument();
+    const search = new URLSearchParams((await screen.findByTestId("logs-route")).textContent ?? "");
+    expect(search.get("q")).toBe("admin_registrar");
+    expect(search.get("category")).toBe("Admin");
+  });
+
+  it("shows each account's status and deactivates one after confirming", async () => {
+    const setStatus = vi.spyOn(services.admins, "setStatus").mockResolvedValue({
+      ...directory[1], status: "Inactive",
+    });
+    await openAdministrators();
+
+    const row = screen.getByText("admin_registrar").closest("tr")!;
+    expect(within(row).getByText("Active")).toBeInTheDocument();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Deactivate account" }));
+
+    // Revoking access asks first, and says the account itself is kept.
+    const dialog = screen.getByRole("dialog", { name: "Deactivate this administrator?" });
+    expect(within(dialog).getByText(/activate the account again/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate Account" }));
+
+    await waitFor(() => expect(setStatus).toHaveBeenCalledWith("2", "Inactive"));
+    expect(await screen.findByText("admin_registrar was deactivated successfully.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Deactivate this administrator?" })).not.toBeInTheDocument();
+  });
+
+  it("reactivates a deactivated account without a confirmation step", async () => {
+    vi.spyOn(services.admins, "list").mockResolvedValue([
+      { ...directory[0] },
+      { ...directory[1], status: "Inactive" },
+    ]);
+    const setStatus = vi.spyOn(services.admins, "setStatus").mockResolvedValue({
+      ...directory[1], status: "Active",
+    });
+    await openAdministrators();
+
+    expect(within(screen.getByText("admin_registrar").closest("tr")!).getByText("Inactive")).toBeInTheDocument();
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Activate account" }));
+
+    await waitFor(() => expect(setStatus).toHaveBeenCalledWith("2", "Active"));
+    expect(await screen.findByText("admin_registrar was activated successfully.")).toBeInTheDocument();
+  });
+
+  it("keeps the deactivation dialog open and explains a refusal", async () => {
+    vi.spyOn(services.admins, "setStatus")
+      .mockRejectedValue(new Error("The last active administrator cannot be deactivated."));
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Deactivate account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate Account" }));
+
+    expect(await screen.findByText("The last active administrator cannot be deactivated.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Deactivate this administrator?" })).toBeInTheDocument();
+  });
+
+  it("will not offer to deactivate the signed-in administrator", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_justine");
+
+    expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeDisabled();
+  });
+
+  it("mails a reset code to another administrator after confirming", async () => {
+    const sendPasswordReset = vi.spyOn(services.admins, "sendPasswordReset")
+      .mockResolvedValue("A password reset code was sent to registrar@isu.edu.ph.");
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send password reset code" }));
+
+    // The dialog says where the code goes, and never shows the code itself.
+    const dialog = screen.getByRole("dialog", { name: "Send a password reset code?" });
+    expect(within(dialog).getByText("registrar@isu.edu.ph")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send Reset Code" }));
+
+    await waitFor(() => expect(sendPasswordReset).toHaveBeenCalledWith("2"));
+    expect(await screen.findByText("A password reset code was sent to registrar@isu.edu.ph.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Send a password reset code?" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the reset dialog open and explains a send failure", async () => {
+    vi.spyOn(services.admins, "sendPasswordReset").mockRejectedValue(new Error("Failed to send the password reset code."));
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send password reset code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send Reset Code" }));
+
+    expect(await screen.findByText("Failed to send the password reset code.")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Send a password reset code?" })).toBeInTheDocument();
+  });
+
+  it("will not offer a reset code for an account with no address on file", async () => {
+    vi.spyOn(services.admins, "list").mockResolvedValue([
+      { ...directory[0] },
+      { id: "2", username: "admin_registrar", email: "", status: "Active", isCurrent: false },
+    ]);
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    expect(screen.getByRole("menuitem", { name: "Send password reset code" })).toBeDisabled();
+    // Access is still revocable; only the email action depends on an address.
+    expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeEnabled();
   });
 
   it("surfaces a duplicate username reported by the service", async () => {

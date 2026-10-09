@@ -7,7 +7,8 @@ const lastNames = ["santos", "reyes", "cruz", "bautista", "garcia", "mendoza", "
 
 /**
  * Deterministic fixture accounts (fixed seed): 60 users, roughly 70% student,
- * 20% teacher, 10% visitor, registered over the 90 days before `now`.
+ * 20% teacher, 10% visitor, registered over the 90 days before `now`. Every
+ * tenth account is deactivated, so the directory shows both states.
  */
 export function createMockUsers(now = Date.now()): UserAccount[] {
   const rand = mulberry32(2026);
@@ -17,7 +18,8 @@ export function createMockUsers(now = Date.now()): UserAccount[] {
     const first = firstNames[Math.floor(rand() * firstNames.length)];
     const last = lastNames[Math.floor(rand() * lastNames.length)];
     const createdAt = new Date(now - Math.floor(rand() * 90 * 24) * DAY / 24 - index * 60_000).toISOString();
-    return { id: String(index + 1), username: `${first}.${last}${index + 1}`, createdAt, userType } satisfies UserAccount;
+    const status = (index + 1) % 10 === 0 ? "Inactive" : "Active";
+    return { id: String(index + 1), username: `${first}.${last}${index + 1}`, createdAt, userType, status } satisfies UserAccount;
   });
   return users.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }

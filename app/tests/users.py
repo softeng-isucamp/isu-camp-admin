@@ -262,3 +262,83 @@ def test_users_requires_authentication(monkeypatch):
     response = app.test_client().get("/api/users")
 
     assert response.status_code == 401
+
+
+# ==========================================
+# ACCOUNT STATUS
+# ==========================================
+
+@pytest.fixture
+def no_audit(monkeypatch):
+    """The audit table is not part of this module's in-memory schema."""
+    monkeypatch.setattr(users_module, "log_audit", lambda *args, **kwargs: None)
+
+
+def test_users_are_listed_as_active_until_deactivated(app):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+
+    response = app.test_client().get("/api/users")
+
+    assert response.json["items"][0]["status"] == "Active"
+
+
+def test_deactivating_an_app_account_persists_and_shows_in_the_listing(app, no_audit):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+    client = app.test_client()
+
+    response = client.put("/api/users/1/status", json={"status": "Inactive"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "maria.santos1 was deactivated successfully."
+    assert response.json["user"]["status"] == "Inactive"
+    assert client.get("/api/users").json["items"][0]["status"] == "Inactive"
+    with app.app_context():
+        assert db.session.get(AppUser, 1).status == "inactive"
+
+
+def test_activating_an_app_account_restores_it(app, no_audit):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+    client = app.test_client()
+    client.put("/api/users/1/status", json={"status": "Inactive"})
+
+    response = client.put("/api/users/1/status", json={"status": "Active"})
+
+    assert response.status_code == 200
+    assert response.json["user"]["status"] == "Active"
+
+
+def test_setting_an_app_account_status_it_already_has_changes_nothing(app, no_audit):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+
+    response = app.test_client().put("/api/users/1/status", json={"status": "Active"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "maria.santos1 is already active."
+
+
+@pytest.mark.parametrize("body", [{}, {"status": "Unknown"}, {"status": "banned"}])
+def test_app_account_status_must_be_one_of_the_two_states(app, body, no_audit):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+
+    response = app.test_client().put("/api/users/1/status", json=body)
+
+    assert response.status_code == 400
+    with app.app_context():
+        assert db.session.get(AppUser, 1).status == "active"
+
+
+def test_setting_the_status_of_a_missing_app_account_is_not_found(app, no_audit):
+    assert app.test_client().put("/api/users/99/status", json={"status": "Inactive"}).status_code == 404
+
+
+def test_setting_an_app_account_status_requires_authentication(app, monkeypatch, no_audit):
+    add_users(app, (1, "maria.santos1", datetime.now(timezone.utc), True))
+    monkeypatch.setattr(
+        users_module, "admin_required", lambda: (None, ({"success": False}, 401)),
+    )
+
+    response = app.test_client().put("/api/users/1/status", json={"status": "Inactive"})
+
+    assert response.status_code == 401
+    with app.app_context():
+        assert db.session.get(AppUser, 1).status == "active"

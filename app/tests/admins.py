@@ -35,7 +35,14 @@ class FakeQuery:
 
 
 class FakeColumn:
-    """Enough of a SQLAlchemy column for `Admin.username.asc()` to resolve."""
+    """Enough of a SQLAlchemy column for the routes' expressions to resolve.
+
+    `Admin.username.asc()` orders the listing, and `Admin.status == "active"`
+    becomes the predicate FakeQuery.filter calls per record.
+    """
+
+    def __init__(self, name):
+        self.name = name
 
     def asc(self):
         return self
@@ -43,17 +50,28 @@ class FakeColumn:
     def desc(self):
         return self
 
+    def __eq__(self, other):
+        return lambda record: getattr(record, self.name) == other
+
+    __hash__ = None
+
 
 class FakeAdmin:
     store = []
     # Shadowed by the instance attribute on every record.
-    username = FakeColumn()
+    username = FakeColumn("username")
+    status = FakeColumn("status")
 
-    def __init__(self, username=None, password=None, gmail=None, id=None):
+    def __init__(self, username=None, password=None, gmail=None, id=None, status="active"):
         self.id = id
         self.username = username
         self.password = password
         self.gmail = gmail
+        self.status = status
+
+    @property
+    def is_active(self):
+        return self.status == "active"
 
     @classmethod
     def reset(cls, records):
@@ -130,6 +148,14 @@ def admin_directory(monkeypatch):
     monkeypatch.setattr(admins_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(admins_module, "reauth_required", lambda: (object(), None))
     monkeypatch.setattr(admins_module, "log_audit", lambda *args, **kwargs: None)
+    # Reset codes are delivered by email; the test records the recipients.
+    session.reset_codes_sent = []
+    monkeypatch.setattr(
+        admins_module,
+        "send_password_reset_otp",
+        lambda admin: session.reset_codes_sent.append(admin.username),
+    )
+    monkeypatch.setattr(admins_module, "rate_limited", lambda *args, **kwargs: None)
     # The route builds its uniqueness predicate from SQLAlchemy expressions; the
     # fake query calls predicates, so comparisons are replaced with plain lambdas.
     monkeypatch.setattr(admins_module, "_username_taken", lambda username, excluding_id=None: any(
@@ -148,6 +174,7 @@ def test_listing_marks_the_signed_in_administrator():
     assert response.json["total"] == 2
     current = {item["username"]: item["isCurrent"] for item in response.json["items"]}
     assert current == {"admin01": False, "admin02": True}
+    assert {item["status"] for item in response.json["items"]} == {"Active"}
     # The listing must never expose stored passwords.
     assert all("password" not in item for item in response.json["items"])
 
@@ -197,7 +224,7 @@ def test_creating_rejects_a_duplicate_username():
 
 
 def test_updating_renames_without_touching_the_password():
-    client = signed_in(admins_app())
+    client = signed_in(admins_app(), admin_id=2)
 
     response = client.put("/api/admins/2", json={"username": "renamed", "email": "renamed@example.com"})
 
@@ -208,7 +235,7 @@ def test_updating_renames_without_touching_the_password():
 
 
 def test_updating_sets_a_supplied_password():
-    client = signed_in(admins_app())
+    client = signed_in(admins_app(), admin_id=2)
 
     response = client.put("/api/admins/2", json={
         "username": "admin02", "email": "admin02@example.com", "password": "replacement",
@@ -222,6 +249,159 @@ def test_updating_a_missing_administrator_is_not_found():
     assert signed_in(admins_app()).put("/api/admins/99", json={
         "username": "ghost", "email": "ghost@example.com",
     }).status_code == 404
+
+
+def test_updating_refuses_another_administrators_details():
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2", json={
+        "username": "hijacked", "email": "hijacked@example.com", "password": "replacement",
+    })
+
+    assert response.status_code == 403
+    assert response.json["message"] == "You can only edit your own administrator account."
+    record = next(item for item in FakeAdmin.store if item.id == 2)
+    assert (record.username, record.gmail, record.password) == (
+        "admin02", "admin02@example.com", "password456",
+    )
+
+
+def test_updating_refuses_another_administrator_before_validating_the_body():
+    # A rejected edit must not leak which fields the other account would accept.
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2", json={})
+
+    assert response.status_code == 403
+    assert "fields" not in response.json
+
+
+def test_deactivating_another_administrator_keeps_the_record(admin_directory):
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/status", json={"status": "Inactive"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "admin02 was deactivated successfully."
+    assert response.json["admin"]["status"] == "Inactive"
+    record = next(item for item in FakeAdmin.store if item.id == 2)
+    assert record.status == "inactive" and record.is_active is False
+    # Deactivation is not a delete: the account is still there to be restored.
+    assert len(FakeAdmin.store) == 2
+    assert admin_directory.committed is True
+
+
+def test_activating_restores_access():
+    FakeAdmin.reset([
+        FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com"),
+        FakeAdmin(id=2, username="admin02", password="x", gmail="b@example.com", status="inactive"),
+    ])
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/status", json={"status": "Active"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "admin02 was activated successfully."
+    assert next(item for item in FakeAdmin.store if item.id == 2).status == "active"
+
+
+def test_deactivating_refuses_the_signed_in_account():
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1/status", json={"status": "Inactive"})
+
+    assert response.status_code == 409
+    assert response.json["message"] == "You cannot deactivate your own administrator account."
+    assert next(item for item in FakeAdmin.store if item.id == 1).status == "active"
+
+
+def test_deactivating_refuses_the_last_active_administrator():
+    # admin02 is already inactive, so admin01 is the only one who can sign in.
+    FakeAdmin.reset([
+        FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com"),
+        FakeAdmin(id=2, username="admin02", password="x", gmail="b@example.com", status="inactive"),
+    ])
+
+    response = signed_in(admins_app(), admin_id=2).put("/api/admins/1/status", json={"status": "Inactive"})
+
+    assert response.status_code == 409
+    assert response.json["message"] == "The last active administrator cannot be deactivated."
+    assert next(item for item in FakeAdmin.store if item.id == 1).status == "active"
+
+
+@pytest.mark.parametrize("body", [{}, {"status": "Unknown"}, {"status": "archived"}])
+def test_status_must_be_one_of_the_two_states(body):
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/status", json=body)
+
+    assert response.status_code == 400
+    assert "status" in response.json["fields"]
+
+
+def test_setting_the_status_it_already_has_is_a_no_op(admin_directory):
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/status", json={"status": "Active"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "admin02 is already active."
+    assert admin_directory.committed is False
+
+
+def test_setting_the_status_of_a_missing_administrator_is_not_found():
+    assert signed_in(admins_app()).put("/api/admins/99/status", json={"status": "Inactive"}).status_code == 404
+
+
+def test_setting_a_status_requires_an_administrator(monkeypatch):
+    monkeypatch.setattr(admins_module, "admin_required", lambda: (None, ({"success": False}, 401)))
+
+    response = signed_in(admins_app()).put("/api/admins/2/status", json={"status": "Inactive"})
+
+    assert response.status_code == 401
+    assert next(item for item in FakeAdmin.store if item.id == 2).status == "active"
+
+
+def test_sending_a_reset_code_mails_the_other_account(admin_directory):
+    response = signed_in(admins_app(), admin_id=1).post("/api/admins/2/password-reset")
+
+    assert response.status_code == 200
+    assert response.json["message"] == "A password reset code was sent to admin02@example.com."
+    assert admin_directory.reset_codes_sent == ["admin02"]
+    # The caller never learns the code itself.
+    assert "otp" not in response.json and "code" not in response.json
+
+
+def test_sending_a_reset_code_needs_an_address_on_file(admin_directory):
+    FakeAdmin.reset([
+        FakeAdmin(id=1, username="admin01", password="x", gmail="admin01@example.com"),
+        FakeAdmin(id=2, username="admin02", password="x", gmail=None),
+    ])
+
+    response = signed_in(admins_app(), admin_id=1).post("/api/admins/2/password-reset")
+
+    assert response.status_code == 409
+    assert admin_directory.reset_codes_sent == []
+
+
+def test_sending_a_reset_code_is_rate_limited_per_account(monkeypatch, admin_directory):
+    monkeypatch.setattr(admins_module, "rate_limited", lambda *args, **kwargs: (
+        {"success": False, "message": "A reset code was just sent to that account."}, 429
+    ))
+
+    response = signed_in(admins_app(), admin_id=1).post("/api/admins/2/password-reset")
+
+    assert response.status_code == 429
+    assert admin_directory.reset_codes_sent == []
+
+
+def test_sending_a_reset_code_reports_a_mail_failure(monkeypatch):
+    def explode(_admin):
+        raise RuntimeError("smtp is down")
+
+    monkeypatch.setattr(admins_module, "send_password_reset_otp", explode)
+
+    response = signed_in(admins_app(), admin_id=1).post("/api/admins/2/password-reset")
+
+    assert response.status_code == 502
+    assert response.json["message"] == "Failed to send the password reset code."
+
+
+def test_sending_a_reset_code_for_a_missing_administrator_is_not_found():
+    assert signed_in(admins_app()).post("/api/admins/99/password-reset").status_code == 404
+
+
+def test_sending_a_reset_code_requires_an_administrator(monkeypatch):
+    monkeypatch.setattr(admins_module, "admin_required", lambda: (None, ({"success": False}, 401)))
+
+    assert signed_in(admins_app()).post("/api/admins/2/password-reset").status_code == 401
 
 
 def test_deleting_removes_another_administrator(admin_directory):
