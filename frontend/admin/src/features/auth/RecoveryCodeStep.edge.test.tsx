@@ -135,6 +135,30 @@ describe("code step: expiry", () => {
     expect(screen.queryByRole("button", { name: /^verify/i })).toBeNull();
   });
 
+  it("drops a wrong code's attempts count when the code expires, and a resend starts without it", async () => {
+    useCountdownTimers();
+    mockBackend({
+      [REQUEST]: [issued({ expiresInSeconds: 3 }), issued({ expiresInSeconds: 3 })],
+      [VERIFY]: [wrongCode(1)],
+    });
+    await openCodeStep();
+    typeCode("111111");
+    await settle();
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 1 attempt left.");
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^This code has expired\. Request a new code to continue\.$/);
+    expect(screen.queryByRole("img", { name: "Warning" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/attempts? left/i)).toBeNull();
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^This code has expired\. Request a new code to continue\.$/);
+  });
+
   it("shows the expired state when the server answers code_expired, even without a timer", async () => {
     useCountdownTimers();
     mockBackend({ [REQUEST]: [issued()], [VERIFY]: [expired()] });

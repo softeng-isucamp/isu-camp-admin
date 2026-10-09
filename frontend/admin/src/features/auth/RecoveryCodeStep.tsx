@@ -69,6 +69,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     otp.current?.clear();
     setState(dead);
     setError(deadMessage(dead));
+    setAttemptsRemaining(undefined);
     setResendMessage("");
   };
 
