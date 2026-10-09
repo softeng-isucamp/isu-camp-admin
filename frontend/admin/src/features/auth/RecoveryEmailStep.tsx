@@ -3,6 +3,7 @@ import { Button } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { recoveryEmailSchema } from "../../services/schemas";
+import { AuthAlert } from "./AuthAlert";
 import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
@@ -59,13 +60,9 @@ export function RecoveryEmailStep({ purpose, title, description, initialEmail = 
           placeholder="name@isu.edu.ph"
         />
       </label>
-      {error && (
-        <div className="error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <AuthAlert>{error}</AuthAlert>}
       <Button type="submit" className="recovery-primary recovery-submit" loading={submitting} disabled={wait.seconds > 0}>
-        {submitting ? "Working…" : wait.seconds > 0 ? `Send code in ${wait.seconds}s` : "Send Code →"}
+        {submitting ? "Sending…" : wait.seconds > 0 ? `Send code in ${wait.seconds}s` : "Send code"}
       </Button>
       <BackToLogin />
     </form>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
-import { attemptsLeftText, isUrgentAttempts } from "./attemptsLeft";
+import { AuthAlert } from "./AuthAlert";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { AuthError } from "../../services/errors";
 import { readLoginPrefill } from "./loginPrefill";
@@ -55,7 +55,7 @@ export function Login() {
       navigate("/dashboard");
     } catch (err) {
       if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
-        setError(`Incorrect username or password. ${attemptsLeftText(err.attemptsRemaining)}`);
+        setError("Incorrect username or password.");
         setAttemptsRemaining(err.attemptsRemaining);
       } else {
         setError(err instanceof Error ? err.message : "Unable to sign in.");
@@ -124,12 +124,9 @@ export function Login() {
             <Link to="/forgot-password">Forgot password?</Link>
           </div>
           {(error || errors.username || errors.password) && (
-            <div
-              className={attemptsRemaining !== undefined && isUrgentAttempts(attemptsRemaining) ? "error error-urgent" : "error"}
-              role="alert"
-            >
+            <AuthAlert attemptsRemaining={attemptsRemaining}>
               {error || errors.username?.message || errors.password?.message}
-            </div>
+            </AuthAlert>
           )}
           <Button type="submit" loading={loginPending} disabled={lockedOut}>
             {loginPending ? "Logging in…" : lockedOut ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />

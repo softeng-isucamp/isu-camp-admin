@@ -22,7 +22,6 @@ function UsernameResult({ verified }: { verified: VerifiedRecovery }) {
       <h2>Your username</h2>
       <p className="muted recovery-copy">Use this username to sign in to the admin console.</p>
       <p className="recovery-username">{verified.username}</p>
-      <div className="recovery-spacer" />
       <Button className="recovery-primary" onClick={() => returnToLogin(verified.username)}>
         Continue to login
       </Button>

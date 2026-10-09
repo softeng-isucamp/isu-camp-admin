@@ -437,7 +437,7 @@ describe("forgot-password: new password and return to login", () => {
 
     fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
     fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
     expect(sent[RESET]).toEqual([{ email: EMAIL, code: "000000", password: "Passw0rd!x" }]);
@@ -455,7 +455,7 @@ describe("forgot-password: new password and return to login", () => {
 
     fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
     fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!y" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Passwords do not match.");
     expect(sent[RESET]).toBeUndefined();
@@ -472,7 +472,7 @@ describe("forgot-password: new password and return to login", () => {
 
     fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
     fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Password is too weak.");
     expect(screen.getByRole("heading", { name: /create a new password/i })).toBeInTheDocument();

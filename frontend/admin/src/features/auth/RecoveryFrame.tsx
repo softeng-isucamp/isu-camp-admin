@@ -25,6 +25,9 @@ function LoginPreview() {
             <input placeholder="Enter your username" readOnly />
           </div>
         </label>
+        <div className="forgot forgot-username">
+          <a>Forgot username?</a>
+        </div>
         <label className="field">
           <span>PASSWORD</span>
           <div className="password">
@@ -35,7 +38,9 @@ function LoginPreview() {
             </button>
           </div>
         </label>
-        <div className="forgot">Forgot password?</div>
+        <div className="forgot forgot-username">
+          <a>Forgot password?</a>
+        </div>
         <Button type="button">
           Login <img src={arrowIcon} alt="" />
         </Button>

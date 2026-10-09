@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,7 +67,7 @@ describe("login attempts left", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Incorrect username or password. 4 attempts left.");
-    expect(alert).not.toHaveClass("error-urgent");
+    expect(within(alert).queryByRole("img", { name: "Warning" })).toBeNull();
   });
 
   it("turns urgent at 2 attempts left and says 'attempt' for the last one", async () => {
@@ -75,15 +75,15 @@ describe("login attempts left", () => {
     renderLogin();
 
     await attemptSignIn();
-    expect(screen.getByRole("alert")).not.toHaveClass("error-urgent");
+    expect(within(screen.getByRole("alert")).queryByRole("img", { name: "Warning" })).toBeNull();
 
     await attemptSignIn();
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect username or password. 2 attempts left.");
-    expect(screen.getByRole("alert")).toHaveClass("error-urgent");
+    expect(within(screen.getByRole("alert")).getByRole("img", { name: "Warning" })).toBeInTheDocument();
 
     await attemptSignIn();
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect username or password. 1 attempt left.");
-    expect(screen.getByRole("alert")).toHaveClass("error-urgent");
+    expect(within(screen.getByRole("alert")).getByRole("img", { name: "Warning" })).toBeInTheDocument();
   });
 
   it("shows only the plain message when the backend sends no count", async () => {
@@ -94,7 +94,7 @@ describe("login attempts left", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Invalid username or password");
     expect(alert).not.toHaveTextContent(/attempt/i);
-    expect(alert).not.toHaveClass("error-urgent");
+    expect(within(alert).queryByRole("img", { name: "Warning" })).toBeNull();
   });
 
   it("disables the inputs and button during the lockout countdown, then re-enables them", async () => {

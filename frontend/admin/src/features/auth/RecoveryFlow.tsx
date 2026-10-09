@@ -48,7 +48,7 @@ export function RecoveryFlow({ purpose, title, description, renderFinal }: Recov
 
   return (
     <RecoveryFrame>
-      <div ref={content}>
+      <div ref={content} className="recovery-step">
         {flow.step === "email" && (
           <RecoveryEmailStep
             purpose={purpose}

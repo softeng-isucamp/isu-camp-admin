@@ -87,7 +87,7 @@ Success `200`:
 
 - **Return the same `200` whether or not the email has an account.** The frontend moves to the code step on any `200`, and the response must not let anyone tell whether the account exists (same body shape, same timing fields, similar latency).
 - `message` is not displayed. Any JSON object body works.
-- `expiresInSeconds`: optional, lifetime of the issued code. Used only if it is a positive integer (`0`, negatives, floats and strings are ignored). When present the code step shows a "Code expires in m:ss" timer and, at zero, switches to the expired state without asking the server. When absent there is no timer and the frontend never decides locally that the code expired.
+- `expiresInSeconds`: optional, lifetime of the issued code. Used only if it is a positive integer (`0`, negatives, floats and strings are ignored). When present the code step states the lifetime in whole minutes ("The code expires in 10 minutes.") and, once it has passed, switches to the expired state without asking the server. When absent the sentence is omitted and the frontend never decides locally that the code expired.
 - `resendAfterSeconds`: optional resend cooldown, same positive-integer rule. When present the Resend button is disabled that long. When absent Resend is enabled immediately, so enforce the cooldown with `429` as well.
 - Issue the real code only when the email belongs to an admin account. Send no email otherwise.
 - A new request replaces the previous code for that `(email, purpose)` and restores the full attempt budget. The frontend calls this same endpoint for "Resend code".

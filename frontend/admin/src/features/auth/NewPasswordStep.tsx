@@ -8,6 +8,7 @@ import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
 import type { DeadCode } from "./RecoveryCodeStep";
 import type { VerifiedRecovery } from "./RecoveryFlow";
+import { AuthAlert } from "./AuthAlert";
 import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
@@ -59,16 +60,17 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
   if (username !== null) {
     return (
       <>
-        <div className="recovery-success-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+        <div className="recovery-success">
+          <div className="recovery-success-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+          <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
+          <p className="muted recovery-copy">
+            Your admin password has been updated. You can now sign in using your new password.
+          </p>
         </div>
-        <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
-        <p className="muted recovery-copy">
-          Your admin password has been updated. You can now sign in using your new password.
-        </p>
-        <div className="recovery-spacer" />
         <Button className="recovery-primary" onClick={() => returnToLogin(username)}>
           Return to login
         </Button>
@@ -112,13 +114,9 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
           {matchState === "mismatch" && "✗ Passwords do not match"}
         </p>
       </PasswordField>
-      {error && (
-        <div className="error" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <AuthAlert>{error}</AuthAlert>}
       <Button type="submit" className="recovery-primary recovery-submit" loading={submitting} disabled={wait.seconds > 0}>
-        {submitting ? "Working…" : wait.seconds > 0 ? `Reset Password in ${wait.seconds}s` : "Reset Password"}
+        {submitting ? "Resetting…" : wait.seconds > 0 ? `Reset password in ${wait.seconds}s` : "Reset password"}
       </Button>
       <BackToLogin />
     </form>

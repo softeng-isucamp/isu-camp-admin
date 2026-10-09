@@ -59,7 +59,7 @@ const reachNewPassword = async () => {
 const newPassword = () => screen.getByLabelText("NEW PASSWORD");
 const confirmPassword = () => screen.getByLabelText("CONFIRM NEW PASSWORD");
 const type = (field: HTMLElement, value: string) => fireEvent.change(field, { target: { value } });
-const submit = () => fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+const submit = () => fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
 const requirements = () => within(screen.getByRole("list", { name: "Password requirements" }));
 const requirement = (state: "Met" | "Not met", label: string) =>
@@ -247,7 +247,7 @@ describe("new password step: submit", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Password is too common.");
     expect(screen.getByRole("heading", { name: /create a new password/i })).toBeInTheDocument();
     expect(newPassword()).toHaveValue(STRONG);
-    expect(screen.getByRole("button", { name: "Reset Password" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled();
   });
 });
 
