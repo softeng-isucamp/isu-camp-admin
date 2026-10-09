@@ -13,6 +13,7 @@ interface AuthValue {
   login: (u: string, p: string) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
+  updateSession: (profile: Session) => void;
 }
 const Auth = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -38,6 +39,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const s = await services.auth.login(u, p);
     setSession(s);
   };
+  // A response may only update the exact session that initiated it.
+  const updateSession = (profile: Session) => {
+    setSession((current) => current && current === session && String(current.id) === profile.id ? profile : current);
+  };
   const logout = async () => {
     try {
       await services.auth.logout();
@@ -47,7 +52,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
   return (
     <Auth.Provider
-      value={useMemo(() => ({ session, login, logout, loading }), [session, loading])}
+      value={useMemo(() => ({ session, login, logout, loading, updateSession }), [session, loading])}
     >
       {children}
     </Auth.Provider>

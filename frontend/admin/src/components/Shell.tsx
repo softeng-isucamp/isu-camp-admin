@@ -50,12 +50,11 @@ export function Shell({ children }: PropsWithChildren) {
   const [minimized, setMinimized] = useState(() => {
     return localStorage.getItem("isucamp_sidebar_minimized") === "true";
   });
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const location = useLocation();
 
   const title =
-    links.find((l) => l.to === location.pathname)?.label ?? "Dashboard Overview";
+    location.pathname === "/profile" ? "My Profile" : links.find((l) => l.to === location.pathname)?.label ?? "Dashboard Overview";
 
   useEffect(() => {
     localStorage.setItem("isucamp_sidebar_minimized", String(minimized));
@@ -63,7 +62,6 @@ export function Shell({ children }: PropsWithChildren) {
 
   const handleToggleMinimize = () => {
     setMinimized((current) => !current);
-    setShowProfileMenu(false);
   };
 
   return (
@@ -121,59 +119,22 @@ export function Shell({ children }: PropsWithChildren) {
         <div className="sidebar-bottom-section">
           {minimized ? (
             <div className="minimized-profile-container">
-              <button
-                type="button"
-                className="minimized-avatar-btn"
-                onClick={() => setShowProfileMenu((prev) => !prev)}
-                aria-label="Open user profile menu"
-                aria-expanded={showProfileMenu}
-                title={`Signed in as ${session?.username ?? "Admin Justine"}`}
-              >
-                <img src={profileUserIcon} alt="" />
-                <span className="online-indicator" />
-              </button>
-
-              {showProfileMenu && (
-                <>
-                  <div
-                    className="profile-popover-backdrop"
-                    onClick={() => setShowProfileMenu(false)}
-                  />
-                  <div className="profile-popover" role="dialog" aria-label="User details">
-                    <div className="profile-popover-header">
-                      <div className="popover-avatar">
-                        <img src={profileUserIcon} alt="" />
-                      </div>
-                      <div>
-                        <strong>{session?.username ?? "Admin Justine"}</strong>
-                        <span className="popover-role">ADMINISTRATOR</span>
-                      </div>
-                    </div>
-                    <div className="profile-popover-divider" />
-                    <button
-                      type="button"
-                      className="profile-popover-signout"
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        setConfirm(true);
-                      }}
-                    >
-                      <img src={signOutIcon} alt="" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                </>
-              )}
+              <NavLink to="/profile" className="minimized-avatar-btn" aria-label="Open profile" title="My Profile" onClick={() => setOpen(false)}>
+                <img src={profileUserIcon} alt="" /><span className="online-indicator" />
+              </NavLink>
+              <button type="button" className="profile-popover-signout" aria-label="Sign out" onClick={() => setConfirm(true)}><img src={signOutIcon} alt="" /></button>
             </div>
           ) : (
             <div className="profile">
+              <NavLink to="/profile" className="sidebar-profile-link" aria-label={`Open profile for ${session?.username ?? "Administrator"}`} onClick={() => setOpen(false)}>
               <div className="avatar">
                 <img src={profileUserIcon} alt="" />
               </div>
               <div className="profile-copy">
                 <strong>{session?.username ?? "Admin Justine"}</strong>
-                <small>ADMINISTRATOR</small>
+                <small>{session?.role === "superadmin" ? "SUPERADMIN" : "ADMINISTRATOR"}</small>
               </div>
+              </NavLink>
               <button
                 type="button"
                 aria-label="Sign out"
@@ -201,14 +162,15 @@ export function Shell({ children }: PropsWithChildren) {
           <div className="crumb">
             ISU Echague <span>/</span> <b>{title}</b>
           </div>
-          <div
+          <NavLink
+            to="/profile"
+            aria-label="Open my profile"
             className="avatar small"
             style={{ cursor: "pointer" }}
             title={`Signed in as ${session?.username ?? "Admin User"}`}
-            onClick={() => setConfirm(true)}
           >
             <img src={profileUserIcon} alt="" />
-          </div>
+          </NavLink>
         </header>
         <main>{children}</main>
       </div>
