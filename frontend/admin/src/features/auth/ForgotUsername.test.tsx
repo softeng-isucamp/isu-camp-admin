@@ -8,41 +8,11 @@ vi.hoisted(() => vi.stubEnv("VITE_API_MODE", "real"));
 import { AuthProvider } from "./AuthContext";
 import { ForgotUsername } from "./ForgotUsername";
 import { Login } from "./AuthPages";
+import { issued, jsonResponse, mockBackend, settle, verified } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
 const REQUEST = "/api/recovery/request";
 const VERIFY = "/api/recovery/verify";
-
-const jsonResponse = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-
-/** `/api/me` says signed out; each recovery call consumes the next reply queued for its path. */
-const mockBackend = (queues: Partial<Record<string, Response[]>>) => {
-  const sent: Record<string, unknown[]> = {};
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/api/me")) return jsonResponse({ authenticated: false });
-    const path = Object.keys(queues).find((candidate) => url.endsWith(candidate));
-    if (!path) throw new Error(`Unexpected request to ${url}`);
-    (sent[path] ??= []).push(JSON.parse(String(init?.body)));
-    const next = queues[path]?.shift();
-    if (!next) throw new Error(`No reply queued for ${path}`);
-    return next;
-  });
-  return { sent };
-};
-
-const issued = () => jsonResponse({ success: true, message: "If an account exists, a code has been sent." });
-const verified = (username = "admin_justine") => jsonResponse({ success: true, username });
-
-const settle = async () => {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-};
 
 const renderFrom = (path: string) =>
   render(
@@ -95,6 +65,13 @@ describe("login: forgot username link", () => {
 });
 
 describe("forgot-username flow", () => {
+  it("focuses the email step heading when the page first loads", () => {
+    mockBackend({});
+    renderFrom("/forgot-username");
+
+    expect(screen.getByRole("heading", { name: /find your username/i })).toHaveFocus();
+  });
+
   it("requests a code with the username purpose", async () => {
     const { sent } = mockBackend({ [REQUEST]: [issued()] });
     renderFrom("/forgot-username");

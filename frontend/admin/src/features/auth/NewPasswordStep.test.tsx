@@ -17,10 +17,14 @@ const jsonResponse = (body: unknown, status = 200) =>
 
 const mockBackend = (resetReplies: Response[] = []) => {
   const resets: unknown[] = [];
+  const requests: unknown[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url.endsWith("/api/me")) return jsonResponse({ authenticated: false });
-    if (url.endsWith("/api/recovery/request")) return jsonResponse({ success: true, message: "Sent." });
+    if (url.endsWith("/api/recovery/request")) {
+      requests.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ success: true, message: "Sent." });
+    }
     if (url.endsWith("/api/recovery/verify")) return jsonResponse({ success: true, username: "admin_justine" });
     if (url.endsWith(RESET)) {
       resets.push(JSON.parse(String(init?.body)));
@@ -30,7 +34,7 @@ const mockBackend = (resetReplies: Response[] = []) => {
     }
     throw new Error(`Unexpected request to ${url}`);
   });
-  return { resets };
+  return { resets, requests };
 };
 
 const reachNewPassword = async () => {
@@ -101,6 +105,29 @@ describe("new password step: requirements checklist", () => {
 
     type(newPassword(), "Abc1!");
     requirement("Not met", LENGTH);
+  });
+});
+
+describe("new password step: length counts characters", () => {
+  it("counts each emoji as one character, not two UTF-16 code units", async () => {
+    const { resets } = mockBackend([jsonResponse({ success: true, username: "admin_justine" })]);
+    await reachNewPassword();
+
+    // "Ab1" plus three emoji is 6 characters even though it has 9 UTF-16 units.
+    type(newPassword(), "Ab1😀😀😀");
+    requirement("Not met", LENGTH);
+    type(confirmPassword(), "Ab1😀😀😀");
+    submit();
+    expect(screen.getByRole("alert")).toHaveTextContent(/at least 8 characters/i);
+    expect(resets).toEqual([]);
+
+    // "Ab1" plus five emoji is exactly 8 characters.
+    type(newPassword(), "Ab1😀😀😀😀😀");
+    requirement("Met", LENGTH);
+    type(confirmPassword(), "Ab1😀😀😀😀😀");
+    submit();
+    expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
+    expect(resets).toHaveLength(1);
   });
 });
 
@@ -221,5 +248,31 @@ describe("new password step: submit", () => {
     expect(screen.getByRole("heading", { name: /create a new password/i })).toBeInTheDocument();
     expect(newPassword()).toHaveValue(STRONG);
     expect(screen.getByRole("button", { name: "Reset Password" })).toBeEnabled();
+  });
+});
+
+describe("new password step: the server turns the code down", () => {
+  it.each([
+    ["code_exhausted", "You have used all your attempts. Request a new code to continue."],
+    ["code_expired", "This code has expired. Request a new code to continue."],
+  ])("%s sends the admin back to the code step to request a new code", async (code, message) => {
+    const { requests } = mockBackend([jsonResponse({ success: false, code, message: "Server says no." }, 400)]);
+    await reachNewPassword();
+
+    type(newPassword(), STRONG);
+    type(confirmPassword(), STRONG);
+    submit();
+
+    expect(await screen.findByRole("heading", { name: /verification code/i })).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByRole("button", { name: "Verify" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Digit 1 of 6")).toBeDisabled();
+
+    // Resend is the primary action, available at once, and asks for a new code for the same email.
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    expect(await screen.findByText("A new code has been sent.")).toBeInTheDocument();
+    expect(requests).toEqual([{ email: EMAIL, purpose: "password" }, { email: EMAIL, purpose: "password" }]);
+    expect(screen.getByLabelText("Digit 1 of 6")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
   });
 });

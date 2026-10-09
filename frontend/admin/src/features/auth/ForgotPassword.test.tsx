@@ -9,54 +9,13 @@ import { App } from "../../App";
 import { AuthProvider } from "./AuthContext";
 import { ForgotPassword } from "./ForgotPassword";
 import { Login } from "./AuthPages";
+import { issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
-
-const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...headers },
-  });
 
 const REQUEST = "/api/recovery/request";
 const VERIFY = "/api/recovery/verify";
 const RESET = "/api/recovery/reset-password";
-
-type Reply = Response | Promise<Response>;
-
-/** `/api/me` says signed out; each recovery call consumes the next reply queued for its path. */
-const mockBackend = (queues: Partial<Record<string, Reply[]>>) => {
-  const sent: Record<string, unknown[]> = {};
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/api/me")) return jsonResponse({ authenticated: false });
-    const path = Object.keys(queues).find((candidate) => url.endsWith(candidate));
-    if (!path) throw new Error(`Unexpected request to ${url}`);
-    (sent[path] ??= []).push(JSON.parse(String(init?.body)));
-    const next = queues[path]?.shift();
-    if (!next) throw new Error(`No reply queued for ${path}`);
-    return next;
-  });
-  return { fetchMock, sent };
-};
-
-const issued = (timing: { expiresInSeconds?: number; resendAfterSeconds?: number } = {}) =>
-  jsonResponse({ success: true, message: "If an account exists, a code has been sent.", ...timing });
-const verified = (username = "admin_justine") => jsonResponse({ success: true, username });
-const wrongCode = (attemptsRemaining?: number) =>
-  jsonResponse(
-    { success: false, code: "invalid_code", message: "Invalid verification code", ...(attemptsRemaining === undefined ? {} : { attemptsRemaining }) },
-    400,
-  );
-
-const settle = async () => {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-};
 
 const tickSecond = () =>
   act(async () => {
@@ -122,6 +81,32 @@ describe("forgot-password: email step", () => {
     expect(sent[REQUEST]).toEqual([{ email: EMAIL, purpose: "password" }]);
     expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(EMAIL);
     expect(box(1)).toHaveValue("");
+  });
+
+  it.each([
+    ["an empty body", ""],
+    ["an HTML error page", "<html><body>Too Many Requests</body></html>"],
+  ])("still counts down from Retry-After when a 429 has %s", async (_name, body) => {
+    mockBackend({ [REQUEST]: [new Response(body, { status: 429, headers: { "Retry-After": "5" } })] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderForgotPassword();
+
+    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await settle();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Too many requests. Please wait 5 seconds.");
+    expect(screen.getByRole("button", { name: "Send code in 5s" })).toBeDisabled();
+  });
+
+  it("reports an unreachable backend when a non-429 error has no JSON body", async () => {
+    mockBackend({ [REQUEST]: [new Response("<html>Bad Gateway</html>", { status: 502 })] });
+    renderForgotPassword();
+
+    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to connect to the backend.");
   });
 
   it("shows a countdown on the Send code button when the server rate-limits the request", async () => {

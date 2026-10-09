@@ -1428,6 +1428,7 @@ td small {
 .recovery-modal .recovery-resend button {
   padding: 0;
   border: none;
+  border-radius: 0;
   background: none;
   color: #0c7441;
   font-size: 13px;
