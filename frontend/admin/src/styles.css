@@ -1206,6 +1206,8 @@ td small {
   min-height: 100vh;
   background: var(--green);
   display: grid;
+  /* A shrinkable track, so the card's max-width can hold it inside a narrow viewport. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   position: relative;
   overflow: hidden;
@@ -1291,15 +1293,12 @@ td small {
 .password button {
   position: absolute;
   right: 12px;
-  top: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
   background: transparent;
   color: #64716a;
   padding: 0;
-}
-.password button img {
-  display: block;
-  width: 18px;
-  height: 13px;
 }
 .forgot {
   display: flex;
@@ -1331,6 +1330,24 @@ td small {
 .recovery-modal .recovery-link:hover:not(:disabled),
 .recovery-modal .recovery-resend .btn:hover:not(:disabled) {
   text-decoration: underline;
+}
+/* Focus ring for every text input on the login and recovery screens, matching the code boxes. */
+.login-card .field input:focus-visible,
+.recovery-modal .field input:focus-visible {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2);
+}
+/* Locked controls (lockout, rate-limit waits) must look locked. A busy button keeps full strength beside its spinner. */
+.login-card .btn:disabled:not([aria-busy]),
+.recovery-modal .recovery-primary:disabled:not([aria-busy]) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.login-card .field input:disabled,
+.recovery-modal .field input:disabled {
+  background: #f1f3f2;
+  color: #8a948f;
+  cursor: not-allowed;
 }
 .error {
   background: #fff0f0;
@@ -1382,6 +1399,7 @@ td small {
   inset: 0;
   z-index: 4;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   background: #0e12107a;
   padding: 24px;
@@ -1433,13 +1451,14 @@ td small {
   border-radius: 18px;
   font-size: 14px;
 }
-/* Field labels share the login form's small caps style. */
+/* Field labels share the login form's small caps style. The markup is sentence case, so screen readers read words, not letters. */
 .login-card .field > span,
 .recovery-modal .recovery-label {
   color: #3f4941;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 /* Empty live regions stay in the tree for announcements but take no room. */
 .recovery-modal .field > [role="status"]:empty {
@@ -1459,12 +1478,19 @@ td small {
   padding: 0;
   box-sizing: border-box;
   border-radius: 14px;
-  border: 1px solid #d1d5db;
-  background: #e1e3e4;
+  border: 1px solid var(--border);
+  background: #fff;
   color: #191c1d;
   text-align: center;
   font-size: 20px;
   font-weight: bold;
+}
+/* A dead or checking code: the boxes go grey so they read as locked. */
+.recovery-modal .field .segmented-code-input:disabled {
+  border-color: #d1d5db;
+  background: #e1e3e4;
+  color: #8a948f;
+  cursor: not-allowed;
 }
 .recovery-modal .field .segmented-code-input:focus {
   border-color: var(--green);
@@ -1491,8 +1517,9 @@ td small {
 }
 .recovery-modal .recovery-link:disabled,
 .recovery-modal .recovery-resend .btn:disabled {
-  color: #8a948f;
+  color: var(--muted);
   cursor: default;
+  text-decoration: none;
 }
 /* Status lines (resend confirmation, passwords match) share one small bold style. */
 .recovery-modal .recovery-status,
@@ -1530,13 +1557,6 @@ td small {
   background: transparent;
   padding: 0;
   color: #64716a;
-}
-.recovery-modal .recovery-password-toggle[aria-pressed="true"] {
-  opacity: 0.55;
-}
-.recovery-modal .recovery-password-toggle img {
-  width: 18px;
-  height: 13px;
 }
 .recovery-modal .recovery-rules {
   list-style: none;
@@ -1590,15 +1610,15 @@ td small {
   width: 100%;
   height: 50px;
   border-radius: 999px;
-  border-color: #0c7441;
-  background: #0c7441;
+  border-color: var(--green);
+  background: var(--green);
   color: #fff;
   font-size: 15px;
 }
-/* Outranks the later global .btn-primary:hover so the recovery button keeps its green. */
+/* The same green and hover as the login button, so the modal and the card behind it share one primary. */
 .recovery-modal .recovery-primary:hover:not(:disabled) {
-  border-color: #0a6537;
-  background: #0a6537;
+  border-color: #004727;
+  background: #004727;
 }
 .recovery-modal .recovery-submit {
   margin-top: 4px;
@@ -1613,7 +1633,7 @@ td small {
   width: 54px;
   height: 54px;
   border-radius: 999px;
-  background: #0c7441;
+  background: var(--green);
   color: #fff;
   font-size: 28px;
   font-weight: 800;
@@ -1625,6 +1645,23 @@ td small {
 .recovery-modal .back-link {
   align-self: center;
   margin-top: -4px;
+}
+/* Phones: tighter outer padding and card padding so the full card, every code box and the Forgot links fit. */
+@media (max-width: 480px) {
+  .auth-page,
+  .recovery-overlay {
+    padding: 16px;
+  }
+  .login-card {
+    padding: 24px;
+    border-radius: 32px;
+  }
+  .recovery-modal {
+    padding: 24px 20px;
+  }
+  .recovery-modal .segmented-code-container {
+    gap: 6px;
+  }
 }
 .modal-backdrop {
   position: fixed;
