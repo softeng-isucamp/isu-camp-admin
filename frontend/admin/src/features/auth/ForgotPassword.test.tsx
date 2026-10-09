@@ -450,12 +450,12 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
 
     expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
-    expect(sent[RESET]).toEqual([{ email: EMAIL, code: "000000", password: "password123" }]);
+    expect(sent[RESET]).toEqual([{ email: EMAIL, code: "000000", password: "Passw0rd!x" }]);
 
     fireEvent.click(screen.getByRole("button", { name: "Return to login" }));
     expect(await screen.findByLabelText(/^username$/i)).toHaveValue("admin_justine");
@@ -468,8 +468,8 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "password124" } });
+    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!y" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Passwords do not match.");
@@ -485,8 +485,8 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Password is too weak.");

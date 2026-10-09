@@ -3,6 +3,7 @@ import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } f
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
 import { AuthError, RateLimitError } from "./errors";
+import { firstPasswordIssue } from "./passwordRules";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
@@ -135,7 +136,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
       resetPassword: async (email: string, code: string, password: string): Promise<RecoveryResult> => {
         const issued = checkCode(email, "password", code);
-        if (password.length < 8) throw new AuthError("weak_password", "Password must be at least 8 characters.");
+        const weakness = firstPasswordIssue(password);
+        if (weakness) throw new AuthError("weak_password", weakness);
         accountPassword = password;
         issued.valid = false; // a used code is dead, like any wrong guess from here on
         return { username: account.username };
