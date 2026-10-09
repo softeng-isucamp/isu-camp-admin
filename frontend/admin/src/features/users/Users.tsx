@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { services } from "../../services/api";
-import { Card, Empty, Field, LoadingState, Pagination, ProgressBar, SelectField, Spinner } from "../../components/UI";
+import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, SelectField, Spinner } from "../../components/UI";
+import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { formatDateTime } from "../../lib/format";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
-import type { UserAccountType } from "../../types";
+import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
 import { AdministratorsPanel } from "./AdministratorsPanel";
 
@@ -16,6 +17,10 @@ type DirectoryTab = "app" | "admins";
 /** App users signed up through the User App. The portal only reads these. */
 function AppUserDirectory() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const feedback = useFeedback();
+  const [pendingDeactivation, setPendingDeactivation] = useState<UserAccount | null>(null);
+  const [statusError, setStatusError] = useState("");
   const [searchParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [createdRange, setCreatedRange] = useState("all");
@@ -42,8 +47,31 @@ function AppUserDirectory() {
     return () => document.removeEventListener("mousedown", closeOnOutsideClick);
   }, []);
 
+  const setStatus = useMutation({
+    mutationFn: ({ user, status }: { user: UserAccount; status: AccountStatus }) =>
+      services.users.setStatus(user.id, status),
+    onSuccess: async (saved) => {
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      feedback.reportSuccess(`${saved.username} was ${saved.status === "Inactive" ? "deactivated" : "activated"} successfully.`);
+      setPendingDeactivation(null);
+    },
+    onError: (cause) => {
+      setStatusError(cause instanceof Error ? cause.message : "Unable to update the account's status.");
+    },
+  });
+
+  /** Restoring access is harmless and immediate; revoking it asks first. */
+  const changeStatus = (user: UserAccount) => {
+    setActionMenuId(null);
+    setStatusError("");
+    if (user.status === "Inactive") setStatus.mutate({ user, status: "Active" });
+    else setPendingDeactivation(user);
+  };
+
   return (
     <>
+      <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
+
       <Card className="filters">
         <Field label="" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
         <SelectField label="REGISTERED" value={createdRange} onChange={(e) => setCreatedRange(e.target.value)}>
@@ -73,7 +101,7 @@ function AppUserDirectory() {
           <table>
             <thead>
               <tr>
-                <th>Username</th><th>Account Type</th><th>Registered On</th>
+                <th>Username</th><th>Account Type</th><th>Registered On</th><th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
@@ -83,6 +111,7 @@ function AppUserDirectory() {
                   <td><strong>{user.username}</strong></td>
                   <td>{user.userType ? accountTypeLabel(user.userType) : "—"}</td>
                   <td>{formatDateTime(user.createdAt)}</td>
+                  <td><Badge tone={user.status === "Active" ? "green" : "grey"}>{user.status}</Badge></td>
                   <td style={{ textAlign: "right", position: "relative" }}>
                     <div style={{ display: "inline-flex" }} ref={actionMenuId === user.id ? actionMenuRef : undefined}>
                       <button
@@ -95,8 +124,9 @@ function AppUserDirectory() {
                       </button>
                       {actionMenuId === user.id && (
                         <div className="row-action-menu" role="menu">
-                          {/* App accounts belong to the User App, so the portal
-                              offers what it owns: their recorded activity. */}
+                          {/* An app account's details are the User App's, so
+                              the portal offers what it owns: their recorded
+                              activity, and whether the account may sign in. */}
                           <button
                             role="menuitem"
                             onClick={() => {
@@ -105,6 +135,13 @@ function AppUserDirectory() {
                             }}
                           >
                             View activity
+                          </button>
+                          <button
+                            role="menuitem"
+                            disabled={setStatus.isPending}
+                            onClick={() => changeStatus(user)}
+                          >
+                            {user.status === "Active" ? "Deactivate account" : "Activate account"}
                           </button>
                         </div>
                       )}
@@ -120,6 +157,37 @@ function AppUserDirectory() {
         </div>
         <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} />
       </Card>
+
+      {pendingDeactivation && (
+        <Modal
+          title="Deactivate this account?"
+          subtitle="The account is kept, but it cannot sign in to the User App."
+          size="sm"
+          onClose={() => { setPendingDeactivation(null); setStatusError(""); }}
+        >
+          <p className="admin-remove-copy">
+            <strong>{pendingDeactivation.username}</strong> will be refused at the User App's login.
+            Their saved history is kept, and you can activate the account again at any time.
+          </p>
+          {statusError && <div role="alert" className="admin-form-error">{statusError}</div>}
+          <div className="modal-actions">
+            <Button
+              variant="subtle"
+              data-modal-initial
+              disabled={setStatus.isPending}
+              onClick={() => { setPendingDeactivation(null); setStatusError(""); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={setStatus.isPending}
+              onClick={() => setStatus.mutate({ user: pendingDeactivation, status: "Inactive" })}
+            >
+              {setStatus.isPending ? "Deactivating…" : "Deactivate Account"}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

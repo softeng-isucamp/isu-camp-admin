@@ -40,7 +40,7 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 rate_limit_buckets = defaultdict(deque)
 
 
-def _rate_limited(scope, key, limit, message):
+def rate_limited(scope, key, limit, message):
     now = time.monotonic()
     bucket = rate_limit_buckets[(scope, key)]
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
@@ -88,6 +88,19 @@ class Admin(db.Model):
         nullable=False
     )
 
+    # Whether this account may sign in, lowercase per model.record_status. The
+    # column arrived with User Management's Activate/Deactivate action; rows
+    # that predate it were defaulted to active.
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default="active"
+    )
+
+    @property
+    def is_active(self):
+        return (self.status or "active") == "active"
+
 
 # ==========================================
 # LOGIN
@@ -100,7 +113,7 @@ def login():
 
         data = request.get_json(silent=True)
 
-        limited = _rate_limited(
+        limited = rate_limited(
             "login",
             request.remote_addr or "unknown",
             5,
@@ -139,6 +152,20 @@ def login():
                 "success": False,
                 "message": "Invalid username or password"
             }), 401
+
+        # Checked after the password so a wrong guess cannot discover which
+        # accounts exist and are deactivated.
+        if not admin.is_active:
+            log_audit(
+                "System", admin, "login refused", "Admin", admin.id,
+                "Sign-in refused: the account is deactivated"
+            )
+            db.session.commit()
+            return jsonify({
+                "success": False,
+                "message": "This administrator account has been deactivated. "
+                           "Ask another administrator to reactivate it."
+            }), 403
 
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
@@ -208,6 +235,17 @@ def current_admin():
             "message": "Admin account not found"
         }), 401
 
+    # The portal asks here whether its session is still good, so a deactivated
+    # administrator is signed out of the UI rather than left on a dead session.
+    if not admin.is_active:
+
+        session.clear()
+
+        return jsonify({
+            "authenticated": False,
+            "message": "This administrator account has been deactivated."
+        }), 401
+
     return jsonify({
         "authenticated": True,
         "admin": {
@@ -249,6 +287,20 @@ def admin_required():
             401
         )
 
+    # Deactivation takes effect on the next request, so an administrator who is
+    # signed in when their account is deactivated does not keep working.
+    if not admin.is_active:
+
+        session.clear()
+
+        return None, (
+            jsonify({
+                "success": False,
+                "message": "This administrator account has been deactivated."
+            }),
+            401
+        )
+
     return admin, None
 
 
@@ -273,7 +325,7 @@ def confirm_password():
     if error:
         return error
 
-    limited = _rate_limited(
+    limited = rate_limited(
         "confirm-password",
         str(admin.id),
         5,
@@ -344,6 +396,49 @@ def reauth_required():
 
 
 # ==========================================
+# PASSWORD RESET OTP DELIVERY
+# ==========================================
+
+def send_password_reset_otp(admin):
+    """Issues a reset code for ``admin`` and emails it to their address.
+
+    Shared by the sign-in page's own request and by User Management, so a
+    locked-out administrator is helped without anyone else seeing the code: it
+    only ever reaches the account's registered address.
+    """
+
+    otp = f"{secrets.randbelow(1000000):06d}"
+
+    reset_otps[admin.username] = {
+        "otp": otp,
+        "expires_at": datetime.utcnow() + timedelta(minutes=10)
+    }
+
+    message = Message(
+        subject="ISU-CAMP Password Reset OTP",
+        recipients=[admin.gmail]
+    )
+
+    message.body = f"""
+Hello {admin.username},
+
+You requested to reset your ISU-CAMP admin password.
+
+Your verification code is:
+
+{otp}
+
+This code will expire in 10 minutes.
+
+If you did not request this password reset, please ignore this email.
+
+ISU-CAMP Admin System
+"""
+
+    mail.send(message)
+
+
+# ==========================================
 # REQUEST PASSWORD RESET OTP
 # ==========================================
 
@@ -355,7 +450,7 @@ def request_reset():
         data = request.get_json(silent=True)
         username = str(data.get("username") or "") if isinstance(data, dict) else ""
 
-        limited = _rate_limited(
+        limited = rate_limited(
             "reset-request",
             f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
             1,
@@ -392,35 +487,7 @@ def request_reset():
                 "message": "No Gmail address is registered for this account"
             }), 400
 
-        otp = f"{secrets.randbelow(1000000):06d}"
-
-        reset_otps[username] = {
-            "otp": otp,
-            "expires_at": datetime.utcnow() + timedelta(minutes=10)
-        }
-
-        message = Message(
-            subject="ISU-CAMP Password Reset OTP",
-            recipients=[admin.gmail]
-        )
-
-        message.body = f"""
-Hello {admin.username},
-
-You requested to reset your ISU-CAMP admin password.
-
-Your verification code is:
-
-{otp}
-
-This code will expire in 10 minutes.
-
-If you did not request this password reset, please ignore this email.
-
-ISU-CAMP Admin System
-"""
-
-        mail.send(message)
+        send_password_reset_otp(admin)
 
         return jsonify({
             "success": True,
@@ -449,7 +516,7 @@ def verify_reset_code():
     username = str(data.get("username") or "") if isinstance(data, dict) else ""
     otp = str(data.get("code") or "") if isinstance(data, dict) else ""
 
-    limited = _rate_limited(
+    limited = rate_limited(
         "reset-verify",
         f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
         5,
@@ -484,7 +551,7 @@ def reset_password():
         data = request.get_json(silent=True)
         username = str(data.get("username") or "") if isinstance(data, dict) else ""
 
-        limited = _rate_limited(
+        limited = rate_limited(
             "reset-password",
             f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
             5,

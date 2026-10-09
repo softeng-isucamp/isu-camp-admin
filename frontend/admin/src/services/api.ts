@@ -1,4 +1,5 @@
 import type {
+  AccountStatus,
   AdminAccount,
   AdminAccountDraft,
   AuditEntry,
@@ -68,12 +69,15 @@ type BackendLocation = {
   function?: unknown; description?: unknown; keywords?: unknown; status?: unknown;
   lat?: unknown; lng?: unknown; positioned?: unknown; hasPhoto?: unknown; polygonCoordinates?: unknown;
 };
-type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown; userType?: unknown; user_type?: unknown };
+type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; createdAt?: unknown; created_at?: unknown; userType?: unknown; user_type?: unknown; status?: unknown };
+/** Accounts predate the status column, so anything unrecognized reads as Active. */
+export const parseAccountStatus = (raw: unknown): AccountStatus =>
+  String(raw ?? "").trim().toLowerCase() === "inactive" ? "Inactive" : "Active";
 type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
   if (id === undefined || typeof raw.username !== "string") throw new Error("Backend returned a malformed user record.");
-  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), userType: parseAccountType(raw.userType ?? raw.user_type) };
+  return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), userType: parseAccountType(raw.userType ?? raw.user_type), status: parseAccountStatus(raw.status) };
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
@@ -625,12 +629,18 @@ export interface Services {
 
   users: {
     list(query?: string, page?: number, pageSize?: number, createdRange?: string, userType?: UserAccountType | "all"): Promise<Page<UserAccount>>;
+    /** Activates or deactivates an app account's access to the User App. */
+    setStatus(id: string, status: AccountStatus): Promise<UserAccount>;
   };
 
   /** Administrator accounts for the portal itself. */
   admins: {
     list(): Promise<AdminAccount[]>;
     save(draft: AdminAccountDraft): Promise<AdminAccount>;
+    /** Activates or deactivates an administrator's access to the portal. */
+    setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
+    /** Emails a password reset code to that account's own address. */
+    sendPasswordReset(id: string): Promise<string>;
     remove(id: string): Promise<void>;
   };
 
@@ -714,8 +724,8 @@ const localUsers: UserAccount[] = createMockUsers();
 // The fixture's own administrator directory. The signed-in fixture admin is
 // `admin_justine`, so that row is the one marked current.
 const localAdmins: AdminAccount[] = [
-  { id: "1", username: "admin_justine", email: "justine.admin@isu.edu.ph", isCurrent: true },
-  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", isCurrent: false },
+  { id: "1", username: "admin_justine", email: "justine.admin@isu.edu.ph", status: "Active", isCurrent: true },
+  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", status: "Active", isCurrent: false },
 ];
 
 const locationAuditActions = new Set([
@@ -1383,6 +1393,21 @@ export const services: Services = {
       const offset = (page - 1) * pageSize;
       return wait({ items: clone(filtered.slice(offset, offset + pageSize)), total: filtered.length, page, pageSize });
     },
+
+    setStatus: async (id, status) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ user: BackendUser }>(
+          `/api/users/${encodeURIComponent(id)}/status`,
+          { method: "PUT", body: JSON.stringify({ status }) },
+        );
+        return normalizeBackendUser(response.user);
+      }
+      const user = localUsers.find((record) => record.id === id);
+      if (!user) throw new Error("User not found.");
+      user.status = status;
+      addAudit(status === "Inactive" ? "Deactivated User" : "Activated User", user.username, "Admin", user.id);
+      return wait(clone(user));
+    },
   },
 
 
@@ -1427,6 +1452,8 @@ export const services: Services = {
 
       const existing = draft.id ? localAdmins.find((admin) => admin.id === draft.id) : undefined;
       if (existing) {
+        // Sign-in details belong to their holder, as the backend enforces.
+        if (!existing.isCurrent) throw new Error("You can only edit your own administrator account.");
         existing.username = username;
         existing.email = email;
         addAudit("Updated Administrator", username, "Admin", existing.id);
@@ -1441,6 +1468,41 @@ export const services: Services = {
       localAdmins.push(created);
       addAudit("Created Administrator", username, "Admin", created.id);
       return wait(clone(created));
+    },
+
+    setStatus: async (id, status) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ admin: AdminAccount }>(
+          `/api/admins/${encodeURIComponent(id)}/status`,
+          { method: "PUT", body: JSON.stringify({ status }) },
+        );
+        return response.admin;
+      }
+      const admin = localAdmins.find((record) => record.id === id);
+      if (!admin) throw new Error("Administrator not found.");
+      if (status === "Inactive") {
+        if (admin.isCurrent) throw new Error("You cannot deactivate your own administrator account.");
+        const activeAdmins = localAdmins.filter((record) => record.status === "Active").length;
+        if (activeAdmins <= 1) throw new Error("The last active administrator cannot be deactivated.");
+      }
+      admin.status = status;
+      addAudit(status === "Inactive" ? "Deactivated Administrator" : "Activated Administrator", admin.username, "Admin", admin.id);
+      return wait(clone(admin));
+    },
+
+    sendPasswordReset: async (id) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ message?: string }>(
+          `/api/admins/${encodeURIComponent(id)}/password-reset`,
+          { method: "POST" },
+        );
+        return response.message ?? "A password reset code was sent.";
+      }
+      const admin = localAdmins.find((record) => record.id === id);
+      if (!admin) throw new Error("Administrator not found.");
+      if (!admin.email) throw new Error("That account has no email address on file, so a reset code cannot be sent.");
+      addAudit("Sent Password Reset", admin.username, "Admin", admin.id);
+      return wait(`A password reset code was sent to ${admin.email}.`);
     },
 
     remove: async (id) => {
