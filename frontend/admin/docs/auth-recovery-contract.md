@@ -36,8 +36,8 @@ The frontend branches on `code`, not on the HTTP status, for recovery errors. Us
 Any `429` from login or a recovery endpoint is treated as a rate limit, whatever the body.
 
 - Send `Retry-After: <seconds>` as a positive integer. The frontend parses it with `parseInt`. It does not parse HTTP-date values. A missing, non-numeric or zero/negative header becomes **60 seconds**.
-- `message` in a JSON body is optional. It is shown to the admin; if absent (or the body is not JSON) the frontend writes "Too many requests. Please wait N seconds."
-- The UI disables the triggering button and counts down: login (inputs locked), "Send code", "Verify", "Resend code", and the new-password submit. The typed code is kept after a `429` on verify.
+- `message` in a JSON body is optional and is not shown: the admin always sees "Too many attempts. Try again when the button unlocks.", so no number in the text can disagree with the countdown.
+- The UI disables the triggering button and counts down on it as "Try again in Ns": login (inputs locked), "Send code", "Verify", "Resend code", and the new-password submit. The typed code is kept after a `429` on verify.
 - Whether a rejected (`429`) request still counts as an attempt is the backend's choice.
 
 ## Endpoints
