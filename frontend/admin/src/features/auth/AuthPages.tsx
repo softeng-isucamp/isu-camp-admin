@@ -90,6 +90,9 @@ export function Login() {
               />
             </div>
           </label>
+          <div className="forgot forgot-username">
+            <Link to="/forgot-username">Forgot username?</Link>
+          </div>
           <label className="field">
             <span>PASSWORD</span>
             <div className="password">
