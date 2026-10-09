@@ -68,6 +68,8 @@ The runners print the selected mode and login guidance. Fixture credentials appl
 
 Real mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=false`, `VITE_API_MODE=real`, and `VITE_MAP_FIXTURE=none`. Its API address defaults to `http://127.0.0.1:5000`; set `VITE_API_BASE_URL` in the shell before running the script to override it. Fixture mode explicitly sets `VITE_TEST_LOCAL_ADAPTER=true`, `VITE_API_MODE=local`, and `VITE_MAP_FIXTURE=osm`. These process variables override Vite's local `.env` settings. Setting only `VITE_API_MODE=local` does not enable the fixture adapter.
 
+The backend allows both loopback spellings as browser origins - `http://localhost:5173`/`:5174` and `http://127.0.0.1:5173`/`:5174` - so the frontend works whichever one the browser is pointed at. They are distinct origins to a browser even though they are the same machine; a frontend served from any other host or port is refused at preflight, which the console reports as a CORS policy error. The allowlist is `ALLOWED_ORIGINS` in [app/services/database.py](app/services/database.py), covered by `app/tests/cors.py`.
+
 For frontend-only commands and verification, see the [frontend README](frontend/admin/README.md#development). For feature ownership and identity relationships, see its [code navigation map](frontend/admin/README.md#code-navigation).
 
 ## Production builds
