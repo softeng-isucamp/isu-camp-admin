@@ -74,7 +74,7 @@ test("password recovery reaches verification step", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: /enter verification code/i }),
   ).toBeVisible();
-  await page.getByLabel("VERIFICATION CODE").fill("123");
+  await page.getByLabel("Digit 1 of 6").fill("123");
   await page.getByRole("button", { name: /continue/i }).click();
   await expect(page.getByRole("alert")).toContainText(
     "6-digit verification code",
@@ -82,7 +82,7 @@ test("password recovery reaches verification step", async ({ page }) => {
   await expect(page).toHaveScreenshot("password-recovery-code-error.png", {
     animations: "disabled",
   });
-  await page.getByLabel("VERIFICATION CODE").fill("000000");
+  await page.getByLabel("Digit 1 of 6").fill("000000");
   await page.getByRole("button", { name: /continue/i }).click();
   await page.getByLabel("NEW PASSWORD", { exact: true }).fill("password123");
   const confirmInput = page.getByLabel(/confirm new password/i);
