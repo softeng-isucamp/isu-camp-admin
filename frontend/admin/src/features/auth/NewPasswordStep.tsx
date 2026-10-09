@@ -1,6 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
-import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import { passwordRules } from "../../services/passwordRules";
 import { resetPasswordSchema } from "../../services/schemas";
@@ -8,7 +7,9 @@ import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
 import type { DeadCode } from "./RecoveryCodeStep";
 import type { VerifiedRecovery } from "./RecoveryFlow";
-import { BackToLogin } from "./RecoveryFrame";
+import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
+import { BackToLogin, SuccessIcon } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
 /** The last step of `/forgot-password`: choose a new password, then see the success screen. */
@@ -17,6 +18,9 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+  // The field a client-side check rejected; editing either field clears the error.
+  const [invalidField, setInvalidField] = useState<"password" | "confirmPassword" | null>(null);
+  const alertId = useId();
   const [submitting, setSubmitting] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
   const inFlight = useRef(false);
@@ -32,9 +36,12 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
     event.preventDefault();
     if (inFlight.current || wait.seconds > 0) return;
     setError("");
+    setInvalidField(null);
     const parsed = resetPasswordSchema.safeParse({ code: verified.code, password, confirmPassword });
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Check your new password.");
+      const issue = parsed.error.issues[0];
+      setError(issue?.message ?? "Check your new password.");
+      setInvalidField(issue?.path[0] === "confirmPassword" ? "confirmPassword" : "password");
       return;
     }
     inFlight.current = true;
@@ -48,8 +55,12 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         onCodeDied(err.kind === "code_exhausted" ? "exhausted" : "expired");
         return;
       }
-      setError(err instanceof Error ? err.message : "Unable to reset password");
-      if (err instanceof RateLimitError) wait.start(err.retryAfterSeconds);
+      if (err instanceof RateLimitError) {
+        setError(RATE_LIMIT_MESSAGE);
+        wait.start(err.retryAfterSeconds);
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to reset password");
+      }
     } finally {
       inFlight.current = false;
       setSubmitting(false);
@@ -59,35 +70,41 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
   if (username !== null) {
     return (
       <>
-        <div className="recovery-success-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+        <div className="recovery-success">
+          <SuccessIcon />
+          <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
+          <p className="muted recovery-copy">
+            Your admin password has been updated. You can now sign in using your new password.
+          </p>
         </div>
-        <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
-        <p className="muted recovery-copy">
-          Your admin password has been updated. You can now sign in using your new password.
-        </p>
-        <div className="recovery-spacer" />
         <Button className="recovery-primary" onClick={() => returnToLogin(username)}>
-          Return to login
+          Continue to login
         </Button>
       </>
     );
   }
 
   const matchState = !confirmPassword ? "idle" : confirmPassword === password ? "match" : "mismatch";
+  const edit = (set: (value: string) => void) => (value: string) => {
+    set(value);
+    if (invalidField) {
+      setInvalidField(null);
+      setError("");
+    }
+  };
+  const errorFor = (field: "password" | "confirmPassword") => (invalidField === field ? alertId : undefined);
 
   return (
     <form onSubmit={submit} noValidate>
       <h2>Create a new password</h2>
       <p className="muted recovery-copy">Choose a strong password for the admin account.</p>
       <PasswordField
-        label="NEW PASSWORD"
+        label="New password"
         toggleName="new password"
         placeholder="Enter new password"
         value={password}
-        onChange={setPassword}
+        onChange={edit(setPassword)}
+        errorId={errorFor("password")}
       />
       <ul className="recovery-rules" aria-label="Password requirements">
         {passwordRules.map((rule) => {
@@ -101,11 +118,12 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         })}
       </ul>
       <PasswordField
-        label="CONFIRM NEW PASSWORD"
+        label="Confirm new password"
         toggleName="confirm password"
         placeholder="Confirm new password"
         value={confirmPassword}
-        onChange={setConfirmPassword}
+        onChange={edit(setConfirmPassword)}
+        errorId={errorFor("confirmPassword")}
       >
         <p className={`recovery-match recovery-match-${matchState}`} role="status">
           {matchState === "match" && "✓ Passwords match"}
@@ -113,12 +131,12 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         </p>
       </PasswordField>
       {error && (
-        <div className="error" role="alert">
+        <AuthAlert id={alertId} urgent={wait.seconds > 0}>
           {error}
-        </div>
+        </AuthAlert>
       )}
       <Button type="submit" className="recovery-primary recovery-submit" loading={submitting} disabled={wait.seconds > 0}>
-        {submitting ? "Working…" : wait.seconds > 0 ? `Reset Password in ${wait.seconds}s` : "Reset Password"}
+        {submitting ? "Resetting…" : wait.seconds > 0 ? tryAgainLabel(wait.seconds) : "Reset password"}
       </Button>
       <BackToLogin />
     </form>
@@ -132,12 +150,14 @@ interface PasswordFieldProps {
   placeholder: string;
   value: string;
   onChange: (value: string) => void;
+  /** The alert describing this field's error; marks the input invalid while set. */
+  errorId?: string;
   /** Rendered under the Caps Lock warning. */
   children?: ReactNode;
 }
 
 /** A labelled new-password input with its own show/hide toggle and Caps Lock warning. */
-function PasswordField({ label, toggleName, placeholder, value, onChange, children }: PasswordFieldProps) {
+function PasswordField({ label, toggleName, placeholder, value, onChange, errorId, children }: PasswordFieldProps) {
   const id = useId();
   const [shown, setShown] = useState(false);
   const caps = useCapsLock();
@@ -153,11 +173,13 @@ function PasswordField({ label, toggleName, placeholder, value, onChange, childr
           onKeyDown={caps.onKeyDown}
           onKeyUp={caps.onKeyUp}
           onBlur={caps.onBlur}
+          aria-invalid={errorId ? true : undefined}
+          aria-describedby={errorId}
           autoComplete="new-password"
           placeholder={placeholder}
         />
         <button type="button" className="recovery-password-toggle" onClick={() => setShown((on) => !on)} aria-pressed={shown} aria-label={`Show ${toggleName}`}>
-          <img src={eyeIcon} alt="" />
+          <PasswordVisibilityIcon shown={shown} />
         </button>
       </div>
       <CapsLockWarning visible={caps.capsLockOn} />

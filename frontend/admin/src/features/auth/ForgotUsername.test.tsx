@@ -30,7 +30,7 @@ const box = (position: number) => screen.getByLabelText(`Digit ${position} of 6`
 const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.change(box(i + 1), { target: { value: digit } }));
 
 const reachCodeStep = async () => {
-  fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+  fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await screen.findByRole("heading", { name: /verification code/i });
 };

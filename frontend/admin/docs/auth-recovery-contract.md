@@ -36,8 +36,8 @@ The frontend branches on `code`, not on the HTTP status, for recovery errors. Us
 Any `429` from login or a recovery endpoint is treated as a rate limit, whatever the body.
 
 - Send `Retry-After: <seconds>` as a positive integer. The frontend parses it with `parseInt`. It does not parse HTTP-date values. A missing, non-numeric or zero/negative header becomes **60 seconds**.
-- `message` in a JSON body is optional. It is shown to the admin; if absent (or the body is not JSON) the frontend writes "Too many requests. Please wait N seconds."
-- The UI disables the triggering button and counts down: login (inputs locked), "Send code", "Verify", "Resend code", and the new-password submit. The typed code is kept after a `429` on verify.
+- `message` in a JSON body is optional and is not shown: the admin always sees "Too many attempts. Try again when the button unlocks.", so no number in the text can disagree with the countdown.
+- The UI disables the triggering button and counts down on it as "Try again in Ns": login (inputs locked), "Send code", "Verify", "Resend code", and the new-password submit. The typed code is kept after a `429` on verify.
 - Whether a rejected (`429`) request still counts as an attempt is the backend's choice.
 
 ## Endpoints
@@ -87,7 +87,7 @@ Success `200`:
 
 - **Return the same `200` whether or not the email has an account.** The frontend moves to the code step on any `200`, and the response must not let anyone tell whether the account exists (same body shape, same timing fields, similar latency).
 - `message` is not displayed. Any JSON object body works.
-- `expiresInSeconds`: optional, lifetime of the issued code. Used only if it is a positive integer (`0`, negatives, floats and strings are ignored). When present the code step shows a "Code expires in m:ss" timer and, at zero, switches to the expired state without asking the server. When absent there is no timer and the frontend never decides locally that the code expired.
+- `expiresInSeconds`: optional, lifetime of the issued code. Used only if it is a positive integer (`0`, negatives, floats and strings are ignored). When present the code step states the lifetime in whole minutes ("The code expires in 10 minutes.") and, once it has passed, switches to the expired state without asking the server. When absent the sentence is omitted and the frontend never decides locally that the code expired.
 - `resendAfterSeconds`: optional resend cooldown, same positive-integer rule. When present the Resend button is disabled that long. When absent Resend is enabled immediately, so enforce the cooldown with `429` as well.
 - Issue the real code only when the email belongs to an admin account. Send no email otherwise.
 - A new request replaces the previous code for that `(email, purpose)` and restores the full attempt budget. The frontend calls this same endpoint for "Resend code".

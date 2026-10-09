@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +21,7 @@ const tickSeconds = async (seconds: number) => {
   }
 };
 
+const codeHeading = () => screen.getByRole("heading", { name: /verification code/i });
 const box = (position: number) => screen.getByLabelText(`Digit ${position} of 6`);
 const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.change(box(i + 1), { target: { value: digit } }));
 const expectBoxes = (code: string) => [...code].forEach((digit, i) => expect(box(i + 1)).toHaveValue(digit));
@@ -39,7 +40,7 @@ const openCodeStep = async () => {
       </AuthProvider>
     </MemoryRouter>,
   );
-  fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+  fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await settle();
   expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
@@ -69,57 +70,93 @@ describe("code step: exhausted code", () => {
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
   });
 
-  it("shows no expiry timer once the code is dead", async () => {
+  it("drops the lifetime sentence once the code is dead", async () => {
     useCountdownTimers();
     mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600 })], [VERIFY]: [exhausted()] });
     await openCodeStep();
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    expect(codeHeading()).toHaveAccessibleDescription(/The code expires in 10 minutes\.$/);
 
     typeCode("111111");
     await settle();
 
-    expect(screen.queryByRole("timer")).toBeNull();
+    expect(codeHeading()).not.toHaveAccessibleDescription(/expires/);
   });
 });
 
-describe("code step: expiry timer", () => {
-  it("counts down as m:ss when the server reports the code lifetime", async () => {
+describe("code step: expiry", () => {
+  it.each([
+    [600, "The code expires in 10 minutes."],
+    [581, "The code expires in 10 minutes."],
+    [60, "The code expires in 1 minute."],
+    [20, "The code expires in 1 minute."],
+  ])("states a %is lifetime in whole minutes under the heading", async (seconds, sentence) => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: seconds })] });
+    await openCodeStep();
+
+    expect(codeHeading()).toHaveAccessibleDescription(expect.stringMatching(/^If an account exists for /));
+    expect(codeHeading()).toHaveAccessibleDescription(expect.stringContaining(`we sent a 6-digit code to it. ${sentence}`));
+  });
+
+  it("shows no visible countdown", async () => {
     useCountdownTimers();
     mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 581 })] });
     await openCodeStep();
-
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 9:41");
     await tickSeconds(1);
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 9:40");
-    await tickSeconds(31);
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 9:09");
+
+    expect(screen.queryByRole("timer")).toBeNull();
+    expect(screen.queryByText(/\d+:\d\d/)).toBeNull();
   });
 
-  it("shows no timer when the server reports no lifetime", async () => {
+  it("omits the lifetime sentence and never expires when the server reports no lifetime", async () => {
     useCountdownTimers();
     mockBackend({ [REQUEST]: [issued()] });
     await openCodeStep();
 
-    expect(screen.queryByRole("timer")).toBeNull();
+    expect(codeHeading()).toHaveAccessibleDescription(/we sent a 6-digit code to it\.$/);
     expect(screen.queryByText(/expires in/i)).toBeNull();
     await tickSeconds(5);
     expect(box(1)).toBeEnabled();
   });
 
-  it("disables the boxes with an expired message and a Resend prompt when the timer reaches zero", async () => {
+  it("silently expires the code: boxes lock with an expired message and Resend becomes the main action", async () => {
     useCountdownTimers();
     mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 3 })] });
     await openCodeStep();
 
     await tickSeconds(2);
     expect(box(1)).toBeEnabled();
+    expect(screen.queryByRole("alert")).toBeNull();
     await tickSeconds(1);
 
     expect(screen.getByRole("alert")).toHaveTextContent("This code has expired");
     for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeDisabled();
-    expect(screen.queryByRole("timer")).toBeNull();
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /^verify/i })).toBeNull();
+  });
+
+  it("drops a wrong code's attempts count when the code expires, and a resend starts without it", async () => {
+    useCountdownTimers();
+    mockBackend({
+      [REQUEST]: [issued({ expiresInSeconds: 3 }), issued({ expiresInSeconds: 3 })],
+      [VERIFY]: [wrongCode(1)],
+    });
+    await openCodeStep();
+    typeCode("111111");
+    await settle();
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 1 attempt left.");
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^This code has expired\. Request a new code to continue\.$/);
+    expect(screen.queryByRole("img", { name: "Warning" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/attempts? left/i)).toBeNull();
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^This code has expired\. Request a new code to continue\.$/);
   });
 
   it("shows the expired state when the server answers code_expired, even without a timer", async () => {
@@ -159,7 +196,7 @@ describe("code step: resend recovery", () => {
   it.each([
     ["exhausted", () => exhausted()],
     ["expired", () => expired()],
-  ])("a successful resend re-enables a dead (%s) code, clears the boxes, restarts the timer and confirms", async (_name, reply) => {
+  ])("a successful resend re-enables a dead (%s) code, clears the boxes, states the new lifetime and confirms", async (_name, reply) => {
     useCountdownTimers();
     const { sent } = mockBackend({
       [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 1 }), issued({ expiresInSeconds: 120, resendAfterSeconds: 1 })],
@@ -179,7 +216,7 @@ describe("code step: resend recovery", () => {
     expectBoxes("");
     for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeEnabled();
     expect(box(1)).toHaveFocus();
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 2:00");
+    expect(codeHeading()).toHaveAccessibleDescription(/The code expires in 2 minutes\.$/);
     expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
   });
 
@@ -203,19 +240,23 @@ describe("code step: resend recovery", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
   });
 
-  it("restarts a running timer when the admin resends before the code dies", async () => {
+  it("restates the lifetime and restarts expiry when the admin resends before the code dies", async () => {
     useCountdownTimers();
     mockBackend({
-      [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 1 }), issued({ expiresInSeconds: 600, resendAfterSeconds: 1 })],
+      [REQUEST]: [issued({ expiresInSeconds: 10, resendAfterSeconds: 1 }), issued({ expiresInSeconds: 300, resendAfterSeconds: 1 })],
     });
     await openCodeStep();
-    await tickSeconds(30);
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 9:30");
+    expect(codeHeading()).toHaveAccessibleDescription(/The code expires in 1 minute\.$/);
+    await tickSeconds(8);
 
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await settle();
+    expect(codeHeading()).toHaveAccessibleDescription(/The code expires in 5 minutes\.$/);
 
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    // The first code's 10 s would have run out here; the new code is still live.
+    await tickSeconds(5);
+    expect(box(1)).toBeEnabled();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("drops the expired message when the code runs out while a resend is pending and the resend succeeds", async () => {
@@ -238,7 +279,7 @@ describe("code step: resend recovery", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("A new code has been sent");
     expect(box(1)).toBeEnabled();
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    expect(codeHeading()).toHaveAccessibleDescription(/The code expires in 10 minutes\.$/);
   });
 
   it("keeps the dead state and shows the failure when the resend itself fails", async () => {
@@ -260,6 +301,43 @@ describe("code step: resend recovery", () => {
   });
 });
 
+describe("code step: messages stay current", () => {
+  it("clears the enter-the-code prompt as soon as the admin types", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter the 6-digit verification code.");
+
+    typeCode("1");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a rejected code's message while the admin types the next attempt", async () => {
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4)] });
+    await openCodeStep();
+    typeCode("111111");
+    await settle();
+
+    typeCode("2");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
+  });
+
+  it("drops the new-code confirmation when that code expires", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued({ resendAfterSeconds: 1 }), issued({ expiresInSeconds: 3 })] });
+    await openCodeStep();
+    await tickSeconds(1);
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+    expect(screen.getByRole("status")).toHaveTextContent("A new code has been sent.");
+
+    await tickSeconds(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("This code has expired");
+    expect(screen.queryByText("A new code has been sent.")).toBeNull();
+  });
+});
+
 describe("code step: change email", () => {
   it("returns to the email step with the address kept for editing, then sends to the corrected address", async () => {
     const { sent } = mockBackend({ [REQUEST]: [issued(), issued()] });
@@ -268,10 +346,10 @@ describe("code step: change email", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change email" }));
 
-    expect(screen.getByLabelText("ADMIN EMAIL")).toHaveValue(EMAIL);
+    expect(screen.getByLabelText("Admin email")).toHaveValue(EMAIL);
     expect(screen.queryByLabelText("Digit 1 of 6")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: "other@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: "other@isu.edu.ph" } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
@@ -295,6 +373,23 @@ describe("code step: change email", () => {
     await settle();
 
     expect(screen.getByRole("button", { name: "Change email" })).toBeDisabled();
+  });
+});
+
+describe("code step: urgent attempts", () => {
+  it("keeps the same alert and adds a warning icon at 2 or fewer attempts", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(3), wrongCode(2)] });
+    await openCodeStep();
+
+    typeCode("111111");
+    await settle();
+    expect(within(screen.getByRole("alert")).queryByRole("img", { name: "Warning" })).toBeNull();
+
+    typeCode("222222");
+    await settle();
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 2 attempts left.");
+    expect(within(screen.getByRole("alert")).getByRole("img", { name: "Warning" })).toBeInTheDocument();
   });
 });
 
@@ -327,7 +422,16 @@ describe("code step: assistive technology", () => {
 
     const heading = screen.getByRole("heading", { name: /verification code/i });
     expect(heading).toHaveFocus();
-    expect(heading).toHaveAccessibleDescription(/we sent a 6-digit verification code to it\.$/);
+    expect(heading).toHaveAccessibleDescription(/we sent a 6-digit code to it\.$/);
+  });
+
+  it("keeps the blurred login preview behind the modal out of reach", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    // The preview is hidden from assistive technology, so its controls must not take keyboard focus either.
+    expect(screen.queryByRole("button", { name: "Login" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Login", hidden: true }).closest("[inert]")).not.toBeNull();
   });
 
   it("focuses the email step heading when the page first loads", () => {

@@ -11,6 +11,8 @@ import { ForgotPassword } from "./ForgotPassword";
 import { Login } from "./AuthPages";
 import { issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
+const RATE_LIMIT_MESSAGE = "Too many attempts. Try again when the button unlocks.";
+
 const EMAIL = "admin@isu.edu.ph";
 
 const REQUEST = "/api/recovery/request";
@@ -35,7 +37,7 @@ const renderForgotPassword = () =>
   );
 
 const sendCodeTo = async (email = EMAIL) => {
-  fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: email } });
+  fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: email } });
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await screen.findByRole("heading", { name: /verification code/i });
 };
@@ -66,10 +68,25 @@ describe("forgot-password: email step", () => {
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid email address.");
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: "admin.isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: "admin.isu.edu.ph" } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid email address.");
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining(REQUEST), expect.anything());
+  });
+
+  it("ties a rejected email to the alert and clears both once the admin edits the address", () => {
+    mockBackend({});
+    renderForgotPassword();
+    const email = screen.getByLabelText("Admin email");
+
+    fireEvent.change(email, { target: { value: "admin.isu.edu.ph" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(email).toHaveAccessibleDescription("Enter a valid email address.");
+
+    fireEvent.change(email, { target: { value: "admin@isu.edu.ph" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(email).not.toHaveAttribute("aria-invalid");
   });
 
   it("sends the trimmed email with the password purpose and confirms generically on the code step", async () => {
@@ -91,39 +108,43 @@ describe("forgot-password: email step", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderForgotPassword();
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Too many requests. Please wait 5 seconds.");
-    expect(screen.getByRole("button", { name: "Send code in 5s" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(screen.getByRole("button", { name: "Try again in 5s" })).toBeDisabled();
   });
 
   it("reports an unreachable backend when a non-429 error has no JSON body", async () => {
     mockBackend({ [REQUEST]: [new Response("<html>Bad Gateway</html>", { status: 502 })] });
     renderForgotPassword();
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to connect to the backend.");
   });
 
-  it("shows a countdown on the Send code button when the server rate-limits the request", async () => {
+  it("counts a server rate limit down on the Send code button, with a number-free urgent alert", async () => {
     mockBackend({
       [REQUEST]: [jsonResponse({ message: "Too many requests." }, 429, { "Retry-After": "3" })],
     });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderForgotPassword();
 
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Too many requests.");
-    expect(screen.getByRole("button", { name: "Send code in 3s" })).toBeDisabled();
+    const alert = screen.getByRole("alert");
+    // The button carries the live count, so the alert names no number that could disagree with it.
+    expect(alert).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(alert).not.toHaveTextContent(/\d/);
+    expect(within(alert).getByRole("img", { name: "Warning" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again in 3s" })).toBeDisabled();
     await tickSecond();
-    expect(screen.getByRole("button", { name: "Send code in 2s" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     await tickSecond();
     await tickSecond();
     expect(screen.getByRole("button", { name: /send code/i })).toBeEnabled();
@@ -139,7 +160,7 @@ describe("forgot-password: email step", () => {
 
     first.unmount();
     renderForgotPassword();
-    expect(screen.getByLabelText("ADMIN EMAIL")).toHaveValue("");
+    expect(screen.getByLabelText("Admin email")).toHaveValue("");
   });
 
   it("offers Back to login on every step", async () => {
@@ -247,7 +268,7 @@ describe("forgot-password: code step", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
     renderForgotPassword();
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
@@ -345,13 +366,15 @@ describe("forgot-password: code step", () => {
       [VERIFY]: [jsonResponse({ message: "Too many requests." }, 429, { "Retry-After": "2" }), verified()],
     });
     renderForgotPassword();
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
     typeCode("123456");
     await settle();
-    expect(screen.getByRole("button", { name: "Verify in 2s" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(within(screen.getByRole("alert")).getByRole("img", { name: "Warning" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     expectBoxes("123456");
     await tickSecond();
     await tickSecond();
@@ -371,7 +394,7 @@ describe("forgot-password: resend", () => {
       [VERIFY]: [wrongCode(4)],
     });
     renderForgotPassword();
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
@@ -408,15 +431,17 @@ describe("forgot-password: resend", () => {
       [REQUEST]: [issued(), jsonResponse({ message: "Too many requests. Please wait 2 seconds." }, 429, { "Retry-After": "2" })],
     });
     renderForgotPassword();
-    fireEvent.change(screen.getByLabelText("ADMIN EMAIL"), { target: { value: EMAIL } });
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Too many requests. Please wait 2 seconds.");
-    expect(screen.getByRole("button", { name: "Resend code in 2s" })).toBeDisabled();
+    // The server's own wording names a number; the alert replaces it so only the button counts.
+    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/\d/);
+    expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     await tickSecond();
     await tickSecond();
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
@@ -435,14 +460,14 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
     expect(sent[RESET]).toEqual([{ email: EMAIL, code: "000000", password: "Passw0rd!x" }]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Return to login" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue to login" }));
     expect(await screen.findByLabelText(/^username$/i)).toHaveValue("admin_justine");
     expect(localStorage).toHaveLength(0);
     expect(sessionStorage).toHaveLength(0);
@@ -453,9 +478,9 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!y" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Passw0rd!y" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("Passwords do not match.");
     expect(sent[RESET]).toBeUndefined();
@@ -470,9 +495,9 @@ describe("forgot-password: new password and return to login", () => {
     renderForgotPassword();
     await reachNewPassword();
 
-    fireEvent.change(screen.getByLabelText("NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.change(screen.getByLabelText("CONFIRM NEW PASSWORD"), { target: { value: "Passw0rd!x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Password is too weak.");
     expect(screen.getByRole("heading", { name: /create a new password/i })).toBeInTheDocument();
@@ -489,6 +514,6 @@ describe("old reset-password links", () => {
     );
 
     expect(await screen.findByRole("heading", { name: /reset your password/i })).toBeInTheDocument();
-    expect(within(document.body).getByLabelText("ADMIN EMAIL")).toBeInTheDocument();
+    expect(within(document.body).getByLabelText("Admin email")).toBeInTheDocument();
   });
 });
