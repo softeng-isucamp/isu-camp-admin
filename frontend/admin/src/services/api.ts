@@ -1419,6 +1419,7 @@ export const services: Services = {
         id: `admin-${Date.now()}`,
         username,
         email,
+        status: "Active",
         isCurrent: false,
       };
       localAdmins.push(created);
