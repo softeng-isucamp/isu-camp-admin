@@ -143,10 +143,9 @@ describe("Dashboard backend boundary", () => {
     expect(await screen.findByRole("heading", { name: "App Usage" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Data Health" })).toBeInTheDocument();
     expect(await screen.findByText("Active users")).toBeInTheDocument();
-    for (const title of ["Searches & Visits", "Peak hours", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
+    for (const title of ["Searches & Visits", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
       expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
-    expect(screen.getByRole("table", { name: "Searches by weekday and hour" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
   });
 

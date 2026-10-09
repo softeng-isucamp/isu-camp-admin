@@ -3,31 +3,29 @@ import { accountTypes } from "../../../lib/accountType";
 import type { DashboardAnalytics } from "../../../types";
 import { ChartArea, ChartCard } from "./ChartCard";
 import { formatNumber, formatPercent } from "./format";
-import { AXIS_TICK, INK, SERIES, TOOLTIP_STYLE } from "./palette";
+import { AXIS_TICK, INK, TOOLTIP_STYLE } from "./palette";
 
-const GUEST_LABEL = "Guest (signed out)";
+// Staff is this chart's label for the "teacher" account type.
+const chartLabel = (key: string, label: string) => (key === "teacher" ? "Staff" : label);
 
-/** A3: Visits split by account type; guests are signed-out users. */
+/** A3: Visits split by account type. The User App records only signed-in users. */
 export function VisitsByAccountType({ data }: { data: DashboardAnalytics | undefined }) {
   return (
     <ChartCard
       title="Visits by account type"
-      subtitle="Who arrives at their Destination. Guests are signed-out users."
+      subtitle="Who arrives at their Destination."
       data={data}
       isEmpty={(d) => Object.values(d.visitsByAccountType).every((value) => value === 0)}
     >
       {(d) => {
         const total = Object.values(d.visitsByAccountType).reduce((sum, value) => sum + value, 0);
-        const rows = [
-          ...accountTypes.map((type) => ({ name: type.label, value: d.visitsByAccountType[type.key], color: type.color })),
-          { name: GUEST_LABEL, value: d.visitsByAccountType.guest, color: SERIES.yellow },
-        ];
+        const rows = accountTypes.map((type) => ({ name: chartLabel(type.key, type.label), value: d.visitsByAccountType[type.key], color: type.color }));
         return (
-          <ChartArea height={220}>
+          <ChartArea height={170}>
             <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 76, bottom: 0, left: 8 }} barCategoryGap={14}>
               <CartesianGrid horizontal={false} stroke={INK.grid} />
               <XAxis type="number" hide />
-              <YAxis type="category" dataKey="name" tick={{ ...AXIS_TICK, fontSize: 12 }} tickLine={false} axisLine={false} width={116} />
+              <YAxis type="category" dataKey="name" tick={{ ...AXIS_TICK, fontSize: 12 }} tickLine={false} axisLine={false} width={80} />
               <Tooltip cursor={{ fill: "#f3f6f4" }} contentStyle={TOOLTIP_STYLE} formatter={(value) => [`${formatNumber(Number(value))} (${formatPercent(Number(value) / (total || 1))})`, "Visits"]} />
               <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={26}>
                 {rows.map((row) => <Cell key={row.name} fill={row.color} />)}

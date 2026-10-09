@@ -4,7 +4,6 @@ import { services } from "../../../services/api";
 import type { DashboardRange } from "../../../types";
 import { ActivityKpis } from "./ActivityKpis";
 import { DirectoryCompleteness } from "./DirectoryCompleteness";
-import { PeakHoursHeatmap } from "./PeakHoursHeatmap";
 import { RegistrationsOverTime } from "./RegistrationsOverTime";
 import { SearchesVisitsTrend } from "./SearchesVisitsTrend";
 import { VisitsByAccountType } from "./VisitsByAccountType";
@@ -39,7 +38,6 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
         <div className="analytics-grid">
           <ActivityKpis data={data} />
           <SearchesVisitsTrend data={data} />
-          <PeakHoursHeatmap data={data} />
           <VisitsByAccountType data={data} />
           <VisitsByDestinationType data={data} />
           <RegistrationsOverTime data={data} />

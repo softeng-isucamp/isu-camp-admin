@@ -9,7 +9,6 @@ import type {
   DestinationType,
   Location,
   UserAccountType,
-  VisitorKind,
 } from "../../types";
 import { mulberry32 } from "./prng";
 
@@ -31,7 +30,7 @@ const MANILA_OFFSET_MS = 8 * 3_600_000;
 
 const WEEKDAY_FACTOR = [1.0, 1.05, 1.0, 0.95, 0.85, 0.18, 0.08]; // Mon..Sun
 const HOUR_PEAKS: Array<[center: number, weight: number]> = [[7.5, 0.2], [10.5, 0.28], [13, 0.27], [16, 0.25]];
-const ACCOUNT_SHARE = { teacher: 0.08, visitor: 0.12, guest: 0.22 }; // students take the remainder
+const ACCOUNT_SHARE = { teacher: 0.08, visitor: 0.12 }; // students take the remainder
 const SIGNED_IN_SHARE = 0.78;
 const INDOOR_TYPES: DestinationType[] = ["Room", "Laboratory", "Office", "Restroom"];
 const INDOOR_TYPE_SHARE: Record<string, number> = { Room: 0.4, Laboratory: 0.25, Office: 0.2, Restroom: 0.15 };
@@ -60,7 +59,7 @@ type Day = {
   hourly: number[]; // searches by hour 0..23
   searches: number;
   visits: number;
-  visitsByAccount: Record<VisitorKind, number>;
+  visitsByAccount: Record<UserAccountType, number>;
   destSearches: number[];
   destVisits: number[];
   registrations: Record<UserAccountType, number>;
@@ -173,8 +172,7 @@ const buildModel = (locations: Location[], todayNumber: number): Model => {
 
     const teacher = Math.round(visits * ACCOUNT_SHARE.teacher * (0.85 + 0.3 * rand()));
     const visitor = Math.round(visits * ACCOUNT_SHARE.visitor * (0.85 + 0.3 * rand()));
-    const guest = Math.round(visits * ACCOUNT_SHARE.guest * (0.85 + 0.3 * rand()));
-    const student = Math.max(0, visits - teacher - visitor - guest);
+    const student = Math.max(0, visits - teacher - visitor);
 
     // Stable user IDs let period totals count distinct signed-in users with a Search.
     const activeUsers = new Set<number>();
@@ -189,7 +187,7 @@ const buildModel = (locations: Location[], todayNumber: number): Model => {
       hourly,
       searches,
       visits,
-      visitsByAccount: { student, teacher, visitor, guest },
+      visitsByAccount: { student, teacher, visitor },
       destSearches,
       destVisits,
       registrations: reg,
@@ -250,13 +248,6 @@ export function generateDashboardAnalytics(range: DashboardRange, locations: Loc
 
   const sumBy = (selector: (day: Day) => number) => current.reduce((sum, day) => sum + selector(day), 0);
 
-  const peakHours: DashboardAnalytics["peakHours"] = [];
-  for (let day = 0; day < 7; day += 1) {
-    for (let hour = FIRST_HOUR; hour <= LAST_HOUR; hour += 1) {
-      peakHours.push({ day, hour, searches: current.filter((entry) => entry.weekday === day).reduce((sum, entry) => sum + entry.hourly[hour], 0) });
-    }
-  }
-
   const visitsByDestinationType: Record<DestinationType, number> = { Building: 0, Room: 0, Laboratory: 0, Office: 0, Restroom: 0 };
   const destTotals = destinations.map((destination, index) => {
     const searches = sumBy((day) => day.destSearches[index]);
@@ -287,12 +278,10 @@ export function generateDashboardAnalytics(range: DashboardRange, locations: Loc
       searches: bucket.reduce((sum, day) => sum + day.searches, 0),
       visits: bucket.reduce((sum, day) => sum + day.visits, 0),
     })),
-    peakHours,
     visitsByAccountType: {
       student: sumBy((day) => day.visitsByAccount.student),
       teacher: sumBy((day) => day.visitsByAccount.teacher),
       visitor: sumBy((day) => day.visitsByAccount.visitor),
-      guest: sumBy((day) => day.visitsByAccount.guest),
     },
     visitsByDestinationType,
     registrations: bucketize(current, bucketSize, (bucket) => ({

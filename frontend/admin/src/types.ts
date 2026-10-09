@@ -169,10 +169,8 @@ export interface DashboardSummary {
 }
 /** Destination categories used by Visit analytics; Facility counts as Building. */
 export type DestinationType = "Building" | "Room" | "Laboratory" | "Office" | "Restroom";
-/** Visits are attributed to an account type, or to "guest" when the user was signed out. */
-export type VisitorKind = UserAccountType | "guest";
 export interface AnalyticsTotals {
-  /** Signed-in users with at least one Search in the period. */
+  /** Signed-in users with at least one Search (route preview or navigation start) in the period. */
   activeUsers: number;
   searches: number;
   visits: number;
@@ -200,9 +198,7 @@ export interface DashboardAnalytics {
   /** The previous equal period; null for "all". */
   previous: AnalyticsTotals | null;
   timeline: Array<{ date: string; searches: number; visits: number }>;
-  /** Searches per weekday (0 = Monday .. 6 = Sunday) and hour (0..23, Manila). */
-  peakHours: Array<{ day: number; hour: number; searches: number }>;
-  visitsByAccountType: Record<VisitorKind, number>;
+  visitsByAccountType: Record<UserAccountType, number>;
   visitsByDestinationType: Record<DestinationType, number>;
   registrations: Array<{ date: string } & Record<UserAccountType, number>>;
   topDestinations: AnalyticsDestination[];

@@ -15,13 +15,13 @@ const tilesOf = (data: DashboardAnalytics): Tile[] => {
   return [
     {
       label: "Active users",
-      hint: "Signed-in users with at least one Search",
+      hint: "Signed-in users who previewed or started a route",
       value: formatNumber(current.activeUsers),
       change: previous ? relativeChange(current.activeUsers, previous.activeUsers) : null,
     },
     {
       label: "Total visits",
-      hint: "Arrivals at a searched Destination",
+      hint: "Arrivals after a route preview or navigation start",
       value: formatNumber(current.visits),
       change: previous ? relativeChange(current.visits, previous.visits) : null,
     },

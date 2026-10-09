@@ -3643,45 +3643,6 @@ td small {
   font-weight: 500;
   color: #87938d;
 }
-.heatmap {
-  display: grid;
-  gap: 3px;
-  align-items: center;
-}
-.heatmap-hour,
-.heatmap-day {
-  font-size: 11px;
-  color: #64716a;
-  text-align: center;
-}
-.heatmap-day {
-  text-align: left;
-}
-.heatmap-cell {
-  display: block;
-  height: 30px;
-  border-radius: 5px;
-}
-.heatmap-cell:hover {
-  outline: 2px solid #151a17;
-  outline-offset: 1px;
-}
-.heatmap-scale {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-}
-.heatmap-scale small {
-  font-size: 11px;
-  color: #64716a;
-  white-space: nowrap;
-}
-.heatmap-scale i {
-  flex: 0 0 140px;
-  height: 8px;
-  border-radius: 4px;
-}
 .analytics-donut {
   display: flex;
   flex-wrap: wrap;

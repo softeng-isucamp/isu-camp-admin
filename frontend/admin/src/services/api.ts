@@ -136,8 +136,7 @@ const dashboardAnalyticsSchema = z.object({
   current: analyticsTotalsSchema,
   previous: analyticsTotalsSchema.nullable(),
   timeline: z.array(z.object({ date: z.string().min(1), searches: nonNegInt, visits: nonNegInt })),
-  peakHours: z.array(z.object({ day: z.number().int().min(0).max(6), hour: z.number().int().min(0).max(23), searches: nonNegInt })),
-  visitsByAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt, guest: nonNegInt }),
+  visitsByAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt }),
   visitsByDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
   registrations: z.array(z.object({ date: z.string().min(1), student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt })),
   topDestinations: z.array(z.object({
