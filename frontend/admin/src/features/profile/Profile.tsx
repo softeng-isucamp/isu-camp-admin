@@ -39,12 +39,15 @@ export function Profile() {
           <Badge tone={profile.role === 'superadmin' ? 'green' : 'grey'}>{roleLabel(profile.role)}</Badge>
         </div>
         <div className="profile-actions">
-          <Button variant="subtle" className="profile-signout" onClick={() => setDialog('signout')}>Sign Out</Button>
           <Button variant="subtle" onClick={() => setDialog('password')}>Change Password</Button>
           <Button onClick={() => setDialog('details')}>Edit Profile</Button>
         </div>
       </Card>
       {session?.role === 'superadmin' && profile.role === 'superadmin' && <BackupRecovery onSuccess={feedback.reportSuccess} />}
+      <Card className="profile-signout">
+        <p>Signed in as <strong>{profile.username}</strong></p>
+        <Button variant="danger" onClick={() => setDialog('signout')}>Sign Out</Button>
+      </Card>
     </div>}
     {dialog === 'details' && profile && <DetailsDialog profile={profile} onClose={() => setDialog(null)} onSaved={(updated) => {
       setProfile(updated); updateSession(updated); setDialog(null);
