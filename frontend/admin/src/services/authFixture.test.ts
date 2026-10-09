@@ -146,6 +146,17 @@ describe("fixture account recovery", () => {
     expect(error).toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });
   });
 
+  it("does not verify or reset without a requested code, counting the guess like any unknown email", async () => {
+    expect(await failure(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE)))
+      .toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });
+    expect(await failure(adapter.auth.resetPassword(EMAIL, TEST_CODE, "NewPassw0rd!")))
+      .toMatchObject({ kind: "invalid_code", attemptsRemaining: 3 });
+    expect(await failure(adapter.auth.login(USERNAME, "NewPassw0rd!"))).toMatchObject({ kind: "invalid_credentials" });
+
+    await adapter.auth.requestRecovery(EMAIL, "password");
+    await expect(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE)).resolves.toEqual({ username: USERNAME });
+  });
+
   it("keeps a password code and a username code apart", async () => {
     await adapter.auth.requestRecovery(EMAIL, "password");
     await adapter.auth.requestRecovery(EMAIL, "username");

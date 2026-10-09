@@ -258,7 +258,7 @@ describe("forgot-password: code step", () => {
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
-  it("never resubmits a wrong code on its own", async () => {
+  it("never resubmits a wrong code on its own, even when it is typed again, but Verify retries it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
     renderForgotPassword();
@@ -271,9 +271,75 @@ describe("forgot-password: code step", () => {
     await tickSecond();
     expect(sent[VERIFY]).toHaveLength(1);
 
-    // Typing the same code again is the admin's own choice and does count.
+    // The same rejected code typed or pasted again is not spent a second time on its own.
     await failVerification();
+    pasteCode(1, "111111");
+    await settle();
+    expect(sent[VERIFY]).toHaveLength(1);
+    expectBoxes("111111");
+
+    // Pressing Verify is the admin's explicit retry and does count.
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await settle();
     expect(sent[VERIFY]).toHaveLength(2);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+  });
+
+  it("still auto-submits a different code after one was rejected", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), verified()] });
+    renderForgotPassword();
+    await sendCodeTo();
+
+    await failVerification();
+    typeCode("222222");
+    await settle();
+
+    expect(sent[VERIFY]).toEqual([
+      { email: EMAIL, purpose: "password", code: "111111" },
+      { email: EMAIL, purpose: "password", code: "222222" },
+    ]);
+  });
+
+  it("sends only one request when Verify is clicked while the code is already auto-submitting", async () => {
+    let release: (response: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [pending] });
+    renderForgotPassword();
+    await sendCodeTo();
+
+    typeCode("123456");
+    fireEvent.click(screen.getByRole("button", { name: /verifying/i }));
+    await settle();
+    expect(sent[VERIFY]).toHaveLength(1);
+
+    await act(async () => release(verified()));
+    expect(sent[VERIFY]).toHaveLength(1);
+  });
+
+  it.each([
+    ["attemptsRemaining is a string", "3"],
+    ["attemptsRemaining is negative", -1],
+  ])("falls back to the server message when %s", async (_name, attemptsRemaining) => {
+    mockBackend({
+      [REQUEST]: [issued()],
+      [VERIFY]: [jsonResponse({ success: false, code: "invalid_code", message: "Invalid verification code", attemptsRemaining }, 400)],
+    });
+    renderForgotPassword();
+    await sendCodeTo();
+
+    await failVerification();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/^Invalid verification code$/);
+  });
+
+  it("ignores malformed timing fields instead of starting a countdown", async () => {
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: "x", resendAfterSeconds: "60" } as never)] });
+    renderForgotPassword();
+    await sendCodeTo();
+
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
   });
 
   it("keeps a manual Verify button that rejects an incomplete code without a request", async () => {

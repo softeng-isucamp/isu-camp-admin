@@ -36,6 +36,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified }: Recover
   const [resending, setResending] = useState(false);
   const otp = useRef<OtpInputHandle>(null);
   const inFlight = useRef(false);
+  // Codes the server rejected for the code currently issued. Auto-submit skips them; the Verify button is an explicit retry.
+  const rejected = useRef(new Set<string>());
   const verifyWait = useCountdown();
   const resendWait = useCountdown(issued.resendAfterSeconds ?? 0);
 
@@ -62,6 +64,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified }: Recover
         verifyWait.start(err.retryAfterSeconds);
       } else {
         otp.current?.clear();
+        if (err instanceof AuthError && err.kind === "invalid_code") rejected.current.add(parsed.data);
         if (err instanceof AuthError && err.kind === "invalid_code" && err.attemptsRemaining !== undefined) {
           setError(`Incorrect code. ${attemptsLeftText(err.attemptsRemaining)}`);
           setAttemptsRemaining(err.attemptsRemaining);
@@ -84,6 +87,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified }: Recover
     try {
       const next = await services.auth.requestRecovery(email, purpose);
       otp.current?.clear();
+      rejected.current.clear();
       setResendMessage("A new 6-digit verification code has been sent.");
       resendWait.start(next.resendAfterSeconds ?? 0);
     } catch (err) {
@@ -106,7 +110,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified }: Recover
       </p>
       <div className="field">
         <span className="recovery-label">VERIFICATION CODE</span>
-        <OtpInput ref={otp} disabled={verifying} onChange={setCode} onComplete={(complete) => void verify(complete)} />
+        <OtpInput ref={otp} disabled={verifying} onChange={setCode} onComplete={(complete) => {
+            if (!rejected.current.has(complete)) void verify(complete);
+          }} />
         <small className="recovery-resend">
           <span>Didn't receive code?</span>
           <button type="button" onClick={() => void resend()} disabled={resendWait.seconds > 0 || resending || verifying}>

@@ -48,21 +48,18 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   let failedLogins = 0;
   let lockedUntil = 0;
 
-  const issueCode = (email: string, purpose: RecoveryPurpose): IssuedCode => {
-    const issued = {
-      valid: normalizeEmail(email) === normalizeEmail(account.email),
-      attempts: 0,
-      expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000,
-    };
+  const issueCode = (email: string, purpose: RecoveryPurpose, valid = normalizeEmail(email) === normalizeEmail(account.email)): IssuedCode => {
+    const issued = { valid, attempts: 0, expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000 };
     issuedCodes.set(`${purpose}:${normalizeEmail(email)}`, issued);
     return issued;
   };
 
-  // An email nobody asked a code for gets one on its first guess, so a wrong
-  // code looks the same whether or not the email has an account.
+  // Nothing was requested for this email: count guesses against a phantom code
+  // that never matches, exactly like an email with no account, so verify and
+  // reset cannot succeed without a request.
   const checkCode = (email: string, purpose: RecoveryPurpose, code: string): IssuedCode => {
     const key = `${purpose}:${normalizeEmail(email)}`;
-    const issued = issuedCodes.get(key) ?? issueCode(email, purpose);
+    const issued = issuedCodes.get(key) ?? issueCode(email, purpose, false);
     if (Date.now() >= issued.expiresAt) throw new AuthError("code_expired", "This code has expired. Request a new one.");
     if (issued.attempts >= RECOVERY_ATTEMPT_LIMIT) {
       throw new AuthError("code_exhausted", "Too many incorrect codes. Request a new one.", 0);
