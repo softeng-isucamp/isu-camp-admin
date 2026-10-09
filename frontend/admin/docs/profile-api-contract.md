@@ -4,7 +4,7 @@ This is a proposed contract implemented by the frontend, for the backend team to
 
 ## Profile and session
 
-Both the sidebar account area (expanded or collapsed) and upper-right avatar navigate to `/profile`. Sign out remains a separate sidebar action. All signed-in administrators can edit their own username, email and password. Backup/recovery appears only when both the session and loaded profile explicitly report `superadmin`; missing or unknown roles grant no backup access.
+Both the sidebar account area (expanded or collapsed) and upper-right avatar navigate to `/profile`. Sign out lives on My Profile, behind a confirmation dialog. All signed-in administrators can edit their own username, email and password. Backup/recovery appears only when both the session and loaded profile explicitly report `superadmin`; missing or unknown roles grant no backup access.
 
 Extend the existing `/api/login` and `/api/me` response's `admin` object with `email` and `role`, preserving its current envelope. Role values are exactly `admin` and `superadmin`. IDs can be strings or numbers and are normalized to strings. The server must derive identity and permissions from the authenticated session, enforce authorization on every endpoint, and never accept an account ID or role change from these forms.
 
