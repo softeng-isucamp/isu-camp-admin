@@ -86,7 +86,9 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
     focusBox(typed.length > 1 ? typed.length - 1 : Math.min(typed.length, LENGTH - 1));
   };
 
+  // Disabled boxes never change: a browser can still deliver paste or input events to them, so the handlers refuse them too.
   const handleInput = (index: number, value: string) => {
+    if (disabled) return;
     const clean = digitsOf(value);
     if (clean.length > 1) {
       fillFrom(clean);
@@ -100,12 +102,13 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
     event.preventDefault();
+    if (disabled) return;
     const pasted = digitsOf(event.clipboardData.getData("text"));
     if (pasted) fillFrom(pasted);
   };
 
   const handleKeyDown = (index: number, event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== "Backspace" || digits[index] || index === 0) return;
+    if (disabled || event.key !== "Backspace" || digits[index] || index === 0) return;
     const next = [...digits];
     next[index - 1] = "";
     commit(next);

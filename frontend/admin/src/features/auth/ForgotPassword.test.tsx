@@ -48,7 +48,7 @@ const pasteCode = (position: number, text: string) =>
   fireEvent.paste(box(position), { clipboardData: { getData: () => text } });
 /** The rejected digits shown in the empty boxes, read from the boxes found by their labels. */
 const ghostDigits = () => [1, 2, 3, 4, 5, 6].map((position) => box(position).getAttribute("placeholder") ?? "").join("");
-const expectBoxes = (code: string) => [...code].forEach((digit, i) => expect(box(i + 1)).toHaveValue(digit));
+const expectBoxes = (code: string) => [1, 2, 3, 4, 5, 6].forEach((position) => expect(box(position)).toHaveValue(code[position - 1] ?? ""));
 
 /** Types a valid code and waits for the wrong-code reply to be shown. */
 const failVerification = async () => {

@@ -9,7 +9,7 @@ vi.hoisted(() => vi.stubEnv("VITE_API_MODE", "real"));
 import { AuthProvider } from "./AuthContext";
 import { ForgotPassword } from "./ForgotPassword";
 import { Login } from "./AuthPages";
-import { issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
+import { expired, issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
 const REQUEST = "/api/recovery/request";
@@ -295,6 +295,93 @@ describe("code step: a rejected code is shown as ghost digits", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual(["111111", "222222"]);
+  });
+});
+
+describe("code step: boxes that are disabled", () => {
+  /** A verify reply the test settles by hand, so the boxes stay disabled while the request is pending. */
+  const pendingReply = () => {
+    let resolve!: (response: Response) => void;
+    const reply = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    return { reply, resolve };
+  };
+
+  it("ignore a paste while the code is being verified, so the ghost shows the code the server rejected", async () => {
+    const { reply, resolve } = pendingReply();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [reply] });
+    renderForgotPassword();
+    await sendCode();
+    pasteCode(1, "123456");
+    await settle();
+    positions.forEach((n) => expect(box(n)).toBeDisabled());
+
+    pasteCode(1, "654321");
+    await settle();
+    expect(boxValues()).toBe("123456");
+
+    resolve(wrongCode(4));
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456"]);
+    expect(boxValues()).toBe("");
+    expect(ghostDigits()).toBe("123456");
+    expectAllInvalid();
+  });
+
+  it("ignore typed digits, several digits at once and Backspace while the code is being verified", async () => {
+    const { reply, resolve } = pendingReply();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [reply] });
+    renderForgotPassword();
+    await sendCode();
+    pasteCode(1, "123456");
+    await settle();
+
+    fireEvent.change(box(3), { target: { value: "9" } });
+    fireEvent.change(box(2), { target: { value: "654321" } });
+    fireEvent.keyDown(box(6), { key: "Backspace" });
+    fireEvent.change(box(6), { target: { value: "" } });
+    await settle();
+    expect(boxValues()).toBe("123456");
+
+    resolve(wrongCode(4));
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456"]);
+    expect(ghostDigits()).toBe("123456");
+  });
+
+  it("ignore a paste once the attempts are used up, leaving the boxes empty and sending nothing", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(0), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    pasteCode(1, "123456");
+    await settle();
+    positions.forEach((n) => expect(box(n)).toBeDisabled());
+
+    pasteCode(1, "654321");
+    fireEvent.change(box(1), { target: { value: "7" } });
+    await settle();
+
+    expect(boxValues()).toBe("");
+    expect(ghostDigits()).toBe("");
+    expect(sentCodes(sent)).toEqual(["123456"]);
+  });
+
+  it("ignore a paste once the code has expired, leaving the boxes empty and sending nothing", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [expired(), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    pasteCode(1, "123456");
+    await settle();
+    positions.forEach((n) => expect(box(n)).toBeDisabled());
+
+    pasteCode(1, "654321");
+    await settle();
+
+    expect(boxValues()).toBe("");
+    expect(sentCodes(sent)).toEqual(["123456"]);
   });
 });
 
