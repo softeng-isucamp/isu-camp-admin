@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type PageIconName = "map" | "locations" | "users" | "logs";
+export type PageIconName = "map" | "locations" | "users" | "logs" | "profile";
 
 // One stroke family (24px grid, 1.8 stroke, round caps) so every module header reads as a set.
 const glyphs: Record<PageIconName, ReactNode> = {
@@ -21,6 +21,12 @@ const glyphs: Record<PageIconName, ReactNode> = {
       <circle cx="9" cy="8" r="3.5" />
       <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
       <path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" />
+    </>
+  ),
+  profile: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4.5 20.5a7.5 7.5 0 0 1 15 0" />
     </>
   ),
   logs: (

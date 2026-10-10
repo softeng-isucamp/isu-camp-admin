@@ -156,14 +156,31 @@ db.init_app(app)
 # CORS
 # ==========================================
 
+# Both spellings of the loopback host, because they are different origins to a
+# browser even though they are the same machine. The dev server is reached at
+# either one - the documented API base is 127.0.0.1:5000 - and allowing only
+# "localhost" meant every request from a frontend opened at 127.0.0.1 failed
+# preflight, which the console reports as a CORS policy error rather than as a
+# missing origin.
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+]
+
+# flask-cors owns every CORS header, preflight included. An earlier
+# ``after_request`` here set the same headers by hand; because Flask runs
+# after_request in reverse registration order it ran first, and flask-cors then
+# skipped a response that already had Access-Control-Allow-Origin. That left
+# this block configuring nothing and dropped the "Vary: Origin" flask-cors adds
+# for a reflected origin, so a cache could serve one origin's response to
+# another. One owner, so there is no second place to edit.
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": [
-                "http://localhost:5173",
-                "http://localhost:5174"
-            ],
+            "origins": ALLOWED_ORIGINS,
             "methods": [
                 "GET",
                 "POST",
@@ -181,31 +198,6 @@ CORS(
         }
     }
 )
-
-
-# ==========================================
-# CORS Preflight / Headers
-# ==========================================
-
-@app.after_request
-def add_cors_headers(response):
-    origin = request.headers.get("Origin")
-
-    if origin in [
-        "http://localhost:5173",
-        "http://localhost:5174"
-    ]:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization"
-        )
-        response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        )
-        response.headers["Access-Control-Expose-Headers"] = "Retry-After"
-
-    return response
 
 
 # ==========================================

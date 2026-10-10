@@ -1,3 +1,4 @@
+import { createProfileService } from "./profile";
 import type {
   AccountStatus,
   AdminAccount,
@@ -586,6 +587,7 @@ export interface Services {
     saveMapDraft(draft: MapDraftSaveRequest): Promise<NetworkSnapshot>;
   };
 
+  profile: ReturnType<typeof createProfileService>;
   auth: {
     login(
       username: string,
@@ -851,6 +853,7 @@ export const services: Services = {
   // AUTHENTICATION
   // ========================================
 
+  profile: createProfileService(apiJson, USE_HTTP_API ? undefined : localAdapter.auth),
   auth: {
 
     // --------------------------------------
@@ -916,6 +919,8 @@ export const services: Services = {
       return {
         id: data.admin.id,
         username: data.admin.username,
+        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
+        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
       };
     },
 
@@ -1001,6 +1006,8 @@ export const services: Services = {
       return {
         id: data.admin.id,
         username: data.admin.username,
+        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
+        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
       };
     },
 

@@ -271,22 +271,13 @@ button {
   font-size: 13px;
   display: block;
 }
-.profile button {
-  margin-left: auto;
-  background: transparent;
-  color: #b6e6c5;
-  font-size: 20px;
-}
-.profile button img {
-  display: block;
-  width: 20px;
-  height: 20px;
-}
 
 /* Minimized Profile & Popover */
 .minimized-profile-container {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   position: relative;
   padding-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.15);
@@ -299,6 +290,7 @@ button {
   background: #a0f5ba;
   display: grid;
   place-items: center;
+  flex-shrink: 0;
   border: 2px solid transparent;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -386,27 +378,6 @@ button {
   height: 1px;
   background: #e5e7eb;
   margin: 12px 0;
-}
-.profile-popover-signout {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #fee2e2;
-  color: #dc2626;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.15s ease;
-}
-.profile-popover-signout:hover {
-  background: #fecaca;
-}
-.profile-popover-signout img {
-  width: 16px;
-  height: 16px;
-  filter: invert(24%) sepia(85%) saturate(3000%) hue-rotate(345deg);
 }
 .avatar {
   display: grid;

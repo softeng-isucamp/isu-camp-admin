@@ -60,7 +60,7 @@ if [ "$MODE" = "--fixture" ]; then
     echo "[MODE] Fixture: local OSM demo data; Flask and database are not used."
     echo "[LOGIN] Fixture only: admin_justine / password123"
     cd frontend/admin
-    exec npm run dev -- --host localhost --port 5173 --strictPort
+    exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 fi
 
 export VITE_TEST_LOCAL_ADAPTER=false
@@ -87,6 +87,6 @@ venv/bin/python app/services/database.py &
 BACKEND_PID=$!
 
 # Start Frontend
-echo "[2/2] Starting Admin Frontend on http://localhost:5173..."
+echo "[2/2] Starting Admin Frontend on http://127.0.0.1:5173..."
 cd frontend/admin
-npm run dev -- --host localhost --port 5173 --strictPort
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
