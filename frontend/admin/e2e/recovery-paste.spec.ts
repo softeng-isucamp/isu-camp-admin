@@ -58,3 +58,39 @@ test("typing one digit over a rejected code starts over instead of submitting a 
   await page.waitForTimeout(300);
   await expect(page.getByRole("alert")).toContainText("4 attempts left.");
 });
+
+test("a digit typed after only moving the caret, or in a later box, never joins the rejected digits", async ({ page }) => {
+  await reachCodeStep(page);
+  await page.getByLabel("Digit 1 of 6").focus();
+  await ctrlV(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => boxValues(page)).toBe("123456");
+  await page.keyboard.press("7");
+  expect(await boxValues(page)).toBe("7");
+
+  // A second rejection, then a whole code typed starting from the middle of the row.
+  await page.getByLabel("Digit 1 of 6").focus();
+  await ctrlV(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await page.getByLabel("Digit 3 of 6").click();
+  await page.keyboard.type("6543");
+
+  expect(await boxValues(page)).toBe("6543");
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+});
+
+test("typing the same first digit over a rejected code starts over", async ({ page }) => {
+  await reachCodeStep(page);
+  await page.getByLabel("Digit 1 of 6").focus();
+  await ctrlV(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+
+  await page.keyboard.press("1");
+
+  expect(await boxValues(page)).toBe("1");
+  await expect(page.getByLabel("Digit 1 of 6")).not.toHaveAttribute("aria-invalid", "true");
+  await expect(page.getByLabel("Digit 2 of 6")).toBeFocused();
+});

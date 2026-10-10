@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -240,7 +240,8 @@ describe("forgot-password: code step", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
     expectBoxes("111111");
     for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeInvalid();
-    expect(box(1)).toHaveFocus();
+    // The alert renders before the passive effect that refocuses box 1 has run.
+    await waitFor(() => expect(box(1)).toHaveFocus());
     expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
   });
 

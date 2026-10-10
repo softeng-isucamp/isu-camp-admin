@@ -58,6 +58,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const inFlight = useRef(false);
   // The digits in the boxes are the code the server just rejected. Nothing submits them again unless the admin presses Verify.
   const stale = useRef(false);
+  // The issued code can no longer be accepted. Set the moment that is known, ahead of any render, so no timer's callback can still send it.
+  const unusable = useRef(initialDead !== undefined);
   const verifyWait = useCountdown();
   const resendWait = useCountdown(issued.resendAfterSeconds ?? 0);
   // The code currently issued; a resend replaces it. Its lifetime is stated in the copy and tracked silently.
@@ -66,6 +68,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
 
   // The code is dead: stop accepting digits and leave Resend as the way forward.
   const retire = (dead: DeadCode) => {
+    unusable.current = true;
     otp.current?.clear();
     setState(dead);
     setError(deadMessage(dead));
@@ -75,7 +78,10 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
 
   useEffect(() => {
     if (current.expiresInSeconds === undefined) return;
-    const timer = setTimeout(() => setLapsed(true), current.expiresInSeconds * 1000);
+    const timer = setTimeout(() => {
+      unusable.current = true;
+      setLapsed(true);
+    }, current.expiresInSeconds * 1000);
     return () => clearTimeout(timer);
   }, [current]);
 
@@ -86,7 +92,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   }, [lapsed, state]);
 
   const verify = async (candidate: string) => {
-    if (inFlight.current || verifyWait.seconds > 0) return;
+    if (inFlight.current || unusable.current || verifyWait.seconds > 0) return;
     const parsed = resetSchema.shape.code.safeParse(candidate);
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? CODE_INCOMPLETE);
@@ -101,8 +107,13 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       const { username } = await services.auth.verifyRecovery(email, purpose, parsed.data);
       onVerified({ code: parsed.data, username });
     } catch (err) {
-      if (err instanceof AuthError && (err.kind === "code_exhausted" || err.kind === "code_expired")) {
-        retire(err.kind === "code_exhausted" ? "exhausted" : "expired");
+      if (err instanceof AuthError && err.kind === "code_expired") {
+        retire("expired");
+        return;
+      }
+      // A wrong code that used the last attempt is as dead as one the server calls exhausted.
+      if (err instanceof AuthError && (err.kind === "code_exhausted" || (err.kind === "invalid_code" && err.attemptsRemaining === 0))) {
+        retire("exhausted");
         return;
       }
       setState("entering");
@@ -154,6 +165,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     try {
       const next = await services.auth.requestRecovery(email, purpose);
       otp.current?.clear();
+      unusable.current = false;
       // Expiry may have retired the code while this request was pending; the new code supersedes that.
       setError("");
       setState("entering");

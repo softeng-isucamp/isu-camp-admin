@@ -123,6 +123,89 @@ describe("code step: a rejected code stays on screen", () => {
     expect(sentCodes(sent)).toEqual(["123456"]);
   });
 
+  it("leaves the rejected code alone while the admin only moves between boxes, then restarts from box 1 on the next digit", async () => {
+    const user = userEvent.setup();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await pasteIntoFirstBox(user, "123456");
+
+    await user.keyboard("{ArrowRight}{ArrowLeft}{ArrowRight}");
+    await user.click(box(4));
+    await user.tab();
+    await user.tab({ shift: true });
+    expect(boxValues()).toBe("123456");
+    expectAllInvalid();
+
+    await user.keyboard("7");
+    await settle();
+
+    expect(boxValues()).toBe("7");
+    expect(box(2)).toHaveFocus();
+    expectNoneInvalid();
+    expect(sentCodes(sent)).toEqual(["123456"]);
+  });
+
+  it("does not let a digit typed after only pressing an arrow key join the rejected one", async () => {
+    const user = userEvent.setup();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await pasteIntoFirstBox(user, "123456");
+
+    await user.keyboard("{ArrowRight}7");
+    await settle();
+
+    expect(boxValues()).toBe("7");
+    expectNoneInvalid();
+    expect(sentCodes(sent)).toEqual(["123456"]);
+  });
+
+  it("starts a new code from box 1 when digits are typed in a later box, and submits only the new digits", async () => {
+    const user = userEvent.setup();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await pasteIntoFirstBox(user, "123456");
+
+    await user.click(box(3));
+    await user.keyboard("654321");
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456", "654321"]);
+  });
+
+  it("treats several digits arriving in one input event in any box as a new code from box 1", async () => {
+    const user = userEvent.setup();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await pasteIntoFirstBox(user, "123456");
+
+    // The box still shows its rejected digit, which is not part of what was typed.
+    fireEvent.change(box(3), { target: { value: "36543" } });
+    await settle();
+    expect(boxValues()).toBe("6543");
+    expect(sentCodes(sent)).toEqual(["123456"]);
+    expectNoneInvalid();
+  });
+
+  it("starts over when the rejected first digit is typed over itself", async () => {
+    const user = userEvent.setup();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await pasteIntoFirstBox(user, "123456");
+
+    await user.keyboard("1");
+    await settle();
+
+    expect(boxValues()).toBe("1");
+    expect(box(2)).toHaveFocus();
+    expectNoneInvalid();
+    expect(sentCodes(sent)).toEqual(["123456"]);
+  });
+
   it("checks the same code again when it is pasted again, and answers with the new attempt count", async () => {
     const user = userEvent.setup();
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
@@ -348,5 +431,127 @@ describe("code step: a code entered during a rate-limit wait", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual(["111111", "111111", "222222"]);
+  });
+
+  it("restarts from box 1 when one digit is typed over rejected digits during the wait, and sends nothing when the wait ends", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), RATE_LIMITED(), wrongCode(3)] });
+    await openCodeStep();
+    pasteCode(1, "123456");
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await settle();
+    expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
+
+    fireEvent.change(box(4), { target: { value: "7" } });
+    expect(boxValues()).toBe("7");
+    await tickSecond();
+    await tickSecond();
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456", "123456"]);
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
+  });
+
+  it("submits a new code typed in a later box over rejected digits during the wait, only when the wait ends", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), RATE_LIMITED(), wrongCode(3)] });
+    await openCodeStep();
+    pasteCode(1, "123456");
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await settle();
+
+    fireEvent.change(box(3), { target: { value: "36543" } });
+    fireEvent.change(box(5), { target: { value: "2" } });
+    fireEvent.change(box(6), { target: { value: "1" } });
+    expect(sentCodes(sent)).toEqual(["123456", "123456"]);
+    await tickSecond();
+    await tickSecond();
+    await settle();
+
+    expect(boxValues()).toBe("654321");
+    expect(sentCodes(sent)).toEqual(["123456", "123456", "654321"]);
+  });
+});
+
+describe("code step: a code that stops being valid", () => {
+  const openExpiring = async (queues: Parameters<typeof mockBackend>[0]) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const backend = mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 2 })], ...queues });
+    renderForgotPassword();
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await settle();
+    return backend;
+  };
+
+  it("never sends a code that expired during a rate-limit wait, even when the wait ends at the same moment", async () => {
+    const { sent } = await openExpiring({ [VERIFY]: [RATE_LIMITED(), wrongCode(4)] });
+    pasteCode(1, "123456");
+    await settle();
+    await tickSecond();
+    await tickSecond();
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456"]);
+    expect(screen.getByRole("alert")).toHaveTextContent(/code has expired/i);
+    expect(box(1)).toBeDisabled();
+  });
+
+  it("locks the boxes when the server reports no attempts left on a wrong code", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(0), wrongCode(3)] });
+    const user = userEvent.setup();
+    renderForgotPassword();
+    await sendCode();
+
+    await pasteIntoFirstBox(user, "123456");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/^You have used all your attempts\. Request a new code to continue\.$/);
+    positions.forEach((n) => expect(box(n)).toBeDisabled());
+    expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeInTheDocument();
+    expect(sentCodes(sent)).toEqual(["123456"]);
+  });
+});
+
+describe("code step: completing a code again", () => {
+  it("submits the same code when it is completed again by a keystroke after an incomplete wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [RATE_LIMITED(), wrongCode(4)] });
+    renderForgotPassword();
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await settle();
+    pasteCode(1, "123456");
+    await settle();
+    fireEvent.keyDown(box(6), { key: "Backspace" });
+    fireEvent.change(box(6), { target: { value: "" } });
+    await tickSecond();
+    await tickSecond();
+    await settle();
+    expect(sentCodes(sent)).toEqual(["123456"]);
+
+    fireEvent.change(box(6), { target: { value: "6" } });
+    await settle();
+
+    expect(sentCodes(sent)).toEqual(["123456", "123456"]);
+  });
+});
+
+describe("code step: a failure that is not a wrong code", () => {
+  it("still clears the boxes and does not mark them invalid", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = mockBackend({ [REQUEST]: [issued()] });
+    renderForgotPassword();
+    await sendCode();
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    await pasteIntoFirstBox(user, "123456");
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(boxValues()).toBe("");
+    expectNoneInvalid();
+    expect(box(1)).toHaveFocus();
   });
 });

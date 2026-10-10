@@ -10,14 +10,20 @@ import {
 
 const LENGTH = 6;
 const emptyDigits = () => Array<string>(LENGTH).fill("");
+const digitsOf = (text: string) => text.replace(/\D/g, "");
+
+/** What an input event added to a box that already held `old`: the box's own text is not part of what was typed. */
+const addedTo = (old: string, value: string) =>
+  old && value.startsWith(old) ? value.slice(old.length) : old && value.endsWith(old) ? value.slice(0, -old.length) : value;
 
 export interface OtpInputHandle {
   /** Empties every box and moves focus to the first one once the input is enabled. */
   clear: () => void;
   /**
    * Marks the digits on screen as a rejected code: they stay visible and `aria-invalid`, focus returns to the first box once the input is enabled,
-   * and they count as stale. The first digit typed, or Backspace or Delete, then empties every box and starts again from the first box;
-   * a paste replaces them as usual. The same code entered afterwards fires `onComplete` again.
+   * and they count as stale. Moving around (arrows, Tab, a click) changes nothing. The first digit typed in any box, or Backspace or Delete,
+   * then empties every box and starts again from the first box, so old and new digits never mix; a paste replaces them as usual.
+   * The same code entered afterwards fires `onComplete` again.
    */
   markRejected: () => void;
 }
@@ -27,7 +33,7 @@ interface OtpInputProps {
   disabled?: boolean;
   /** Fires with the current digits joined together after every edit; shorter than 6 characters while incomplete. */
   onChange?: (code: string) => void;
-  /** Fires once per distinct completed code, so the same code is never reported twice in a row. `clear` and `markRejected` forget the last code. */
+  /** Fires once per completed entry, so one entry is never reported twice. Making the code incomplete, `clear` and `markRejected` forget the last code. */
   onComplete?: (code: string) => void;
 }
 
@@ -50,6 +56,8 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
     setDigits(next);
     const code = next.join("");
     onChange?.(code);
+    // An incomplete code ends the entry, so completing it again is a new one.
+    if (code.length < LENGTH) lastCompleted.current = null;
     if (code.length === LENGTH && code !== lastCompleted.current) {
       lastCompleted.current = code;
       onComplete?.(code);
@@ -72,26 +80,26 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
 
   const focusBox = (index: number) => inputs.current[index]?.focus();
 
-  /** Drops a stale code: every box empties and a typed digit, if any, lands in the first box. */
-  const restart = (digit: string) => {
+  /** Starts a fresh entry: every box empties, `chars` fill from the first box, and any rejected code is gone. */
+  const startOver = (chars: string) => {
+    const typed = chars.slice(0, LENGTH);
     setStale(false);
     lastCompleted.current = null;
-    commit([digit, ...emptyDigits().slice(1)]);
-    focusBox(digit ? 1 : 0);
+    commit([...typed.split(""), ...emptyDigits()].slice(0, LENGTH));
+    // After one digit, the next box; after a paste, the last box it filled.
+    focusBox(typed.length > 1 ? typed.length - 1 : Math.min(typed.length, LENGTH - 1));
   };
 
-  const applyInput = (index: number, raw: string) => {
-    const clean = raw.replace(/\D/g, "");
-    if (clean.length > 1) {
-      setStale(false);
-      const chars = clean.slice(0, LENGTH).split("");
-      commit([...chars, ...emptyDigits()].slice(0, LENGTH));
-      focusBox(chars.length - 1);
+  const handleInput = (index: number, value: string) => {
+    if (stale) {
+      // The box still shows its rejected digit; a letter typed over the rejected code changes nothing, deleting the box's text starts over.
+      const typed = digitsOf(addedTo(digits[index], value));
+      if (typed || !value) startOver(typed);
       return;
     }
-    if (stale) {
-      // A letter typed over a rejected code changes nothing; deleting the box's text starts over.
-      if (clean || !raw) restart(clean);
+    const clean = digitsOf(value);
+    if (clean.length > 1) {
+      startOver(clean);
       return;
     }
     const next = [...digits];
@@ -102,14 +110,23 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
 
   const handlePaste = (index: number, event: ClipboardEvent<HTMLInputElement>) => {
     event.preventDefault();
-    const pasted = event.clipboardData.getData("text");
-    if (pasted.replace(/\D/g, "")) applyInput(index, pasted);
+    const pasted = digitsOf(event.clipboardData.getData("text"));
+    if (!pasted) return;
+    if (stale || pasted.length > 1) startOver(pasted);
+    else handleInput(index, pasted);
   };
 
   const handleKeyDown = (index: number, event: KeyboardEvent<HTMLInputElement>) => {
     if (stale && (event.key === "Backspace" || event.key === "Delete")) {
       event.preventDefault();
-      restart("");
+      startOver("");
+      return;
+    }
+    // The keystroke itself is used because no input event fires when a selected digit is replaced by the same digit.
+    // Keyboards that report no key (most touch ones) fall through to the input event.
+    if (stale && /^\d$/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      startOver(event.key);
       return;
     }
     if (event.key !== "Backspace" || digits[index] || index === 0) return;
@@ -135,7 +152,7 @@ export function OtpInput({ ref, disabled = false, onChange, onComplete }: OtpInp
           value={digit}
           disabled={disabled}
           aria-invalid={stale || undefined}
-          onChange={(event) => applyInput(index, event.target.value)}
+          onChange={(event) => handleInput(index, event.target.value)}
           onKeyDown={(event) => handleKeyDown(index, event)}
           onPaste={(event) => handlePaste(index, event)}
           onFocus={(event) => event.target.select()}

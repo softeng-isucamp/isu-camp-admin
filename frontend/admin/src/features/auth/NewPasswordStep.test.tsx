@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -257,7 +257,9 @@ describe("new password step: submit", () => {
     type(confirmPassword(), STRONG);
     submit();
 
-    expect(await screen.findByRole("heading", { name: /password reset successful/i })).toHaveFocus();
+    // The heading is found as soon as it renders; its focus effect runs a moment later.
+    const heading = await screen.findByRole("heading", { name: /password reset successful/i });
+    await waitFor(() => expect(heading).toHaveFocus());
   });
 
   it("shows the server's weak_password message and stays on the step", async () => {
@@ -290,7 +292,9 @@ describe("new password step: the server turns the code down", () => {
     type(confirmPassword(), STRONG);
     submit();
 
-    expect(await screen.findByRole("heading", { name: /verification code/i })).toHaveFocus();
+    // The heading is found as soon as it renders; its focus effect runs a moment later.
+    const heading = await screen.findByRole("heading", { name: /verification code/i });
+    await waitFor(() => expect(heading).toHaveFocus());
     expect(screen.getByRole("alert")).toHaveTextContent(message);
     expect(screen.queryByRole("button", { name: "Verify" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Digit 1 of 6")).toBeDisabled();
