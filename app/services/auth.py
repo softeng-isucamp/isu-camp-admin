@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from extensions import db, mail
 from services.audit import log_audit
+from services.password_rules import first_password_issue
 from services.security import (
     burn_password_comparison,
     hash_password,
@@ -664,10 +665,11 @@ def reset_password():
                 "message": "Username, verification code, and new password are required"
             }), 400
 
-        if len(password) < 8:
+        weakness = first_password_issue(password)
+        if weakness:
             return jsonify({
                 "success": False,
-                "message": "Password must be at least 8 characters"
+                "message": weakness
             }), 400
 
         reset = reset_otps.get(username)

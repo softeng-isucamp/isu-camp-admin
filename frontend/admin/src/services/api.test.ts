@@ -1300,13 +1300,13 @@ describe("real administrators service boundary", () => {
       .mockResolvedValueOnce(json(reply))
       .mockResolvedValueOnce(json(reply));
 
-    await expect(admins.admins.save({ username: "boss", email: "b@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" }))
+    await expect(admins.admins.save({ username: "boss", email: "b@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin" }))
       .resolves.toMatchObject({ role: "superadmin" });
-    await admins.admins.save({ username: "plain", email: "p@isu.edu.ph", password: "a-long-enough-secret" });
+    await admins.admins.save({ username: "plain", email: "p@isu.edu.ph", password: "A-long-enough-secret1" });
     await admins.admins.save({ id: "9", username: "boss", email: "b@isu.edu.ph", role: "superadmin" });
 
     const [first, second, third] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
-    expect(first).toEqual({ username: "boss", email: "b@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" });
+    expect(first).toEqual({ username: "boss", email: "b@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin" });
     expect(second).not.toHaveProperty("role");
     expect(third).not.toHaveProperty("role");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });

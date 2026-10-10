@@ -81,7 +81,7 @@ describe("Administrator accounts over the fixture backend", () => {
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_boss" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "boss@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     fireEvent.change(screen.getByLabelText("Role"), { target: { value: "superadmin" } });
     typePassword();
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));

@@ -264,7 +264,7 @@ def test_listing_carries_each_accounts_role():
 
 def test_a_demoted_superadmin_is_refused_on_the_next_request():
     client = signed_in(admins_app(), admin_id=1)
-    body = {"username": "admin03", "email": "admin03@example.com", "password": "another-secret"}
+    body = {"username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!"}
     assert client.post("/api/admins", json=body).status_code == 201
 
     # Same session cookie: only the stored row changed.
@@ -280,7 +280,7 @@ def test_creating_an_administrator_adds_the_record(admin_directory):
     client = signed_in(admins_app())
 
     response = client.post("/api/admins", json={
-        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+        "username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!",
     })
 
     assert response.status_code == 201
@@ -291,7 +291,7 @@ def test_creating_an_administrator_adds_the_record(admin_directory):
 
 def test_creating_refuses_a_plain_administrator(admin_directory):
     response = signed_in(admins_app(), admin_id=2).post("/api/admins", json={
-        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+        "username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!",
     })
 
     assert response.status_code == 403
@@ -304,13 +304,13 @@ def test_creating_refuses_a_plain_administrator(admin_directory):
 
 def test_creating_requires_a_signed_in_account():
     response = admins_app().test_client().post("/api/admins", json={
-        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+        "username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!",
     })
 
     assert response.status_code == 401
 
 
-NEW_ACCOUNT = {"username": "admin03", "email": "admin03@example.com", "password": "another-secret"}
+NEW_ACCOUNT = {"username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!"}
 
 
 def created_accounts():
@@ -439,9 +439,9 @@ def test_a_created_account_is_listed_with_its_role():
 @pytest.mark.parametrize(
     "body,expected_field",
     [
-        ({"email": "a@example.com", "password": "longenough"}, "username"),
-        ({"username": "admin03", "password": "longenough"}, "email"),
-        ({"username": "admin03", "email": "not-an-email", "password": "longenough"}, "email"),
+        ({"email": "a@example.com", "password": "Longenough1!"}, "username"),
+        ({"username": "admin03", "password": "Longenough1!"}, "email"),
+        ({"username": "admin03", "email": "not-an-email", "password": "Longenough1!"}, "email"),
         ({"username": "admin03", "email": "a@example.com", "password": "short"}, "password"),
     ],
 )
@@ -452,9 +452,52 @@ def test_creating_rejects_an_incomplete_account(body, expected_field):
     assert expected_field in response.json["fields"]
 
 
+@pytest.mark.parametrize(
+    "password,message",
+    [
+        ("", "Password must be at least 8 characters."),
+        ("Abcde1!", "Password must be at least 8 characters."),
+        ("abcdefg1!", "Password must include an uppercase letter."),
+        ("ABCDEFG1!", "Password must include a lowercase letter."),
+        ("Abcdefgh!", "Password must include a number."),
+        ("Abcdefg12", "Password must include a symbol."),
+        ("longenough", "Password must include an uppercase letter."),
+    ],
+)
+def test_creating_enforces_the_shared_password_rules_against_the_password_field(password, message):
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "password": password})
+
+    assert response.status_code == 400
+    assert response.json["message"] == message
+    assert response.json["fields"] == {"password": message}
+    assert created_accounts() == []
+
+
+@pytest.mark.parametrize("password", ["Élève123!", "Aa1😀😀😀😀😀", "Abcdefg1😀"])
+def test_creating_accepts_non_ascii_letters_and_counts_code_points(password):
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "password": password})
+
+    assert response.status_code == 201
+    assert verify_password(created_accounts()[0].password, password)[0]
+
+
+def test_creating_reports_the_username_before_the_password():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "username": "", "password": "weak"})
+
+    assert response.status_code == 400
+    assert list(response.json["fields"]) == ["username"]
+
+
+def test_creating_a_weak_password_is_refused_before_the_duplicate_username():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "username": "ADMIN02", "password": "weakweak"})
+
+    assert response.status_code == 400
+    assert list(response.json["fields"]) == ["password"]
+
+
 def test_creating_rejects_a_duplicate_username():
     response = signed_in(admins_app()).post("/api/admins", json={
-        "username": "ADMIN02", "email": "new@example.com", "password": "longenough",
+        "username": "ADMIN02", "email": "new@example.com", "password": "Longenough1!",
     })
 
     assert response.status_code == 409
@@ -476,14 +519,28 @@ def test_updating_sets_a_supplied_password():
     client = signed_in(admins_app(), admin_id=2)
 
     response = client.put("/api/admins/2", json={
-        "username": "admin02", "email": "admin02@example.com", "password": "replacement",
+        "username": "admin02", "email": "admin02@example.com", "password": "Replacement1!",
     })
 
     assert response.status_code == 200
     stored = next(item for item in FakeAdmin.store if item.id == 2).password
     # Hashed on the way in, so the column never receives the raw password.
-    assert stored != "replacement"
-    assert verify_password(stored, "replacement")[0]
+    assert stored != "Replacement1!"
+    assert verify_password(stored, "Replacement1!")[0]
+
+
+@pytest.mark.parametrize("password", ["replacement", "Replacement1", "replacement1!", "Rep1!"])
+def test_updating_enforces_the_shared_password_rules_on_a_supplied_password(password):
+    client = signed_in(admins_app(), admin_id=2)
+
+    response = client.put("/api/admins/2", json={
+        "username": "admin02", "email": "admin02@example.com", "password": password,
+    })
+
+    assert response.status_code == 400
+    assert list(response.json["fields"]) == ["password"]
+    assert response.json["message"].startswith("Password must ")
+    assert next(item for item in FakeAdmin.store if item.id == 2).password == "password456"
 
 
 def test_updating_a_missing_administrator_is_not_found():
@@ -494,7 +551,7 @@ def test_updating_a_missing_administrator_is_not_found():
 
 def test_updating_refuses_another_administrators_details():
     response = signed_in(admins_app(), admin_id=1).put("/api/admins/2", json={
-        "username": "hijacked", "email": "hijacked@example.com", "password": "replacement",
+        "username": "hijacked", "email": "hijacked@example.com", "password": "Replacement1!",
     })
 
     assert response.status_code == 403
@@ -733,7 +790,7 @@ def test_a_deactivated_superadmin_is_refused():
     next(item for item in FakeAdmin.store if item.id == 1).status = "inactive"
 
     response = signed_in(admins_app(), admin_id=1).post("/api/admins", json={
-        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+        "username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!",
     })
 
     assert response.status_code == 401

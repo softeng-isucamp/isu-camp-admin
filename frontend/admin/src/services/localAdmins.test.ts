@@ -51,10 +51,10 @@ describe("fixture sign-ins", () => {
   it("lets a newly added administrator sign in with the password they were given", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
-    await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" });
+    await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     await adapter.auth.logout();
 
-    await expect(adapter.auth.login("admin_new", "a-long-enough-secret")).resolves.toMatchObject({ role: "admin" });
+    await expect(adapter.auth.login("admin_new", "A-long-enough-secret1")).resolves.toMatchObject({ role: "admin" });
   });
 });
 
@@ -98,7 +98,7 @@ describe("fixture refusals for a plain administrator", () => {
   });
 
   it("refuses to add an administrator", async () => {
-    const error = await failure(fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" }));
+    const error = await failure(fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" }));
     expect(error).toBeInstanceOf(SuperadminRequiredError);
     expect(error).toMatchObject({ message: "Superadmin access required" });
     expect((await fixture.admins.list()).map((account) => account.username)).not.toContain("admin_new");
@@ -106,7 +106,7 @@ describe("fixture refusals for a plain administrator", () => {
 
   it("refuses a superadmin create with the superadmin refusal, never a password prompt", async () => {
     const error = await failure(fixture.admins.save({
-      username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin",
+      username: "admin_boss", email: "boss@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin",
     }));
     expect(error).toBeInstanceOf(SuperadminRequiredError);
   });
@@ -158,12 +158,12 @@ describe("fixture rules for a superadmin", () => {
   });
 
   it("adds a plain administrator", async () => {
-    const created = await fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" });
+    const created = await fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     expect(created).toMatchObject({ username: "admin_new", role: "admin", status: "Active", isCurrent: false });
   });
 
   it("adds a superadmin only after the password was confirmed, and says so before the account exists", async () => {
-    const draft = { username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" as const };
+    const draft = { username: "admin_boss", email: "boss@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin" as const };
 
     const refusal = await failure(fixture.admins.save(draft));
     expect(refusal).toBeInstanceOf(PasswordConfirmationRequiredError);
@@ -179,9 +179,9 @@ describe("fixture rules for a superadmin", () => {
   });
 
   it("needs no confirmation to add a plain administrator, whether the role is named or not", async () => {
-    await expect(fixture.admins.save({ username: "a_one", email: "a1@isu.edu.ph", password: "a-long-enough-secret", role: "admin" }))
+    await expect(fixture.admins.save({ username: "a_one", email: "a1@isu.edu.ph", password: "A-long-enough-secret1", role: "admin" }))
       .resolves.toMatchObject({ role: "admin" });
-    await expect(fixture.admins.save({ username: "a_two", email: "a2@isu.edu.ph", password: "a-long-enough-secret" }))
+    await expect(fixture.admins.save({ username: "a_two", email: "a2@isu.edu.ph", password: "A-long-enough-secret1" }))
       .resolves.toMatchObject({ role: "admin" });
   });
 
@@ -190,13 +190,13 @@ describe("fixture rules for a superadmin", () => {
     await fixture.adapter.auth.logout();
     await fixture.adapter.auth.login("admin_justine", PASSWORD);
     const error = await failure(fixture.admins.save({
-      username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin",
+      username: "admin_boss", email: "boss@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin",
     }));
     expect(error).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
 
   it("reports an unrecognized role against the role field, and a duplicate username before asking for the password", async () => {
-    const base = { email: "x@isu.edu.ph", password: "a-long-enough-secret" };
+    const base = { email: "x@isu.edu.ph", password: "A-long-enough-secret1" };
     const badRole = await failure(fixture.admins.save({ ...base, username: "admin_x", role: "owner" as never }));
     expect(badRole).toMatchObject({ message: "Role must be Administrator or Superadmin.", fieldErrors: { role: "Role must be Administrator or Superadmin." } });
 
@@ -422,7 +422,7 @@ describe("fixture password confirmation for role changes and removal", () => {
     expect(await failure(fixture.admins.setRole("2", "superadmin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.remove("2"))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.save({
-      username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin",
+      username: "admin_boss", email: "boss@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin",
     }))).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
 });
@@ -458,7 +458,7 @@ describe("fixture deactivated accounts", () => {
   });
 
   it("refuses every administrator request from an account deactivated while signed in, and signs it out", async () => {
-    const draft = { username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" };
+    const draft = { username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" };
     const requests: Array<[string, () => Promise<unknown>]> = [
       ["list", () => fixture.admins.list()],
       ["add", () => fixture.admins.save(draft)],
@@ -491,7 +491,7 @@ describe("fixture deactivated accounts", () => {
 
 describe("fixture validation of a new or edited account", () => {
   let fixture: ReturnType<typeof setup>;
-  const valid = { username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" };
+  const valid = { username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" };
 
   beforeEach(async () => {
     fixture = setup();
@@ -503,8 +503,12 @@ describe("fixture validation of a new or edited account", () => {
     ["a username over 255 characters", { username: "u".repeat(256) }, "username", "Username must be 255 characters or fewer"],
     ["an empty email", { email: " " }, "email", "Email is required"],
     ["an invalid email", { email: "not-an-email" }, "email", "Enter a valid email address"],
-    ["a short password", { password: "short" }, "password", "Password must be at least 8 characters"],
-    ["no password", { password: undefined }, "password", "Password must be at least 8 characters"],
+    ["a short password", { password: "short" }, "password", "Password must be at least 8 characters."],
+    ["no password", { password: undefined }, "password", "Password must be at least 8 characters."],
+    ["no uppercase letter", { password: "longenough1!" }, "password", "Password must include an uppercase letter."],
+    ["no lowercase letter", { password: "LONGENOUGH1!" }, "password", "Password must include a lowercase letter."],
+    ["no number", { password: "Longenough!!" }, "password", "Password must include a number."],
+    ["no symbol", { password: "Longenough12" }, "password", "Password must include a symbol."],
   ])("refuses %s with the server's message against its field", async (_name, change, field, message) => {
     const error = await failure(fixture.admins.save({ ...valid, ...change }));
 
@@ -519,11 +523,20 @@ describe("fixture validation of a new or edited account", () => {
     expect(await failure(fixture.admins.save({ username: "u", email: "bad", password: "x" })))
       .toMatchObject({ fieldErrors: { email: "Enter a valid email address" } });
     expect(await failure(fixture.admins.save({ username: "u", email: "u@isu.edu.ph", password: "x" })))
-      .toMatchObject({ fieldErrors: { password: "Password must be at least 8 characters" } });
+      .toMatchObject({ fieldErrors: { password: "Password must be at least 8 characters." } });
+  });
+
+  it.each(["Élève123!", "Aa1😀😀😀😀😀", "Abcdefg1😀"])("accepts %s, counting code points and non-ASCII letters as the server does", async (password) => {
+    await expect(fixture.admins.save({ ...valid, password })).resolves.toMatchObject({ username: "admin_new" });
+  });
+
+  it("reports a weak password before a duplicate username", async () => {
+    expect(await failure(fixture.admins.save({ ...valid, username: "ADMIN_REGISTRAR", password: "weakweak" })))
+      .toMatchObject({ fieldErrors: { password: "Password must include an uppercase letter." } });
   });
 
   it("reports an invalid identity before an unrecognized role, a duplicate or the password prompt", async () => {
-    const invalid = { username: "admin_registrar", email: "bad", password: "a-long-enough-secret" };
+    const invalid = { username: "admin_registrar", email: "bad", password: "A-long-enough-secret1" };
 
     expect(await failure(fixture.admins.save({ ...invalid, role: "owner" as never })))
       .toMatchObject({ fieldErrors: { email: "Enter a valid email address" } });
@@ -541,7 +554,9 @@ describe("fixture validation of a new or edited account", () => {
     await expect(fixture.admins.save({ id: "1", username: "admin_justine", email: "j@isu.edu.ph" }))
       .resolves.toMatchObject({ email: "j@isu.edu.ph" });
     expect(await failure(fixture.admins.save({ id: "1", username: "admin_justine", email: "j@isu.edu.ph", password: "short" })))
-      .toMatchObject({ fieldErrors: { password: "Password must be at least 8 characters" } });
+      .toMatchObject({ fieldErrors: { password: "Password must be at least 8 characters." } });
+    expect(await failure(fixture.admins.save({ id: "1", username: "admin_justine", email: "j@isu.edu.ph", password: "nouppercase1!" })))
+      .toMatchObject({ fieldErrors: { password: "Password must include an uppercase letter." } });
     expect(await failure(fixture.admins.save({ id: "1", username: "", email: "j@isu.edu.ph" })))
       .toMatchObject({ fieldErrors: { username: "Username is required" } });
   });
@@ -559,9 +574,9 @@ describe("fixture session restore", () => {
   it("signs out a restored session whose account the fresh fixture does not have", async () => {
     const first = setup(sessionStorage);
     await first.adapter.auth.login("admin_justine", PASSWORD);
-    await first.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" });
+    await first.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     await first.adapter.auth.logout();
-    await first.adapter.auth.login("admin_new", "a-long-enough-secret");
+    await first.adapter.auth.login("admin_new", "A-long-enough-secret1");
 
     // A reload starts from the seed accounts, which do not include the new one.
     const reloaded = setup(sessionStorage);
@@ -586,16 +601,16 @@ describe("fixture edits of one's own account", () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
 
-    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "newPassword456" });
+    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "NewPassword456!" });
     await adapter.auth.logout();
 
-    await expect(adapter.auth.login("admin_justine", "newPassword456")).resolves.toMatchObject({ id: "1" });
+    await expect(adapter.auth.login("admin_justine", "NewPassword456!")).resolves.toMatchObject({ id: "1" });
   });
 
   it("stops the old password from working once it is replaced", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
-    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "newPassword456" });
+    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "NewPassword456!" });
     await adapter.auth.logout();
 
     expect(await failure(adapter.auth.login("admin_justine", PASSWORD))).toMatchObject({ kind: "invalid_credentials" });

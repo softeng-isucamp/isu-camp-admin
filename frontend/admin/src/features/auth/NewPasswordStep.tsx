@@ -1,7 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
-import { passwordRules } from "../../services/passwordRules";
 import { resetPasswordSchema } from "../../services/schemas";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
@@ -106,17 +106,7 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         onChange={edit(setPassword)}
         errorId={errorFor("password")}
       />
-      <ul className="recovery-rules" aria-label="Password requirements">
-        {passwordRules.map((rule) => {
-          const met = rule.test(password);
-          return (
-            <li key={rule.id} className={met ? "rule-met" : "rule-unmet"} aria-label={`${met ? "Met" : "Not met"}: ${rule.label}`}>
-              <span aria-hidden="true">{met ? "✓" : "○"}</span>
-              {rule.label}
-            </li>
-          );
-        })}
-      </ul>
+      <PasswordChecklist password={password} />
       <PasswordField
         label="Confirm new password"
         toggleName="confirm password"

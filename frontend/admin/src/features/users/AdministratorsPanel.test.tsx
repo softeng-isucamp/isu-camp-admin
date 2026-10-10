@@ -117,11 +117,11 @@ describe("Administrator accounts in User Management", () => {
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
-      username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret",
+      username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1",
     })));
     expect(await screen.findByText("admin_new was added successfully.")).toBeInTheDocument();
   });
@@ -143,6 +143,77 @@ describe("Administrator accounts in User Management", () => {
     expect(await screen.findByText("Enter a valid email address.")).toBeInTheDocument();
     expect(screen.getByText("Password must be at least 8 characters.")).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  describe("password rules", () => {
+    const checklist = () => within(screen.getByRole("list", { name: "Password requirements" }));
+    const rule = (state: "Met" | "Not met", label: string) => checklist().getByRole("listitem", { name: `${state}: ${label}` });
+
+    const fill = (password: string) => {
+      fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+      fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: password } });
+    };
+
+    it("shows the reset page's live checklist under the password field in place of the length hint", async () => {
+      await openAdministrators();
+      fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+
+      expect(screen.queryByText("At least 8 characters.")).not.toBeInTheDocument();
+      expect(checklist().getAllByRole("listitem")).toHaveLength(5);
+      for (const label of ["At least 8 characters", "An uppercase letter", "A lowercase letter", "A number", "A symbol"]) {
+        rule("Not met", label);
+      }
+
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Abc1" } });
+      rule("Not met", "At least 8 characters");
+      rule("Met", "An uppercase letter");
+      rule("Met", "A lowercase letter");
+      rule("Met", "A number");
+      rule("Not met", "A symbol");
+
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Abcdef1!" } });
+      for (const label of ["At least 8 characters", "An uppercase letter", "A lowercase letter", "A number", "A symbol"]) {
+        rule("Met", label);
+      }
+    });
+
+    it.each([
+      ["Abcde1!", "Password must be at least 8 characters."],
+      ["abcdefg1!", "Password must include an uppercase letter."],
+      ["ABCDEFG1!", "Password must include a lowercase letter."],
+      ["Abcdefgh!", "Password must include a number."],
+      ["Abcdefg12", "Password must include a symbol."],
+    ])("refuses %s with the first unmet rule and does not save", async (password, message) => {
+      const save = vi.spyOn(services.admins, "save");
+      await openAdministrators();
+      fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+      fill(password);
+      fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("reports only the first unmet rule when several fail", async () => {
+      await openAdministrators();
+      fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+      fill("abc");
+      fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+      expect(await screen.findByText("Password must be at least 8 characters.")).toBeInTheDocument();
+      expect(screen.queryByText("Password must include an uppercase letter.")).not.toBeInTheDocument();
+    });
+
+    it("saves a password that meets every rule", async () => {
+      const save = vi.spyOn(services.admins, "save");
+      await openAdministrators();
+      fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+      fill("Abcdef1!");
+      fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+      await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ password: "Abcdef1!" })));
+    });
   });
 
   it("offers no way to edit an account from the directory", async () => {
@@ -285,7 +356,7 @@ describe("Administrator accounts in User Management", () => {
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_registrar" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "dupe@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
 
     expect(await screen.findAllByText("That username is already taken")).not.toHaveLength(0);
@@ -614,7 +685,7 @@ describe("Choosing a role when adding an administrator", () => {
   const fillDetails = () => {
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
   };
 
   const submit = () => fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
@@ -689,7 +760,7 @@ describe("Choosing a role when adding an administrator", () => {
     expect(screen.getByRole("dialog", { name: "Add Administrator" })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Username")).toHaveValue("admin_new");
     expect(within(dialog).getByLabelText("Email")).toHaveValue("new@isu.edu.ph");
-    expect(within(dialog).getByLabelText("Password")).toHaveValue("a-long-enough-secret");
+    expect(within(dialog).getByLabelText("Password")).toHaveValue("A-long-enough-secret1");
     expect(within(dialog).getByLabelText("Role")).toHaveValue("superadmin");
   });
 
@@ -924,7 +995,7 @@ describe("A superadmin session that has gone stale", () => {
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
 
     await expectRefusalAnnounced();
@@ -957,7 +1028,7 @@ describe("A superadmin session that has gone stale", () => {
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
     await waitFor(() => expect(screen.getAllByText("Username already exists.").length).toBeGreaterThan(0));
     expect(screen.getByRole("dialog", { name: "Add Administrator" })).toBeInTheDocument();

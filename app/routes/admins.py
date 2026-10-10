@@ -23,11 +23,11 @@ from auth import (
 from extensions import db
 from model.record_status import normalized_status, status_label
 from services.audit import log_audit
+from services.password_rules import first_password_issue
 from services.security import hash_password
 
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 
-MIN_PASSWORD_LENGTH = 8
 ROLES = ("admin", "superadmin")
 LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -73,11 +73,9 @@ def _read_identity(data, *, require_password):
     if not EMAIL_PATTERN.match(email):
         return None, _error("Enter a valid email address", field="email")
     if require_password or password:
-        if len(password) < MIN_PASSWORD_LENGTH:
-            return None, _error(
-                f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
-                field="password",
-            )
+        issue = first_password_issue(password)
+        if issue:
+            return None, _error(issue, field="password")
 
     return {"username": username, "email": email, "password": password}, None
 

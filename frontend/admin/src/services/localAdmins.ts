@@ -1,9 +1,9 @@
 import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
 import { PasswordConfirmationRequiredError, SuperadminRequiredError, fieldError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
+import { firstPasswordIssue } from "./passwordRules";
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const MIN_PASSWORD_LENGTH = 8;
 const ROLE_MESSAGE = "Role must be Administrator or Superadmin.";
 const LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first.";
 
@@ -48,9 +48,8 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
     if (username.length > 255) throw fieldError("username", "Username must be 255 characters or fewer");
     if (!email) throw fieldError("email", "Email is required");
     if (!EMAIL_PATTERN.test(email)) throw fieldError("email", "Enter a valid email address");
-    if ((requirePassword || password) && [...password].length < MIN_PASSWORD_LENGTH) {
-      throw fieldError("password", `Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
-    }
+    const weakness = requirePassword || password ? firstPasswordIssue(password) : undefined;
+    if (weakness) throw fieldError("password", weakness);
     return { username, email, password };
   };
 

@@ -3,10 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
+import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
 import { SuperadminRequiredError } from "../../services/errors";
+import { firstPasswordIssue } from "../../services/passwordRules";
 import type { AdminAccount, AdminAccountDraft, AdminRole } from "../../types";
 
 const ROLE_LABELS: Record<AdminAccount["role"], string> = { admin: "Administrator", superadmin: "Superadmin" };
@@ -201,9 +203,8 @@ export function AdministratorsPanel() {
     if (!username) issues.username = "Username is required.";
     if (!email) issues.email = "Email is required.";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) issues.email = "Enter a valid email address.";
-    if ((draft.password ?? "").length < 8) {
-      issues.password = "Password must be at least 8 characters.";
-    }
+    const weakness = firstPasswordIssue(draft.password ?? "");
+    if (weakness) issues.password = weakness;
     if (Object.keys(issues).length) {
       setFieldErrors(issues);
       return;
@@ -390,11 +391,11 @@ export function AdministratorsPanel() {
               type="password"
               required
               autoComplete="new-password"
-              subhelper="At least 8 characters."
               value={draft.password ?? ""}
               error={fieldErrors.password}
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
             />
+            <PasswordChecklist password={draft.password ?? ""} />
             <SelectField
               label="ROLE"
               aria-label="Role"
