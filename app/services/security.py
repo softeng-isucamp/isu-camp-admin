@@ -37,8 +37,6 @@ _HASH_PREFIXES = ("pbkdf2:", "scrypt:", "argon2")
 # missing account costs the same time as a wrong password.
 _DUMMY_HASH = generate_password_hash("dummy-password", method=PASSWORD_HASH_METHOD)
 
-MIN_PASSWORD_LENGTH = 10
-
 
 def hash_password(raw_password):
     """Return a storable hash for a new or reset password."""
@@ -77,17 +75,3 @@ def verify_password(stored_password, raw_password):
 def burn_password_comparison(raw_password):
     """Spend the same work as a real check for an account that does not exist."""
     check_password_hash(_DUMMY_HASH, str(raw_password or ""))
-
-
-def password_policy_error(password, username=None):
-    """Return a human-readable reason the password is unacceptable, or None."""
-    value = str(password or "")
-
-    if len(value) < MIN_PASSWORD_LENGTH:
-        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters"
-    if not any(character.isalpha() for character in value):
-        return "Password must include at least one letter"
-    if not any(character.isdigit() for character in value):
-        return "Password must include at least one number"
-    if username and str(username).strip().lower() in value.lower():
-        return "Password must not contain the username"

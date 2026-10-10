@@ -1256,3 +1256,96 @@ it("uses Manila dates and actual active directory metadata, including building f
   expect(changed.topDestinations).toEqual([]);
   expect(changed.completenessTotal).toBe(0);
 });
+
+describe("real administrators service boundary", () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  const httpServices = async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    // Reset modules give the service its own error classes, so `instanceof` needs the same copy.
+    return { services: (await import("./api")).services, errors: await import("./errors") };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("passes each account's role through and reads a missing or unknown one as administrator", async () => {
+    const { services: admins } = await httpServices();
+    const account = { email: "", status: "Active", isCurrent: false };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      items: [
+        { id: "1", username: "boss", role: "superadmin", ...account },
+        { id: "2", username: "staff", role: "admin", ...account },
+        { id: "3", username: "legacy", ...account },
+        { id: "4", username: "odd", role: "owner", ...account },
+      ],
+      total: 4,
+    }));
+
+    const listed = await admins.admins.list();
+    expect(listed.map((item) => [item.username, item.role])).toEqual([
+      ["boss", "superadmin"], ["staff", "admin"], ["legacy", "admin"], ["odd", "admin"],
+    ]);
+  });
+
+  it("sends the chosen role when adding an administrator, but never when editing one", async () => {
+    const { services: admins } = await httpServices();
+    const reply = { success: true, admin: { id: "9", username: "boss", email: "b@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json(reply, 201))
+      .mockResolvedValueOnce(json(reply))
+      .mockResolvedValueOnce(json(reply));
+
+    await expect(admins.admins.save({ username: "boss", email: "b@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin" }))
+      .resolves.toMatchObject({ role: "superadmin" });
+    await admins.admins.save({ username: "plain", email: "p@isu.edu.ph", password: "A-long-enough-secret1" });
+    await admins.admins.save({ id: "9", username: "boss", email: "b@isu.edu.ph", role: "superadmin" });
+
+    const [first, second, third] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(first).toEqual({ username: "boss", email: "b@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin" });
+    expect(second).not.toHaveProperty("role");
+    expect(third).not.toHaveProperty("role");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "PUT" });
+  });
+
+  it("changes a role through the role route and returns the updated account", async () => {
+    const { services: admins } = await httpServices();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      success: true,
+      message: "staff was promoted to superadmin successfully.",
+      admin: { id: "2", username: "staff", email: "", status: "Active", role: "superadmin", isCurrent: false },
+    }));
+
+    await expect(admins.admins.setRole("2", "superadmin")).resolves.toMatchObject({ username: "staff", role: "superadmin" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/admins\/2\/role$/);
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(init?.body))).toEqual({ role: "superadmin" });
+  });
+
+  it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
+    const { services: admins, errors } = await httpServices();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(json({ success: false, code: "superadmin_required", message: "Superadmin access required" }, 403))
+      .mockResolvedValueOnce(json({ success: false, code: "password_confirmation_required", message: "Confirm your password." }, 403))
+      .mockResolvedValueOnce(json({ success: false, message: "Superadmin access required" }, 403));
+
+    const refusal = await admins.admins.remove("2").catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(errors.SuperadminRequiredError);
+    expect(refusal).toMatchObject({ message: "Superadmin access required" });
+
+    expect(await admins.admins.remove("2").catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
+
+    // The message alone is not the signal: a 403 without the code stays a plain error.
+    const plain = await admins.admins.remove("2").catch((error: unknown) => error);
+    expect(plain).not.toBeInstanceOf(errors.SuperadminRequiredError);
+    expect(plain).toMatchObject({ message: "Superadmin access required" });
+  });
+});

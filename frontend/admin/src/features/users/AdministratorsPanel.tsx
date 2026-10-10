@@ -1,19 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar } from "../../components/UI";
+import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
-import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
+import { PasswordChecklist } from "../../components/PasswordChecklist";
+import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
+import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
-import type { AdminAccount, AdminAccountDraft } from "../../types";
+import { SuperadminRequiredError } from "../../services/errors";
+import { firstPasswordIssue } from "../../services/passwordRules";
+import type { AdminAccount, AdminAccountDraft, AdminRole } from "../../types";
 
-const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "" });
+const ROLE_LABELS: Record<AdminAccount["role"], string> = { admin: "Administrator", superadmin: "Superadmin" };
+
+const ROLE_CHANGE_WORDING: PasswordConfirmationWording = {
+  missing: "Enter your password to confirm this role change.",
+  expired: "Your password confirmation expired. Enter it again to change this role.",
+  hint: "Changing a role needs your password.",
+};
+
+const CREATE_SUPERADMIN_WORDING: PasswordConfirmationWording = {
+  missing: "Enter your password to confirm creating a superadmin.",
+  expired: "Your password confirmation expired. Enter it again to create this account.",
+  hint: "Creating a superadmin needs your password.",
+};
+
+const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "", role: "admin" });
 
 type Dialog =
   | { kind: "add" }
   | { kind: "deactivate"; account: AdminAccount }
   | { kind: "reset"; account: AdminAccount }
   | { kind: "remove"; account: AdminAccount }
+  | { kind: "role"; account: AdminAccount; role: AdminRole }
   | null;
 
 /**
@@ -28,13 +47,24 @@ type Dialog =
  * activity, revoke or restore their access, mail them a reset code, or remove
  * them outright. Deactivating is the reversible one, and usually the right one:
  * the account and its audit trail survive, only the sign-in stops.
+ *
+ * Managing accounts belongs to superadmins. Any administrator can read the list,
+ * open an account's activity and send a reset code; the rest of the menu and the
+ * Add button are left out for them. The server refuses those requests too — the
+ * viewer's role only decides what is offered. A superadmin also promotes and
+ * demotes other accounts here, after retyping their own password; nobody changes
+ * their own role.
  */
 export function AdministratorsPanel() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const feedback = useFeedback();
-  const passwordConfirmation = usePasswordConfirmation();
+  const { session, refreshSession } = useAuth();
+  const canManage = session?.role === "superadmin";
   const [dialog, setDialog] = useState<Dialog>(null);
+  const passwordConfirmation = usePasswordConfirmation(
+    dialog?.kind === "role" ? ROLE_CHANGE_WORDING : dialog?.kind === "add" ? CREATE_SUPERADMIN_WORDING : undefined,
+  );
   const [draft, setDraft] = useState<AdminAccountDraft>(blankDraft());
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -71,6 +101,21 @@ export function AdministratorsPanel() {
     setError(cause instanceof Error ? cause.message : fallback);
   };
 
+  /**
+   * A superadmin refusal means this page is acting on a role the account no longer
+   * holds. Say so, drop whatever dialog was open, and read the session and the list
+   * again so the controls match what the server will allow. It goes to the page's
+   * feedback stack because closing the dialog discards the dialog's own error line.
+   */
+  const recoverFromSuperadminRefusal = (cause: unknown) => {
+    if (!(cause instanceof SuperadminRequiredError)) return false;
+    closeDialog();
+    feedback.reportError(cause.message);
+    void refreshSession();
+    void refresh();
+    return true;
+  };
+
   const save = useMutation({
     mutationFn: (values: AdminAccountDraft) => services.admins.save(values),
     onSuccess: async (saved) => {
@@ -78,7 +123,10 @@ export function AdministratorsPanel() {
       feedback.reportSuccess(`${saved.username} was added successfully.`);
       closeDialog();
     },
-    onError: (cause) => reportFailure(cause, "Unable to save the administrator."),
+    onError: (cause) => {
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
+      reportFailure(cause, "Unable to save the administrator.");
+    },
   });
 
   const setStatus = useMutation({
@@ -89,7 +137,10 @@ export function AdministratorsPanel() {
       feedback.reportSuccess(`${saved.username} was ${saved.status === "Inactive" ? "deactivated" : "activated"} successfully.`);
       closeDialog();
     },
-    onError: (cause) => reportFailure(cause, "Unable to update the administrator's status."),
+    onError: (cause) => {
+      if (recoverFromSuperadminRefusal(cause)) return;
+      reportFailure(cause, "Unable to update the administrator's status.");
+    },
   });
 
   const sendReset = useMutation({
@@ -109,8 +160,24 @@ export function AdministratorsPanel() {
       closeDialog();
     },
     onError: (cause) => {
-      if (passwordConfirmation.handleRejection(cause)) return;
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
       reportFailure(cause, "Unable to remove the administrator.");
+    },
+  });
+
+  const setRole = useMutation({
+    mutationFn: ({ account, role }: { account: AdminAccount; role: AdminRole }) =>
+      services.admins.setRole(account.id, role),
+    onSuccess: async (saved) => {
+      await refresh();
+      feedback.reportSuccess(
+        `${saved.username} was ${saved.role === "superadmin" ? "promoted to superadmin" : "demoted to administrator"} successfully.`,
+      );
+      closeDialog();
+    },
+    onError: (cause) => {
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
+      reportFailure(cause, "Unable to change the administrator's role.");
     },
   });
 
@@ -127,7 +194,7 @@ export function AdministratorsPanel() {
     else setDialog({ kind: "deactivate", account });
   };
 
-  const submitDraft = () => {
+  const submitDraft = async () => {
     setError("");
     setFieldErrors({});
     const username = draft.username.trim();
@@ -136,13 +203,14 @@ export function AdministratorsPanel() {
     if (!username) issues.username = "Username is required.";
     if (!email) issues.email = "Email is required.";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) issues.email = "Enter a valid email address.";
-    if ((draft.password ?? "").length < 8) {
-      issues.password = "Password must be at least 8 characters.";
-    }
+    const weakness = firstPasswordIssue(draft.password ?? "");
+    if (weakness) issues.password = weakness;
     if (Object.keys(issues).length) {
       setFieldErrors(issues);
       return;
     }
+    // Creating a superadmin is guarded like promoting one; the form keeps its details if the password is refused.
+    if (draft.role === "superadmin" && !await passwordConfirmation.confirm()) return;
     save.mutate({ ...draft, username, email });
   };
 
@@ -150,6 +218,12 @@ export function AdministratorsPanel() {
     setError("");
     if (!await passwordConfirmation.confirm()) return;
     remove.mutate(account);
+  };
+
+  const confirmRoleChange = async (account: AdminAccount, role: AdminRole) => {
+    setError("");
+    if (!await passwordConfirmation.confirm()) return;
+    setRole.mutate({ account, role });
   };
 
   return (
@@ -161,9 +235,11 @@ export function AdministratorsPanel() {
           <h2>Administrators</h2>
           <p>Portal accounts that can sign in and manage campus data.</p>
         </div>
-        <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); setDialog({ kind: "add" }); }}>
-          ＋ Add Administrator
-        </Button>
+        {canManage && (
+          <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); passwordConfirmation.reset(); setDialog({ kind: "add" }); }}>
+            ＋ Add Administrator
+          </Button>
+        )}
       </div>
 
       <ProgressBar active={isFetching && !isLoading} />
@@ -186,7 +262,7 @@ export function AdministratorsPanel() {
                 <td>{account.email || "—"}</td>
                 <td>
                   <Badge tone={account.isCurrent ? "green" : "grey"}>
-                    {account.isCurrent ? "Administrator · You" : "Administrator"}
+                    {ROLE_LABELS[account.role]}{account.isCurrent && " · You"}
                   </Badge>
                 </td>
                 <td>
@@ -210,14 +286,31 @@ export function AdministratorsPanel() {
                         <button role="menuitem" onClick={() => viewActivity(account)}>
                           View activity
                         </button>
-                        <button
-                          role="menuitem"
-                          disabled={account.isCurrent || setStatus.isPending}
-                          title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
-                          onClick={() => changeStatus(account)}
-                        >
-                          {account.status === "Active" ? "Deactivate account" : "Activate account"}
-                        </button>
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            disabled={account.isCurrent || setStatus.isPending}
+                            title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
+                            onClick={() => changeStatus(account)}
+                          >
+                            {account.status === "Active" ? "Deactivate account" : "Activate account"}
+                          </button>
+                        )}
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            disabled={account.isCurrent}
+                            title={account.isCurrent ? "You cannot change your own role." : undefined}
+                            onClick={() => {
+                              setError("");
+                              passwordConfirmation.reset();
+                              setDialog({ kind: "role", account, role: account.role === "superadmin" ? "admin" : "superadmin" });
+                              setActionMenuId(null);
+                            }}
+                          >
+                            {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
+                          </button>
+                        )}
                         {/* Helps a locked-out colleague without touching their
                             account: the code only reaches their own inbox. */}
                         <button
@@ -232,22 +325,24 @@ export function AdministratorsPanel() {
                         >
                           Send password reset code
                         </button>
-                        <button
-                          role="menuitem"
-                          className="danger"
-                          disabled={account.isCurrent || admins.length <= 1}
-                          title={account.isCurrent
-                            ? "You cannot remove your own account."
-                            : admins.length <= 1 ? "The last administrator cannot be removed." : undefined}
-                          onClick={() => {
-                            setError("");
-                            passwordConfirmation.reset();
-                            setDialog({ kind: "remove", account });
-                            setActionMenuId(null);
-                          }}
-                        >
-                          Remove administrator
-                        </button>
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            className="danger"
+                            disabled={account.isCurrent || admins.length <= 1}
+                            title={account.isCurrent
+                              ? "You cannot remove your own account."
+                              : admins.length <= 1 ? "The last administrator cannot be removed." : undefined}
+                            onClick={() => {
+                              setError("");
+                              passwordConfirmation.reset();
+                              setDialog({ kind: "remove", account });
+                              setActionMenuId(null);
+                            }}
+                          >
+                            Remove administrator
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -296,16 +391,42 @@ export function AdministratorsPanel() {
               type="password"
               required
               autoComplete="new-password"
-              subhelper="At least 8 characters."
               value={draft.password ?? ""}
               error={fieldErrors.password}
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
             />
+            <PasswordChecklist password={draft.password ?? ""} />
+            <SelectField
+              label="ROLE"
+              aria-label="Role"
+              value={draft.role}
+              error={fieldErrors.role}
+              disabled={save.isPending || passwordConfirmation.confirming}
+              subhelper={draft.role === "superadmin"
+                ? "Superadmins can add, deactivate and remove administrators and change their roles."
+                : "Administrators can read this list but cannot manage accounts."}
+              onChange={(event) => {
+                setDraft({ ...draft, role: event.target.value as AdminRole });
+                setFieldErrors({ ...fieldErrors, role: "" });
+                // A password typed for a superadmin is not carried over to a plain administrator.
+                passwordConfirmation.reset();
+              }}
+            >
+              <option value="admin">Administrator</option>
+              <option value="superadmin">Superadmin</option>
+            </SelectField>
+            {draft.role === "superadmin" && (
+              <PasswordConfirmationField
+                confirmation={passwordConfirmation}
+                disabled={save.isPending}
+                onSubmit={() => void submitDraft()}
+              />
+            )}
           </div>
           <div className="modal-actions">
-            <Button variant="subtle" disabled={save.isPending} onClick={closeDialog}>Cancel</Button>
-            <Button loading={save.isPending} onClick={submitDraft}>
-              {save.isPending ? "Saving…" : "Add Administrator"}
+            <Button variant="subtle" disabled={save.isPending || passwordConfirmation.confirming} onClick={closeDialog}>Cancel</Button>
+            <Button loading={save.isPending || passwordConfirmation.confirming} onClick={() => void submitDraft()}>
+              {save.isPending ? "Saving…" : passwordConfirmation.confirming ? "Confirming…" : "Add Administrator"}
             </Button>
           </div>
         </Modal>
@@ -357,6 +478,55 @@ export function AdministratorsPanel() {
             </Button>
             <Button loading={sendReset.isPending} onClick={() => sendReset.mutate(dialog.account)}>
               {sendReset.isPending ? "Sending…" : "Send Reset Code"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog?.kind === "role" && (
+        <Modal
+          title={dialog.role === "superadmin" ? "Make superadmin?" : "Make administrator?"}
+          subtitle={dialog.role === "superadmin"
+            ? "This gives the account control of administrator accounts."
+            : "This withdraws the account's control of administrator accounts."}
+          size="sm"
+          onClose={closeDialog}
+        >
+          <p className="admin-remove-copy">
+            {dialog.role === "superadmin" ? (
+              <>
+                <strong>{dialog.account.username}</strong> will be able to add, deactivate and remove administrators and
+                change their roles, yours included. Only grant this to someone you trust with that control.
+              </>
+            ) : (
+              <>
+                <strong>{dialog.account.username}</strong> keeps their account and can still sign in, see this list and
+                send reset codes. They can no longer add, deactivate or remove administrators or change their roles —
+                their next attempt will be refused.
+              </>
+            )}
+          </p>
+          {error && <div role="alert" className="admin-form-error">{error}</div>}
+          <PasswordConfirmationField
+            confirmation={passwordConfirmation}
+            disabled={setRole.isPending}
+            onSubmit={() => void confirmRoleChange(dialog.account, dialog.role)}
+          />
+          <div className="modal-actions">
+            <Button
+              variant="subtle"
+              data-modal-initial
+              disabled={setRole.isPending || passwordConfirmation.confirming}
+              onClick={closeDialog}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={setRole.isPending || passwordConfirmation.confirming}
+              onClick={() => void confirmRoleChange(dialog.account, dialog.role)}
+            >
+              {setRole.isPending ? "Updating…" : passwordConfirmation.confirming ? "Confirming…"
+                : dialog.role === "superadmin" ? "Make Superadmin" : "Make Administrator"}
             </Button>
           </div>
         </Modal>

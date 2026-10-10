@@ -23,7 +23,8 @@ from flask import Blueprint, jsonify, request, session
 from auth import Admin, admin_required, rate_limited
 from extensions import db
 from services.audit import log_audit
-from services.security import hash_password, password_policy_error, verify_password
+from services.password_rules import first_password_issue
+from services.security import hash_password, verify_password
 
 profile_bp = Blueprint("profile", __name__, url_prefix="/api/profile")
 
@@ -161,7 +162,7 @@ def change_password():
         db.session.commit()
         return _error("Your current password is incorrect", status=401, field="currentPassword")
 
-    policy_error = password_policy_error(new_password, username=admin.username)
+    policy_error = first_password_issue(new_password)
     if policy_error:
         return _error(policy_error, field="newPassword")
 

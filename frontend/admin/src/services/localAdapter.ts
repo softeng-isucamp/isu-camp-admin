@@ -1,23 +1,41 @@
 import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
-import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
+import type { AccountStatus, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
-import { AuthError, RateLimitError } from "./errors";
+import { AuthError, RateLimitError, fieldError } from "./errors";
 import { firstPasswordIssue } from "./passwordRules";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
-const LOCAL_ADMIN = { username: "admin_justine", password: "password123" } as const;
+const LOCAL_PASSWORD = "password123";
 const LOGIN_ATTEMPT_LIMIT = 5;
 const LOGIN_LOCKOUT_SECONDS = 60;
+const CONFIRMATION_WINDOW_MS = 5 * 60 * 1000;
+const DEACTIVATED_MESSAGE = "This administrator account has been deactivated.";
 const LOCAL_ADMIN_EMAIL = "admin@isu.edu.ph";
 const RECOVERY_TEST_CODE = "000000";
 const RECOVERY_ATTEMPT_LIMIT = 5;
 const RECOVERY_EXPIRES_SECONDS = 600;
 const RECOVERY_RESEND_SECONDS = 60;
 
-/** A code the fixture handed out. `valid` is false for emails with no account, which still behave like they have one. */
-type IssuedCode = { valid: boolean; attempts: number; expiresAt: number };
+/** A fixture administrator: the sign-in, the directory row and the session all read this one record. */
+export type FixtureAccount = AccountProfile & { password: string; status: AccountStatus };
+
+/**
+ * `admin_justine` is the demo superadmin and `admin_registrar` the plain
+ * administrator; `admin_dean` is a second superadmin so one can act on another.
+ * They all sign in with the same password.
+ */
+const seedAccounts = (): FixtureAccount[] => [
+  { id: "1", username: "admin_justine", email: LOCAL_ADMIN_EMAIL, role: "superadmin", status: "Active", password: LOCAL_PASSWORD },
+  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD },
+  { id: "3", username: "admin_dean", email: "dean.admin@isu.edu.ph", role: "superadmin", status: "Active", password: LOCAL_PASSWORD },
+];
+
+const profileOf = ({ id, username, email, role }: FixtureAccount): AccountProfile => ({ id, username, email, role });
+
+/** A code the fixture handed out. `account` is unset for emails with no account, which still behave like they have one. */
+type IssuedCode = { account?: FixtureAccount; attempts: number; expiresAt: number };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
@@ -42,15 +60,44 @@ const parseSession = (storage: Storage | null): Session | null => {
 };
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
+  const accounts = seedAccounts();
   let session = parseSession(storage);
-  let account: AccountProfile = { id: "local-admin", username: session?.username ?? LOCAL_ADMIN.username, email: session?.email ?? LOCAL_ADMIN_EMAIL, role: "superadmin" };
-  let accountPassword: string = LOCAL_ADMIN.password;
+  const restored = accounts.find((record) => record.id === session?.id);
+  // Accounts added in an earlier page load are gone, so a session for one of
+  // them has nobody to be: signed out, never another account's identity or role.
+  if (session && !restored) {
+    session = null;
+    storage?.removeItem(LOCAL_SESSION_KEY);
+  }
+  // The account the session belongs to, or the demo superadmin while signed out.
+  // The stored session carries only profile edits; the role is the directory's.
+  let account = restored ?? accounts[0];
+  if (session && restored) {
+    account.username = session.username;
+    account.email = session.email ?? account.email;
+  }
+  // When the signed-in account last retyped its password; the server keeps this on the session.
+  let confirmedAt = 0;
+  const endSession = () => {
+    session = null;
+    confirmedAt = 0;
+    storage?.removeItem(LOCAL_SESSION_KEY);
+  };
+  // The server reads the account row on every request, so one deactivated while
+  // signed in is refused on its next request and signed out.
+  const refuseIfDeactivated = () => {
+    if (session && account.status !== "Active") {
+      endSession();
+      throw new Error(DEACTIVATED_MESSAGE);
+    }
+  };
   const issuedCodes = new Map<string, IssuedCode>();
   let failedLogins = 0;
   let lockedUntil = 0;
 
-  const issueCode = (email: string, purpose: RecoveryPurpose, valid = normalizeEmail(email) === normalizeEmail(account.email)): IssuedCode => {
-    const issued = { valid, attempts: 0, expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000 };
+  const issueCode = (email: string, purpose: RecoveryPurpose, known = true): IssuedCode => {
+    const owner = known ? accounts.find((record) => normalizeEmail(record.email) === normalizeEmail(email)) : undefined;
+    const issued = { account: owner, attempts: 0, expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000 };
     issuedCodes.set(`${purpose}:${normalizeEmail(email)}`, issued);
     return issued;
   };
@@ -58,20 +105,21 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   // Nothing was requested for this email: count guesses against a phantom code
   // that never matches, exactly like an email with no account, so verify and
   // reset cannot succeed without a request.
-  const checkCode = (email: string, purpose: RecoveryPurpose, code: string): IssuedCode => {
+  const checkCode = (email: string, purpose: RecoveryPurpose, code: string): { issued: IssuedCode; owner: FixtureAccount } => {
     const key = `${purpose}:${normalizeEmail(email)}`;
     const issued = issuedCodes.get(key) ?? issueCode(email, purpose, false);
     if (Date.now() >= issued.expiresAt) throw new AuthError("code_expired", "This code has expired. Request a new one.");
     if (issued.attempts >= RECOVERY_ATTEMPT_LIMIT) {
       throw new AuthError("code_exhausted", "Too many incorrect codes. Request a new one.", 0);
     }
-    if (!issued.valid || code !== RECOVERY_TEST_CODE) {
+    const owner = issued.account;
+    if (!owner || code !== RECOVERY_TEST_CODE) {
       issued.attempts += 1;
       const remaining = RECOVERY_ATTEMPT_LIMIT - issued.attempts;
       if (remaining <= 0) throw new AuthError("code_exhausted", "Too many incorrect codes. Request a new one.", 0);
       throw new AuthError("invalid_code", "Incorrect verification code", remaining);
     }
-    return issued;
+    return { issued, owner };
   };
 
   return {
@@ -83,7 +131,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
           lockedUntil = 0;
           failedLogins = 0;
         }
-        if (username.trim() !== account.username || password !== accountPassword) {
+        const candidate = accounts.find((record) => record.username === username.trim());
+        if (!candidate || password !== candidate.password) {
           // Counted for unknown usernames too, so the count never hints at which exist.
           failedLogins += 1;
           if (failedLogins >= LOGIN_ATTEMPT_LIMIT) {
@@ -92,38 +141,55 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
           }
           throw new AuthError("invalid_credentials", "Invalid username or password", LOGIN_ATTEMPT_LIMIT - failedLogins);
         }
+        // Checked after the password, so a wrong guess cannot discover which accounts are deactivated.
+        if (candidate.status !== "Active") throw new Error(`${DEACTIVATED_MESSAGE} Ask another administrator to reactivate it.`);
         failedLogins = 0;
-        session = { ...account };
+        account = candidate;
+        confirmedAt = 0;
+        session = profileOf(account);
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
         return session;
       },
-      logout: async (): Promise<void> => {
-        session = null;
-        storage?.removeItem(LOCAL_SESSION_KEY);
+      logout: async (): Promise<void> => endSession(),
+      me: async (): Promise<Session | null> => {
+        if (session && account.status !== "Active") endSession();
+        return session ? profileOf(account) : null;
       },
-      me: async (): Promise<Session | null> => session ? { ...account } : null,
       profile: async (): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to view your profile.");
-        return { ...account };
+        refuseIfDeactivated();
+        return profileOf(account);
       },
       updateProfile: async (changes: ProfileChanges): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to edit your profile.");
+        refuseIfDeactivated();
         if (!changes.username.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email.trim())) throw new Error("Enter a username and valid email.");
-        account = { ...account, username: changes.username.trim(), email: changes.email.trim() };
-        session = { ...account };
+        const taken = accounts.some((record) =>
+          record.id !== account.id && record.username.toLowerCase() === changes.username.trim().toLowerCase());
+        if (taken) throw fieldError("username", "That username is already taken");
+        account.username = changes.username.trim();
+        account.email = changes.email.trim();
+        session = profileOf(account);
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
-        return { ...account };
+        return profileOf(account);
       },
       changePassword: async (changes: PasswordChange): Promise<void> => {
         if (!session) throw new Error("Sign in to change your password.");
-        if (changes.currentPassword !== accountPassword) throw new Error("Current password is incorrect.");
-        if (changes.newPassword.length < 8) throw new Error("Use at least 8 characters.");
-        accountPassword = changes.newPassword;
+        refuseIfDeactivated();
+        if (changes.currentPassword !== account.password) throw new Error("Current password is incorrect.");
+        const weakness = firstPasswordIssue(changes.newPassword);
+        if (weakness) throw new Error(weakness);
+        account.password = changes.newPassword;
       },
-      // The fixture only checks the password. Session ownership and the
-      // confirmation window are enforced by the backend, which owns the real guard.
+      // Opens the confirmation window the administrator actions that need one read.
+      // A wrong password closes it again, as the server's session does.
       confirmPassword: async (password: string): Promise<void> => {
-        if (password !== accountPassword) throw new Error("Password is incorrect");
+        refuseIfDeactivated();
+        if (password !== account.password) {
+          confirmedAt = 0;
+          throw new Error("Password is incorrect");
+        }
+        confirmedAt = Date.now();
       },
       // Always succeeds and reports the same timing, so the response never says whether the email has an account.
       requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
@@ -131,17 +197,32 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         return { expiresInSeconds: RECOVERY_EXPIRES_SECONDS, resendAfterSeconds: RECOVERY_RESEND_SECONDS };
       },
       verifyRecovery: async (email: string, purpose: RecoveryPurpose, code: string): Promise<RecoveryResult> => {
-        checkCode(email, purpose, code);
-        return { username: account.username };
+        const { owner } = checkCode(email, purpose, code);
+        return { username: owner.username };
       },
       resetPassword: async (email: string, code: string, password: string): Promise<RecoveryResult> => {
-        const issued = checkCode(email, "password", code);
+        const { issued, owner } = checkCode(email, "password", code);
         const weakness = firstPasswordIssue(password);
         if (weakness) throw new AuthError("weak_password", weakness);
-        accountPassword = password;
-        issued.valid = false; // a used code is dead, like any wrong guess from here on
-        return { username: account.username };
+        owner.password = password;
+        issued.account = undefined; // a used code is dead, like any wrong guess from here on
+        return { username: owner.username };
       },
+    },
+    // The administrator directory shares these records with sign-in, so a role
+    // or status changed here is what the next sign-in and `me()` report.
+    directory: {
+      accounts,
+      /** The account the session belongs to, or null while signed out. */
+      viewer: (): FixtureAccount | null => session ? account : null,
+      /** The account making an administrator request: signed in and still active, or the request is refused. */
+      caller: (): FixtureAccount => {
+        if (!session) throw new Error("Authentication required");
+        refuseIfDeactivated();
+        return account;
+      },
+      /** Whether the signed-in account confirmed its password within the server's five minutes. */
+      recentlyConfirmed: (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS,
     },
     locations: {
       saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {

@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from extensions import db, mail
 from services.audit import log_audit
+from services.password_rules import first_password_issue
 from services.security import (
     burn_password_comparison,
     hash_password,
@@ -344,6 +345,46 @@ def admin_required():
     return admin, None
 
 
+# The frontend recognises this code, not the message text, to tell a missing
+# role apart from any other 403.
+SUPERADMIN_REQUIRED_CODE = "superadmin_required"
+
+
+def superadmin_required(locked=None):
+    """Guard a route that only a superadmin may use.
+
+    Returns ``(admin, None)`` or ``(None, response)`` like
+    :func:`admin_required`, so routes can chain the two. The role is read from
+    the row on every request, so a demoted account is refused on its next call
+    without its session being invalidated.
+
+    A route that writes under a row lock on the administrator table passes the
+    locked rows as ``locked``, to check again that the caller still holds the
+    role. The caller is then judged from those rows alone, so an account that
+    was demoted, deactivated or removed while the request waited is refused
+    with the same response.
+    """
+
+    if locked is None:
+        admin, error = admin_required()
+        if error:
+            return None, error
+    else:
+        admin = next((row for row in locked if row.id == session.get("admin_id")), None)
+
+    if admin is None or not (admin.is_active and admin.is_superadmin):
+        return None, (
+            jsonify({
+                "success": False,
+                "code": SUPERADMIN_REQUIRED_CODE,
+                "message": "Superadmin access required"
+            }),
+            403
+        )
+
+    return admin, None
+
+
 # ==========================================
 # PASSWORD CONFIRMATION FOR DESTRUCTIVE ACTIONS
 # ==========================================
@@ -355,6 +396,9 @@ REAUTH_MAX_AGE_SECONDS = 300
 
 # The frontend prompts for the password again when it sees this code.
 REAUTH_REQUIRED_CODE = "password_confirmation_required"
+
+# What a refusal says when the route does not word it for its own action.
+REAUTH_DEFAULT_MESSAGE = "Confirm your password to delete this record."
 
 
 @auth_bp.route("/confirm-password", methods=["POST"])
@@ -412,11 +456,13 @@ def confirm_password():
     }), 200
 
 
-def reauth_required():
+def reauth_required(message=REAUTH_DEFAULT_MESSAGE):
     """Guard a destructive route behind a recent password confirmation.
 
     Returns ``(None, response)`` when the caller must confirm its password
     again, mirroring :func:`admin_required` so routes can chain both guards.
+    A route that is not a delete passes ``message`` so the prompt names its own
+    action; the code, which the frontend reads, never changes.
     """
 
     admin, error = admin_required()
@@ -431,7 +477,7 @@ def reauth_required():
             jsonify({
                 "success": False,
                 "code": REAUTH_REQUIRED_CODE,
-                "message": "Confirm your password to delete this record."
+                "message": message
             }),
             403
         )
@@ -619,10 +665,11 @@ def reset_password():
                 "message": "Username, verification code, and new password are required"
             }), 400
 
-        if len(password) < 8:
+        weakness = first_password_issue(password)
+        if weakness:
             return jsonify({
                 "success": False,
-                "message": "Password must be at least 8 characters"
+                "message": weakness
             }), 400
 
         reset = reset_otps.get(username)
