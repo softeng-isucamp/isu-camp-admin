@@ -1497,6 +1497,16 @@ td small {
   box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2);
   outline: none;
 }
+/* A rejected code kept on screen: the alert's own red, until the admin starts editing. */
+.recovery-modal .field .segmented-code-input[aria-invalid="true"] {
+  border-color: #f0bcbc;
+  background: #fff0f0;
+  color: var(--danger);
+}
+.recovery-modal .field .segmented-code-input[aria-invalid="true"]:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(167, 53, 53, 0.2);
+}
 .recovery-modal .recovery-resend {
   display: flex;
   flex-wrap: wrap;

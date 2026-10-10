@@ -230,7 +230,7 @@ describe("forgot-password: code step", () => {
     expect(box(1)).toBeEnabled();
   });
 
-  it("clears and refocuses the boxes on a wrong code and says how many attempts are left", async () => {
+  it("keeps the rejected digits visible and invalid, refocuses box 1 and says how many attempts are left", async () => {
     mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4)] });
     renderForgotPassword();
     await sendCodeTo();
@@ -238,7 +238,8 @@ describe("forgot-password: code step", () => {
     await failVerification();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
-    expectBoxes("");
+    expectBoxes("111111");
+    for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeInvalid();
     expect(box(1)).toHaveFocus();
     expect(screen.getByRole("heading", { name: /verification code/i })).toBeInTheDocument();
   });
@@ -264,9 +265,9 @@ describe("forgot-password: code step", () => {
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
-  it("never resubmits a wrong code on its own, even when it is typed again, but Verify retries it", async () => {
+  it("does not resend rejected digits on its own, but the same code entered again or sent with Verify is checked", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2)] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
@@ -276,19 +277,19 @@ describe("forgot-password: code step", () => {
     await tickSecond();
     await tickSecond();
     expect(sent[VERIFY]).toHaveLength(1);
-
-    // The same rejected code typed or pasted again is not spent a second time on its own.
-    await failVerification();
-    pasteCode(1, "111111");
-    await settle();
-    expect(sent[VERIFY]).toHaveLength(1);
     expectBoxes("111111");
 
-    // Pressing Verify is the admin's explicit retry and does count.
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    // Pasting the same code again is a new entry: the server answers again.
+    pasteCode(1, "111111");
     await settle();
     expect(sent[VERIFY]).toHaveLength(2);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+
+    // Pressing Verify is the admin's explicit retry and counts too.
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await settle();
+    expect(sent[VERIFY]).toHaveLength(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 2 attempts left.");
   });
 
   it("still auto-submits a different code after one was rejected", async () => {
@@ -359,7 +360,7 @@ describe("forgot-password: code step", () => {
     expect(sent[VERIFY]).toBeUndefined();
   });
 
-  it("counts a server rate limit down on the Verify button and keeps the typed code", async () => {
+  it("counts a server rate limit down on the Verify button, keeps the typed code and sends it when the wait ends", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sent } = mockBackend({
       [REQUEST]: [issued()],
@@ -377,10 +378,10 @@ describe("forgot-password: code step", () => {
     expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     expectBoxes("123456");
     await tickSecond();
+    expect(sent[VERIFY]).toHaveLength(1);
     await tickSecond();
-
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await settle();
+
     expect(sent[VERIFY]).toHaveLength(2);
     expect(screen.getByRole("heading", { name: /create a new password/i })).toBeInTheDocument();
   });
