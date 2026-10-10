@@ -147,14 +147,44 @@ describe("Dashboard backend boundary", () => {
       expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
+    expect(screen.getByText(/^[\d,]+ active locations$/)).toBeInTheDocument();
   });
 
-  it("explains that analytics are unavailable when the endpoint fails", async () => {
+  it("explains that analytics failed to load and retries on request", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
     renderDashboard();
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Analytics are not available from the backend yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
+    const failedCalls = request.mock.calls.length;
+
+    request.mockResolvedValue(analytics());
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    expect(request.mock.calls.length).toBeGreaterThan(failedCalls);
+  });
+
+  it("keeps the cards and warns when a later refresh fails", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    const request = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+    renderDashboard();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "month");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
+
+    // Back to the cached week: its numbers stay up while the refetch fails.
+    request.mockRejectedValue(new Error("Gateway timeout"));
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "week");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/latest refresh of analytics failed/i);
+    expect(alert).toHaveTextContent(/may be out of date/i);
+    expect(screen.getByText("Active users")).toBeInTheDocument();
+
+    request.mockImplementation(async (range) => analytics(range));
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });

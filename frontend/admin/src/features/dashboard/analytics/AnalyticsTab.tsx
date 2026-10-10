@@ -15,7 +15,7 @@ export const dashboardAnalyticsQueryKey = (range: DashboardRange) => ["dashboard
  * Candidate charts for the Analytics tab. To drop a chart, delete its file and its JSX line below.
  */
 export function AnalyticsTab({ range }: { range: DashboardRange }) {
-  const { data, error, isFetching, isLoading } = useQuery({
+  const { data, error, isFetching, isLoading, refetch } = useQuery({
     queryKey: dashboardAnalyticsQueryKey(range),
     queryFn: () => services.dashboard.analytics(range),
     placeholderData: (previous) => previous,
@@ -25,7 +25,8 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
   if (error && !data) {
     return (
       <Card className="analytics-unavailable">
-        <Empty>Analytics are not available from the backend yet.</Empty>
+        <Empty>Unable to load analytics. {error instanceof Error ? error.message : "The dashboard service returned an error."}</Empty>
+        <button type="button" onClick={() => void refetch()}>Try again</button>
       </Card>
     );
   }
@@ -33,6 +34,12 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
   return (
     <div className="analytics">
       <ProgressBar active={isFetching && !isLoading} />
+      {error && (
+        <div className="dashboard-error" role="alert">
+          <span>The latest refresh of analytics failed, so the numbers shown may be out of date. {error instanceof Error ? error.message : ""}</span>
+          <button type="button" onClick={() => void refetch()}>Try again</button>
+        </div>
+      )}
       <section aria-labelledby="analytics-app-usage">
         <h2 className="analytics-section" id="analytics-app-usage">App Usage</h2>
         <div className="analytics-grid">
