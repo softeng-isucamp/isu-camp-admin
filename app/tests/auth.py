@@ -5,6 +5,7 @@ from flask import Flask
 
 import auth as auth_module
 from auth import auth_bp
+from services.security import verify_password
 
 
 def auth_app():
@@ -232,7 +233,10 @@ def test_final_reset_remains_authoritative_after_non_consuming_verification(monk
         "username": "admin01", "code": "123456", "password": "password123",
     })
     assert correct_final.status_code == 200
-    assert admin.password == "password123"
+    # Stored as a hash now, not as the password itself, so the assertion is
+    # that the new password verifies rather than that it is readable.
+    assert admin.password != "password123"
+    assert verify_password(admin.password, "password123")[0]
     assert "admin01" not in auth_module.reset_otps
 
 

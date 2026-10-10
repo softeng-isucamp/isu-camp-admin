@@ -21,6 +21,7 @@ from auth import (
 from extensions import db
 from model.record_status import normalized_status, status_label
 from services.audit import log_audit
+from services.security import hash_password
 
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 
@@ -110,7 +111,9 @@ def create_admin():
         # public.admin.id is an identity column, so the database assigns it.
         record = Admin(
             username=values["username"],
-            password=values["password"],
+            # Hashed on the way in, so a new account never adds a
+            # plaintext row to the ones already there.
+            password=hash_password(values["password"]),
             gmail=values["email"],
         )
         db.session.add(record)
@@ -155,7 +158,7 @@ def update_admin(admin_id):
         # A blank password leaves the existing one alone; the reset flow is the
         # other way to change it.
         if values["password"]:
-            record.password = values["password"]
+            record.password = hash_password(values["password"])
         log_audit("Admin", None, "update", "Administrator", record.id, record.username)
         db.session.commit()
         return jsonify({"success": True, "message": "Administrator updated successfully.", "admin": _as_dict(record)}), 200
