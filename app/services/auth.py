@@ -1213,6 +1213,11 @@ def recovery_reset_password():
         if refusal:
             return refusal
 
+        # Read before the commit: committing expires the row, so reading it
+        # afterwards is another query, and a failure there would report an
+        # error for a password that has already changed.
+        username = admin.username
+
         # The code is spent for good, even if this write fails: the admin asks
         # for a new one, and nothing can bring an old one back.
         admin.password = password_hash
@@ -1222,7 +1227,7 @@ def recovery_reset_password():
         )
         db.session.commit()
 
-        return jsonify({"success": True, "username": admin.username}), 200
+        return jsonify({"success": True, "username": username}), 200
 
     except Exception as e:
         return recovery_failure(e)

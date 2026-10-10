@@ -998,6 +998,27 @@ def test_a_failed_write_still_consumes_the_code(harness, monkeypatch):
     assert harness.reset(harness.issued_code(), password="Retry!pass12").status_code == 200
 
 
+def test_a_reset_that_committed_reports_success_even_if_the_row_cannot_be_read_again(harness, monkeypatch):
+    """Nothing after the commit may fail the response: the password has already changed."""
+
+    harness.request_code()
+    admin = harness.admins[0]
+    username = admin.username
+    original_commit = auth_module.db.session.commit
+
+    def commit_then_lose_the_row():
+        original_commit()
+        # Stands in for the expired row whose refresh fails after COMMIT.
+        del admin.username
+
+    monkeypatch.setattr(auth_module.db.session, "commit", commit_then_lose_the_row)
+    response = harness.reset(harness.issued_code(), password="Fresh!pass12")
+
+    assert response.status_code == 200
+    assert response.json["username"] == username
+    assert verify_password(admin.password, "Fresh!pass12")[0]
+
+
 def test_a_failed_old_reset_cannot_bring_its_code_back_after_a_newer_one_was_used(harness, monkeypatch):
     harness.request_code()
     old = harness.issued_code()
