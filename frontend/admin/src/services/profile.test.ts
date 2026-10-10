@@ -7,10 +7,33 @@ it('keeps renamed fixture credentials and password changes in the current fixtur
   await fixture.auth.login('admin_justine', 'password123');
   const service = createProfileService(vi.fn(), fixture.auth);
   await service.update({ username: 'renamed', email: 'new@example.com' });
-  await service.changePassword({ currentPassword: 'password123', newPassword: 'different123' });
+  await service.changePassword({ currentPassword: 'password123', newPassword: 'Different123!' });
   await fixture.auth.logout();
   await expect(fixture.auth.login('renamed', 'password123')).rejects.toThrow();
-  expect(await fixture.auth.login('renamed', 'different123')).toMatchObject({ username: 'renamed', email: 'new@example.com' });
+  expect(await fixture.auth.login('renamed', 'Different123!')).toMatchObject({ username: 'renamed', email: 'new@example.com' });
+});
+
+it.each([
+  ['Abcde1!', 'Password must be at least 8 characters.'],
+  ['abcdefg1!', 'Password must include an uppercase letter.'],
+  ['ABCDEFG1!', 'Password must include a lowercase letter.'],
+  ['Abcdefgh!', 'Password must include a number.'],
+  ['Abcdefg12', 'Password must include a symbol.'],
+  ['abc', 'Password must be at least 8 characters.'],
+])('refuses the fixture password change to %s with the server message and keeps the old password', async (newPassword, message) => {
+  const fixture = createLocalAdapter({ locations: [] }, null);
+  await fixture.auth.login('admin_justine', 'password123');
+  const service = createProfileService(vi.fn(), fixture.auth);
+  await expect(service.changePassword({ currentPassword: 'password123', newPassword })).rejects.toThrow(message);
+  await fixture.auth.logout();
+  expect(await fixture.auth.login('admin_justine', 'password123')).toMatchObject({ username: 'admin_justine' });
+});
+
+it('checks the current password before the new one, as the server does', async () => {
+  const fixture = createLocalAdapter({ locations: [] }, null);
+  await fixture.auth.login('admin_justine', 'password123');
+  const service = createProfileService(vi.fn(), fixture.auth);
+  await expect(service.changePassword({ currentPassword: 'wrong', newPassword: 'abc' })).rejects.toThrow('Current password is incorrect.');
 });
 
 it('sends authenticated operations through the proposed endpoint contract', async () => {

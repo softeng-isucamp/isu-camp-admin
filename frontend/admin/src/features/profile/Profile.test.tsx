@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import { services } from '../../services/api';
 
@@ -40,12 +40,74 @@ it('requires matching passwords before submitting a change', async () => {
   page();
   await userEvent.click(await screen.findByRole('button', { name: 'Change Password' }));
   await userEvent.type(screen.getByLabelText('Current password'), 'password123');
-  await userEvent.type(screen.getByLabelText('New password'), 'newpassword123');
-  await userEvent.type(screen.getByLabelText('Confirm new password'), 'different123');
+  await userEvent.type(screen.getByLabelText('New password'), 'Newpassword123!');
+  await userEvent.type(screen.getByLabelText('Confirm new password'), 'Different123!');
   await userEvent.click(screen.getByRole('button', { name: 'Update Password' }));
   expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument();
   expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('aria-invalid', 'true');
   expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+describe('change password rules', () => {
+  const rule = (state: 'Met' | 'Not met', label: string) => within(screen.getByRole('list', { name: 'Password requirements' })).getByRole('listitem', { name: `${state}: ${label}` });
+  async function openDialog() {
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Change Password' }));
+  }
+  async function submit(newPassword: string, confirmation = newPassword) {
+    await userEvent.type(screen.getByLabelText('Current password'), 'password123');
+    await userEvent.type(screen.getByLabelText('New password'), newPassword);
+    await userEvent.type(screen.getByLabelText('Confirm new password'), confirmation);
+    await userEvent.click(screen.getByRole('button', { name: 'Update Password' }));
+  }
+
+  it('shows the shared live checklist under the new password in place of the length hint', async () => {
+    await openDialog();
+    expect(screen.queryByText('At least 8 characters.')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('list', { name: 'Password requirements' })).getAllByRole('listitem')).toHaveLength(5);
+    rule('Not met', 'At least 8 characters');
+    await userEvent.type(screen.getByLabelText('New password'), 'Abc1');
+    rule('Not met', 'At least 8 characters');
+    rule('Met', 'An uppercase letter');
+    rule('Met', 'A lowercase letter');
+    rule('Met', 'A number');
+    rule('Not met', 'A symbol');
+    await userEvent.type(screen.getByLabelText('New password'), 'defg!');
+    for (const label of ['At least 8 characters', 'An uppercase letter', 'A lowercase letter', 'A number', 'A symbol']) rule('Met', label);
+  });
+
+  it.each([
+    ['Abcde1!', 'Password must be at least 8 characters.'],
+    ['abcdefg1!', 'Password must include an uppercase letter.'],
+    ['ABCDEFG1!', 'Password must include a lowercase letter.'],
+    ['Abcdefgh!', 'Password must include a number.'],
+    ['Abcdefg12', 'Password must include a symbol.'],
+  ])('refuses %s with the first unmet rule and does not send it', async (password, message) => {
+    const changePassword = vi.spyOn(services.profile, 'changePassword');
+    await openDialog();
+    await submit(password);
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByLabelText('New password')).toHaveAttribute('aria-invalid', 'true');
+    expect(changePassword).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('reports only the first unmet rule when several fail', async () => {
+    await openDialog();
+    await submit('abc');
+    expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument();
+    expect(screen.queryByText('Password must include an uppercase letter.')).not.toBeInTheDocument();
+  });
+
+  it('sends a password that meets every rule and closes the dialog', async () => {
+    // Stubbed so the shared fixture account keeps its sign-in for the other tests.
+    const changePassword = vi.spyOn(services.profile, 'changePassword').mockResolvedValue(undefined);
+    await openDialog();
+    await submit('Abcdef1!');
+    await waitFor(() => expect(changePassword).toHaveBeenCalledWith({ currentPassword: 'password123', newPassword: 'Abcdef1!' }));
+    expect(await screen.findByText('Your password was updated successfully.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });
 
 it('signs out from the profile after confirmation', async () => {

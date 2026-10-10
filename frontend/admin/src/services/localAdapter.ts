@@ -177,7 +177,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         if (!session) throw new Error("Sign in to change your password.");
         refuseIfDeactivated();
         if (changes.currentPassword !== account.password) throw new Error("Current password is incorrect.");
-        if (changes.newPassword.length < 8) throw new Error("Use at least 8 characters.");
+        const weakness = firstPasswordIssue(changes.newPassword);
+        if (weakness) throw new Error(weakness);
         account.password = changes.newPassword;
       },
       // Opens the confirmation window the administrator actions that need one read.
