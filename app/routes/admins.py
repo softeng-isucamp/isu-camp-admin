@@ -2,9 +2,10 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, deactivated and removed. Editing is limited to the signed-in
-account: every other administrator can be deactivated or removed, but not
-rewritten.
+they are created, deactivated and removed, by superadmins only. Editing is
+limited to the signed-in account: every other administrator can be deactivated
+or removed, but not rewritten. Any active administrator can list the accounts
+and send a password reset code.
 """
 
 import re
@@ -17,6 +18,7 @@ from auth import (
     rate_limited,
     reauth_required,
     send_password_reset_otp,
+    superadmin_required,
 )
 from extensions import db
 from model.record_status import normalized_status, status_label
@@ -42,6 +44,7 @@ def _as_dict(admin):
         "username": admin.username,
         "email": admin.gmail or "",
         "status": status_label(admin.status),
+        "role": "superadmin" if admin.is_superadmin else "admin",
         # The signed-in admin is the only one that can be edited, and the only
         # one that cannot be deactivated or removed, so the client marks that
         # row rather than offering actions the server would refuse.
@@ -96,7 +99,7 @@ def list_admins():
 
 @admins_bp.post("")
 def create_admin():
-    _, error = admin_required()
+    _, error = superadmin_required()
     if error:
         return error
 
@@ -176,7 +179,7 @@ def set_admin_status(admin_id):
     is another administrator's to set.
     """
 
-    _, error = admin_required()
+    _, error = superadmin_required()
     if error:
         return error
 
@@ -269,6 +272,12 @@ def send_password_reset(admin_id):
 
 @admins_bp.delete("/<int:admin_id>")
 def delete_admin(admin_id):
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
     # Removing an administrator is destructive, so it needs a recent password
     # confirmation like every other delete in the portal.
     _, error = reauth_required()

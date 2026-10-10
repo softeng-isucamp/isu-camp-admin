@@ -1,7 +1,10 @@
+import time
+
 from flask import Flask
 import pytest
 
 import admins as admins_module
+import auth as auth_module
 from admins import admins_bp
 from services.security import verify_password
 
@@ -63,16 +66,18 @@ class FakeAdmin:
     username = FakeColumn("username")
     status = FakeColumn("status")
 
-    def __init__(self, username=None, password=None, gmail=None, id=None, status="active"):
+    # The real properties read plain attributes, so the fake shares them and a
+    # change to what counts as active or superadmin is exercised here too.
+    is_active = auth_module.Admin.is_active
+    is_superadmin = auth_module.Admin.is_superadmin
+
+    def __init__(self, username=None, password=None, gmail=None, id=None, status="active", role="admin"):
         self.id = id
         self.username = username
         self.password = password
         self.gmail = gmail
         self.status = status
-
-    @property
-    def is_active(self):
-        return self.status == "active"
+        self.role = role
 
     @classmethod
     def reset(cls, records):
@@ -127,27 +132,44 @@ def admins_app():
     return app
 
 
-def signed_in(app, admin_id=1):
+def signed_in(app, admin_id=1, confirmed=True):
     client = app.test_client()
     with client.session_transaction() as flask_session:
         flask_session["admin_id"] = admin_id
         flask_session["admin_username"] = "admin01"
+        if confirmed:
+            flask_session["reauth_at"] = time.time()
     return client
+
+
+@pytest.fixture
+def guards_passed(monkeypatch):
+    """Skips every guard, for rules a real caller can never reach.
+
+    A signed-in superadmin is always an active account, so "the last active
+    administrator" and "the last account" can only be tested with a caller who
+    is not in the directory.
+    """
+    for guard in ("admin_required", "superadmin_required", "reauth_required"):
+        monkeypatch.setattr(admins_module, guard, lambda: (object(), None))
 
 
 @pytest.fixture(autouse=True)
 def admin_directory(monkeypatch):
-    """Two administrators, an authenticated session, and a confirmed password."""
+    """A superadmin (1) and an administrator (2), over the real guards.
+
+    Sessions made by ``signed_in`` carry a fresh password confirmation unless
+    asked not to. The guards read ``FakeAdmin`` through ``auth.Admin``.
+    """
     FakeAdmin.reset([
-        FakeAdmin(id=1, username="admin01", password="password123", gmail="admin01@example.com"),
+        FakeAdmin(id=1, username="admin01", password="password123", gmail="admin01@example.com", role="superadmin"),
         FakeAdmin(id=2, username="admin02", password="password456", gmail="admin02@example.com"),
     ])
     session = FakeSession()
     monkeypatch.setattr(admins_module, "Admin", FakeAdmin)
+    monkeypatch.setattr(auth_module, "Admin", FakeAdmin)
     monkeypatch.setattr(admins_module.db, "session", session)
     monkeypatch.setattr(admins_module.db.func, "lower", lambda column: column, raising=False)
-    monkeypatch.setattr(admins_module, "admin_required", lambda: (object(), None))
-    monkeypatch.setattr(admins_module, "reauth_required", lambda: (object(), None))
     monkeypatch.setattr(admins_module, "log_audit", lambda *args, **kwargs: None)
     # Reset codes are delivered by email; the test records the recipients.
     session.reset_codes_sent = []
@@ -180,10 +202,37 @@ def test_listing_marks_the_signed_in_administrator():
     assert all("password" not in item for item in response.json["items"])
 
 
-def test_listing_requires_an_administrator(monkeypatch):
-    monkeypatch.setattr(admins_module, "admin_required", lambda: (None, ({"success": False}, 401)))
-
+def test_listing_requires_an_administrator():
     assert admins_app().test_client().get("/api/admins").status_code == 401
+
+
+def test_listing_carries_each_accounts_role():
+    FakeAdmin.store.extend([
+        FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role=None),
+        FakeAdmin(id=4, username="admin04", password="x", gmail="d@example.com", role="owner"),
+    ])
+
+    # A plain administrator may read the list.
+    response = signed_in(admins_app(), admin_id=2).get("/api/admins")
+
+    assert response.status_code == 200
+    roles = {item["username"]: item["role"] for item in response.json["items"]}
+    # A missing or unrecognized stored role never reads as superadmin.
+    assert roles == {"admin01": "superadmin", "admin02": "admin", "admin03": "admin", "admin04": "admin"}
+
+
+def test_a_demoted_superadmin_is_refused_on_the_next_request():
+    client = signed_in(admins_app(), admin_id=1)
+    body = {"username": "admin03", "email": "admin03@example.com", "password": "another-secret"}
+    assert client.post("/api/admins", json=body).status_code == 201
+
+    # Same session cookie: only the stored row changed.
+    next(item for item in FakeAdmin.store if item.id == 1).role = "admin"
+    response = client.post("/api/admins", json={**body, "username": "admin04"})
+
+    assert response.status_code == 403
+    assert response.json["message"] == "Superadmin access required"
+    assert not any(record.username == "admin04" for record in FakeAdmin.store)
 
 
 def test_creating_an_administrator_adds_the_record(admin_directory):
@@ -197,6 +246,27 @@ def test_creating_an_administrator_adds_the_record(admin_directory):
     assert response.json["admin"]["username"] == "admin03"
     assert admin_directory.committed is True
     assert any(record.username == "admin03" for record in FakeAdmin.store)
+
+
+def test_creating_refuses_a_plain_administrator(admin_directory):
+    response = signed_in(admins_app(), admin_id=2).post("/api/admins", json={
+        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+    })
+
+    assert response.status_code == 403
+    assert response.json == {
+        "success": False, "code": "superadmin_required", "message": "Superadmin access required",
+    }
+    assert admin_directory.committed is False
+    assert [record.id for record in FakeAdmin.store] == [1, 2]
+
+
+def test_creating_requires_a_signed_in_account():
+    response = admins_app().test_client().post("/api/admins", json={
+        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+    })
+
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize(
@@ -291,7 +361,7 @@ def test_deactivating_another_administrator_keeps_the_record(admin_directory):
 
 def test_activating_restores_access():
     FakeAdmin.reset([
-        FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com"),
+        FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com", role="superadmin"),
         FakeAdmin(id=2, username="admin02", password="x", gmail="b@example.com", status="inactive"),
     ])
 
@@ -310,7 +380,7 @@ def test_deactivating_refuses_the_signed_in_account():
     assert next(item for item in FakeAdmin.store if item.id == 1).status == "active"
 
 
-def test_deactivating_refuses_the_last_active_administrator():
+def test_deactivating_refuses_the_last_active_administrator(guards_passed):
     # admin02 is already inactive, so admin01 is the only one who can sign in.
     FakeAdmin.reset([
         FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com"),
@@ -344,13 +414,23 @@ def test_setting_the_status_of_a_missing_administrator_is_not_found():
     assert signed_in(admins_app()).put("/api/admins/99/status", json={"status": "Inactive"}).status_code == 404
 
 
-def test_setting_a_status_requires_an_administrator(monkeypatch):
-    monkeypatch.setattr(admins_module, "admin_required", lambda: (None, ({"success": False}, 401)))
-
-    response = signed_in(admins_app()).put("/api/admins/2/status", json={"status": "Inactive"})
+def test_setting_a_status_requires_a_signed_in_account():
+    response = admins_app().test_client().put("/api/admins/2/status", json={"status": "Inactive"})
 
     assert response.status_code == 401
     assert next(item for item in FakeAdmin.store if item.id == 2).status == "active"
+
+
+@pytest.mark.parametrize("status", ["Inactive", "Active"])
+def test_setting_a_status_refuses_a_plain_administrator(status, admin_directory):
+    # The caller (2) acts on the superadmin (1), so only the role can refuse.
+    response = signed_in(admins_app(), admin_id=2).put("/api/admins/1/status", json={"status": status})
+
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+    assert response.json["message"] == "Superadmin access required"
+    assert next(item for item in FakeAdmin.store if item.id == 1).status == "active"
+    assert admin_directory.committed is False
 
 
 def test_sending_a_reset_code_mails_the_other_account(admin_directory):
@@ -361,6 +441,13 @@ def test_sending_a_reset_code_mails_the_other_account(admin_directory):
     assert admin_directory.reset_codes_sent == ["admin02"]
     # The caller never learns the code itself.
     assert "otp" not in response.json and "code" not in response.json
+
+
+def test_a_plain_administrator_can_send_a_reset_code_to_a_superadmin(admin_directory):
+    response = signed_in(admins_app(), admin_id=2).post("/api/admins/1/password-reset")
+
+    assert response.status_code == 200
+    assert admin_directory.reset_codes_sent == ["admin01"]
 
 
 def test_sending_a_reset_code_needs_an_address_on_file(admin_directory):
@@ -402,10 +489,8 @@ def test_sending_a_reset_code_for_a_missing_administrator_is_not_found():
     assert signed_in(admins_app()).post("/api/admins/99/password-reset").status_code == 404
 
 
-def test_sending_a_reset_code_requires_an_administrator(monkeypatch):
-    monkeypatch.setattr(admins_module, "admin_required", lambda: (None, ({"success": False}, 401)))
-
-    assert signed_in(admins_app()).post("/api/admins/2/password-reset").status_code == 401
+def test_sending_a_reset_code_requires_a_signed_in_account():
+    assert admins_app().test_client().post("/api/admins/2/password-reset").status_code == 401
 
 
 def test_deleting_removes_another_administrator(admin_directory):
@@ -424,7 +509,7 @@ def test_deleting_refuses_the_signed_in_account():
     assert len(FakeAdmin.store) == 2
 
 
-def test_deleting_refuses_the_last_administrator():
+def test_deleting_refuses_the_last_administrator(guards_passed):
     FakeAdmin.reset([FakeAdmin(id=2, username="admin02", password="x", gmail="a@example.com")])
 
     response = signed_in(admins_app(), admin_id=1).delete("/api/admins/2")
@@ -434,13 +519,76 @@ def test_deleting_refuses_the_last_administrator():
     assert len(FakeAdmin.store) == 1
 
 
-def test_deleting_requires_a_confirmed_password(monkeypatch):
-    monkeypatch.setattr(admins_module, "reauth_required", lambda: (None, (
-        {"success": False, "code": "password_confirmation_required"}, 403,
-    )))
-
-    response = signed_in(admins_app(), admin_id=1).delete("/api/admins/2")
+def test_deleting_requires_a_confirmed_password():
+    response = signed_in(admins_app(), admin_id=1, confirmed=False).delete("/api/admins/2")
 
     assert response.status_code == 403
     assert response.json["code"] == "password_confirmation_required"
     assert len(FakeAdmin.store) == 2
+
+
+def test_deleting_requires_a_recent_password_confirmation():
+    client = signed_in(admins_app(), admin_id=1, confirmed=False)
+    with client.session_transaction() as flask_session:
+        flask_session["reauth_at"] = time.time() - auth_module.REAUTH_MAX_AGE_SECONDS - 1
+
+    response = client.delete("/api/admins/2")
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
+    assert len(FakeAdmin.store) == 2
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_deleting_refuses_a_plain_administrator_before_asking_for_a_password(confirmed):
+    # Even with no confirmation the caller hears about the role, not a prompt.
+    response = signed_in(admins_app(), admin_id=2, confirmed=confirmed).delete("/api/admins/1")
+
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+    assert response.json["message"] == "Superadmin access required"
+    assert len(FakeAdmin.store) == 2
+
+
+def test_deleting_requires_a_signed_in_account():
+    assert admins_app().test_client().delete("/api/admins/2").status_code == 401
+
+
+def test_a_plain_administrator_is_refused_before_the_account_is_looked_up():
+    # A missing target must not tell a plain administrator anything.
+    response = signed_in(admins_app(), admin_id=2).delete("/api/admins/99")
+
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+
+
+def test_a_deactivated_superadmin_is_refused():
+    next(item for item in FakeAdmin.store if item.id == 1).status = "inactive"
+
+    response = signed_in(admins_app(), admin_id=1).post("/api/admins", json={
+        "username": "admin03", "email": "admin03@example.com", "password": "another-secret",
+    })
+
+    assert response.status_code == 401
+
+
+def test_self_edit_works_for_a_plain_administrator_and_cannot_change_the_role():
+    client = signed_in(admins_app(), admin_id=2)
+
+    response = client.put("/api/admins/2", json={
+        "username": "admin02", "email": "admin02@example.com", "role": "superadmin",
+    })
+
+    assert response.status_code == 200
+    assert response.json["admin"]["role"] == "admin"
+    assert next(item for item in FakeAdmin.store if item.id == 2).role == "admin"
+
+
+def test_a_superadmin_self_edit_keeps_the_role():
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1", json={
+        "username": "admin01", "email": "admin01@example.com", "role": "admin",
+    })
+
+    assert response.status_code == 200
+    assert response.json["admin"]["role"] == "superadmin"
+    assert next(item for item in FakeAdmin.store if item.id == 1).role == "superadmin"

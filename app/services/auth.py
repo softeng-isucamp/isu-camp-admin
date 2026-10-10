@@ -344,6 +344,37 @@ def admin_required():
     return admin, None
 
 
+# The frontend recognises this code, not the message text, to tell a missing
+# role apart from any other 403.
+SUPERADMIN_REQUIRED_CODE = "superadmin_required"
+
+
+def superadmin_required():
+    """Guard a route that only a superadmin may use.
+
+    Returns ``(admin, None)`` or ``(None, response)`` like
+    :func:`admin_required`, so routes can chain the two. The role is read from
+    the row on every request, so a demoted account is refused on its next call
+    without its session being invalidated.
+    """
+
+    admin, error = admin_required()
+    if error:
+        return None, error
+
+    if not admin.is_superadmin:
+        return None, (
+            jsonify({
+                "success": False,
+                "code": SUPERADMIN_REQUIRED_CODE,
+                "message": "Superadmin access required"
+            }),
+            403
+        )
+
+    return admin, None
+
+
 # ==========================================
 # PASSWORD CONFIRMATION FOR DESTRUCTIVE ACTIONS
 # ==========================================
