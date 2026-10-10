@@ -75,20 +75,24 @@ def reclaim_idle_rate_limit_buckets(now):
         return
     rate_limit_swept_at = now
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-    for key in [k for k, bucket in list(rate_limit_buckets.items()) if not bucket or bucket[-1] <= cutoff]:
+    for key in [k for k, bucket in list(rate_limit_buckets.items()) if not bucket or max(bucket) <= cutoff]:
         rate_limit_buckets.pop(key, None)
 
 
 def rate_limited(scope, key, limit, message):
-    now = time.monotonic()
     with rate_limit_lock:
+        # Read inside the lock so hits are stored in the order they were
+        # taken; hits are still judged by value, not position.
+        now = time.monotonic()
         reclaim_idle_rate_limit_buckets(now)
         bucket = rate_limit_buckets[(scope, key)]
         cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-        while bucket and bucket[0] <= cutoff:
-            bucket.popleft()
+        if bucket and min(bucket) <= cutoff:
+            live = [hit for hit in bucket if hit > cutoff]
+            bucket.clear()
+            bucket.extend(live)
         if len(bucket) >= limit:
-            retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
+            retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - min(bucket))))
         else:
             bucket.append(now)
             return None
@@ -793,7 +797,13 @@ RECOVERY_RETAIN_EXPIRED_SECONDS = 3600
 # Every address asked about gets a stored entry, real account or not, so the
 # number of entries is capped; past it the oldest go first, whichever kind they
 # are, so being evicted cannot tell an attacker which addresses have accounts.
+# Entries made by /request live in ``reset_otps`` under this cap. A guess for an
+# address with no entry makes one too, but in ``guessed_recovery_entries`` under
+# its own cap, so guessing at addresses nobody asked about can only push out
+# other such guesses, never a code that was really requested.
 RECOVERY_MAX_ENTRIES = 5000
+RECOVERY_MAX_GUESSED_ENTRIES = 5000
+guessed_recovery_entries = {}
 
 # The width of the admin.gmail column: no stored address is longer, so a longer
 # one cannot belong to an account. Checked before anything is keyed on it.
@@ -853,23 +863,35 @@ def recovery_key(purpose, email):
 def sweep_recovery_codes():
     """Drops long-expired entries; the caller holds ``recovery_lock``."""
     cutoff = datetime.utcnow() - timedelta(seconds=RECOVERY_RETAIN_EXPIRED_SECONDS)
-    for key in [k for k, entry in list(reset_otps.items()) if isinstance(k, tuple) and entry["expires_at"] < cutoff]:
-        reset_otps.pop(key, None)
+    for pool in (reset_otps, guessed_recovery_entries):
+        for key in [k for k, entry in list(pool.items()) if isinstance(k, tuple) and entry["expires_at"] < cutoff]:
+            pool.pop(key, None)
 
 
-def store_recovery_entry(key, entry):
-    """Stores ``entry`` as the newest, evicting the oldest past the cap.
+def find_recovery_entry(key):
+    """The entry for ``key`` from either pool, or None; the caller holds the lock.
 
-    The caller holds ``recovery_lock``.
+    A guessed entry only exists while no requested one does, so the order is
+    not observable.
     """
-    reset_otps.pop(key, None)
-    reset_otps[key] = entry
-    if len(reset_otps) <= RECOVERY_MAX_ENTRIES:
+    entry = reset_otps.get(key)
+    return entry if entry is not None else guessed_recovery_entries.get(key)
+
+
+def store_recovery_entry(pool, cap, key, entry):
+    """Stores ``entry`` in ``pool`` as the newest, evicting its oldest past ``cap``.
+
+    The caller holds ``recovery_lock``. Only the entries of ``pool`` are
+    counted or evicted, and the oldest goes first whatever kind it is.
+    """
+    pool.pop(key, None)
+    pool[key] = entry
+    if len(pool) <= cap:
         return
     sweep_recovery_codes()
-    excess = sum(1 for k in list(reset_otps) if isinstance(k, tuple)) - RECOVERY_MAX_ENTRIES
-    for oldest in [k for k in list(reset_otps) if isinstance(k, tuple)][:max(excess, 0)]:
-        reset_otps.pop(oldest, None)
+    excess = sum(1 for k in list(pool) if isinstance(k, tuple)) - cap
+    for oldest in [k for k in list(pool) if isinstance(k, tuple)][:max(excess, 0)]:
+        pool.pop(oldest, None)
 
 
 def new_recovery_entry(otp=None, admin=None):
@@ -891,7 +913,9 @@ def issue_recovery_code(purpose, email, admin):
     otp = generate_otp() if admin else None
     with recovery_lock:
         sweep_recovery_codes()
-        store_recovery_entry(recovery_key(purpose, email), new_recovery_entry(otp, admin))
+        key = recovery_key(purpose, email)
+        guessed_recovery_entries.pop(key, None)
+        store_recovery_entry(reset_otps, RECOVERY_MAX_ENTRIES, key, new_recovery_entry(otp, admin))
     return otp
 
 
@@ -968,8 +992,10 @@ def recovery_failure(error):
 def recovery_email(data):
     """The normalised email from a request body, or '' when it is unusable.
 
-    Longer than a stored address can be counts as unusable, and is measured
-    before anything is lowercased or kept, so an oversized value costs nothing.
+    Longer than a stored address can be counts as unusable, and is measured as
+    submitted, before anything is lowercased or kept, so an oversized value
+    costs nothing. Lowercasing can lengthen a character, so the result may be
+    a little longer than the cap.
     """
     value = data.get("email") if isinstance(data, dict) else None
     if not isinstance(value, str):
@@ -977,8 +1003,7 @@ def recovery_email(data):
     value = value.strip()
     if len(value) > EMAIL_MAX_LENGTH:
         return ""
-    value = value.lower()
-    return value if len(value) <= EMAIL_MAX_LENGTH else ""
+    return value.lower()
 
 
 def recovery_code_matches(entry, code):
@@ -1012,11 +1037,11 @@ def check_recovery_code(purpose, email, code):
     admin = find_recovery_admin(email)
 
     with recovery_lock:
-        entry = reset_otps.get(key)
+        entry = find_recovery_entry(key)
         if entry is None:
             sweep_recovery_codes()
             entry = new_recovery_entry()
-            store_recovery_entry(key, entry)
+            store_recovery_entry(guessed_recovery_entries, RECOVERY_MAX_GUESSED_ENTRIES, key, entry)
 
         if datetime.utcnow() >= entry["expires_at"]:
             return None, recovery_error("code_expired", "This code has expired. Request a new one.")
@@ -1053,15 +1078,6 @@ def claim_recovery_code(purpose, email, code, admin):
             return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
         del reset_otps[key]
         return entry, None
-
-
-def restore_recovery_code(purpose, email, entry):
-    """Puts back a claimed code whose password write failed.
-
-    Only if nothing has taken its place: a code issued since is newer and wins.
-    """
-    with recovery_lock:
-        reset_otps.setdefault(recovery_key(purpose, email), entry)
 
 
 def recovery_guess_limit(scope, email):
@@ -1193,22 +1209,18 @@ def recovery_reset_password():
         # The code is single-use: whichever request claims it first redeems it,
         # and a request that checked it at the same moment is refused here,
         # before anything is written.
-        claimed, refusal = claim_recovery_code("password", email, code, admin)
+        _, refusal = claim_recovery_code("password", email, code, admin)
         if refusal:
             return refusal
 
-        try:
-            admin.password = password_hash
-            log_audit(
-                "System", admin, "password reset", "Admin", admin.id,
-                "Password reset by email verification code"
-            )
-            db.session.commit()
-        except Exception:
-            # Nothing was changed, so the admin keeps the code they were sent
-            # rather than needing another email for a failure that was ours.
-            restore_recovery_code("password", email, claimed)
-            raise
+        # The code is spent for good, even if this write fails: the admin asks
+        # for a new one, and nothing can bring an old one back.
+        admin.password = password_hash
+        log_audit(
+            "System", admin, "password reset", "Admin", admin.id,
+            "Password reset by email verification code"
+        )
+        db.session.commit()
 
         return jsonify({"success": True, "username": admin.username}), 200
 

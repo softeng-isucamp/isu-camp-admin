@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 import re
 import threading
+from collections import deque
 
 from flask import Flask
 import pytest
@@ -45,6 +46,7 @@ class Harness:
 
         auth_module.rate_limit_buckets.clear()
         auth_module.reset_otps.clear()
+        auth_module.guessed_recovery_entries.clear()
 
         class FakeMessage:
             def __init__(self, **values):
@@ -666,8 +668,18 @@ def test_the_old_reset_routes_still_use_their_own_store(harness):
 # Review round 1
 # ==========================================
 
-def recovery_entries():
+def pending_entries():
+    """Entries /request created, real or codeless."""
     return {k: v for k, v in auth_module.reset_otps.items() if isinstance(k, tuple)}
+
+
+def guessed_entries():
+    """Entries made because a guess arrived for an address with none."""
+    return dict(auth_module.guessed_recovery_entries)
+
+
+def recovery_entries():
+    return {**pending_entries(), **guessed_entries()}
 
 
 def outcome(response):
@@ -751,20 +763,20 @@ def test_an_email_at_the_column_width_is_still_accepted(harness):
     assert harness.verify("000000", email=email).json["code"] == "invalid_code"
 
 
-def test_phantom_entries_are_capped_and_keep_the_newest(harness, monkeypatch):
+def test_request_entries_are_capped_and_keep_the_newest(harness, monkeypatch):
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 5)
 
     for n in range(20):
         harness.release_cooldown()
-        harness.verify("000000", email=f"nobody{n}@isu.edu.ph")
+        harness.request_code(f"nobody{n}@isu.edu.ph")
 
-    assert len(recovery_entries()) == 5
-    assert ("password", "nobody19@isu.edu.ph") in recovery_entries()
-    assert ("password", "nobody0@isu.edu.ph") not in recovery_entries()
+    assert len(pending_entries()) == 5
+    assert ("password", "nobody19@isu.edu.ph") in pending_entries()
+    assert ("password", "nobody0@isu.edu.ph") not in pending_entries()
 
 
-def test_an_evicted_real_code_looks_like_an_evicted_phantom_one(harness, monkeypatch):
-    """Eviction restarts both kinds of entry alike, so it cannot tell them apart."""
+def test_an_evicted_real_code_looks_like_an_evicted_codeless_one(harness, monkeypatch):
+    """Eviction restarts both kinds of request entry alike, so it cannot tell them apart."""
 
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
     harness.request_code()
@@ -772,7 +784,7 @@ def test_an_evicted_real_code_looks_like_an_evicted_phantom_one(harness, monkeyp
     harness.request_code("absent@isu.edu.ph")
     for n in range(3):
         harness.release_cooldown()
-        harness.verify("000000", email=f"nobody{n}@isu.edu.ph")
+        harness.request_code(f"nobody{n}@isu.edu.ph")
 
     harness.release_cooldown()
     known = harness.verify(real)
@@ -959,8 +971,8 @@ def test_the_same_code_cannot_reset_two_passwords_at_once(harness, monkeypatch):
     assert harness.commits == 1
 
 
-def test_a_failed_write_gives_the_code_back_so_the_reset_can_be_retried(harness, monkeypatch):
-    """The password did not change, so the admin keeps the code they were sent."""
+def test_a_failed_write_still_consumes_the_code(harness, monkeypatch):
+    """A claimed code is spent for good; the admin asks for a new one."""
 
     harness.request_code()
     real = harness.issued_code()
@@ -976,10 +988,52 @@ def test_a_failed_write_gives_the_code_back_so_the_reset_can_be_retried(harness,
     retry = harness.reset(real, password="Retry!pass12")
 
     assert failed.status_code == 500
+    assert failed.json == {"success": False, "message": "Account recovery failed. Please try again."}
     assert "database is down" not in failed.get_data(as_text=True)
-    assert retry.status_code == 200
-    assert verify_password(harness.admins[0].password, "Retry!pass12")[0]
-    assert harness.reset(real).json["code"] == "invalid_code"
+    assert retry.status_code == 400 and retry.json["code"] == "invalid_code"
+    assert not verify_password(harness.admins[0].password, "Retry!pass12")[0]
+    assert ("password", "admin@isu.edu.ph") not in pending_entries()
+
+    harness.request_code()
+    assert harness.reset(harness.issued_code(), password="Retry!pass12").status_code == 200
+
+
+def test_a_failed_old_reset_cannot_bring_its_code_back_after_a_newer_one_was_used(harness, monkeypatch):
+    harness.request_code()
+    old = harness.issued_code()
+    entered = threading.Event()
+    release = threading.Event()
+    original_commit = auth_module.db.session.commit
+    monkeypatch.setattr(auth_module, "generate_otp", lambda: "654321" if old != "654321" else "654322")
+
+    def commit():
+        if threading.current_thread().name == "old-reset":
+            entered.set()
+            assert release.wait(5)
+            raise RuntimeError("database is down")
+        original_commit()
+
+    monkeypatch.setattr(auth_module.db.session, "commit", commit)
+
+    def old_reset():
+        return harness.post_from("192.0.2.2", "reset-password", email="admin@isu.edu.ph", code=old, password="First!pass1")
+
+    def newer():
+        assert entered.wait(5)
+        harness.release_cooldown()
+        assert harness.post_from("192.0.2.3", "request", email="admin@isu.edu.ph", purpose="password").status_code == 200
+        new = harness.post_from("192.0.2.4", "reset-password", email="admin@isu.edu.ph", code="654321" if old != "654321" else "654322", password="Newer!pass2")
+        release.set()
+        return new
+
+    results = run_threads(**{"old-reset": old_reset, "newer": newer})
+    again = harness.post_from("192.0.2.5", "reset-password", email="admin@isu.edu.ph", code=old, password="Third!pass3")
+
+    assert results["newer"].status_code == 200
+    assert results["old-reset"].status_code == 500
+    assert again.status_code == 400 and again.json["code"] == "invalid_code"
+    assert verify_password(harness.admins[0].password, "Newer!pass2")[0]
+    assert harness.commits == 1
 
 
 def test_a_reset_that_loses_the_code_to_a_new_request_is_refused(harness, monkeypatch):
@@ -1035,3 +1089,159 @@ def test_signing_in_with_the_new_password_works_and_the_old_one_is_refused(harne
     assert old.status_code == 401
     assert new.status_code == 200 and new.json["admin"]["username"] == "admin_justine"
     assert signed_in == 1
+
+
+# ==========================================
+# Review round 2
+# ==========================================
+
+def test_guesses_for_unrequested_addresses_cannot_evict_a_pending_code(harness, monkeypatch):
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_GUESSED_ENTRIES", 3)
+    harness.request_code()
+    real = harness.issued_code()
+
+    for n in range(20):
+        harness.release_cooldown()
+        assert harness.verify("000000", email=f"nobody{n}@isu.edu.ph").status_code == 400
+
+    harness.release_cooldown()
+    verified = harness.verify(real)
+    assert verified.status_code == 200 and verified.json["username"] == "admin_justine"
+
+
+def test_guessed_entries_have_their_own_cap_and_evict_only_each_other(harness, monkeypatch):
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_GUESSED_ENTRIES", 5)
+    harness.request_code()
+    harness.request_code("absent@isu.edu.ph")
+
+    for n in range(20):
+        harness.release_cooldown()
+        harness.verify("000000", email=f"nobody{n}@isu.edu.ph")
+
+    assert len(guessed_entries()) == 5
+    assert ("password", "nobody19@isu.edu.ph") in guessed_entries()
+    assert ("password", "nobody0@isu.edu.ph") not in guessed_entries()
+    assert set(pending_entries()) == {("password", "admin@isu.edu.ph"), ("password", "absent@isu.edu.ph")}
+
+
+def test_a_flood_of_requests_does_not_evict_guessed_entries(harness, monkeypatch):
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_GUESSED_ENTRIES", 3)
+    harness.verify("000000", email="guessed@isu.edu.ph")
+    harness.verify("000000", email="guessed@isu.edu.ph")
+
+    for n in range(10):
+        harness.release_cooldown()
+        harness.request_code(f"nobody{n}@isu.edu.ph")
+
+    assert guessed_entries()[("password", "guessed@isu.edu.ph")]["attempts"] == 2
+    assert len(pending_entries()) == 3
+
+
+def test_a_guessed_address_counts_down_exactly_like_a_requested_one(harness):
+    harness.request_code("requested@isu.edu.ph")
+    for remaining in (4, 3, 2, 1):
+        harness.release_cooldown()
+        requested = harness.verify("000000", email="requested@isu.edu.ph")
+        guessed = harness.verify("000000", email="guessed@isu.edu.ph")
+        assert outcome(requested) == outcome(guessed)
+        assert guessed.json["attemptsRemaining"] == remaining
+    harness.release_cooldown()
+    assert outcome(harness.verify("000000", email="requested@isu.edu.ph")) == outcome(harness.verify("000000", email="guessed@isu.edu.ph"))
+    assert harness.verify("000000", email="guessed@isu.edu.ph").json["code"] == "code_exhausted"
+
+
+def test_a_request_replaces_an_address_guessed_before_it(harness):
+    for _ in range(3):
+        harness.verify("000000")
+    assert ("password", "admin@isu.edu.ph") in guessed_entries()
+
+    harness.request_code()
+    real = harness.issued_code()
+
+    assert ("password", "admin@isu.edu.ph") not in guessed_entries()
+    assert harness.verify(harness.wrong_code(real)).json["attemptsRemaining"] == 4
+    assert harness.verify(real).status_code == 200
+
+
+def test_a_flood_of_requests_that_evicts_a_real_code_leaves_a_fresh_guessed_entry(harness, monkeypatch):
+    monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 2)
+    harness.request_code()
+    real = harness.issued_code()
+    for n in range(2):
+        harness.release_cooldown()
+        harness.request_code(f"nobody{n}@isu.edu.ph")
+
+    harness.release_cooldown()
+    refused = harness.verify(real)
+
+    assert refused.json["code"] == "invalid_code" and refused.json["attemptsRemaining"] == 4
+    assert ("password", "admin@isu.edu.ph") in guessed_entries()
+
+
+def test_the_rate_limiter_reads_the_clock_inside_its_lock(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    held = []
+
+    def clock():
+        held.append(auth_module.rate_limit_lock.locked())
+        return 100.0
+
+    monkeypatch.setattr(auth_module.time, "monotonic", clock)
+    with Flask(__name__).test_request_context():
+        auth_module.rate_limited("s", "k", 5, "slow")
+
+    assert held and all(held)
+
+
+def test_a_bucket_with_hits_out_of_order_keeps_its_live_hits(monkeypatch):
+    """Four hits still inside the window must count, whatever order they were stored in."""
+
+    auth_module.rate_limit_buckets.clear()
+    monkeypatch.setattr(auth_module, "rate_limit_swept_at", None)
+    monkeypatch.setattr(auth_module.time, "monotonic", lambda: 160.0)
+    auth_module.rate_limit_buckets[("login", "client")] = deque([101.0, 101.0, 101.0, 101.0, 100.0])
+
+    with Flask(__name__).test_request_context():
+        first = auth_module.rate_limited("login", "client", 5, "slow")
+        second = auth_module.rate_limited("login", "client", 5, "slow")
+
+    assert first is None
+    assert second is not None and second[1] == 429
+    assert second[0].headers["Retry-After"] == "1"
+    assert sorted(auth_module.rate_limit_buckets[("login", "client")]) == [101.0] * 4 + [160.0]
+
+
+def test_a_stale_hit_stored_behind_a_live_one_does_not_count(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    monkeypatch.setattr(auth_module, "rate_limit_swept_at", 150.0)
+    monkeypatch.setattr(auth_module.time, "monotonic", lambda: 160.0)
+    auth_module.rate_limit_buckets[("s", "k")] = deque([130.0, 99.0])
+
+    with Flask(__name__).test_request_context():
+        assert auth_module.rate_limited("s", "k", 2, "slow") is None
+        limited = auth_module.rate_limited("s", "k", 2, "slow")
+
+    assert limited is not None
+    assert limited[0].headers["Retry-After"] == str(30)
+
+
+def test_an_address_that_only_fits_before_lowercasing_is_still_accepted(harness):
+    email = "İ" + "a" * (auth_module.EMAIL_MAX_LENGTH - len("@isu.edu.ph") - 1) + "@isu.edu.ph"
+    assert len(email) == auth_module.EMAIL_MAX_LENGTH and len(email.lower()) == auth_module.EMAIL_MAX_LENGTH + 1
+    harness.admins.append(FakeAdmin(2, "long_address", email))
+
+    requested = harness.request_code(email=email)
+
+    assert requested.status_code == 200
+    assert len(harness.sent) == 1
+    assert harness.verify(harness.issued_code(), email=email).json["username"] == "long_address"
+
+
+def test_an_address_one_character_over_the_column_is_still_refused(harness):
+    email = "a" * (auth_module.EMAIL_MAX_LENGTH + 1 - len("@isu.edu.ph")) + "@isu.edu.ph"
+
+    assert harness.request_code(email=email).status_code == 400
+    assert recovery_entries() == {}
