@@ -89,3 +89,35 @@ Use the tracked [production build and release recipe](deploy/README.md) for Dock
 The Map Editor's indoor-location markers require the `public.location` schema to support nullable latitude and longitude values. Coordinates must be stored as a complete pair and stay within the valid latitude and longitude ranges. Apply the database migration through the database team's deployment process before using indoor marker placement; the application does not alter the schema at startup.
 
 Pathway distance and estimated time are no longer stored or returned by the application. Legacy `public.pathway.distance_m` and `public.pathway.estimated_minutes` columns are unused by the application and may remain in the database.
+
+## Database backups
+
+Backup & Recovery on My Profile takes real `pg_dump` archives. Four routes back it, all superadmin-only:
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/backups` | Stored archives, plus the running job if there is one |
+| `POST /api/backups` | Start a dump; returns a job to poll |
+| `POST /api/backups/<id>/restore` | Restore an archive; needs the caller's password |
+| `GET /api/jobs/<id>` | Poll one operation until it is terminal |
+
+The archive is `pg_dump`'s custom format, so `pg_restore` can list it, pull one table out of it, or restore all of it with no code from this repository involved. That is the reason for preferring it to an application-level export. Measured against this project: **24 MB in about 1 minute 45 seconds**, covering all 17 tables of the `public` schema.
+
+These are jobs rather than plain responses because of that runtime. The API runs `gunicorn --timeout 120`, so a synchronous dump would be killed before finishing. `POST /api/backups` returns `202` with `{id, kind, status}` and the panel polls `GET /api/jobs/<id>` every 1.5 seconds.
+
+### What a deployment needs
+
+Two things that are **not** in place today:
+
+1. **`pg_dump` and `pg_restore` must be on the server.** The API image (`python:3.12-slim-bookworm`) does not include them, so a deployed backup fails with a clear `503` rather than a crash. Debian bookworm's `postgresql-client` is version 15, and **a 15 client refuses to dump a 17 server** — Supabase runs 17.6, so the client must be 17 or newer. Installing that needs the PostgreSQL APT repository, which would add an unpinned source to an image that otherwise pins its base by digest and its Python packages by hash. That trade is a deliberate decision, so it has not been made here. Set `PG_DUMP_PATH` and `PG_RESTORE_PATH` to point at specific binaries.
+2. **The archive directory must outlive the container.** Archives are written to `BACKUP_DIR` (default `backups/`, gitignored). `deploy/compose.yaml` mounts no volume, so in a container they would disappear on the next deployment. Mount a volume at the configured path, or move storage to object storage.
+
+Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
+
+### Restoring is off by default
+
+`POST /api/backups/<id>/restore` answers `403` unless `BACKUP_RESTORE_ENABLED=true`. A restore runs `pg_restore --clean --if-exists --single-transaction` over the live `public` schema: it replaces every table, including `public.admin`, in a database the companion User App also reads. It undoes other people's work, not just the caller's. The flag exists so enabling it is a decision somebody makes on purpose rather than a button that happens to be present.
+
+The caller's password is required and is checked **before** the flag, so a caller who cannot authenticate learns nothing about whether restoring is available.
+
+**An archive is a complete copy of the database, including the `public.admin` password hashes.** Treat a `.dump` file as credential material: `backups/` is gitignored, and a copy moved anywhere else needs the same care.

@@ -27,3 +27,7 @@ reference/
 frontend.pid
 frontend.out.log
 frontend.err.log
+
+# pg_dump archives written by services/backup_jobs.py. These are full
+# database dumps including public.admin password hashes - never commit them.
+backups/
