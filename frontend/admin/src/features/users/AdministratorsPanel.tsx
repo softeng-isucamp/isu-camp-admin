@@ -6,6 +6,7 @@ import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
+import { SuperadminRequiredError } from "../../services/errors";
 import type { AdminAccount, AdminAccountDraft, AdminRole } from "../../types";
 
 const ROLE_LABELS: Record<AdminAccount["role"], string> = { admin: "Administrator", superadmin: "Superadmin" };
@@ -56,7 +57,7 @@ export function AdministratorsPanel() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const feedback = useFeedback();
-  const { session } = useAuth();
+  const { session, refreshSession } = useAuth();
   const canManage = session?.role === "superadmin";
   const [dialog, setDialog] = useState<Dialog>(null);
   const passwordConfirmation = usePasswordConfirmation(
@@ -98,6 +99,21 @@ export function AdministratorsPanel() {
     setError(cause instanceof Error ? cause.message : fallback);
   };
 
+  /**
+   * A superadmin refusal means this page is acting on a role the account no longer
+   * holds. Say so, drop whatever dialog was open, and read the session and the list
+   * again so the controls match what the server will allow. It goes to the page's
+   * feedback stack because closing the dialog discards the dialog's own error line.
+   */
+  const recoverFromSuperadminRefusal = (cause: unknown) => {
+    if (!(cause instanceof SuperadminRequiredError)) return false;
+    closeDialog();
+    feedback.reportError(cause.message);
+    void refreshSession();
+    void refresh();
+    return true;
+  };
+
   const save = useMutation({
     mutationFn: (values: AdminAccountDraft) => services.admins.save(values),
     onSuccess: async (saved) => {
@@ -106,7 +122,7 @@ export function AdministratorsPanel() {
       closeDialog();
     },
     onError: (cause) => {
-      if (passwordConfirmation.handleRejection(cause)) return;
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
       reportFailure(cause, "Unable to save the administrator.");
     },
   });
@@ -119,7 +135,10 @@ export function AdministratorsPanel() {
       feedback.reportSuccess(`${saved.username} was ${saved.status === "Inactive" ? "deactivated" : "activated"} successfully.`);
       closeDialog();
     },
-    onError: (cause) => reportFailure(cause, "Unable to update the administrator's status."),
+    onError: (cause) => {
+      if (recoverFromSuperadminRefusal(cause)) return;
+      reportFailure(cause, "Unable to update the administrator's status.");
+    },
   });
 
   const sendReset = useMutation({
@@ -139,7 +158,7 @@ export function AdministratorsPanel() {
       closeDialog();
     },
     onError: (cause) => {
-      if (passwordConfirmation.handleRejection(cause)) return;
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
       reportFailure(cause, "Unable to remove the administrator.");
     },
   });
@@ -155,7 +174,7 @@ export function AdministratorsPanel() {
       closeDialog();
     },
     onError: (cause) => {
-      if (passwordConfirmation.handleRejection(cause)) return;
+      if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
       reportFailure(cause, "Unable to change the administrator's role.");
     },
   });

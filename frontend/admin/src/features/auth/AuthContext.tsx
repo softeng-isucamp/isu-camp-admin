@@ -14,6 +14,8 @@ interface AuthValue {
   logout: () => Promise<void>;
   loading: boolean;
   updateSession: (profile: Session) => void;
+  /** Reads the session from the server again, e.g. after a refusal shows its role has changed. */
+  refreshSession: () => Promise<void>;
 }
 const Auth = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -43,6 +45,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const updateSession = (profile: Session) => {
     setSession((current) => current && current === session && String(current.id) === profile.id ? profile : current);
   };
+  // Only an explicit request re-reads the session; a failed read leaves the current one alone.
+  // A read that comes back after sign-out, or for another account, is ignored.
+  const refreshSession = async () => {
+    let fresh: Session | null;
+    try {
+      fresh = await services.auth.me();
+    } catch {
+      return;
+    }
+    setSession((current) => {
+      if (!current) return current;
+      if (!fresh) return null;
+      return String(current.id) === String(fresh.id) ? fresh : current;
+    });
+  };
   const logout = async () => {
     try {
       await services.auth.logout();
@@ -52,7 +69,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   };
   return (
     <Auth.Provider
-      value={useMemo(() => ({ session, login, logout, loading, updateSession }), [session, loading])}
+      value={useMemo(() => ({ session, login, logout, loading, updateSession, refreshSession }), [session, loading])}
     >
       {children}
     </Auth.Provider>

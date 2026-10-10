@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
-import { PasswordConfirmationRequiredError } from "../../services/errors";
+import { PasswordConfirmationRequiredError, SuperadminRequiredError } from "../../services/errors";
 import type { AdminAccount, AdminRole } from "../../types";
+import { Shell } from "../../components/Shell";
 import * as AuthContext from "../auth/AuthContext";
 import { Users } from "./Users";
 
@@ -21,6 +22,7 @@ function signInAs(role: AdminRole | undefined, username = "admin_justine") {
     logout: vi.fn(),
     loading: false,
     updateSession: vi.fn(),
+    refreshSession: vi.fn(),
   });
 }
 
@@ -779,5 +781,205 @@ describe("Choosing a role when adding an administrator", () => {
     vi.spyOn(services.admins, "list").mockResolvedValue(directoryForRegistrar());
     await openAdministrators();
     expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("A superadmin session that has gone stale", () => {
+  const dean: AdminAccount = { id: "3", username: "admin_dean", email: "dean@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false };
+  const inactive: AdminAccount = { id: "4", username: "admin_idle", email: "idle@isu.edu.ph", status: "Inactive", role: "admin", isCurrent: false };
+  const refusal = () => new SuperadminRequiredError("Superadmin access required");
+  const demotedSession = { id: "1", username: "admin_justine", role: "admin" as const };
+  let me: ReturnType<typeof vi.spyOn>;
+  let list: ReturnType<typeof vi.spyOn>;
+
+  /** The list the server returns once the viewer has been demoted: same accounts, new role. */
+  const demotedDirectory = () => [
+    { ...directory[0], role: "admin" as const },
+    { ...directory[1] },
+    { ...dean },
+    { ...inactive },
+  ];
+
+  beforeEach(() => {
+    // The real provider: the page must end up with whatever `me()` reports after the refusal.
+    me = vi.spyOn(services.auth, "me").mockResolvedValueOnce({ id: "1", username: "admin_justine", role: "superadmin" });
+    list = vi.spyOn(services.admins, "list").mockResolvedValueOnce([{ ...directory[0] }, { ...directory[1] }, { ...dean }, { ...inactive }]);
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  /** After the refusal the server reports a plain administrator. */
+  const demoteOnServer = () => {
+    me.mockResolvedValue(demotedSession);
+    list.mockResolvedValue(demotedDirectory());
+  };
+
+  function renderSignedIn(withShell = false) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const page = <Users />;
+    return render(
+      <QueryClientProvider client={client}>
+        <AuthContext.AuthProvider>
+          <MemoryRouter initialEntries={["/users"]}>
+            {withShell ? <Shell>{page}</Shell> : page}
+          </MemoryRouter>
+        </AuthContext.AuthProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  async function openSignedInAdministrators(withShell = false) {
+    renderSignedIn(withShell);
+    // The Add button appears once the session has loaded.
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_registrar");
+    await screen.findByRole("button", { name: /add administrator/i });
+  }
+
+  /** Everything a plain administrator no longer sees. */
+  async function expectPlainAdministratorView() {
+    await waitFor(() => expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument());
+    openRowMenu("admin_registrar");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity", "Send password reset code"]);
+  }
+
+  const expectRefusalAnnounced = async () => {
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Superadmin access required");
+  };
+
+  it("announces the refusal, closes the dialog and shows the plain view after a refused role change", async () => {
+    vi.spyOn(services.admins, "setRole").mockRejectedValue(refusal());
+    await openSignedInAdministrators();
+    expect(me).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(1);
+
+    demoteOnServer();
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Make Superadmin" }));
+
+    await expectRefusalAnnounced();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    await expectPlainAdministratorView();
+    // The message stays up after the dialog and the controls are gone.
+    expect(screen.getByRole("alert")).toHaveTextContent("Superadmin access required");
+  });
+
+  it("recovers from a refused removal", async () => {
+    vi.spyOn(services.admins, "remove").mockRejectedValue(refusal());
+    await openSignedInAdministrators();
+
+    demoteOnServer();
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove administrator" }));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Administrator" }));
+
+    await expectRefusalAnnounced();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await expectPlainAdministratorView();
+    expect(me).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from a refused deactivation", async () => {
+    vi.spyOn(services.admins, "setStatus").mockRejectedValue(refusal());
+    await openSignedInAdministrators();
+
+    demoteOnServer();
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Deactivate account" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Deactivate Account" }));
+
+    await expectRefusalAnnounced();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await expectPlainAdministratorView();
+  });
+
+  it("recovers from a refused reactivation, which has no dialog to close", async () => {
+    vi.spyOn(services.admins, "setStatus").mockRejectedValue(refusal());
+    await openSignedInAdministrators();
+
+    demoteOnServer();
+    openRowMenu("admin_idle");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Activate account" }));
+
+    await expectRefusalAnnounced();
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument();
+  });
+
+  it("recovers from a refused add and drops the form with its typed values", async () => {
+    vi.spyOn(services.admins, "save").mockRejectedValue(refusal());
+    await openSignedInAdministrators();
+
+    demoteOnServer();
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+    await expectRefusalAnnounced();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await expectPlainAdministratorView();
+  });
+
+  it("makes the Shell's role label follow the refreshed session", async () => {
+    vi.spyOn(services.admins, "setRole").mockRejectedValue(refusal());
+    await openSignedInAdministrators(true);
+    expect(screen.getByText("SUPERADMIN")).toBeInTheDocument();
+
+    demoteOnServer();
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Make Superadmin" }));
+
+    expect(await screen.findByText("ADMINISTRATOR")).toBeInTheDocument();
+    expect(screen.queryByText("SUPERADMIN")).not.toBeInTheDocument();
+  });
+
+  it("does not re-read the session for other failures", async () => {
+    const save = vi.spyOn(services.admins, "save");
+    const remove = vi.spyOn(services.admins, "remove");
+    await openSignedInAdministrators();
+
+    // Validation: stays in the form, against its field.
+    save.mockRejectedValue(Object.assign(new Error("Username already exists."), { fieldErrors: { username: "Username already exists." } }));
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+    await waitFor(() => expect(screen.getAllByText("Username already exists.").length).toBeGreaterThan(0));
+    expect(screen.getByRole("dialog", { name: "Add Administrator" })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+
+    // Password confirmation expired: re-prompts in the dialog.
+    remove.mockRejectedValueOnce(new PasswordConfirmationRequiredError());
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove administrator" }));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Administrator" }));
+    expect(await screen.findByText(/confirmation expired/i)).toBeInTheDocument();
+
+    // Anything else, such as a network failure: shown in the dialog.
+    remove.mockRejectedValueOnce(new Error("Network down"));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove Administrator" }));
+    expect(await screen.findByText("Network down")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    expect(me).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /add administrator/i })).toBeInTheDocument();
   });
 });

@@ -23,6 +23,7 @@ describe("Shell Sidebar Component", () => {
       logout: mockLogout,
       loading: false,
       updateSession: vi.fn(),
+      refreshSession: vi.fn(),
     });
   });
 
