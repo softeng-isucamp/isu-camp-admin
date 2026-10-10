@@ -1,6 +1,6 @@
 import type { DashboardAnalytics } from "../../../types";
 import { ChartCard } from "./ChartCard";
-import { formatNumber, formatPercent, rangeNoun } from "./format";
+import { formatNumber, formatPercent, rangePhrase } from "./format";
 
 type Tile = { label: string; hint: string; value: string; change: { text: string; direction: number } | null };
 
@@ -39,7 +39,7 @@ export function ActivityKpis({ data }: { data: DashboardAnalytics | undefined })
   return (
     <ChartCard
       title="Usage at a glance"
-      subtitle={data ? `Activity over the ${rangeNoun(data.range)}${data.previous ? ", compared with the previous equal period." : "."}` : "Active users, visits, and arrival rate."}
+      subtitle={data ? `Activity ${rangePhrase(data.range)}${data.previous ? ", compared with the previous equal period." : "."}` : "Active users, visits, and arrival rate."}
       data={data}
       isEmpty={(d) => d.current.searches === 0}
       className="analytics-wide"
