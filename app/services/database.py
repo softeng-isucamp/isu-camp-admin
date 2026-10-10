@@ -34,6 +34,7 @@ from routes.users import users_bp
 from routes.admins import admins_bp
 from routes.logs import logs_bp
 from routes.dashboard import dashboard_bp
+from routes.profile import profile_bp
 
 
 # ==========================================
@@ -239,6 +240,7 @@ app.register_blueprint(users_bp)
 app.register_blueprint(admins_bp)
 app.register_blueprint(logs_bp)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(profile_bp)
 
 
 # ==========================================

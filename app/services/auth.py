@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 
 from extensions import db, mail
 from services.audit import log_audit
+from services.security import (
+    burn_password_comparison,
+    hash_password,
+    verify_password,
+)
 
 import secrets
 from datetime import datetime, timedelta
@@ -97,9 +102,38 @@ class Admin(db.Model):
         default="active"
     )
 
+    # Which parts of the portal this account may reach. Only two values, and
+    # only one of them means anything beyond a label: Backup & Recovery is
+    # superadmin-only. Rows that predate the column default to 'admin', so a
+    # deployment grants the first superadmin deliberately rather than by
+    # accident. See migrations/20261010_add_admin_role.sql.
+    role = db.Column(
+        db.String(20),
+        nullable=False,
+        default="admin"
+    )
+
     @property
     def is_active(self):
         return (self.status or "active") == "active"
+
+    @property
+    def is_superadmin(self):
+        return (self.role or "admin") == "superadmin"
+
+    def to_profile(self):
+        """The account as My Profile reads it.
+
+        Not wrapped in the usual success envelope: the frontend parses this
+        response body directly against its own schema (services/profile.ts),
+        so the fields sit at the top level.
+        """
+        return {
+            "id": str(self.id),
+            "username": self.username,
+            "email": self.gmail or "",
+            "role": "superadmin" if self.is_superadmin else "admin",
+        }
 
 
 # ==========================================
@@ -142,16 +176,25 @@ def login():
         ).first()
 
         if not admin:
+            # Spend the same work as a real check, so a missing username is not
+            # distinguishable from a wrong password by how long the reply takes.
+            burn_password_comparison(password)
             return jsonify({
                 "success": False,
                 "message": "Invalid username or password"
             }), 401
 
-        if admin.password != password:
+        matches, needs_rehash = verify_password(admin.password, password)
+        if not matches:
             return jsonify({
                 "success": False,
                 "message": "Invalid username or password"
             }), 401
+
+        if needs_rehash:
+            # The row still held plaintext. A correct sign-in is the one moment
+            # the raw password is available to hash, so take it.
+            admin.password = hash_password(password)
 
         # Checked after the password so a wrong guess cannot discover which
         # accounts exist and are deactivated.
@@ -175,10 +218,10 @@ def login():
         return jsonify({
             "success": True,
             "message": "Login successful",
-            "admin": {
-                "id": admin.id,
-                "username": admin.username
-            }
+            # role and email are what the portal's Shell and My Profile read off
+            # the session. The frontend treats a missing role as not superadmin,
+            # so leaving them out silently disables the superadmin gate.
+            "admin": admin.to_profile()
         }), 200
 
     except Exception as e:
@@ -248,10 +291,7 @@ def current_admin():
 
     return jsonify({
         "authenticated": True,
-        "admin": {
-            "id": admin.id,
-            "username": admin.username
-        }
+        "admin": admin.to_profile()
     }), 200
 
 
@@ -343,7 +383,11 @@ def confirm_password():
             "message": "Password is required"
         }), 400
 
-    if not secrets.compare_digest(str(admin.password), password):
+    matches, needs_rehash = verify_password(admin.password, password)
+    if needs_rehash:
+        admin.password = hash_password(password)
+
+    if not matches:
         session.pop("reauth_at", None)
         log_audit(
             "Admin",
@@ -614,7 +658,7 @@ def reset_password():
                 "message": "Admin account not found"
             }), 404
 
-        admin.password = password
+        admin.password = hash_password(password)
 
         db.session.commit()
 
