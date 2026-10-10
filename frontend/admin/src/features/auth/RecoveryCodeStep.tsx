@@ -46,6 +46,7 @@ const expiryText = (seconds: number) => {
 /** Collects the 6-digit code, submits it when an entry completes it, and offers a manual Verify (or Enter) and Resend. */
 export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead }: RecoveryCodeStepProps) {
   const sentId = useId();
+  const alertId = useId();
   const [state, setState] = useState<CodeStepState>(initialDead ?? "entering");
   const [code, setCode] = useState("");
   const [error, setError] = useState(initialDead ? deadMessage(initialDead) : "");
@@ -139,7 +140,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   };
 
   // A complete code held in the boxes while a rate-limit wait runs is sent once when the wait ends. That is the code which was rate
-  // limited or one entered during the wait, never a rejected one: a wait only starts from a verify, which leaves its code unjudged.
+  // limited, one entered during the wait, or a rejected code the admin explicitly sent again with Verify and got a 429 for. A rejected
+  // code that was only left on screen is never sent: the wait only starts from a verify, and nothing but a verify starts one.
   const waited = useRef(false);
   useEffect(() => {
     if (verifyWait.seconds > 0) {
@@ -217,6 +219,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         <OtpInput
           ref={otp}
           disabled={verifying || dead}
+          describedBy={error ? alertId : undefined}
           onChange={(next) => {
             setCode(next);
             // Typing answers "enter the code"; a rejected code's message stays until the next attempt.
@@ -236,7 +239,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </p>
       </div>
       {error && (
-        <AuthAlert attemptsRemaining={attemptsRemaining} urgent={state === "exhausted" || rateLimited}>
+        <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} urgent={state === "exhausted" || rateLimited}>
           {error}
         </AuthAlert>
       )}

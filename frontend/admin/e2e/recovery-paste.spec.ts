@@ -136,3 +136,85 @@ test("pasting the same rejected code again, or a different one, is checked again
   expect(await boxValues(page)).toBe("654321");
   await expectInvalid(page, true);
 });
+
+for (const [state, prepare] of [
+  ["a rejected code", (page: Page) => pasteWrongCode(page, "123456")],
+  [
+    "five digits typed and not sent",
+    async (page: Page) => {
+      await box(page, 1).focus();
+      await page.keyboard.type("12345");
+      await box(page, 1).focus();
+    },
+  ],
+] as const) {
+  test(`clicking box 1 that already has focus, then typing six digits, replaces them all and sends once (${state})`, async ({ page }) => {
+    await reachCodeStep(page);
+    await prepare(page);
+    const attemptsBefore = state === "a rejected code" ? "4 attempts left." : null;
+
+    // A real click on the focused box collapses its selection to a caret; typing must still replace the digit.
+    await box(page, 1).click();
+    await page.keyboard.type("65432");
+    await quiet(page);
+    expect(await boxValues(page)).toBe(state === "a rejected code" ? "654326" : "65432");
+    await expect(box(page, 6)).toBeFocused();
+    if (attemptsBefore) await expect(page.getByRole("alert")).toContainText(attemptsBefore);
+    else await expect(page.getByRole("alert")).toHaveCount(0);
+
+    await page.keyboard.type("1");
+
+    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "3 attempts left." : "4 attempts left.");
+    await quiet(page);
+    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "3 attempts left." : "4 attempts left.");
+    expect(await boxValues(page)).toBe("654321");
+  });
+}
+
+test("clicking a middle box that already has focus, then typing one digit, replaces its digit and moves on", async ({ page }) => {
+  await reachCodeStep(page);
+  await pasteWrongCode(page, "123456");
+
+  await box(page, 3).click();
+  await box(page, 3).click();
+  await page.keyboard.type("7");
+
+  expect(await boxValues(page)).toBe("127456");
+  await expect(box(page, 4)).toBeFocused();
+  await expectInvalid(page, false);
+  await quiet(page);
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+});
+
+test("typing the digit a box already holds, after clicking it, still replaces it and moves on", async ({ page }) => {
+  await reachCodeStep(page);
+  await pasteWrongCode(page, "123456");
+
+  await box(page, 3).click();
+  await box(page, 3).click();
+  await page.keyboard.type("3");
+
+  expect(await boxValues(page)).toBe("123456");
+  await expect(box(page, 4)).toBeFocused();
+});
+
+test("a digit composed by an IME is entered once, on commit, and not before", async ({ page }) => {
+  await reachCodeStep(page);
+  await box(page, 1).focus();
+  await page.keyboard.type("12345");
+  await expect(box(page, 6)).toBeFocused();
+  const cdp = await page.context().newCDPSession(page);
+
+  await cdp.send("Input.imeSetComposition", { text: "9", selectionStart: 1, selectionEnd: 1 });
+  await quiet(page);
+
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(box(page, 6)).toBeFocused();
+
+  await cdp.send("Input.insertText", { text: "9" });
+
+  await expect(page.getByRole("alert")).toContainText("Incorrect code. 4 attempts left.");
+  await quiet(page);
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  expect(await boxValues(page)).toBe("123459");
+});

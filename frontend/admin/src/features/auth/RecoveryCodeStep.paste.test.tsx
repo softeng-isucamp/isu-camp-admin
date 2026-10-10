@@ -727,3 +727,309 @@ describe("code step: a failure that is not a wrong code", () => {
     expect(box(1)).toHaveFocus();
   });
 });
+
+describe("code step: a digit typed into a box that already holds one", () => {
+  type User = ReturnType<typeof userEvent.setup>;
+  const REJECTED = "123456";
+
+  /** Rejects `123456` by typing it; the boxes keep the digits and box 1 has focus with its digit selected. */
+  const openRejected = async (user: User) => {
+    const backend = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2)] });
+    renderForgotPassword();
+    await sendCode();
+    await user.click(box(1));
+    await user.keyboard(REJECTED);
+    await settle();
+    await waitFor(() => expect(box(1)).toHaveFocus());
+    expect(sentCodes(backend.sent)).toEqual([REJECTED]);
+    return backend;
+  };
+
+  /** Five digits typed: boxes 1 to 5 are filled, nothing has been sent. */
+  const openFiveDigits = async (user: User) => {
+    const backend = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await user.click(box(1));
+    await user.keyboard("12345");
+    await settle();
+    expect(boxValues()).toBe("12345");
+    return backend;
+  };
+
+  const placeCaret = (position: number, offset: number) => (box(position) as HTMLInputElement).setSelectionRange(offset, offset);
+
+  it.each([
+    ["before the digit", 0, "7", "127456"],
+    ["after the digit", 1, "7", "127456"],
+    ["before the digit, when it is the same digit", 0, "3", "123456"],
+    ["after the digit, when it is the same digit", 1, "3", "123456"],
+  ])("replaces digit 3 of a rejected code when one digit is typed with the caret %s", async (_name, offset, typed, expected) => {
+    const user = userEvent.setup();
+    const { sent } = await openRejected(user);
+    await user.click(box(3));
+    placeCaret(3, offset);
+
+    await user.keyboard(typed);
+    await settle();
+
+    expect(boxValues()).toBe(expected);
+    expectNoneInvalid();
+    expect(box(4)).toHaveFocus();
+    expect(sentCodes(sent)).toEqual([REJECTED]);
+  });
+
+  it.each([
+    ["before", 0],
+    ["after", 1],
+  ])("replaces digit 2 of a plain five-digit entry with the caret %s it, leaving the other boxes untouched", async (_name, offset) => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    await user.click(box(2));
+    placeCaret(2, offset);
+
+    await user.keyboard("9");
+    await settle();
+
+    expect(boxValues()).toBe("19345");
+    expect(box(6)).toHaveValue("");
+    expect(box(3)).toHaveFocus();
+    expect(sentCodes(sent)).toEqual([]);
+  });
+
+  it.each([
+    ["before", 0],
+    ["after", 1],
+  ])("sends the edited code once when the digit typed in box 6 replaces its digit with the caret %s it", async (_name, offset) => {
+    const user = userEvent.setup();
+    const { sent } = await openRejected(user);
+    await user.click(box(6));
+    placeCaret(6, offset);
+
+    await user.keyboard("9");
+    await settle();
+
+    expect(boxValues()).toBe("123459");
+    expect(sentCodes(sent)).toEqual([REJECTED, "123459"]);
+    // The second rejection returns focus to box 1, like the first.
+    await waitFor(() => expect(box(1)).toHaveFocus());
+  });
+
+  it("takes one digit from a two-character value by the caret, not by looking at the characters", async () => {
+    const user = userEvent.setup();
+    await openRejected(user);
+    const third = box(3) as HTMLInputElement;
+    await user.click(third);
+
+    // The digit 7 was inserted in front of the 3, and then the digit 3 behind it.
+    third.value = "73";
+    third.setSelectionRange(1, 1);
+    fireEvent.input(third, { inputType: "insertText", data: "7" });
+    expect(boxValues()).toBe("127456");
+    expect(box(4)).toHaveFocus();
+
+    await user.click(box(5));
+    const fifth = box(5) as HTMLInputElement;
+    fifth.value = "55";
+    fifth.setSelectionRange(2, 2);
+    fireEvent.input(fifth, { inputType: "insertText", data: "5" });
+    expect(boxValues()).toBe("127456");
+    expect(box(6)).toHaveFocus();
+  });
+
+  it.each(["654321", REJECTED])(
+    "sends exactly one request, on the sixth digit, when %s is typed after clicking box 1 that already has focus",
+    async (retyped) => {
+      const user = userEvent.setup();
+      const { sent } = await openRejected(user);
+
+      await user.click(box(1));
+      await user.keyboard(retyped.slice(0, 5));
+      await settle();
+      expect(boxValues()).toBe(retyped.slice(0, 5) + REJECTED[5]);
+      expect(sentCodes(sent)).toEqual([REJECTED]);
+
+      await user.keyboard(retyped[5]);
+      await settle();
+
+      expect(boxValues()).toBe(retyped);
+      expect(sentCodes(sent)).toEqual([REJECTED, retyped]);
+    },
+  );
+
+  it("keeps a clicked box's digit selected, so typing replaces it even though the click moved the caret", async () => {
+    const user = userEvent.setup();
+    await openRejected(user);
+
+    await user.click(box(1));
+
+    const first = box(1) as HTMLInputElement;
+    expect([first.selectionStart, first.selectionEnd]).toEqual([0, 1]);
+  });
+
+  it("still takes a code of six digits arriving in one input event in a box that holds a digit as the whole code", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    await user.click(box(1));
+    await user.keyboard("{Backspace}");
+    await user.keyboard("3");
+    await settle();
+    expect(box(1)).toHaveValue("3");
+    sent[VERIFY] = [];
+
+    fireEvent.input(box(1), { target: { value: "365432" } });
+    await settle();
+
+    expect(boxValues()).toBe("365432");
+    expect(sentCodes(sent)).toEqual(["365432"]);
+  });
+
+  it("takes two digits inserted at once over a selected digit as a bulk entry", async () => {
+    const user = userEvent.setup();
+    await openFiveDigits(user);
+    await user.click(box(2));
+
+    fireEvent.input(box(2), { target: { value: "78" }, inputType: "insertText", data: "78" });
+    await settle();
+
+    expect(boxValues()).toBe("78");
+  });
+
+  it("ignores a letter typed into a box that holds a digit", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openRejected(user);
+    await user.click(box(3));
+    placeCaret(3, 1);
+
+    await user.keyboard("a");
+    await settle();
+
+    expect(boxValues()).toBe(REJECTED);
+    expectAllInvalid();
+    expect(box(3)).toHaveFocus();
+    expect(sentCodes(sent)).toEqual([REJECTED]);
+  });
+});
+
+describe("code step: composition text", () => {
+  type User = ReturnType<typeof userEvent.setup>;
+
+  const openFiveDigits = async (user: User) => {
+    const backend = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
+    renderForgotPassword();
+    await sendCode();
+    await user.click(box(1));
+    await user.keyboard("12345");
+    await settle();
+    return backend;
+  };
+
+  const compose = (position: number, text: string) =>
+    fireEvent.input(box(position), { target: { value: text }, inputType: "insertCompositionText", data: text, isComposing: true });
+  const endComposition = (position: number, text: string) => fireEvent.compositionEnd(box(position), { data: text });
+
+  it("sends nothing and moves no focus while the last digit is still being composed, then sends once when it is committed", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    expect(box(6)).toHaveFocus();
+
+    compose(6, "9");
+    await settle();
+
+    expect(sentCodes(sent)).toEqual([]);
+    expect(box(6)).toHaveFocus();
+    expect(box(6)).toHaveValue("9");
+
+    endComposition(6, "9");
+    await settle();
+
+    expect(boxValues()).toBe("123459");
+    expect(sentCodes(sent)).toEqual(["123459"]);
+  });
+
+  it("does not advance focus while a middle digit is being composed, and advances once on commit", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    await user.click(box(2));
+
+    compose(2, "8");
+    expect(box(2)).toHaveFocus();
+    expect(box(2)).toHaveValue("8");
+    endComposition(2, "8");
+    await settle();
+
+    expect(boxValues()).toBe("18345");
+    expect(box(3)).toHaveFocus();
+    expect(sentCodes(sent)).toEqual([]);
+  });
+
+  it("applies a composed digit once when the browser also reports it in a plain input event after compositionend", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+
+    compose(6, "9");
+    endComposition(6, "9");
+    fireEvent.input(box(6), { target: { value: "9" }, inputType: "insertText", data: "9" });
+    await settle();
+
+    expect(boxValues()).toBe("123459");
+    expect(sentCodes(sent)).toEqual(["123459"]);
+  });
+
+  it("ends up with one digit and one request for a keyboard that composes every digit", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    await user.click(box(1));
+
+    for (const [i, digit] of [...("654321")].entries()) {
+      fireEvent.compositionStart(box(i + 1));
+      compose(i + 1, digit);
+      endComposition(i + 1, digit);
+      await settle();
+    }
+
+    expect(boxValues()).toBe("654321");
+    expect(sentCodes(sent)).toEqual(["654321"]);
+  });
+
+  it("resolves composed text in a box with a digit by the caret, and drops composed text without digits", async () => {
+    const user = userEvent.setup();
+    const { sent } = await openFiveDigits(user);
+    await user.click(box(2));
+    const second = box(2) as HTMLInputElement;
+
+    second.value = "72";
+    second.setSelectionRange(1, 1);
+    fireEvent.input(second, { inputType: "insertCompositionText", data: "7", isComposing: true });
+    endComposition(2, "7");
+    await settle();
+    expect(boxValues()).toBe("17345");
+    expect(box(3)).toHaveFocus();
+
+    await user.click(box(3));
+    compose(3, "x");
+    endComposition(3, "x");
+    await settle();
+
+    expect(boxValues()).toBe("17345");
+    expect(box(3)).toHaveValue("3");
+    expect(sentCodes(sent)).toEqual([]);
+  });
+});
+
+describe("code step: the error alert describes the code boxes", () => {
+  it("is the description of the code group while it shows, and the boxes keep their names", async () => {
+    const user = userEvent.setup();
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4)] });
+    renderForgotPassword();
+    await sendCode();
+    const group = screen.getByRole("group", { name: "Verification code" });
+    expect(group).not.toHaveAccessibleDescription();
+
+    await pasteIntoFirstBox(user, "123456");
+
+    expect(group).toHaveAccessibleDescription("Incorrect code. 4 attempts left.");
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    positions.forEach((n) => expect(screen.getByRole("textbox", { name: `Digit ${n} of 6` })).toBe(box(n)));
+  });
+});
