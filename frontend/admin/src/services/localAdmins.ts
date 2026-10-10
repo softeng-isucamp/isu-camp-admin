@@ -1,5 +1,5 @@
 import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
-import { PasswordConfirmationRequiredError, SuperadminRequiredError } from "./errors";
+import { PasswordConfirmationRequiredError, SuperadminRequiredError, fieldError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -38,9 +38,6 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
   const requireConfirmation = (message?: string) => {
     if (!recentlyConfirmed()) throw new PasswordConfirmationRequiredError(message);
   };
-
-  const fieldError = (field: string, message: string) =>
-    Object.assign(new Error(message), { fieldErrors: { [field]: message } });
 
   /** The server's identity checks, in its order; the password is only checked when given or required. */
   const readIdentity = (draft: AdminAccountDraft, requirePassword: boolean) => {
@@ -101,10 +98,12 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       const existing = find(draft.id);
       // Sign-in details belong to their holder, as the backend enforces.
       if (existing.id !== caller.id) throw new Error("You can only edit your own administrator account.");
-      const { username, email } = readIdentity(draft, false);
+      const { username, email, password } = readIdentity(draft, false);
       ensureUsernameFree(username, existing.id);
       existing.username = username;
       existing.email = email;
+      // A blank password leaves the existing one alone, as on the server.
+      if (password) existing.password = password;
       audit("Updated Administrator", username, existing.id);
       return asAccount(existing);
     },

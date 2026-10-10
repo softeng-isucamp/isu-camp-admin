@@ -2,7 +2,7 @@ import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
 import type { AccountStatus, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
-import { AuthError, RateLimitError } from "./errors";
+import { AuthError, RateLimitError, fieldError } from "./errors";
 import { firstPasswordIssue } from "./passwordRules";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
@@ -62,10 +62,17 @@ const parseSession = (storage: Storage | null): Session | null => {
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
   const accounts = seedAccounts();
   let session = parseSession(storage);
+  const restored = accounts.find((record) => record.id === session?.id);
+  // Accounts added in an earlier page load are gone, so a session for one of
+  // them has nobody to be: signed out, never another account's identity or role.
+  if (session && !restored) {
+    session = null;
+    storage?.removeItem(LOCAL_SESSION_KEY);
+  }
   // The account the session belongs to, or the demo superadmin while signed out.
   // The stored session carries only profile edits; the role is the directory's.
-  let account = accounts.find((record) => record.id === session?.id) ?? accounts[0];
-  if (session) {
+  let account = restored ?? accounts[0];
+  if (session && restored) {
     account.username = session.username;
     account.email = session.email ?? account.email;
   }
@@ -157,6 +164,9 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         if (!session) throw new Error("Sign in to edit your profile.");
         refuseIfDeactivated();
         if (!changes.username.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email.trim())) throw new Error("Enter a username and valid email.");
+        const taken = accounts.some((record) =>
+          record.id !== account.id && record.username.toLowerCase() === changes.username.trim().toLowerCase());
+        if (taken) throw fieldError("username", "That username is already taken");
         account.username = changes.username.trim();
         account.email = changes.email.trim();
         session = profileOf(account);

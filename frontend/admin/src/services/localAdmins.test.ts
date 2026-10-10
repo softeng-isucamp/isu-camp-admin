@@ -552,3 +552,87 @@ describe("fixture validation of a new or edited account", () => {
       .toMatchObject({ message: "You can only edit your own administrator account." });
   });
 });
+
+describe("fixture session restore", () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it("signs out a restored session whose account the fresh fixture does not have", async () => {
+    const first = setup(sessionStorage);
+    await first.adapter.auth.login("admin_justine", PASSWORD);
+    await first.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" });
+    await first.adapter.auth.logout();
+    await first.adapter.auth.login("admin_new", "a-long-enough-secret");
+
+    // A reload starts from the seed accounts, which do not include the new one.
+    const reloaded = setup(sessionStorage);
+
+    await expect(reloaded.adapter.auth.me()).resolves.toBeNull();
+    expect(await failure(reloaded.admins.list())).toMatchObject({ message: "Authentication required" });
+    expect(sessionStorage.getItem("isucamp_local_session")).toBeNull();
+  });
+
+  it("does not hand an unknown account's name to the first seed account", async () => {
+    sessionStorage.setItem("isucamp_local_session", JSON.stringify({ id: "admin-123", username: "ghost", email: "ghost@isu.edu.ph", role: "admin" }));
+
+    const { adapter } = setup(sessionStorage);
+
+    expect(adapter.directory.accounts[0]).toMatchObject({ username: "admin_justine", email: "admin@isu.edu.ph" });
+    await expect(adapter.auth.me()).resolves.toBeNull();
+  });
+});
+
+describe("fixture edits of one's own account", () => {
+  it("applies a new password supplied with the edit, as the server does", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+
+    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "newPassword456" });
+    await adapter.auth.logout();
+
+    await expect(adapter.auth.login("admin_justine", "newPassword456")).resolves.toMatchObject({ id: "1" });
+  });
+
+  it("stops the old password from working once it is replaced", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+    await admins.save({ id: "1", username: "admin_justine", email: "admin@isu.edu.ph", password: "newPassword456" });
+    await adapter.auth.logout();
+
+    expect(await failure(adapter.auth.login("admin_justine", PASSWORD))).toMatchObject({ kind: "invalid_credentials" });
+  });
+
+  it("leaves the password alone when none is supplied", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+
+    await admins.save({ id: "1", username: "admin_justine", email: "j@isu.edu.ph" });
+    await adapter.auth.logout();
+
+    await expect(adapter.auth.login("admin_justine", PASSWORD)).resolves.toMatchObject({ id: "1" });
+  });
+});
+
+describe("fixture profile update", () => {
+  it.each(["admin_justine", "ADMIN_JUSTINE"])("refuses the username %s, which another administrator holds", async (username) => {
+    const { adapter } = setup();
+    await adapter.auth.login("admin_registrar", PASSWORD);
+
+    const error = await failure(adapter.auth.updateProfile({ username, email: "registrar.admin@isu.edu.ph" }));
+
+    expect(error).toMatchObject({
+      message: "That username is already taken",
+      fieldErrors: { username: "That username is already taken" },
+    });
+    await expect(adapter.auth.me()).resolves.toMatchObject({ username: "admin_registrar" });
+  });
+
+  it("lets an administrator keep or recase their own username", async () => {
+    const { adapter } = setup();
+    await adapter.auth.login("admin_registrar", PASSWORD);
+
+    await expect(adapter.auth.updateProfile({ username: "admin_registrar", email: "r@isu.edu.ph" }))
+      .resolves.toMatchObject({ email: "r@isu.edu.ph" });
+    await expect(adapter.auth.updateProfile({ username: "Admin_Registrar", email: "r@isu.edu.ph" }))
+      .resolves.toMatchObject({ username: "Admin_Registrar" });
+  });
+});

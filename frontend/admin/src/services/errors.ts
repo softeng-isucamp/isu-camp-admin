@@ -57,3 +57,7 @@ export class AuthError extends Error {
     if (attemptsRemaining !== undefined) this.attemptsRemaining = attemptsRemaining;
   }
 }
+
+/** A refusal that names the form field it is about, as the backend's `fields` do. */
+export const fieldError = (field: string, message: string) =>
+  Object.assign(new Error(message), { fieldErrors: { [field]: message } });
