@@ -23,9 +23,17 @@ import type {
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
-import { AuthError, type AuthErrorKind, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
+import {
+  AuthError,
+  type AuthErrorKind,
+  PASSWORD_CONFIRMATION_REQUIRED,
+  PasswordConfirmationRequiredError,
+  RateLimitError,
+  SUPERADMIN_REQUIRED,
+  SuperadminRequiredError,
+} from "./errors";
 
-export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError } from "./errors";
+export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError, SUPERADMIN_REQUIRED, SuperadminRequiredError } from "./errors";
 import { z } from "zod";
 
 import {
@@ -40,6 +48,7 @@ import {
   locationSchema,
 } from "./schemas";
 import { createLocalAdapter } from "./localAdapter";
+import { createLocalAdmins } from "./localAdmins";
 import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
@@ -488,6 +497,9 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
       throw new PasswordConfirmationRequiredError(envelope.message);
     }
+    if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
+      throw new SuperadminRequiredError(envelope.message);
+    }
     const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
     error.fieldErrors = { ...data?.fields, ...data?.relationships };
     throw error;
@@ -738,12 +750,14 @@ const addAudit = (
 
 const localAuditEntries: AuditEntry[] = createMockAuditLogs();
 const localUsers: UserAccount[] = createMockUsers();
-// The fixture's own administrator directory. The signed-in fixture admin is
-// `admin_justine`, so that row is the one marked current.
-const localAdmins: AdminAccount[] = [
-  { id: "1", username: "admin_justine", email: "justine.admin@isu.edu.ph", status: "Active", isCurrent: true },
-  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", status: "Active", isCurrent: false },
-];
+// The fixture's administrator directory is the adapter's sign-in accounts, so
+// the row marked current and the rules applied follow whoever signed in.
+const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId) =>
+  addAudit(action, target, "Admin", targetId));
+
+/** A missing or unrecognized role means a plain administrator, never a superadmin. */
+const normalizeAdmin = (account: AdminAccount): AdminAccount =>
+  ({ ...account, role: account.role === "superadmin" ? "superadmin" : "admin" });
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -1432,9 +1446,9 @@ export const services: Services = {
     list: async () => {
       if (USE_HTTP_API) {
         const response = await apiJson<{ items: AdminAccount[] }>("/api/admins");
-        return response.items ?? [];
+        return (response.items ?? []).map(normalizeAdmin);
       }
-      return wait(clone(localAdmins));
+      return wait(await localAdmins.list());
     },
 
     save: async (draft) => {
@@ -1449,38 +1463,9 @@ export const services: Services = {
           draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",
           { method: draft.id ? "PUT" : "POST", body },
         );
-        return response.admin;
+        return normalizeAdmin(response.admin);
       }
-
-      const username = draft.username.trim();
-      const email = draft.email.trim();
-      const duplicate = localAdmins.some((admin) =>
-        admin.username.toLowerCase() === username.toLowerCase() && admin.id !== draft.id);
-      if (duplicate) {
-        const error = new Error("That username is already taken") as Error & { fieldErrors?: Record<string, string> };
-        error.fieldErrors = { username: "That username is already taken" };
-        throw error;
-      }
-
-      const existing = draft.id ? localAdmins.find((admin) => admin.id === draft.id) : undefined;
-      if (existing) {
-        // Sign-in details belong to their holder, as the backend enforces.
-        if (!existing.isCurrent) throw new Error("You can only edit your own administrator account.");
-        existing.username = username;
-        existing.email = email;
-        addAudit("Updated Administrator", username, "Admin", existing.id);
-        return wait(clone(existing));
-      }
-      const created: AdminAccount = {
-        id: `admin-${Date.now()}`,
-        username,
-        email,
-        status: "Active",
-        isCurrent: false,
-      };
-      localAdmins.push(created);
-      addAudit("Created Administrator", username, "Admin", created.id);
-      return wait(clone(created));
+      return wait(await localAdmins.save(draft));
     },
 
     setStatus: async (id, status) => {
@@ -1489,18 +1474,9 @@ export const services: Services = {
           `/api/admins/${encodeURIComponent(id)}/status`,
           { method: "PUT", body: JSON.stringify({ status }) },
         );
-        return response.admin;
+        return normalizeAdmin(response.admin);
       }
-      const admin = localAdmins.find((record) => record.id === id);
-      if (!admin) throw new Error("Administrator not found.");
-      if (status === "Inactive") {
-        if (admin.isCurrent) throw new Error("You cannot deactivate your own administrator account.");
-        const activeAdmins = localAdmins.filter((record) => record.status === "Active").length;
-        if (activeAdmins <= 1) throw new Error("The last active administrator cannot be deactivated.");
-      }
-      admin.status = status;
-      addAudit(status === "Inactive" ? "Deactivated Administrator" : "Activated Administrator", admin.username, "Admin", admin.id);
-      return wait(clone(admin));
+      return wait(await localAdmins.setStatus(id, status));
     },
 
     sendPasswordReset: async (id) => {
@@ -1511,11 +1487,7 @@ export const services: Services = {
         );
         return response.message ?? "A password reset code was sent.";
       }
-      const admin = localAdmins.find((record) => record.id === id);
-      if (!admin) throw new Error("Administrator not found.");
-      if (!admin.email) throw new Error("That account has no email address on file, so a reset code cannot be sent.");
-      addAudit("Sent Password Reset", admin.username, "Admin", admin.id);
-      return wait(`A password reset code was sent to ${admin.email}.`);
+      return wait(await localAdmins.sendPasswordReset(id));
     },
 
     remove: async (id) => {
@@ -1523,12 +1495,7 @@ export const services: Services = {
         await apiJson<unknown>(`/api/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
         return;
       }
-      const index = localAdmins.findIndex((admin) => admin.id === id);
-      if (index < 0) throw new Error("Administrator not found.");
-      if (localAdmins[index].isCurrent) throw new Error("You cannot remove your own administrator account.");
-      if (localAdmins.length <= 1) throw new Error("The last administrator account cannot be removed.");
-      const [removed] = localAdmins.splice(index, 1);
-      addAudit("Deleted Administrator", removed.username, "Admin", removed.id);
+      await localAdmins.remove(id);
       return wait(undefined);
     },
   },

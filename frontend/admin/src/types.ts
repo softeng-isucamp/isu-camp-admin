@@ -123,12 +123,15 @@ export interface UserAccount {
   /** The one field of an app account this portal writes; the User App enforces it. */
   status: AccountStatus;
 }
+/** What an administrator account may do in the portal; a missing or unrecognized value means "admin". */
+export type AdminRole = "admin" | "superadmin";
 /** An administrator account for the portal itself, owned by this app. */
 export interface AdminAccount {
   id: string;
   username: string;
   email: string;
   status: AccountStatus;
+  role: AdminRole;
   /** True for the signed-in admin, who cannot deactivate or remove their own account. */
   isCurrent: boolean;
 }
@@ -154,7 +157,7 @@ export interface Session {
   username: string;
   email?: string;
   /** Missing or unrecognized roles never grant superadmin access. */
-  role?: "admin" | "superadmin";
+  role?: AdminRole;
 }
 export type DashboardRange = "week" | "month" | "all";
 export interface DashboardSummary {

@@ -1256,3 +1256,59 @@ it("uses Manila dates and actual active directory metadata, including building f
   expect(changed.topDestinations).toEqual([]);
   expect(changed.completenessTotal).toBe(0);
 });
+
+describe("real administrators service boundary", () => {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  const httpServices = async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    // Reset modules give the service its own error classes, so `instanceof` needs the same copy.
+    return { services: (await import("./api")).services, errors: await import("./errors") };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("passes each account's role through and reads a missing or unknown one as administrator", async () => {
+    const { services: admins } = await httpServices();
+    const account = { email: "", status: "Active", isCurrent: false };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      items: [
+        { id: "1", username: "boss", role: "superadmin", ...account },
+        { id: "2", username: "staff", role: "admin", ...account },
+        { id: "3", username: "legacy", ...account },
+        { id: "4", username: "odd", role: "owner", ...account },
+      ],
+      total: 4,
+    }));
+
+    const listed = await admins.admins.list();
+    expect(listed.map((item) => [item.username, item.role])).toEqual([
+      ["boss", "superadmin"], ["staff", "admin"], ["legacy", "admin"], ["odd", "admin"],
+    ]);
+  });
+
+  it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
+    const { services: admins, errors } = await httpServices();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    fetchMock
+      .mockResolvedValueOnce(json({ success: false, code: "superadmin_required", message: "Superadmin access required" }, 403))
+      .mockResolvedValueOnce(json({ success: false, code: "password_confirmation_required", message: "Confirm your password." }, 403))
+      .mockResolvedValueOnce(json({ success: false, message: "Superadmin access required" }, 403));
+
+    const refusal = await admins.admins.remove("2").catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(errors.SuperadminRequiredError);
+    expect(refusal).toMatchObject({ message: "Superadmin access required" });
+
+    expect(await admins.admins.remove("2").catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
+
+    // The message alone is not the signal: a 403 without the code stays a plain error.
+    const plain = await admins.admins.remove("2").catch((error: unknown) => error);
+    expect(plain).not.toBeInstanceOf(errors.SuperadminRequiredError);
+    expect(plain).toMatchObject({ message: "Superadmin access required" });
+  });
+});

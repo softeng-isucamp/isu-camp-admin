@@ -16,6 +16,17 @@ export class PasswordConfirmationRequiredError extends Error {
   }
 }
 
+/** The backend code for an administrator-account action only a superadmin may take. */
+export const SUPERADMIN_REQUIRED = "superadmin_required";
+
+/** An administrator-account action the server refused because the signed-in account is not a superadmin. */
+export class SuperadminRequiredError extends Error {
+  constructor(message?: string) {
+    super(message ?? "Superadmin access required");
+    this.name = "SuperadminRequiredError";
+  }
+}
+
 /** The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number. */
 export class RateLimitError extends Error {
   readonly retryAfterSeconds: number;

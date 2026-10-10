@@ -4,8 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
+import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
 import type { AdminAccount, AdminAccountDraft } from "../../types";
+
+const ROLE_LABELS: Record<AdminAccount["role"], string> = { admin: "Administrator", superadmin: "Superadmin" };
 
 const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "" });
 
@@ -28,11 +31,18 @@ type Dialog =
  * activity, revoke or restore their access, mail them a reset code, or remove
  * them outright. Deactivating is the reversible one, and usually the right one:
  * the account and its audit trail survive, only the sign-in stops.
+ *
+ * Managing accounts belongs to superadmins. Any administrator can read the list,
+ * open an account's activity and send a reset code; the rest of the menu and the
+ * Add button are left out for them. The server refuses those requests too — the
+ * viewer's role only decides what is offered.
  */
 export function AdministratorsPanel() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const feedback = useFeedback();
+  const { session } = useAuth();
+  const canManage = session?.role === "superadmin";
   const passwordConfirmation = usePasswordConfirmation();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [draft, setDraft] = useState<AdminAccountDraft>(blankDraft());
@@ -161,9 +171,11 @@ export function AdministratorsPanel() {
           <h2>Administrators</h2>
           <p>Portal accounts that can sign in and manage campus data.</p>
         </div>
-        <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); setDialog({ kind: "add" }); }}>
-          ＋ Add Administrator
-        </Button>
+        {canManage && (
+          <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); setDialog({ kind: "add" }); }}>
+            ＋ Add Administrator
+          </Button>
+        )}
       </div>
 
       <ProgressBar active={isFetching && !isLoading} />
@@ -186,7 +198,7 @@ export function AdministratorsPanel() {
                 <td>{account.email || "—"}</td>
                 <td>
                   <Badge tone={account.isCurrent ? "green" : "grey"}>
-                    {account.isCurrent ? "Administrator · You" : "Administrator"}
+                    {ROLE_LABELS[account.role]}{account.isCurrent && " · You"}
                   </Badge>
                 </td>
                 <td>
@@ -210,14 +222,16 @@ export function AdministratorsPanel() {
                         <button role="menuitem" onClick={() => viewActivity(account)}>
                           View activity
                         </button>
-                        <button
-                          role="menuitem"
-                          disabled={account.isCurrent || setStatus.isPending}
-                          title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
-                          onClick={() => changeStatus(account)}
-                        >
-                          {account.status === "Active" ? "Deactivate account" : "Activate account"}
-                        </button>
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            disabled={account.isCurrent || setStatus.isPending}
+                            title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
+                            onClick={() => changeStatus(account)}
+                          >
+                            {account.status === "Active" ? "Deactivate account" : "Activate account"}
+                          </button>
+                        )}
                         {/* Helps a locked-out colleague without touching their
                             account: the code only reaches their own inbox. */}
                         <button
@@ -232,22 +246,24 @@ export function AdministratorsPanel() {
                         >
                           Send password reset code
                         </button>
-                        <button
-                          role="menuitem"
-                          className="danger"
-                          disabled={account.isCurrent || admins.length <= 1}
-                          title={account.isCurrent
-                            ? "You cannot remove your own account."
-                            : admins.length <= 1 ? "The last administrator cannot be removed." : undefined}
-                          onClick={() => {
-                            setError("");
-                            passwordConfirmation.reset();
-                            setDialog({ kind: "remove", account });
-                            setActionMenuId(null);
-                          }}
-                        >
-                          Remove administrator
-                        </button>
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            className="danger"
+                            disabled={account.isCurrent || admins.length <= 1}
+                            title={account.isCurrent
+                              ? "You cannot remove your own account."
+                              : admins.length <= 1 ? "The last administrator cannot be removed." : undefined}
+                            onClick={() => {
+                              setError("");
+                              passwordConfirmation.reset();
+                              setDialog({ kind: "remove", account });
+                              setActionMenuId(null);
+                            }}
+                          >
+                            Remove administrator
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

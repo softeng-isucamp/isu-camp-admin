@@ -4,13 +4,28 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
-import type { AdminAccount } from "../../types";
+import type { AdminAccount, AdminRole } from "../../types";
+import * as AuthContext from "../auth/AuthContext";
 import { Users } from "./Users";
 
 const directory: AdminAccount[] = [
-  { id: "1", username: "admin_justine", email: "justine@isu.edu.ph", status: "Active", isCurrent: true },
-  { id: "2", username: "admin_registrar", email: "registrar@isu.edu.ph", status: "Active", isCurrent: false },
+  { id: "1", username: "admin_justine", email: "justine@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: true },
+  { id: "2", username: "admin_registrar", email: "registrar@isu.edu.ph", status: "Active", role: "admin", isCurrent: false },
 ];
+
+/** The panel reads the viewer's role from the session; the list marks which row is theirs. */
+function signInAs(role: AdminRole | undefined, username = "admin_justine") {
+  vi.spyOn(AuthContext, "useAuth").mockReturnValue({
+    session: { id: "1", username, ...(role ? { role } : {}) },
+    login: vi.fn(),
+    logout: vi.fn(),
+    loading: false,
+    updateSession: vi.fn(),
+  });
+}
+
+/** The directory as seen by the plain administrator `admin_registrar`. */
+const directoryForRegistrar = () => directory.map((admin) => ({ ...admin, isCurrent: admin.id === "2" }));
 
 /** Stands in for the System Logs page so a row's link can be read off the URL. */
 function LogsProbe() {
@@ -45,6 +60,7 @@ function openRowMenu(username: string) {
 
 describe("Administrator accounts in User Management", () => {
   beforeEach(() => {
+    signInAs("superadmin");
     vi.spyOn(services.admins, "list").mockResolvedValue(directory.map((admin) => ({ ...admin })));
     vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
   });
@@ -58,8 +74,25 @@ describe("Administrator accounts in User Management", () => {
 
     expect(screen.getByRole("columnheader", { name: "Email" })).toBeInTheDocument();
     const row = screen.getByText("admin_justine").closest("tr")!;
-    expect(within(row).getByText("Administrator · You")).toBeInTheDocument();
+    expect(within(row).getByText("Superadmin · You")).toBeInTheDocument();
     expect(within(screen.getByText("admin_registrar").closest("tr")!).getByText("Administrator")).toBeInTheDocument();
+  });
+
+  it("labels each account with its own role, whoever is signed in", async () => {
+    vi.spyOn(services.admins, "list").mockResolvedValue([
+      { ...directory[0], isCurrent: false },
+      { ...directory[1], isCurrent: true },
+      { id: "3", username: "admin_dean", email: "dean@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false },
+    ]);
+    signInAs("admin", "admin_registrar");
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_dean");
+
+    const labelOf = (username: string) => within(screen.getByText(username).closest("tr")!).getByText(/Superadmin|Administrator/).textContent;
+    expect(labelOf("admin_justine")).toBe("Superadmin");
+    expect(labelOf("admin_registrar")).toBe("Administrator · You");
+    expect(labelOf("admin_dean")).toBe("Superadmin");
   });
 
   it("keeps the app user directory on its own tab", async () => {
@@ -75,7 +108,7 @@ describe("Administrator accounts in User Management", () => {
 
   it("adds an administrator and reports the outcome", async () => {
     const save = vi.spyOn(services.admins, "save").mockResolvedValue({
-      id: "3", username: "admin_new", email: "new@isu.edu.ph", status: "Active", isCurrent: false,
+      id: "3", username: "admin_new", email: "new@isu.edu.ph", status: "Active", role: "admin", isCurrent: false,
     });
     await openAdministrators();
 
@@ -230,7 +263,7 @@ describe("Administrator accounts in User Management", () => {
   it("will not offer a reset code for an account with no address on file", async () => {
     vi.spyOn(services.admins, "list").mockResolvedValue([
       { ...directory[0] },
-      { id: "2", username: "admin_registrar", email: "", status: "Active", isCurrent: false },
+      { id: "2", username: "admin_registrar", email: "", status: "Active", role: "admin", isCurrent: false },
     ]);
     await openAdministrators();
 
@@ -300,5 +333,74 @@ describe("Administrator accounts in User Management", () => {
 
     expect(await screen.findByText(/Your password confirmation expired/)).toBeInTheDocument();
     expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+  });
+});
+
+describe("Administrators tab for a plain administrator", () => {
+  beforeEach(() => {
+    signInAs("admin", "admin_registrar");
+    vi.spyOn(services.admins, "list").mockResolvedValue(directoryForRegistrar());
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("still lists every account and its role", async () => {
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_justine");
+
+    expect(within(screen.getByText("admin_justine").closest("tr")!).getByText("Superadmin")).toBeInTheDocument();
+    expect(within(screen.getByText("admin_registrar").closest("tr")!).getByText("Administrator · You")).toBeInTheDocument();
+  });
+
+  it("does not offer to add an administrator", async () => {
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_justine");
+
+    expect(screen.getByRole("heading", { name: "Administrators" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument();
+  });
+
+  it("offers only View activity and Send password reset code on every row, their own included", async () => {
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_justine");
+
+    for (const username of ["admin_justine", "admin_registrar"]) {
+      openRowMenu(username);
+      const actions = within(screen.getByRole("menu")).getAllByRole("menuitem");
+      expect(actions.map((action) => action.textContent)).toEqual(["View activity", "Send password reset code"]);
+      openRowMenu(username);
+    }
+  });
+
+  it("sends a reset code to a superadmin", async () => {
+    const sendPasswordReset = vi.spyOn(services.admins, "sendPasswordReset")
+      .mockResolvedValue("A password reset code was sent to justine@isu.edu.ph.");
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_justine");
+
+    openRowMenu("admin_justine");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send password reset code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send Reset Code" }));
+
+    await waitFor(() => expect(sendPasswordReset).toHaveBeenCalledWith("1"));
+    expect(await screen.findByText("A password reset code was sent to justine@isu.edu.ph.")).toBeInTheDocument();
+  });
+
+  it("treats a session with no role as a plain administrator", async () => {
+    signInAs(undefined, "admin_registrar");
+    renderUsers();
+    fireEvent.click(await screen.findByRole("button", { name: "Administrators" }));
+    await screen.findByText("admin_justine");
+
+    expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument();
+    openRowMenu("admin_justine");
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem")).toHaveLength(2);
   });
 });
