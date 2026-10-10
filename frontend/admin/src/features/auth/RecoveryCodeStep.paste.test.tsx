@@ -1017,6 +1017,84 @@ describe("code step: composition text", () => {
   });
 });
 
+describe("code step: events in box 6 that enter no digit into a rejected code", () => {
+  const REJECTED = "123456";
+
+  /** Rejects `123456` by typing it, with box 6 holding its digit; the second backend reply is spare, to catch a send that should not happen. */
+  const openRejected = async () => {
+    const user = userEvent.setup();
+    const backend = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2)] });
+    renderForgotPassword();
+    await sendCode();
+    await user.click(box(1));
+    await user.keyboard(REJECTED);
+    await settle();
+    expect(sentCodes(backend.sent)).toEqual([REJECTED]);
+    return { user, sent: backend.sent };
+  };
+
+  it.each(["historyUndo", "historyRedo"])("sends nothing and keeps the six values for a %s event, whether or not it changed the box", async (inputType) => {
+    const { user, sent } = await openRejected();
+    await user.click(box(6));
+    await user.keyboard("9");
+    await settle();
+    expect(sentCodes(sent)).toEqual([REJECTED, "123459"]);
+    await user.click(box(6));
+
+    // Chromium reports Ctrl+Z here with no data and the value as it was.
+    fireEvent.input(box(6), { inputType, data: null });
+    await settle();
+    // And a browser that does change the box leaves a value the state does not hold.
+    fireEvent.input(box(6), { target: { value: "6" }, inputType, data: null });
+    await settle();
+
+    expect(boxValues()).toBe("123459");
+    expect(box(6)).toHaveValue("9");
+    expect(sentCodes(sent)).toEqual([REJECTED, "123459"]);
+  });
+
+  it("still sends once when the digit a box 6 already holds is typed over it", async () => {
+    const { user, sent } = await openRejected();
+    await user.click(box(6));
+
+    fireEvent.input(box(6), { target: { value: "6" }, inputType: "insertText", data: "6" });
+    await settle();
+
+    expect(boxValues()).toBe(REJECTED);
+    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
+  });
+
+  it("sends nothing and restores the digit when a composition in box 6 is cancelled", async () => {
+    const { user, sent } = await openRejected();
+    await user.click(box(6));
+
+    fireEvent.compositionStart(box(6));
+    fireEvent.input(box(6), { target: { value: "9" }, inputType: "insertCompositionText", data: "9", isComposing: true });
+    expect(box(6)).toHaveValue("9");
+    // The browser puts the old digit back, and the composition ends with no text.
+    fireEvent.input(box(6), { target: { value: "6" }, inputType: "insertCompositionText", data: "", isComposing: true });
+    fireEvent.compositionEnd(box(6), { data: "" });
+    await settle();
+
+    expect(box(6)).toHaveValue("6");
+    expect(boxValues()).toBe(REJECTED);
+    expect(sentCodes(sent)).toEqual([REJECTED]);
+  });
+
+  it("sends once when a composition in box 6 commits the digit the box already holds", async () => {
+    const { user, sent } = await openRejected();
+    await user.click(box(6));
+
+    fireEvent.compositionStart(box(6));
+    fireEvent.input(box(6), { target: { value: "6" }, inputType: "insertCompositionText", data: "6", isComposing: true });
+    fireEvent.compositionEnd(box(6), { data: "6" });
+    await settle();
+
+    expect(boxValues()).toBe(REJECTED);
+    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
+  });
+});
+
 describe("code step: the error alert describes the code boxes", () => {
   it("is the description of the code group while it shows, and the boxes keep their names", async () => {
     const user = userEvent.setup();

@@ -54,7 +54,7 @@ interface OtpInputProps {
   onChange?: (code: string) => void;
   /**
    * Fires, at most once per input event, when an edit leaves all six boxes filled and either completed a code that was incomplete,
-   * entered a digit in the last box, or was a paste. Changing a digit in boxes 1 to 5 of a complete code does not fire it.
+   * entered a digit in the last box, or was a paste. Undo, redo and a cancelled composition enter nothing. Changing a digit in boxes 1 to 5 of a complete code does not fire it.
    */
   onComplete?: (code: string) => void;
 }
@@ -108,8 +108,11 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
     focusBox(typed.length > 1 ? typed.length - 1 : Math.min(typed.length, LENGTH - 1));
   };
 
-  /** Applies what an input event (or the end of a composition) did to box `index`, which held `digits[index]`. */
-  const applyEdit = (index: number, input: HTMLInputElement, inserted: number) => {
+  /**
+   * Applies what an input event (or the end of a composition) did to box `index`, which held `digits[index]`.
+   * `entered` says the event really put text in; only then may the edit submit. An event that only moved or restored text never does.
+   */
+  const applyEdit = (index: number, input: HTMLInputElement, inserted: number, entered: boolean) => {
     const old = digits[index];
     const edit = interpretEdit(old, input.value, input.selectionStart, inserted);
     if (edit.kind === "ignore") {
@@ -124,7 +127,7 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
     const next = [...digits];
     next[index] = edit.digit;
     // Completing the code, or entering its last digit, finishes an entry; fixing a digit in the middle of a full code does not.
-    commit(next, !digits.every(Boolean) || index === LENGTH - 1);
+    commit(next, entered && (!digits.every(Boolean) || index === LENGTH - 1));
     if (edit.digit && index < LENGTH - 1) focusBox(index + 1);
   };
 
@@ -133,13 +136,20 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
     if (disabled) return;
     const input = event.currentTarget;
     const native = event.nativeEvent;
+    // Undo and redo enter nothing, and the browser may have left the box showing text the code does not hold.
+    if (native.inputType === "historyUndo" || native.inputType === "historyRedo") {
+      input.value = digits[index];
+      return;
+    }
     if (native.isComposing) {
       // Nothing is entered until the composition ends: no code change, no completion, no focus move.
       setComposing({ index, text: input.value });
       return;
     }
     if (justComposed.current) return;
-    applyEdit(index, input, native.data ? native.data.length : input.value.length - digits[index].length);
+    // An event with no inputType (older browsers, synthetic events) is taken as an insertion; otherwise only insert* types are.
+    const entered = !native.inputType || native.inputType.startsWith("insert");
+    applyEdit(index, input, native.data ? native.data.length : input.value.length - digits[index].length, entered);
   };
 
   const handleCompositionEnd = (index: number, event: CompositionEvent<HTMLInputElement>) => {
@@ -151,7 +161,11 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
       justComposed.current = false;
     }, 0);
     const input = event.currentTarget;
-    applyEdit(index, input, event.data ? event.data.length : input.value.length - digits[index].length);
+    if (!event.data && input.value === digits[index]) {
+      // Cancelled: no text was committed and the box is back to what it held, so nothing was entered.
+      return;
+    }
+    applyEdit(index, input, event.data ? event.data.length : input.value.length - digits[index].length, true);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
