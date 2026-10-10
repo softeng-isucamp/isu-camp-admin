@@ -49,14 +49,16 @@ test("administrator can sign in and navigate modules", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "System Logs" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("link", { name: "Open my profile" }).click();
+  await expect(page).toHaveURL(/profile/);
+  await page.getByRole("button", { name: "Sign Out" }).click();
   await expect(page.getByRole("heading", { name: "Sign out?" })).toBeVisible();
   await expect(page).toHaveScreenshot("sign-out-confirmation.png", {
     animations: "disabled",
   });
   await page.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await page.getByRole("button", { name: "Sign Out", exact: true }).click();
+  await page.getByRole("button", { name: "Sign Out" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Sign Out" }).click();
   await expect(page).toHaveURL(/login/);
 });
 

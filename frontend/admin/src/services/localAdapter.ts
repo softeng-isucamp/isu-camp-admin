@@ -1,3 +1,4 @@
+import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
 import type { Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { locationPolicy } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
@@ -27,15 +28,17 @@ const parseSession = (storage: Storage | null): Session | null => {
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
   let session = parseSession(storage);
+  let account: AccountProfile = { id: "local-admin", username: session?.username ?? LOCAL_ADMIN.username, email: session?.email ?? "justine@example.com", role: "superadmin" };
+  let accountPassword: string = LOCAL_ADMIN.password;
   let resetUsername: string | null = null;
 
   return {
     auth: {
       login: async (username: string, password: string): Promise<Session> => {
-        if (username.trim() !== LOCAL_ADMIN.username || password !== LOCAL_ADMIN.password) {
+        if (username.trim() !== account.username || password !== accountPassword) {
           throw new Error("Invalid username or password");
         }
-        session = { id: "local-admin", username: LOCAL_ADMIN.username };
+        session = { ...account };
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
         return session;
       },
@@ -43,11 +46,29 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         session = null;
         storage?.removeItem(LOCAL_SESSION_KEY);
       },
-      me: async (): Promise<Session | null> => session,
+      me: async (): Promise<Session | null> => session ? { ...account } : null,
+      profile: async (): Promise<AccountProfile> => {
+        if (!session) throw new Error("Sign in to view your profile.");
+        return { ...account };
+      },
+      updateProfile: async (changes: ProfileChanges): Promise<AccountProfile> => {
+        if (!session) throw new Error("Sign in to edit your profile.");
+        if (!changes.username.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email.trim())) throw new Error("Enter a username and valid email.");
+        account = { ...account, username: changes.username.trim(), email: changes.email.trim() };
+        session = { ...account };
+        storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+        return { ...account };
+      },
+      changePassword: async (changes: PasswordChange): Promise<void> => {
+        if (!session) throw new Error("Sign in to change your password.");
+        if (changes.currentPassword !== accountPassword) throw new Error("Current password is incorrect.");
+        if (changes.newPassword.length < 8) throw new Error("Use at least 8 characters.");
+        accountPassword = changes.newPassword;
+      },
       // The fixture only checks the password. Session ownership and the
       // confirmation window are enforced by the backend, which owns the real guard.
       confirmPassword: async (password: string): Promise<void> => {
-        if (password !== LOCAL_ADMIN.password) throw new Error("Password is incorrect");
+        if (password !== accountPassword) throw new Error("Password is incorrect");
       },
       requestReset: async (username: string): Promise<void> => {
         if (username.trim() !== LOCAL_ADMIN.username) throw new Error("Admin username not found.");

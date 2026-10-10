@@ -3,6 +3,7 @@ import pytest
 
 import admins as admins_module
 from admins import admins_bp
+from services.security import verify_password
 
 
 class FakeQuery:
@@ -242,7 +243,10 @@ def test_updating_sets_a_supplied_password():
     })
 
     assert response.status_code == 200
-    assert next(item for item in FakeAdmin.store if item.id == 2).password == "replacement"
+    stored = next(item for item in FakeAdmin.store if item.id == 2).password
+    # Hashed on the way in, so the column never receives the raw password.
+    assert stored != "replacement"
+    assert verify_password(stored, "replacement")[0]
 
 
 def test_updating_a_missing_administrator_is_not_found():
