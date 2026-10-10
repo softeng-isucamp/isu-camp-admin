@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useId, useRef, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
@@ -10,14 +10,13 @@ import { useCountdown } from "./useCountdown";
 interface RecoveryEmailStepProps {
   purpose: RecoveryPurpose;
   title: string;
-  description: ReactNode;
   /** Pre-fills the field, e.g. when the admin comes back to correct the address. */
   initialEmail?: string;
   onSent: (email: string, issued: CodeRequestResult) => void;
 }
 
 /** Asks for the admin's email and requests a code. It never says whether the email has an account. */
-export function RecoveryEmailStep({ purpose, title, description, initialEmail = "", onSent }: RecoveryEmailStepProps) {
+export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }: RecoveryEmailStepProps) {
   const [email, setEmail] = useState(initialEmail);
   const [error, setError] = useState("");
   // The address failed the client-side check: the field is marked invalid until edited.
@@ -58,7 +57,9 @@ export function RecoveryEmailStep({ purpose, title, description, initialEmail = 
   return (
     <form onSubmit={submit} noValidate>
       <h2>{title}</h2>
-      <p className="muted recovery-copy">{description}</p>
+      <p className="muted recovery-copy">
+        Enter your admin email and we'll send you a <span className="nowrap">6-digit</span> code.
+      </p>
       <label className="field">
         <span className="recovery-label">Admin email</span>
         <input

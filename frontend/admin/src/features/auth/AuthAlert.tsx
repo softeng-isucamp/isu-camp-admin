@@ -1,11 +1,21 @@
 import type { ReactNode } from "react";
-import { attemptsLeftText, isUrgentAttempts } from "./attemptsLeft";
 
 /** Shown for every server rate limit. It names no number: the button that is locked counts down the live wait. */
 export const RATE_LIMIT_MESSAGE = "Too many attempts. Try again when the button unlocks.";
 
 /** The label of a button locked by a rate limit. */
 export const tryAgainLabel = (seconds: number) => `Try again in ${seconds}s`;
+
+/** At or below this many attempts the "attempts left" message turns urgent. */
+const URGENT_ATTEMPTS_THRESHOLD = 2;
+
+const isUrgentAttempts = (attemptsRemaining: number) => attemptsRemaining <= URGENT_ATTEMPTS_THRESHOLD;
+
+/** "4 attempts left." */
+const attemptsLeftText = (attemptsRemaining: number) =>
+  attemptsRemaining <= 0
+    ? "No attempts left."
+    : `${attemptsRemaining} attempt${attemptsRemaining === 1 ? "" : "s"} left.`;
 
 interface AuthAlertProps {
   /** The error sentence, e.g. "Incorrect code." */

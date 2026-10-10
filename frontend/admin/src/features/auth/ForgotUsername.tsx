@@ -1,7 +1,7 @@
 import { Button } from "../../components/UI";
 import { useReturnToLogin } from "./loginPrefill";
 import { SuccessIcon } from "./RecoveryFrame";
-import { EMAIL_STEP_COPY, RecoveryFlow, type VerifiedRecovery } from "./RecoveryFlow";
+import { RecoveryFlow, type VerifiedRecovery } from "./RecoveryFlow";
 
 /** `/forgot-username`: verify a code sent to the admin's email, then show their username. */
 export function ForgotUsername() {
@@ -9,7 +9,6 @@ export function ForgotUsername() {
     <RecoveryFlow
       purpose="username"
       title="Find your username"
-      description={EMAIL_STEP_COPY}
       renderFinal={(verified) => <UsernameResult verified={verified} />}
     />
   );

@@ -9,12 +9,12 @@ import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
 /** Where the admin is in entering a code. `exhausted` and `expired` mean the code is dead and only a resend helps. */
-export type CodeStepState = "entering" | "verifying" | "exhausted" | "expired";
+type CodeStepState = "entering" | "verifying" | "exhausted" | "expired";
 
 /** The two dead states, which a code step can also open in. */
 export type DeadCode = "exhausted" | "expired";
 
-export interface VerifiedCode {
+interface VerifiedCode {
   code: string;
   username: string;
 }
@@ -38,7 +38,7 @@ const EXPIRED_MESSAGE = "This code has expired. Request a new code to continue."
 const deadMessage = (dead: DeadCode) => (dead === "exhausted" ? EXHAUSTED_MESSAGE : EXPIRED_MESSAGE);
 
 /** "The code expires in 10 minutes.", rounded to whole minutes and never below one. */
-export const expiryText = (seconds: number) => {
+const expiryText = (seconds: number) => {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `The code expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 };

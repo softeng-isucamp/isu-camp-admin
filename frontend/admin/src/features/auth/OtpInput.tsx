@@ -16,7 +16,7 @@ export interface OtpInputHandle {
   clear: () => void;
 }
 
-export interface OtpInputProps {
+interface OtpInputProps {
   ref?: Ref<OtpInputHandle>;
   disabled?: boolean;
   /** Fires with the current digits joined together after every edit; shorter than 6 characters while incomplete. */

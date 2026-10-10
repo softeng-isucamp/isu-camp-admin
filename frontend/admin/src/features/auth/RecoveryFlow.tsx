@@ -4,13 +4,6 @@ import { type DeadCode, RecoveryCodeStep } from "./RecoveryCodeStep";
 import { RecoveryEmailStep } from "./RecoveryEmailStep";
 import { RecoveryFrame } from "./RecoveryFrame";
 
-/** The email step's copy, shared by both flows; "6-digit" never breaks across lines, as on the code step. */
-export const EMAIL_STEP_COPY = (
-  <>
-    Enter your admin email and we'll send you a <span className="nowrap">6-digit</span> code.
-  </>
-);
-
 /** What the code step hands to the purpose-specific final step. */
 export interface VerifiedRecovery {
   email: string;
@@ -20,9 +13,8 @@ export interface VerifiedRecovery {
 
 interface RecoveryFlowProps {
   purpose: RecoveryPurpose;
-  /** Heading and copy of the email step. */
+  /** Heading of the email step. */
   title: string;
-  description: ReactNode;
   /**
    * The purpose-specific step shown once the code is verified. It renders inside
    * the recovery card and owns its own heading, actions and "Back to login".
@@ -42,7 +34,7 @@ type FlowStep =
  * then code step, then `renderFinal`. All of it lives in memory, so a refresh
  * restarts the flow.
  */
-export function RecoveryFlow({ purpose, title, description, renderFinal }: RecoveryFlowProps) {
+export function RecoveryFlow({ purpose, title, renderFinal }: RecoveryFlowProps) {
   const [flow, setFlow] = useState<FlowStep>({ step: "email", email: "" });
   const content = useRef<HTMLDivElement>(null);
 
@@ -60,7 +52,6 @@ export function RecoveryFlow({ purpose, title, description, renderFinal }: Recov
           <RecoveryEmailStep
             purpose={purpose}
             title={title}
-            description={description}
             initialEmail={flow.email}
             onSent={(email, issued) => setFlow({ step: "code", email, issued })}
           />
