@@ -59,21 +59,42 @@ def otp_expiry():
 # a shared store can replace this seam when the app is scaled horizontally.
 RATE_LIMIT_WINDOW_SECONDS = 60
 rate_limit_buckets = defaultdict(deque)
+rate_limit_lock = threading.Lock()
+rate_limit_swept_at = None
+
+
+def reclaim_idle_rate_limit_buckets(now):
+    """Drops buckets whose hits have all left the window.
+
+    Such a bucket would be emptied by its next call anyway, so dropping it
+    changes no verdict; it only stops keys that are never seen again, such as
+    one per unknown email, from accumulating. Runs at most once a window.
+    """
+    global rate_limit_swept_at
+    if rate_limit_swept_at is not None and 0 <= now - rate_limit_swept_at < RATE_LIMIT_WINDOW_SECONDS:
+        return
+    rate_limit_swept_at = now
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    for key in [k for k, bucket in list(rate_limit_buckets.items()) if not bucket or bucket[-1] <= cutoff]:
+        rate_limit_buckets.pop(key, None)
 
 
 def rate_limited(scope, key, limit, message):
     now = time.monotonic()
-    bucket = rate_limit_buckets[(scope, key)]
-    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-    while bucket and bucket[0] <= cutoff:
-        bucket.popleft()
-    if len(bucket) >= limit:
-        retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
-        response = jsonify({"success": False, "message": message})
-        response.headers["Retry-After"] = str(retry_after)
-        return response, 429
-    bucket.append(now)
-    return None
+    with rate_limit_lock:
+        reclaim_idle_rate_limit_buckets(now)
+        bucket = rate_limit_buckets[(scope, key)]
+        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
+        else:
+            bucket.append(now)
+            return None
+    response = jsonify({"success": False, "message": message})
+    response.headers["Retry-After"] = str(retry_after)
+    return response, 429
 
 
 # ==========================================
@@ -769,7 +790,26 @@ RECOVERY_GUESS_LIMIT_PER_IP = 30
 # rather than that it never existed; after that they are swept.
 RECOVERY_RETAIN_EXPIRED_SECONDS = 3600
 
+# Every address asked about gets a stored entry, real account or not, so the
+# number of entries is capped; past it the oldest go first, whichever kind they
+# are, so being evicted cannot tell an attacker which addresses have accounts.
+RECOVERY_MAX_ENTRIES = 5000
+
+# The width of the admin.gmail column: no stored address is longer, so a longer
+# one cannot belong to an account. Checked before anything is keyed on it.
+EMAIL_MAX_LENGTH = 255
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# A code is exactly six ASCII digits. Anything else is a wrong guess.
+RECOVERY_CODE_PATTERN = re.compile(r"[0-9]{6}")
+# What a codeless (phantom) entry is compared against, so a guess costs the same
+# whether or not the entry holds a code.
+PHANTOM_CODE = "000000"
+
+# Check, count and decide on a code entry happen under this lock, and so does
+# every change to the recovery entries. It is never held across a database call
+# or a mail send.
+recovery_lock = threading.Lock()
 
 
 def run_in_background(work):
@@ -811,9 +851,34 @@ def recovery_key(purpose, email):
 
 
 def sweep_recovery_codes():
+    """Drops long-expired entries; the caller holds ``recovery_lock``."""
     cutoff = datetime.utcnow() - timedelta(seconds=RECOVERY_RETAIN_EXPIRED_SECONDS)
-    for key in [k for k, entry in reset_otps.items() if isinstance(k, tuple) and entry["expires_at"] < cutoff]:
-        del reset_otps[key]
+    for key in [k for k, entry in list(reset_otps.items()) if isinstance(k, tuple) and entry["expires_at"] < cutoff]:
+        reset_otps.pop(key, None)
+
+
+def store_recovery_entry(key, entry):
+    """Stores ``entry`` as the newest, evicting the oldest past the cap.
+
+    The caller holds ``recovery_lock``.
+    """
+    reset_otps.pop(key, None)
+    reset_otps[key] = entry
+    if len(reset_otps) <= RECOVERY_MAX_ENTRIES:
+        return
+    sweep_recovery_codes()
+    excess = sum(1 for k in list(reset_otps) if isinstance(k, tuple)) - RECOVERY_MAX_ENTRIES
+    for oldest in [k for k in list(reset_otps) if isinstance(k, tuple)][:max(excess, 0)]:
+        reset_otps.pop(oldest, None)
+
+
+def new_recovery_entry(otp=None, admin=None):
+    return {
+        "otp": otp,
+        "admin_id": admin.id if admin else None,
+        "expires_at": otp_expiry(),
+        "attempts": 0,
+    }
 
 
 def issue_recovery_code(purpose, email, admin):
@@ -823,14 +888,10 @@ def issue_recovery_code(purpose, email, admin):
     ``admin`` the entry holds no code, but still counts guesses and expires like
     one that does, so asking about an unknown address changes nothing visible.
     """
-    sweep_recovery_codes()
     otp = generate_otp() if admin else None
-    reset_otps[recovery_key(purpose, email)] = {
-        "otp": otp,
-        "admin_id": admin.id if admin else None,
-        "expires_at": otp_expiry(),
-        "attempts": 0,
-    }
+    with recovery_lock:
+        sweep_recovery_codes()
+        store_recovery_entry(recovery_key(purpose, email), new_recovery_entry(otp, admin))
     return otp
 
 
@@ -905,9 +966,31 @@ def recovery_failure(error):
 
 
 def recovery_email(data):
-    """The normalised email from a request body, or '' when it is unusable."""
+    """The normalised email from a request body, or '' when it is unusable.
+
+    Longer than a stored address can be counts as unusable, and is measured
+    before anything is lowercased or kept, so an oversized value costs nothing.
+    """
     value = data.get("email") if isinstance(data, dict) else None
-    return value.strip().lower() if isinstance(value, str) else ""
+    if not isinstance(value, str):
+        return ""
+    value = value.strip()
+    if len(value) > EMAIL_MAX_LENGTH:
+        return ""
+    value = value.lower()
+    return value if len(value) <= EMAIL_MAX_LENGTH else ""
+
+
+def recovery_code_matches(entry, code):
+    """True when ``code`` is the one stored in ``entry``.
+
+    A malformed code is compared as nothing at all, and a codeless entry
+    against a placeholder, so every input takes the same steps for any entry.
+    """
+    submitted = code.encode() if RECOVERY_CODE_PATTERN.fullmatch(code) else b""
+    stored = entry["otp"] if entry["otp"] is not None else PHANTOM_CODE
+    digits_match = secrets.compare_digest(stored.encode(), submitted)
+    return digits_match and entry["otp"] is not None
 
 
 def check_recovery_code(purpose, email, code):
@@ -919,56 +1002,88 @@ def check_recovery_code(purpose, email, code):
     the right code is refused from then on. An address with no account, or no
     code ever requested, is judged against a codeless entry and fails the same
     way. A correct code does not consume anything.
+
+    The account is looked up first, for every address, outside the lock. The
+    entry is then read, counted and decided in one step under the lock, so
+    guesses sent together cannot each see budget left, and a right guess cannot
+    be accepted after the wrong one that used the last attempt.
     """
     key = recovery_key(purpose, email)
-    entry = reset_otps.get(key)
-    if entry is None:
-        sweep_recovery_codes()
-        entry = reset_otps[key] = {
-            "otp": None,
-            "admin_id": None,
-            "expires_at": otp_expiry(),
-            "attempts": 0,
-        }
+    admin = find_recovery_admin(email)
 
-    if datetime.utcnow() >= entry["expires_at"]:
-        return None, recovery_error("code_expired", "This code has expired. Request a new one.")
+    with recovery_lock:
+        entry = reset_otps.get(key)
+        if entry is None:
+            sweep_recovery_codes()
+            entry = new_recovery_entry()
+            store_recovery_entry(key, entry)
 
-    if entry["attempts"] >= RECOVERY_ATTEMPT_LIMIT:
-        return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
+        if datetime.utcnow() >= entry["expires_at"]:
+            return None, recovery_error("code_expired", "This code has expired. Request a new one.")
 
-    admin = find_recovery_admin(email) if entry["otp"] is not None else None
-    # Bytes, so a code with non-ASCII characters is a wrong code, not an error.
-    matches = (
-        admin is not None
-        and admin.id == entry["admin_id"]
-        and secrets.compare_digest(entry["otp"].encode(), code.encode())
-    )
-    if matches:
-        return admin, None
+        if entry["attempts"] >= RECOVERY_ATTEMPT_LIMIT:
+            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
 
-    entry["attempts"] += 1
-    remaining = RECOVERY_ATTEMPT_LIMIT - entry["attempts"]
-    if remaining <= 0:
-        return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
-    return None, recovery_error("invalid_code", "Incorrect verification code", remaining)
+        if recovery_code_matches(entry, code) and admin is not None and admin.id == entry["admin_id"]:
+            return admin, None
+
+        entry["attempts"] += 1
+        remaining = RECOVERY_ATTEMPT_LIMIT - entry["attempts"]
+        if remaining <= 0:
+            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
+        return None, recovery_error("invalid_code", "Incorrect verification code", remaining)
+
+
+def claim_recovery_code(purpose, email, code, admin):
+    """Takes the code out of the store so exactly one request can redeem it.
+
+    Returns ``(entry, None)`` to the one request that gets it, or
+    ``(None, response)`` when the code is no longer good: already redeemed,
+    replaced by a newer one, used up or expired since this request checked it.
+    Nothing is counted here; the guess was already judged right.
+    """
+    key = recovery_key(purpose, email)
+    with recovery_lock:
+        entry = reset_otps.get(key)
+        if entry is None or entry["otp"] is None or entry["admin_id"] != admin.id or not recovery_code_matches(entry, code):
+            return None, recovery_error("code_exhausted", "This code can no longer be used. Request a new one.", 0)
+        if datetime.utcnow() >= entry["expires_at"]:
+            return None, recovery_error("code_expired", "This code has expired. Request a new one.")
+        if entry["attempts"] >= RECOVERY_ATTEMPT_LIMIT:
+            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
+        del reset_otps[key]
+        return entry, None
+
+
+def restore_recovery_code(purpose, email, entry):
+    """Puts back a claimed code whose password write failed.
+
+    Only if nothing has taken its place: a code issued since is newer and wins.
+    """
+    with recovery_lock:
+        reset_otps.setdefault(recovery_key(purpose, email), entry)
 
 
 def recovery_guess_limit(scope, email):
+    """Limits guesses per client and per client and address.
+
+    An address that is not a usable email is only counted against the client:
+    the route refuses it next, and it must not become a limiter key.
+    """
     client = request.remote_addr or "unknown"
-    return (
-        rate_limited(
-            f"{scope}-ip",
-            client,
-            RECOVERY_GUESS_LIMIT_PER_IP,
-            "Too many attempts. Please try again later.",
-        )
-        or rate_limited(
-            scope,
-            f"{client}:{email}",
-            RECOVERY_GUESS_LIMIT_PER_EMAIL,
-            "Too many attempts. Please try again later.",
-        )
+    limited = rate_limited(
+        f"{scope}-ip",
+        client,
+        RECOVERY_GUESS_LIMIT_PER_IP,
+        "Too many attempts. Please try again later.",
+    )
+    if limited or not EMAIL_PATTERN.match(email):
+        return limited
+    return rate_limited(
+        scope,
+        f"{client}:{email}",
+        RECOVERY_GUESS_LIMIT_PER_EMAIL,
+        "Too many attempts. Please try again later.",
     )
 
 
@@ -979,26 +1094,30 @@ def recovery_request():
         email = recovery_email(data)
         client = request.remote_addr or "unknown"
 
-        limited = (
-            rate_limited(
-                "recovery-request-ip",
-                client,
-                RECOVERY_REQUEST_LIMIT_PER_IP,
-                "Too many recovery requests. Please try again later.",
-            )
-            or rate_limited(
-                "recovery-request",
-                f"{client}:{email}",
-                1,
-                "Please wait before requesting another code.",
-            )
+        limited = rate_limited(
+            "recovery-request-ip",
+            client,
+            RECOVERY_REQUEST_LIMIT_PER_IP,
+            "Too many recovery requests. Please try again later.",
+        )
+        if limited:
+            return limited
+
+        # Before the per-address limit, so a malformed or oversized address
+        # never becomes a key.
+        if not EMAIL_PATTERN.match(email):
+            return recovery_bad_request("Enter a valid email address.")
+
+        limited = rate_limited(
+            "recovery-request",
+            f"{client}:{email}",
+            1,
+            "Please wait before requesting another code.",
         )
         if limited:
             return limited
 
         purpose = data.get("purpose") if isinstance(data, dict) else None
-        if not EMAIL_PATTERN.match(email):
-            return recovery_bad_request("Enter a valid email address.")
         if purpose not in RECOVERY_PURPOSES:
             return recovery_bad_request("Choose whether to recover a password or a username.")
 
@@ -1068,13 +1187,28 @@ def recovery_reset_password():
         if weakness:
             return recovery_error("weak_password", weakness)
 
-        admin.password = hash_password(password)
-        log_audit(
-            "System", admin, "password reset", "Admin", admin.id,
-            "Password reset by email verification code"
-        )
-        db.session.commit()
-        reset_otps.pop(recovery_key("password", email), None)
+        # Hashed before the claim only because it is slow and changes nothing.
+        password_hash = hash_password(password)
+
+        # The code is single-use: whichever request claims it first redeems it,
+        # and a request that checked it at the same moment is refused here,
+        # before anything is written.
+        claimed, refusal = claim_recovery_code("password", email, code, admin)
+        if refusal:
+            return refusal
+
+        try:
+            admin.password = password_hash
+            log_audit(
+                "System", admin, "password reset", "Admin", admin.id,
+                "Password reset by email verification code"
+            )
+            db.session.commit()
+        except Exception:
+            # Nothing was changed, so the admin keeps the code they were sent
+            # rather than needing another email for a failure that was ours.
+            restore_recovery_code("password", email, claimed)
+            raise
 
         return jsonify({"success": True, "username": admin.username}), 200
 
