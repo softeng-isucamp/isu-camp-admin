@@ -157,6 +157,7 @@ describe("Dashboard backend boundary", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
     expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
     const failedCalls = request.mock.calls.length;
 
     request.mockResolvedValue(analytics());
