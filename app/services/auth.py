@@ -349,20 +349,29 @@ def admin_required():
 SUPERADMIN_REQUIRED_CODE = "superadmin_required"
 
 
-def superadmin_required():
+def superadmin_required(locked=None):
     """Guard a route that only a superadmin may use.
 
     Returns ``(admin, None)`` or ``(None, response)`` like
     :func:`admin_required`, so routes can chain the two. The role is read from
     the row on every request, so a demoted account is refused on its next call
     without its session being invalidated.
+
+    A route that writes under a row lock on the administrator table passes the
+    locked rows as ``locked``, to check again that the caller still holds the
+    role. The caller is then judged from those rows alone, so an account that
+    was demoted, deactivated or removed while the request waited is refused
+    with the same response.
     """
 
-    admin, error = admin_required()
-    if error:
-        return None, error
+    if locked is None:
+        admin, error = admin_required()
+        if error:
+            return None, error
+    else:
+        admin = next((row for row in locked if row.id == session.get("admin_id")), None)
 
-    if not admin.is_superadmin:
+    if admin is None or not (admin.is_active and admin.is_superadmin):
         return None, (
             jsonify({
                 "success": False,

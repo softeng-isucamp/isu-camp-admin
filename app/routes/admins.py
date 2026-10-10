@@ -89,38 +89,42 @@ def _read_role(value):
     return role if role in ROLES else None
 
 
-def _is_last_active_superadmin(record):
+def _lock_administrators():
+    """Locks every administrator row for this transaction and returns them by id.
+
+    Every write that changes who can sign in or manage accounts (role, status,
+    removal) starts here and decides from what this returns, never from rows
+    read earlier. The table holds a handful of accounts, so SELECT ... FOR
+    UPDATE over all of it, in id order, is cheap, and it makes these writes
+    run one at a time: a second request waits in this query until the first
+    commits, rolls back or ends, and then reads the rows as the first left
+    them (PostgreSQL re-reads locked rows under READ COMMITTED; populate_existing
+    refreshes the ones this session already holds). Taking every row in one
+    ordered statement means no request holds a lock while waiting for another.
+
+    The caller is judged again from the locked rows, since its role may have
+    changed while it waited. Returns ``(directory, error_response)``.
+    """
+
+    rows = Admin.query.order_by(Admin.id).populate_existing().with_for_update().all()
+    _, error = superadmin_required(rows)
+    return {row.id: row for row in rows}, error
+
+
+def _is_last_active_superadmin(record, directory):
     """True when losing this account's superadmin access would leave nobody with it.
 
     Only an active superadmin counts, so a deactivated one neither blocks the
     change nor is protected by it. Applies to demoting, deactivating and
-    removing alike.
-
-    The check and the write that follows it must not interleave with another
-    administrator's, or two superadmins acting on each other could both pass.
-    So this first takes a row lock on every active superadmin (SELECT ... FOR
-    UPDATE, in id order so two requests cannot deadlock). The lock lasts until
-    the caller commits, rolls back or the request ends, which makes a second
-    request wait here; when it resumes, PostgreSQL re-reads the locked rows, so
-    it sees the first one's change and counts what is really left. The rows are
-    also refreshed (populate_existing), so ``record`` is judged on its current
-    state rather than what this request read before waiting. An account that
-    is not an active superadmin does not need any of that, so it is not locked.
+    removing alike. ``directory`` is the locked set from
+    :func:`_lock_administrators`. Holding it, the caller is an active
+    superadmin and is never the target, so this cannot be true for a real
+    request; it stays as the second line of defence.
     """
 
     if not (record.is_active and record.is_superadmin):
         return False
-    active_superadmins = (
-        Admin.query.filter(Admin.role == "superadmin")
-        .filter(Admin.status == "active")
-        .order_by(Admin.id)
-        .populate_existing()
-        .with_for_update()
-        .all()
-    )
-    if not (record.is_active and record.is_superadmin):
-        return False
-    return len(active_superadmins) <= 1
+    return sum(1 for row in directory.values() if row.is_active and row.is_superadmin) <= 1
 
 
 def _username_taken(username, *, excluding_id=None):
@@ -240,7 +244,11 @@ def set_admin_status(admin_id):
     if error:
         return error
 
-    record = db.session.get(Admin, admin_id)
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
 
@@ -254,10 +262,9 @@ def set_admin_status(admin_id):
         if record.id == session.get("admin_id"):
             return _error("You cannot deactivate your own administrator account.", status=409)
         # Someone has to be left who can sign in and undo this.
-        active_admins = Admin.query.filter(Admin.status == "active").count()
-        if active_admins <= 1:
+        if sum(1 for row in directory.values() if row.is_active) <= 1:
             return _error("The last active administrator cannot be deactivated.", status=409)
-        if _is_last_active_superadmin(record):
+        if _is_last_active_superadmin(record, directory):
             return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     if record.status == status:
@@ -302,7 +309,11 @@ def set_admin_role(admin_id):
     if error:
         return error
 
-    record = db.session.get(Admin, admin_id)
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
 
@@ -322,7 +333,7 @@ def set_admin_role(admin_id):
             "admin": _as_dict(record),
         }), 200
 
-    if role == "admin" and _is_last_active_superadmin(record):
+    if role == "admin" and _is_last_active_superadmin(record, directory):
         return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     try:
@@ -401,17 +412,21 @@ def delete_admin(admin_id):
     if error:
         return error
 
-    record = db.session.get(Admin, admin_id)
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
 
     if record.id == session.get("admin_id"):
         return _error("You cannot remove your own administrator account.", status=409)
 
-    if Admin.query.count() <= 1:
+    if len(directory) <= 1:
         return _error("The last administrator account cannot be removed.", status=409)
 
-    if _is_last_active_superadmin(record):
+    if _is_last_active_superadmin(record, directory):
         return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     try:

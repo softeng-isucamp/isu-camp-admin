@@ -1071,10 +1071,19 @@ def test_a_deactivated_last_superadmin_can_be_demoted_or_removed(lone_superadmin
     assert lone_superadmin.delete("/api/admins/4").status_code == 200
 
 
+def _start(send, client):
+    """Runs one request on its own thread. Returns the thread and its outcome."""
+
+    outcome = {}
+    thread = threading.Thread(target=lambda: outcome.update(response=send(client)))
+    thread.start()
+    return thread, outcome
+
+
 def _peer_superadmins_act_together(monkeypatch, request_for):
     """Two active superadmins each act on the other, the first held mid-check.
 
-    The first request is paused once its last-superadmin check has passed, so a
+    The first request is paused once its last-superadmin check has run, so a
     second one arrives while it still has to write. Returns both status codes.
     """
     next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
@@ -1083,30 +1092,23 @@ def _peer_superadmins_act_together(monkeypatch, request_for):
     proceed = threading.Event()
     original = admins_module._is_last_active_superadmin
 
-    def paused_after_check(record):
-        result = original(record)
+    def paused_after_check(record, *args):
+        result = original(record, *args)
         if not in_check.is_set():
             in_check.set()
             assert proceed.wait(timeout=5)
         return result
 
     monkeypatch.setattr(admins_module, "_is_last_active_superadmin", paused_after_check)
-    responses = {}
-
-    def send(caller, target):
-        responses[caller] = request_for(signed_in(app, admin_id=caller), target)
-
-    first = threading.Thread(target=send, args=(1, 2))
-    first.start()
+    first, first_outcome = _start(lambda client: request_for(client, 2), signed_in(app, admin_id=1))
     assert in_check.wait(timeout=5)
-    second = threading.Thread(target=send, args=(2, 1))
-    second.start()
+    second, second_outcome = _start(lambda client: request_for(client, 1), signed_in(app, admin_id=2))
     # Long enough for an unlocked second request to run to the end.
     time.sleep(0.3)
     proceed.set()
     first.join(timeout=5)
     second.join(timeout=5)
-    return responses[1].status_code, responses[2].status_code
+    return first_outcome["response"].status_code, second_outcome["response"].status_code
 
 
 PEER_REQUESTS = {
@@ -1116,16 +1118,116 @@ PEER_REQUESTS = {
 }
 
 
+def active_superadmins():
+    return [record.id for record in FakeAdmin.store if record.is_active and record.is_superadmin]
+
+
 @pytest.mark.parametrize("operation", sorted(PEER_REQUESTS))
 def test_two_superadmins_cannot_remove_each_others_access_at_once(monkeypatch, operation):
     statuses = _peer_superadmins_act_together(monkeypatch, PEER_REQUESTS[operation])
 
-    # One wins, the other is told it would leave nobody, and someone is left.
-    assert sorted(statuses) == [200, 409]
-    assert any(record.is_active and record.is_superadmin for record in FakeAdmin.store)
+    # One wins. The other waited for the lock, found its own caller stripped of
+    # superadmin access (or gone) by then, and was refused.
+    assert sorted(statuses) == [200, 403]
+    assert active_superadmins()
 
 
-def test_the_last_superadmin_check_locks_the_active_superadmins_before_counting(monkeypatch):
+@pytest.mark.parametrize("operation", sorted(PEER_REQUESTS))
+def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_superadmin(monkeypatch, operation):
+    """Account 1 is the only active superadmin and acts on account 2, which is
+    not an active superadmin yet. While that request is in flight, 2 is enabled
+    and then tries to demote 1."""
+
+    target = FakeAdmin.store[1]
+    if operation == "deactivate":
+        target.role, target.status = "admin", "active"
+        enable = lambda client: client.put("/api/admins/2/role", json={"role": "superadmin"})
+    else:
+        target.role, target.status = "superadmin", "inactive"
+        enable = lambda client: client.put("/api/admins/2/status", json={"status": "Active"})
+    app = admins_app()
+    in_check = threading.Event()
+    proceed = threading.Event()
+    original = admins_module._is_last_active_superadmin
+
+    def paused_after_check(record, *args):
+        result = original(record, *args)
+        if record.id == 2 and not in_check.is_set():
+            in_check.set()
+            assert proceed.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(admins_module, "_is_last_active_superadmin", paused_after_check)
+    initial, initial_outcome = _start(lambda client: PEER_REQUESTS[operation](client, 2), signed_in(app, admin_id=1))
+    assert in_check.wait(timeout=5)
+    enabling, enabled = _start(enable, signed_in(app, admin_id=1))
+    enabling.join(timeout=0.3)
+    waiting = enabling.is_alive()
+    relinquishing, relinquished = _start(
+        lambda client: client.put("/api/admins/1/role", json={"role": "admin"}),
+        signed_in(app, admin_id=2),
+    )
+    relinquishing.join(timeout=0.3)
+    proceed.set()
+    for thread in (initial, enabling, relinquishing):
+        thread.join(timeout=5)
+
+    assert active_superadmins(), "the in-flight request removed the last active superadmin"
+    assert initial_outcome["response"].status_code == 200
+    assert relinquished["response"].status_code in (401, 403)
+    # Enabling the target is a write too, so it waits behind the request in flight.
+    assert waiting
+    assert enabled["response"].status_code == (404 if operation == "remove" else 200)
+
+
+STALE_CALLER_REQUESTS = {
+    "promote": lambda client: client.put("/api/admins/3/role", json={"role": "superadmin"}),
+    "deactivate": lambda client: client.put("/api/admins/3/status", json={"status": "Inactive"}),
+    "remove": lambda client: client.delete("/api/admins/3"),
+}
+
+
+@pytest.mark.parametrize("operation", sorted(STALE_CALLER_REQUESTS))
+def test_a_caller_demoted_between_the_guard_and_the_lock_is_refused(monkeypatch, operation):
+    FakeAdmin.store[1].role = "superadmin"
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com"))
+    app = admins_app()
+    past_guard = threading.Event()
+    proceed = threading.Event()
+    original = admins_module.superadmin_required
+
+    def paused_after_guard(*args):
+        result = original(*args)
+        if not past_guard.is_set():
+            past_guard.set()
+            assert proceed.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(admins_module, "superadmin_required", paused_after_guard)
+    stale, outcome = _start(STALE_CALLER_REQUESTS[operation], signed_in(app, admin_id=2))
+    assert past_guard.wait(timeout=5)
+    demoted = signed_in(app, admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    assert demoted.status_code == 200
+    proceed.set()
+    stale.join(timeout=5)
+
+    response = outcome["response"]
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+    account = next(item for item in FakeAdmin.store if item.id == 3)
+    assert (account.role, account.status) == ("admin", "active")
+
+
+LOCKING_REQUESTS = {
+    "role": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "superadmin"}),
+    "status": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
+    "remove": lambda client, target: client.delete(f"/api/admins/{target}"),
+}
+
+
+@pytest.mark.parametrize("target", [2, 1, 99], ids=["a plain administrator", "the caller", "a missing account"])
+@pytest.mark.parametrize("operation", sorted(LOCKING_REQUESTS))
+def test_every_role_status_and_remove_request_locks_the_whole_directory_first(monkeypatch, operation, target):
     locked = []
     original = FakeQuery._matching
 
@@ -1135,11 +1237,38 @@ def test_the_last_superadmin_check_locks_the_active_superadmins_before_counting(
         return original(self)
 
     monkeypatch.setattr(FakeQuery, "_matching", recording)
-    FakeAdmin.store[1].role = "superadmin"
 
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    LOCKING_REQUESTS[operation](signed_in(admins_app(), admin_id=1), target)
 
+    # One lock over every row, taken whatever the request goes on to decide.
     assert len(locked) == 1
+    assert locked[0]._filters == []
+    # And it does not outlive the request, whether it wrote or was refused.
+    assert FakeAdmin._lock_owner is None
+
+
+@pytest.mark.parametrize("operation", sorted(LOCKING_REQUESTS))
+def test_a_plain_administrator_is_refused_without_taking_the_lock(monkeypatch, operation):
+    locked = []
+    monkeypatch.setattr(FakeQuery, "with_for_update", lambda self: locked.append(self) or self)
+
+    response = LOCKING_REQUESTS[operation](signed_in(admins_app(), admin_id=2), 1)
+
+    assert response.status_code == 403
+    assert locked == []
+
+
+def test_a_failed_write_releases_the_lock(admin_directory, monkeypatch):
+    def broken_commit():
+        raise RuntimeError("database offline")
+
+    monkeypatch.setattr(admin_directory, "commit", broken_commit)
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/status", json={"status": "Inactive"})
+
+    assert response.status_code == 500
+    assert admin_directory.rolled_back is True
+    assert FakeAdmin._lock_owner is None
 
 
 def test_the_existing_self_rules_still_hold_for_a_superadmin(admin_directory):
