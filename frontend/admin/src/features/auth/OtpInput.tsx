@@ -1,6 +1,5 @@
 import {
   type ClipboardEvent,
-  type CompositionEvent,
   type InputEvent as ReactInputEvent,
   type KeyboardEvent,
   type Ref,
@@ -54,7 +53,7 @@ interface OtpInputProps {
   onChange?: (code: string) => void;
   /**
    * Fires, at most once per input event, when an edit leaves all six boxes filled and either completed a code that was incomplete,
-   * entered a digit in the last box, or was a paste. Undo, redo and a cancelled composition enter nothing. Changing a digit in boxes 1 to 5 of a complete code does not fire it.
+   * entered a digit in the last box, or was a paste. Undo and redo enter nothing. Changing a digit in boxes 1 to 5 of a complete code does not fire it.
    */
   onComplete?: (code: string) => void;
 }
@@ -65,10 +64,6 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
   const [rejected, setRejected] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const refocusFirst = useRef(false);
-  // Text an IME is still composing in one box. It is shown as the box's value but is not part of the code until compositionend.
-  const [composing, setComposing] = useState<{ index: number; text: string } | null>(null);
-  // Some browsers report a composed digit again in a plain input event right after compositionend.
-  const justComposed = useRef(false);
 
   useEffect(() => {
     if (!refocusFirst.current || disabled) return;
@@ -109,7 +104,7 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
   };
 
   /**
-   * Applies what an input event (or the end of a composition) did to box `index`, which held `digits[index]`.
+   * Applies what an input event did to box `index`, which held `digits[index]`.
    * `entered` says the event really put text in; only then may the edit submit. An event that only moved or restored text never does.
    */
   const applyEdit = (index: number, input: HTMLInputElement, inserted: number, entered: boolean) => {
@@ -141,31 +136,9 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
       input.value = digits[index];
       return;
     }
-    if (native.isComposing) {
-      // Nothing is entered until the composition ends: no code change, no completion, no focus move.
-      setComposing({ index, text: input.value });
-      return;
-    }
-    if (justComposed.current) return;
     // An event with no inputType (older browsers, synthetic events) is taken as an insertion; otherwise only insert* types are.
     const entered = !native.inputType || native.inputType.startsWith("insert");
     applyEdit(index, input, native.data ? native.data.length : input.value.length - digits[index].length, entered);
-  };
-
-  const handleCompositionEnd = (index: number, event: CompositionEvent<HTMLInputElement>) => {
-    const pending = composing;
-    setComposing(null);
-    if (disabled || pending?.index !== index) return;
-    justComposed.current = true;
-    setTimeout(() => {
-      justComposed.current = false;
-    }, 0);
-    const input = event.currentTarget;
-    if (!event.data && input.value === digits[index]) {
-      // Cancelled: no text was committed and the box is back to what it held, so nothing was entered.
-      return;
-    }
-    applyEdit(index, input, event.data ? event.data.length : input.value.length - digits[index].length, true);
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
@@ -176,7 +149,7 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
   };
 
   const handleKeyDown = (index: number, event: KeyboardEvent<HTMLInputElement>) => {
-    if (disabled || event.nativeEvent.isComposing || event.key !== "Backspace" || digits[index] || index === 0) return;
+    if (disabled || event.key !== "Backspace" || digits[index] || index === 0) return;
     const next = [...digits];
     next[index - 1] = "";
     commit(next);
@@ -192,17 +165,15 @@ export function OtpInput({ ref, disabled = false, describedBy, onChange, onCompl
             inputs.current[index] = element;
           }}
           type="text"
-          inputMode="numeric"
-          autoComplete={index === 0 ? "one-time-code" : "off"}
+          autoComplete="off"
           className="segmented-code-input"
           aria-label={`Digit ${index + 1} of ${LENGTH}`}
-          value={composing?.index === index ? composing.text : digit}
+          value={digit}
           disabled={disabled}
           aria-invalid={rejected || undefined}
           // The input event, not change: it also fires when a digit is replaced by itself. React still wants an onChange for a controlled value.
           onChange={noop}
           onInput={(event) => handleInput(index, event)}
-          onCompositionEnd={(event) => handleCompositionEnd(index, event)}
           onKeyDown={(event) => handleKeyDown(index, event)}
           onPaste={handlePaste}
           onFocus={(event) => event.target.select()}

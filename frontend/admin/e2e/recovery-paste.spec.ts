@@ -103,7 +103,7 @@ test("digits delivered by insertText, with no key events, edit and submit like t
   await reachCodeStep(page);
   await pasteWrongCode(page, "123456");
 
-  // The path of touch keyboards and IMEs: one input event per digit. Each digit equals the one it replaces.
+  // One input event per digit, with no key events. Each digit equals the one it replaces.
   for (const digit of "12345") await page.keyboard.insertText(digit);
   await quiet(page);
   await expect(page.getByRole("alert")).toContainText("4 attempts left.");
@@ -198,27 +198,6 @@ test("typing the digit a box already holds, after clicking it, still replaces it
   await expect(box(page, 4)).toBeFocused();
 });
 
-test("a digit composed by an IME is entered once, on commit, and not before", async ({ page }) => {
-  await reachCodeStep(page);
-  await box(page, 1).focus();
-  await page.keyboard.type("12345");
-  await expect(box(page, 6)).toBeFocused();
-  const cdp = await page.context().newCDPSession(page);
-
-  await cdp.send("Input.imeSetComposition", { text: "9", selectionStart: 1, selectionEnd: 1 });
-  await quiet(page);
-
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(box(page, 6)).toBeFocused();
-
-  await cdp.send("Input.insertText", { text: "9" });
-
-  await expect(page.getByRole("alert")).toContainText("Incorrect code. 4 attempts left.");
-  await quiet(page);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-  expect(await boxValues(page)).toBe("123459");
-});
-
 /** Rejects 123456, then rejects 123459 typed into box 6, so the boxes hold a rejected code and 3 attempts are left. */
 async function rejectThenReplaceDigitSix(page: Page) {
   await pasteWrongCode(page, "123456");
@@ -245,26 +224,4 @@ test("Ctrl+Z in box 6 of a rejected code sends nothing and does not cost an atte
   expect(requests).toBe(0);
   await expect(page.getByRole("alert")).toContainText("3 attempts left.");
   expect(await boxValues(page)).toBe("123459");
-});
-
-test("a composition in box 6 of a rejected code that is cancelled sends nothing and restores the digit", async ({ page }) => {
-  await reachCodeStep(page);
-  await pasteWrongCode(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-  const cdp = await page.context().newCDPSession(page);
-  let requests = 0;
-  page.on("request", (request) => {
-    if (request.method() === "POST") requests += 1;
-  });
-
-  await box(page, 6).click();
-  await page.keyboard.press("ArrowRight");
-  await cdp.send("Input.imeSetComposition", { text: "9", selectionStart: 1, selectionEnd: 1 });
-  await expect(box(page, 6)).toHaveValue("69");
-  await cdp.send("Input.imeSetComposition", { text: "", selectionStart: 0, selectionEnd: 0 });
-  await quiet(page);
-
-  expect(requests).toBe(0);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-  expect(await boxValues(page)).toBe("123456");
 });

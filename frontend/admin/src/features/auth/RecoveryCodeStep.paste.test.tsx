@@ -53,7 +53,7 @@ const pasteIntoFirstBox = async (user: ReturnType<typeof userEvent.setup>, text:
   await settle();
 };
 
-/** One input event per digit, as a touch keyboard sends them; the same digit is still an input event. */
+/** One input event per digit; the same digit is still an input event. */
 const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.input(box(i + 1), { target: { value: digit } }));
 const pasteCode = (position: number, text: string) => fireEvent.paste(box(position), { clipboardData: { getData: () => text } });
 const tickSecond = () =>
@@ -187,7 +187,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "paste");
 
-    // A touch keyboard sends no keydown, and the value does not change, so React's onChange would not fire.
+    // An input event with no keydown, and no change of value, so React's onChange would not fire.
     fireEvent.input(box(1), { target: { value: "1" } });
     await settle();
 
@@ -301,7 +301,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "paste");
 
-    // Autofill, an IME or insertText: several digits at once, into a box that already has one.
+    // Autofill or insertText: several digits at once, into a box that already has one.
     fireEvent.input(box(3), { target: { value: inserted } });
     await settle();
 
@@ -911,112 +911,6 @@ describe("code step: a digit typed into a box that already holds one", () => {
   });
 });
 
-describe("code step: composition text", () => {
-  type User = ReturnType<typeof userEvent.setup>;
-
-  const openFiveDigits = async (user: User) => {
-    const backend = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
-    renderForgotPassword();
-    await sendCode();
-    await user.click(box(1));
-    await user.keyboard("12345");
-    await settle();
-    return backend;
-  };
-
-  const compose = (position: number, text: string) =>
-    fireEvent.input(box(position), { target: { value: text }, inputType: "insertCompositionText", data: text, isComposing: true });
-  const endComposition = (position: number, text: string) => fireEvent.compositionEnd(box(position), { data: text });
-
-  it("sends nothing and moves no focus while the last digit is still being composed, then sends once when it is committed", async () => {
-    const user = userEvent.setup();
-    const { sent } = await openFiveDigits(user);
-    expect(box(6)).toHaveFocus();
-
-    compose(6, "9");
-    await settle();
-
-    expect(sentCodes(sent)).toEqual([]);
-    expect(box(6)).toHaveFocus();
-    expect(box(6)).toHaveValue("9");
-
-    endComposition(6, "9");
-    await settle();
-
-    expect(boxValues()).toBe("123459");
-    expect(sentCodes(sent)).toEqual(["123459"]);
-  });
-
-  it("does not advance focus while a middle digit is being composed, and advances once on commit", async () => {
-    const user = userEvent.setup();
-    const { sent } = await openFiveDigits(user);
-    await user.click(box(2));
-
-    compose(2, "8");
-    expect(box(2)).toHaveFocus();
-    expect(box(2)).toHaveValue("8");
-    endComposition(2, "8");
-    await settle();
-
-    expect(boxValues()).toBe("18345");
-    expect(box(3)).toHaveFocus();
-    expect(sentCodes(sent)).toEqual([]);
-  });
-
-  it("applies a composed digit once when the browser also reports it in a plain input event after compositionend", async () => {
-    const user = userEvent.setup();
-    const { sent } = await openFiveDigits(user);
-
-    compose(6, "9");
-    endComposition(6, "9");
-    fireEvent.input(box(6), { target: { value: "9" }, inputType: "insertText", data: "9" });
-    await settle();
-
-    expect(boxValues()).toBe("123459");
-    expect(sentCodes(sent)).toEqual(["123459"]);
-  });
-
-  it("ends up with one digit and one request for a keyboard that composes every digit", async () => {
-    const user = userEvent.setup();
-    const { sent } = await openFiveDigits(user);
-    await user.click(box(1));
-
-    for (const [i, digit] of [...("654321")].entries()) {
-      fireEvent.compositionStart(box(i + 1));
-      compose(i + 1, digit);
-      endComposition(i + 1, digit);
-      await settle();
-    }
-
-    expect(boxValues()).toBe("654321");
-    expect(sentCodes(sent)).toEqual(["654321"]);
-  });
-
-  it("resolves composed text in a box with a digit by the caret, and drops composed text without digits", async () => {
-    const user = userEvent.setup();
-    const { sent } = await openFiveDigits(user);
-    await user.click(box(2));
-    const second = box(2) as HTMLInputElement;
-
-    second.value = "72";
-    second.setSelectionRange(1, 1);
-    fireEvent.input(second, { inputType: "insertCompositionText", data: "7", isComposing: true });
-    endComposition(2, "7");
-    await settle();
-    expect(boxValues()).toBe("17345");
-    expect(box(3)).toHaveFocus();
-
-    await user.click(box(3));
-    compose(3, "x");
-    endComposition(3, "x");
-    await settle();
-
-    expect(boxValues()).toBe("17345");
-    expect(box(3)).toHaveValue("3");
-    expect(sentCodes(sent)).toEqual([]);
-  });
-});
-
 describe("code step: events in box 6 that enter no digit into a rejected code", () => {
   const REJECTED = "123456";
 
@@ -1064,35 +958,6 @@ describe("code step: events in box 6 that enter no digit into a rejected code", 
     expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
   });
 
-  it("sends nothing and restores the digit when a composition in box 6 is cancelled", async () => {
-    const { user, sent } = await openRejected();
-    await user.click(box(6));
-
-    fireEvent.compositionStart(box(6));
-    fireEvent.input(box(6), { target: { value: "9" }, inputType: "insertCompositionText", data: "9", isComposing: true });
-    expect(box(6)).toHaveValue("9");
-    // The browser puts the old digit back, and the composition ends with no text.
-    fireEvent.input(box(6), { target: { value: "6" }, inputType: "insertCompositionText", data: "", isComposing: true });
-    fireEvent.compositionEnd(box(6), { data: "" });
-    await settle();
-
-    expect(box(6)).toHaveValue("6");
-    expect(boxValues()).toBe(REJECTED);
-    expect(sentCodes(sent)).toEqual([REJECTED]);
-  });
-
-  it("sends once when a composition in box 6 commits the digit the box already holds", async () => {
-    const { user, sent } = await openRejected();
-    await user.click(box(6));
-
-    fireEvent.compositionStart(box(6));
-    fireEvent.input(box(6), { target: { value: "6" }, inputType: "insertCompositionText", data: "6", isComposing: true });
-    fireEvent.compositionEnd(box(6), { data: "6" });
-    await settle();
-
-    expect(boxValues()).toBe(REJECTED);
-    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
-  });
 });
 
 describe("code step: the error alert describes the code boxes", () => {
