@@ -226,12 +226,16 @@ describe("mock service contracts", () => {
     expect(
       resetSchema.safeParse({ code: "000000", password: "password123" })
         .success,
+    ).toBe(false);
+    expect(
+      resetSchema.safeParse({ code: "000000", password: "Passw0rd!x" })
+        .success,
     ).toBe(true);
     expect(
       resetPasswordSchema.safeParse({
         code: "000000",
-        password: "password123",
-        confirmPassword: "different123",
+        password: "Passw0rd!x",
+        confirmPassword: "Different1!",
       }).success,
     ).toBe(false);
   });
