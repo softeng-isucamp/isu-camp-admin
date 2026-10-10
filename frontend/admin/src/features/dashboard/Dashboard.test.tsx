@@ -111,7 +111,7 @@ describe("Dashboard backend boundary", () => {
     vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
     renderDashboard();
 
-    const teacher = await screen.findByRole("button", { name: "View Teacher accounts" });
+    const teacher = await screen.findByRole("button", { name: "View Staff accounts" });
     expect(within(teacher).getByText("20%")).toBeInTheDocument();
     expect(within(teacher).getByText("11")).toBeInTheDocument();
     const student = screen.getByRole("button", { name: "View Student accounts" });
@@ -121,7 +121,7 @@ describe("Dashboard backend boundary", () => {
     expect(screen.getByRole("img", { name: "Registered users by account type" })).toBeInTheDocument();
     expect(screen.getByText("Visitor: 5 (9%)")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("Teacher: 11 (20%)"));
+    await userEvent.click(screen.getByText("Staff: 11 (20%)"));
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=teacher");
   });
 

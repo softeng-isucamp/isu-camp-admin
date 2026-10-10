@@ -5,9 +5,6 @@ import { ChartArea, ChartCard } from "./ChartCard";
 import { formatNumber, formatPercent } from "./format";
 import { AXIS_TICK, INK, TOOLTIP_STYLE } from "./palette";
 
-// Staff is this chart's label for the "teacher" account type.
-const chartLabel = (key: string, label: string) => (key === "teacher" ? "Staff" : label);
-
 /** A3: Visits split by account type. The User App records only signed-in users. */
 export function VisitsByAccountType({ data }: { data: DashboardAnalytics | undefined }) {
   return (
@@ -19,7 +16,7 @@ export function VisitsByAccountType({ data }: { data: DashboardAnalytics | undef
     >
       {(d) => {
         const total = Object.values(d.visitsByAccountType).reduce((sum, value) => sum + value, 0);
-        const rows = accountTypes.map((type) => ({ name: chartLabel(type.key, type.label), value: d.visitsByAccountType[type.key], color: type.color }));
+        const rows = accountTypes.map((type) => ({ name: type.label, value: d.visitsByAccountType[type.key], color: type.color }));
         return (
           <ChartArea height={170}>
             <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 76, bottom: 0, left: 8 }} barCategoryGap={14}>
