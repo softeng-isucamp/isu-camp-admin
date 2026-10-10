@@ -95,12 +95,32 @@ def _is_last_active_superadmin(record):
     Only an active superadmin counts, so a deactivated one neither blocks the
     change nor is protected by it. Applies to demoting, deactivating and
     removing alike.
+
+    The check and the write that follows it must not interleave with another
+    administrator's, or two superadmins acting on each other could both pass.
+    So this first takes a row lock on every active superadmin (SELECT ... FOR
+    UPDATE, in id order so two requests cannot deadlock). The lock lasts until
+    the caller commits, rolls back or the request ends, which makes a second
+    request wait here; when it resumes, PostgreSQL re-reads the locked rows, so
+    it sees the first one's change and counts what is really left. The rows are
+    also refreshed (populate_existing), so ``record`` is judged on its current
+    state rather than what this request read before waiting. An account that
+    is not an active superadmin does not need any of that, so it is not locked.
     """
 
     if not (record.is_active and record.is_superadmin):
         return False
-    active_superadmins = Admin.query.filter(Admin.role == "superadmin").filter(Admin.status == "active").count()
-    return active_superadmins <= 1
+    active_superadmins = (
+        Admin.query.filter(Admin.role == "superadmin")
+        .filter(Admin.status == "active")
+        .order_by(Admin.id)
+        .populate_existing()
+        .with_for_update()
+        .all()
+    )
+    if not (record.is_active and record.is_superadmin):
+        return False
+    return len(active_superadmins) <= 1
 
 
 def _username_taken(username, *, excluding_id=None):

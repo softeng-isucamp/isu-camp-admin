@@ -1,3 +1,4 @@
+import threading
 import time
 
 from flask import Flask
@@ -24,7 +25,22 @@ class FakeQuery:
     def order_by(self, *_columns):
         return self
 
+    def populate_existing(self):
+        return self
+
+    def with_for_update(self):
+        clone = FakeQuery(self.store)
+        clone._filters = list(self._filters)
+        clone._locking = True
+        return clone
+
+    _locking = False
+
     def _matching(self):
+        if self._locking:
+            # A locking read waits for whoever holds the rows, then reads what
+            # they left behind, as PostgreSQL does under READ COMMITTED.
+            FakeAdmin.lock_rows()
         return [record for record in self.store if all(check(record) for check in self._filters)]
 
     def all(self):
@@ -63,6 +79,7 @@ class FakeColumn:
 class FakeAdmin:
     store = []
     # Shadowed by the instance attribute on every record.
+    id = FakeColumn("id")
     username = FakeColumn("username")
     status = FakeColumn("status")
     role = FakeColumn("role")
@@ -80,9 +97,28 @@ class FakeAdmin:
         self.status = status
         self.role = role
 
+    # Stands in for the row locks of SELECT ... FOR UPDATE: one holder at a
+    # time, released when its transaction ends (commit, rollback or the end of
+    # the request, where the real session is removed).
+    _row_lock = threading.Lock()
+    _lock_owner = None
+
     @classmethod
     def reset(cls, records):
         cls.store = list(records)
+        cls.release_rows()
+
+    @classmethod
+    def lock_rows(cls):
+        if cls._lock_owner != threading.get_ident():
+            cls._row_lock.acquire()
+            cls._lock_owner = threading.get_ident()
+
+    @classmethod
+    def release_rows(cls):
+        if cls._lock_owner == threading.get_ident():
+            cls._lock_owner = None
+            cls._row_lock.release()
 
     class _QueryDescriptor:
         def __get__(self, _instance, owner):
@@ -121,15 +157,19 @@ class FakeSession:
     def commit(self):
         self.flush()
         self.committed = True
+        FakeAdmin.release_rows()
 
     def rollback(self):
         self.rolled_back = True
+        FakeAdmin.release_rows()
 
 
 def admins_app():
     app = Flask(__name__)
     app.config["SECRET_KEY"] = "test-secret"
     app.register_blueprint(admins_bp)
+    # The real session is removed when the request ends, which ends its transaction.
+    app.teardown_appcontext(lambda _error: FakeAdmin.release_rows())
     return app
 
 
@@ -1029,6 +1069,77 @@ def test_a_deactivated_last_superadmin_can_be_demoted_or_removed(lone_superadmin
 
     assert lone_superadmin.put("/api/admins/4/role", json={"role": "admin"}).status_code == 200
     assert lone_superadmin.delete("/api/admins/4").status_code == 200
+
+
+def _peer_superadmins_act_together(monkeypatch, request_for):
+    """Two active superadmins each act on the other, the first held mid-check.
+
+    The first request is paused once its last-superadmin check has passed, so a
+    second one arrives while it still has to write. Returns both status codes.
+    """
+    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
+    app = admins_app()
+    in_check = threading.Event()
+    proceed = threading.Event()
+    original = admins_module._is_last_active_superadmin
+
+    def paused_after_check(record):
+        result = original(record)
+        if not in_check.is_set():
+            in_check.set()
+            assert proceed.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(admins_module, "_is_last_active_superadmin", paused_after_check)
+    responses = {}
+
+    def send(caller, target):
+        responses[caller] = request_for(signed_in(app, admin_id=caller), target)
+
+    first = threading.Thread(target=send, args=(1, 2))
+    first.start()
+    assert in_check.wait(timeout=5)
+    second = threading.Thread(target=send, args=(2, 1))
+    second.start()
+    # Long enough for an unlocked second request to run to the end.
+    time.sleep(0.3)
+    proceed.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    return responses[1].status_code, responses[2].status_code
+
+
+PEER_REQUESTS = {
+    "demote": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "admin"}),
+    "deactivate": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
+    "remove": lambda client, target: client.delete(f"/api/admins/{target}"),
+}
+
+
+@pytest.mark.parametrize("operation", sorted(PEER_REQUESTS))
+def test_two_superadmins_cannot_remove_each_others_access_at_once(monkeypatch, operation):
+    statuses = _peer_superadmins_act_together(monkeypatch, PEER_REQUESTS[operation])
+
+    # One wins, the other is told it would leave nobody, and someone is left.
+    assert sorted(statuses) == [200, 409]
+    assert any(record.is_active and record.is_superadmin for record in FakeAdmin.store)
+
+
+def test_the_last_superadmin_check_locks_the_active_superadmins_before_counting(monkeypatch):
+    locked = []
+    original = FakeQuery._matching
+
+    def recording(self):
+        if self._locking:
+            locked.append(self)
+        return original(self)
+
+    monkeypatch.setattr(FakeQuery, "_matching", recording)
+    FakeAdmin.store[1].role = "superadmin"
+
+    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+
+    assert len(locked) == 1
 
 
 def test_the_existing_self_rules_still_hold_for_a_superadmin(admin_directory):
