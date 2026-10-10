@@ -1,21 +1,22 @@
-from datetime import datetime, timedelta, timezone
-
 from sqlalchemy import func
 
 from extensions import db
 from model.building import Building
 from model.location import LOCATION_TYPE_NAMES, Location
 from model.user_history import UserHistory
+from services.dashboard_analytics import search_window
 
 
-def summarize_user_searches(days, limit=5):
-    """Return ranked User App destination selections for a rolling window."""
+def summarize_user_searches(days, limit=5, now=None):
+    """Return ranked User App destination selections for the last ``days``
+    Manila calendar days, the window the Analytics tab uses.
 
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=days)
-        if days is not None
-        else None
-    )
+    ``searches`` counts every Search in the window, including one whose
+    Building or Location has since been deleted; only the ranking skips those.
+    """
+
+    window = search_window(days, now) if days is not None else None
+    total_query = db.session.query(func.count(UserHistory.id))
 
     location_query = (
         db.session.query(
@@ -27,7 +28,10 @@ def summarize_user_searches(days, limit=5):
         )
         .join(Location, Location.location_id == UserHistory.location_id)
         .outerjoin(Building, Building.building_id == UserHistory.building_id)
-        .filter(UserHistory.location_id.isnot(None))
+        .filter(
+            UserHistory.location_id.isnot(None),
+            Location.type_id.in_(LOCATION_TYPE_NAMES),
+        )
     )
     building_query = (
         db.session.query(
@@ -43,9 +47,12 @@ def summarize_user_searches(days, limit=5):
         )
     )
 
-    if cutoff is not None:
-        location_query = location_query.filter(UserHistory.created_at >= cutoff)
-        building_query = building_query.filter(UserHistory.created_at >= cutoff)
+    if window is not None:
+        start, end = window
+        in_window = (UserHistory.created_at >= start, UserHistory.created_at < end)
+        total_query = total_query.filter(*in_window)
+        location_query = location_query.filter(*in_window)
+        building_query = building_query.filter(*in_window)
 
     location_rows = location_query.group_by(
         UserHistory.location_id,
@@ -86,7 +93,7 @@ def summarize_user_searches(days, limit=5):
     )
 
     return {
-        "searches": sum(row["searches"] for row in ranked),
+        "searches": int(total_query.scalar()),
         "topSearched": [
             {"rank": str(index), **row}
             for index, row in enumerate(ranked[:limit], start=1)
