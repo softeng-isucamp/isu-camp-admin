@@ -11,6 +11,7 @@ const LOCAL_PASSWORD = "password123";
 const LOGIN_ATTEMPT_LIMIT = 5;
 const LOGIN_LOCKOUT_SECONDS = 60;
 const CONFIRMATION_WINDOW_MS = 5 * 60 * 1000;
+const DEACTIVATED_MESSAGE = "This administrator account has been deactivated.";
 const LOCAL_ADMIN_EMAIL = "admin@isu.edu.ph";
 const RECOVERY_TEST_CODE = "000000";
 const RECOVERY_ATTEMPT_LIMIT = 5;
@@ -70,6 +71,19 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   }
   // When the signed-in account last retyped its password; the server keeps this on the session.
   let confirmedAt = 0;
+  const endSession = () => {
+    session = null;
+    confirmedAt = 0;
+    storage?.removeItem(LOCAL_SESSION_KEY);
+  };
+  // The server reads the account row on every request, so one deactivated while
+  // signed in is refused on its next request and signed out.
+  const refuseIfDeactivated = () => {
+    if (session && account.status !== "Active") {
+      endSession();
+      throw new Error(DEACTIVATED_MESSAGE);
+    }
+  };
   const issuedCodes = new Map<string, IssuedCode>();
   let failedLogins = 0;
   let lockedUntil = 0;
@@ -120,6 +134,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
           }
           throw new AuthError("invalid_credentials", "Invalid username or password", LOGIN_ATTEMPT_LIMIT - failedLogins);
         }
+        // Checked after the password, so a wrong guess cannot discover which accounts are deactivated.
+        if (candidate.status !== "Active") throw new Error(`${DEACTIVATED_MESSAGE} Ask another administrator to reactivate it.`);
         failedLogins = 0;
         account = candidate;
         confirmedAt = 0;
@@ -127,18 +143,19 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
         return session;
       },
-      logout: async (): Promise<void> => {
-        session = null;
-        confirmedAt = 0;
-        storage?.removeItem(LOCAL_SESSION_KEY);
+      logout: async (): Promise<void> => endSession(),
+      me: async (): Promise<Session | null> => {
+        if (session && account.status !== "Active") endSession();
+        return session ? profileOf(account) : null;
       },
-      me: async (): Promise<Session | null> => session ? profileOf(account) : null,
       profile: async (): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to view your profile.");
+        refuseIfDeactivated();
         return profileOf(account);
       },
       updateProfile: async (changes: ProfileChanges): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to edit your profile.");
+        refuseIfDeactivated();
         if (!changes.username.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email.trim())) throw new Error("Enter a username and valid email.");
         account.username = changes.username.trim();
         account.email = changes.email.trim();
@@ -148,14 +165,19 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
       changePassword: async (changes: PasswordChange): Promise<void> => {
         if (!session) throw new Error("Sign in to change your password.");
+        refuseIfDeactivated();
         if (changes.currentPassword !== account.password) throw new Error("Current password is incorrect.");
         if (changes.newPassword.length < 8) throw new Error("Use at least 8 characters.");
         account.password = changes.newPassword;
       },
-      // The fixture opens the confirmation window, but only creating a superadmin
-      // asks for it; the backend owns the real guard for the other actions.
+      // Opens the confirmation window the administrator actions that need one read.
+      // A wrong password closes it again, as the server's session does.
       confirmPassword: async (password: string): Promise<void> => {
-        if (password !== account.password) throw new Error("Password is incorrect");
+        refuseIfDeactivated();
+        if (password !== account.password) {
+          confirmedAt = 0;
+          throw new Error("Password is incorrect");
+        }
         confirmedAt = Date.now();
       },
       // Always succeeds and reports the same timing, so the response never says whether the email has an account.
@@ -182,6 +204,12 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       accounts,
       /** The account the session belongs to, or null while signed out. */
       viewer: (): FixtureAccount | null => session ? account : null,
+      /** The account making an administrator request: signed in and still active, or the request is refused. */
+      caller: (): FixtureAccount => {
+        if (!session) throw new Error("Authentication required");
+        refuseIfDeactivated();
+        return account;
+      },
       /** Whether the signed-in account confirmed its password within the server's five minutes. */
       recentlyConfirmed: (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS,
     },
