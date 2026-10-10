@@ -2,9 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
-import type { DashboardSummary } from "../../types";
+import { generateDashboardAnalytics } from "../../services/fixtures/dashboardAnalytics";
+import { locations } from "../../services/mockData";
+import type { DashboardAnalytics, DashboardRange, DashboardSummary } from "../../types";
 import { formatDateTime } from "../../lib/format";
 import { Dashboard } from "./Dashboard";
 
@@ -23,6 +25,16 @@ const summary: DashboardSummary = {
     { id: "8", actor: "student01", action: "Searched Location", target: "Library", createdAt: "Sep 12, 2026", category: "User" },
   ],
 };
+
+const analytics = (range: DashboardRange = "week"): DashboardAnalytics => ({
+  ...generateDashboardAnalytics(range, locations),
+  topDestinations: [{ rank: "1", locationId: "Building:42", name: "Library", context: "Student Services", searches: 18, visits: 9 }],
+});
+
+beforeAll(() => {
+  // jsdom has no ResizeObserver, which Recharts' ResponsiveContainer needs.
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+});
 
 function renderDashboard() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -46,6 +58,7 @@ describe("Dashboard backend boundary", () => {
 
   it("loads the default range and refetches when the analytics range changes", async () => {
     const request = vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
     renderDashboard();
 
     expect(await screen.findByText("12")).toBeInTheDocument();
@@ -68,18 +81,22 @@ describe("Dashboard backend boundary", () => {
     expect(within(rankedLibrary).getByText("Library")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("Student Services")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("18")).toBeInTheDocument();
+    expect(within(rankedLibrary).getByText("9")).toBeInTheDocument();
+    expect(within(rankedLibrary).getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("Top Destinations")).toBeInTheDocument();
     await userEvent.click(rankedLibrary);
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent(
       "/locations?q=Library&locationKey=Building%3A42",
     );
 
-    await userEvent.selectOptions(screen.getByLabelText("Top searched time range"), "month");
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "month");
     await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
     expect(screen.getByText("+2 added this month")).toBeInTheDocument();
   });
 
   it("shows an actionable error when the backend request fails", async () => {
     vi.spyOn(services.dashboard, "summary").mockRejectedValue(new Error("Service unavailable"));
+    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Service unavailable"));
     renderDashboard();
 
     const alert = await screen.findByRole("alert");
@@ -91,9 +108,10 @@ describe("Dashboard backend boundary", () => {
 
   it("shows the account type split with percentages, counts, and filtered links", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
     renderDashboard();
 
-    const teacher = await screen.findByRole("button", { name: "View Teacher accounts" });
+    const teacher = await screen.findByRole("button", { name: "View Staff accounts" });
     expect(within(teacher).getByText("20%")).toBeInTheDocument();
     expect(within(teacher).getByText("11")).toBeInTheDocument();
     const student = screen.getByRole("button", { name: "View Student accounts" });
@@ -103,16 +121,71 @@ describe("Dashboard backend boundary", () => {
     expect(screen.getByRole("img", { name: "Registered users by account type" })).toBeInTheDocument();
     expect(screen.getByText("Visitor: 5 (9%)")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("Teacher: 11 (20%)"));
+    await userEvent.click(screen.getByText("Staff: 11 (20%)"));
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=teacher");
   });
 
   it("shows the total and dashes when the backend omits the account type split", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue({ ...summary, usersByType: null });
+    vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
     renderDashboard();
 
     const student = await screen.findByRole("button", { name: "View Student accounts" });
     expect(within(student).getAllByText("—")).toHaveLength(2);
     expect(screen.getByText("56")).toBeInTheDocument();
+  });
+
+  it("renders the Analytics tab sections from fixture data", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    renderDashboard();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByRole("heading", { name: "App Usage" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Data Health" })).toBeInTheDocument();
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    for (const title of ["Searches & Visits", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
+      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
+    expect(screen.getByText(/^[\d,]+ active locations$/)).toBeInTheDocument();
+  });
+
+  it("explains that analytics failed to load and retries on request", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+    renderDashboard();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+    const failedCalls = request.mock.calls.length;
+
+    request.mockResolvedValue(analytics());
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    expect(request.mock.calls.length).toBeGreaterThan(failedCalls);
+  });
+
+  it("keeps the cards and warns when a later refresh fails", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    const request = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+    renderDashboard();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "month");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
+
+    // Back to the cached week: its numbers stay up while the refetch fails.
+    request.mockRejectedValue(new Error("Gateway timeout"));
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "week");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/latest refresh of analytics failed/i);
+    expect(alert).toHaveTextContent(/may be out of date/i);
+    expect(screen.getByText("Active users")).toBeInTheDocument();
+
+    request.mockImplementation(async (range) => analytics(range));
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });

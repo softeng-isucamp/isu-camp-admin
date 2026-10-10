@@ -3739,6 +3739,254 @@ td small {
   justify-content: space-between;
   gap: 16px;
 }
+
+/* Dashboard tabs and range filter */
+.hero {
+  position: relative;
+}
+.hero-compact {
+  min-height: 260px;
+}
+.hero-toolbar {
+  position: absolute;
+  left: 32px;
+  right: 32px;
+  bottom: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hero-compact .hero-toolbar {
+  bottom: 28px;
+}
+.hero-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #ffffffb3;
+}
+.hero-tabs button {
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 18px;
+  background: transparent;
+  color: #4c5751;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hero-tabs button.active {
+  background: var(--green);
+  color: #fff;
+}
+
+/* Top Destinations with Visits */
+.rank-row.rank-row-visits {
+  grid-template-columns: 28px minmax(0, 1fr) 64px 64px 84px;
+}
+
+/* Analytics tab */
+.analytics {
+  margin-top: 24px;
+}
+.analytics-section {
+  margin: 8px 4px 16px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #087044;
+}
+.analytics section + section {
+  margin-top: 32px;
+}
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.analytics-grid .analytics-wide {
+  grid-column: 1 / -1;
+}
+.analytics-body {
+  margin-top: 16px;
+}
+.analytics-unavailable {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.analytics > .dashboard-error {
+  margin: 0 0 24px;
+}
+.dashboard-error button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.analytics-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.analytics-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #f4f7f5;
+}
+.analytics-kpi > span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4c5751;
+}
+.analytics-kpi strong {
+  font-size: 34px;
+  line-height: 1.15;
+}
+.analytics-kpi small {
+  font-size: 11px;
+  color: #64716a;
+}
+.analytics-kpi em {
+  margin-top: 8px;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+  color: #64716a;
+}
+.analytics-kpi em.up {
+  color: #087044;
+}
+.analytics-kpi em.down {
+  color: var(--danger);
+}
+.analytics-kpi em i {
+  font-style: normal;
+  font-weight: 500;
+  color: #87938d;
+}
+.analytics-donut {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+}
+.analytics-donut-chart {
+  position: relative;
+  flex: 0 0 200px;
+}
+.analytics-donut-total {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.analytics-donut-total strong {
+  font-size: 24px;
+}
+.analytics-donut-total small {
+  font-size: 11px;
+  color: #64716a;
+}
+.analytics-donut .account-type-legend {
+  flex: 1 1 180px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.analytics-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 14px;
+}
+.analytics-legend-row i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.analytics-legend-row b {
+  margin-left: auto;
+}
+.analytics-legend-row small {
+  min-width: 36px;
+  text-align: right;
+  color: #64716a;
+  font-size: 13px;
+}
+.completeness {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+}
+.completeness-ring {
+  flex: none;
+}
+.completeness-bars {
+  flex: 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.completeness-bars a {
+  display: grid;
+  grid-template-columns: 120px 1fr 44px 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  font-size: 14px;
+}
+.completeness-bars a:hover {
+  background: #f3f6f4;
+}
+.completeness-bars b {
+  text-align: right;
+}
+.completeness-bars small {
+  text-align: right;
+  color: #64716a;
+  font-size: 12px;
+}
+.completeness-track {
+  height: 10px;
+  border-radius: 5px;
+  background: #eef2f0;
+  overflow: hidden;
+}
+.completeness-track i {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: #2a78d6;
+}
+@media (max-width: 1100px) {
+  .hero-toolbar {
+    bottom: 24px;
+  }
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+  .analytics-kpis {
+    grid-template-columns: 1fr;
+  }
+}
 .recovery-modal h2:focus {
   outline: none;
 }
