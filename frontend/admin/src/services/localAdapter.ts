@@ -10,6 +10,7 @@ const LOCAL_SESSION_KEY = "isucamp_local_session";
 const LOCAL_PASSWORD = "password123";
 const LOGIN_ATTEMPT_LIMIT = 5;
 const LOGIN_LOCKOUT_SECONDS = 60;
+const CONFIRMATION_WINDOW_MS = 5 * 60 * 1000;
 const LOCAL_ADMIN_EMAIL = "admin@isu.edu.ph";
 const RECOVERY_TEST_CODE = "000000";
 const RECOVERY_ATTEMPT_LIMIT = 5;
@@ -67,6 +68,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
     account.username = session.username;
     account.email = session.email ?? account.email;
   }
+  // When the signed-in account last retyped its password; the server keeps this on the session.
+  let confirmedAt = 0;
   const issuedCodes = new Map<string, IssuedCode>();
   let failedLogins = 0;
   let lockedUntil = 0;
@@ -119,12 +122,14 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         }
         failedLogins = 0;
         account = candidate;
+        confirmedAt = 0;
         session = profileOf(account);
         storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
         return session;
       },
       logout: async (): Promise<void> => {
         session = null;
+        confirmedAt = 0;
         storage?.removeItem(LOCAL_SESSION_KEY);
       },
       me: async (): Promise<Session | null> => session ? profileOf(account) : null,
@@ -147,10 +152,11 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         if (changes.newPassword.length < 8) throw new Error("Use at least 8 characters.");
         account.password = changes.newPassword;
       },
-      // The fixture only checks the password. Session ownership and the
-      // confirmation window are enforced by the backend, which owns the real guard.
+      // The fixture opens the confirmation window, but only creating a superadmin
+      // asks for it; the backend owns the real guard for the other actions.
       confirmPassword: async (password: string): Promise<void> => {
         if (password !== account.password) throw new Error("Password is incorrect");
+        confirmedAt = Date.now();
       },
       // Always succeeds and reports the same timing, so the response never says whether the email has an account.
       requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
@@ -176,6 +182,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       accounts,
       /** The account the session belongs to, or null while signed out. */
       viewer: (): FixtureAccount | null => session ? account : null,
+      /** Whether the signed-in account confirmed its password within the server's five minutes. */
+      recentlyConfirmed: (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS,
     },
     locations: {
       saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {

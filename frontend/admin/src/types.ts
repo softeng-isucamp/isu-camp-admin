@@ -141,6 +141,8 @@ export interface AdminAccountDraft {
   email: string;
   /** Required when creating; blank on edit leaves the existing password alone. */
   password?: string;
+  /** Only read when creating; a new account is an administrator unless this says otherwise. */
+  role?: AdminRole;
 }
 export interface AuditEntry {
   id: string;

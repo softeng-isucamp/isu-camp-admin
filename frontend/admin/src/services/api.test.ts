@@ -1292,6 +1292,27 @@ describe("real administrators service boundary", () => {
     ]);
   });
 
+  it("sends the chosen role when adding an administrator, but never when editing one", async () => {
+    const { services: admins } = await httpServices();
+    const reply = { success: true, admin: { id: "9", username: "boss", email: "b@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json(reply, 201))
+      .mockResolvedValueOnce(json(reply))
+      .mockResolvedValueOnce(json(reply));
+
+    await expect(admins.admins.save({ username: "boss", email: "b@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" }))
+      .resolves.toMatchObject({ role: "superadmin" });
+    await admins.admins.save({ username: "plain", email: "p@isu.edu.ph", password: "a-long-enough-secret" });
+    await admins.admins.save({ id: "9", username: "boss", email: "b@isu.edu.ph", role: "superadmin" });
+
+    const [first, second, third] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(first).toEqual({ username: "boss", email: "b@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" });
+    expect(second).not.toHaveProperty("role");
+    expect(third).not.toHaveProperty("role");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "PUT" });
+  });
+
   it("changes a role through the role route and returns the updated account", async () => {
     const { services: admins } = await httpServices();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({

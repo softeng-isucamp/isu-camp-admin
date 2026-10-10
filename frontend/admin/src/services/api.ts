@@ -1461,6 +1461,8 @@ export const services: Services = {
           email: draft.email,
           // An empty password on edit leaves the stored one alone.
           ...(draft.password ? { password: draft.password } : {}),
+          // A role is only chosen when adding; the edit route is for one's own sign-in details.
+          ...(!draft.id && draft.role ? { role: draft.role } : {}),
         });
         const response = await apiJson<{ admin: AdminAccount }>(
           draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",

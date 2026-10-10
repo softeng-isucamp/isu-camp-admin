@@ -587,3 +587,197 @@ describe("Administrators tab for a plain administrator", () => {
     expect(within(screen.getByRole("menu")).getAllByRole("menuitem")).toHaveLength(2);
   });
 });
+
+describe("Choosing a role when adding an administrator", () => {
+  const added = (role: AdminRole): AdminAccount => ({
+    id: "9", username: "admin_new", email: "new@isu.edu.ph", status: "Active", role, isCurrent: false,
+  });
+
+  beforeEach(() => {
+    signInAs("superadmin");
+    vi.spyOn(services.admins, "list").mockResolvedValue(directory.map((admin) => ({ ...admin })));
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  async function openAddForm() {
+    await openAdministrators();
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    return screen.getByRole("dialog", { name: "Add Administrator" });
+  }
+
+  const fillDetails = () => {
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "a-long-enough-secret" } });
+  };
+
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+  it("offers Administrator and Superadmin, defaulting to Administrator without a password prompt", async () => {
+    const dialog = await openAddForm();
+
+    const role = within(dialog).getByLabelText("Role") as HTMLSelectElement;
+    expect(role.value).toBe("admin");
+    expect(within(dialog).getAllByRole("option").map((option) => option.textContent)).toEqual(["Administrator", "Superadmin"]);
+    expect(within(dialog).queryByLabelText("Confirm your password")).not.toBeInTheDocument();
+  });
+
+  it("adds a plain administrator without confirming a password", async () => {
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword");
+    const save = vi.spyOn(services.admins, "save").mockResolvedValue(added("admin"));
+    await openAddForm();
+
+    fillDetails();
+    submit();
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ username: "admin_new", role: "admin" })));
+    expect(confirmPassword).not.toHaveBeenCalled();
+    expect(await screen.findByText("admin_new was added successfully.")).toBeInTheDocument();
+  });
+
+  it("asks for the password when Superadmin is chosen and sends the role once it is confirmed", async () => {
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    const save = vi.spyOn(services.admins, "save").mockResolvedValue(added("superadmin"));
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    expect(within(dialog).getByLabelText("Confirm your password")).toBeInTheDocument();
+    expect(within(dialog).getByText("Creating a superadmin needs your password.")).toBeInTheDocument();
+
+    fillDetails();
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    submit();
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ username: "admin_new", role: "superadmin" })));
+    expect(confirmPassword).toHaveBeenCalledWith("password123");
+    expect(await screen.findByText("admin_new was added successfully.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Add Administrator" })).not.toBeInTheDocument();
+  });
+
+  it("does not create the account until a password is entered", async () => {
+    const save = vi.spyOn(services.admins, "save");
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword");
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fillDetails();
+    submit();
+
+    expect(await screen.findByText("Enter your password to confirm creating a superadmin.")).toBeInTheDocument();
+    expect(confirmPassword).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected password in the form, which stays open with the details intact", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockRejectedValue(new Error("Password is incorrect"));
+    const save = vi.spyOn(services.admins, "save");
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fillDetails();
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "wrong" } });
+    submit();
+
+    expect(await within(dialog).findByText("Password is incorrect")).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Add Administrator" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Username")).toHaveValue("admin_new");
+    expect(within(dialog).getByLabelText("Email")).toHaveValue("new@isu.edu.ph");
+    expect(within(dialog).getByLabelText("Password")).toHaveValue("a-long-enough-secret");
+    expect(within(dialog).getByLabelText("Role")).toHaveValue("superadmin");
+  });
+
+  it("keeps the details and shows a taken username when the server refuses after the password was accepted", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "save").mockRejectedValue(
+      Object.assign(new Error("That username is already taken"), { fieldErrors: { username: "That username is already taken" } }),
+    );
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fillDetails();
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    submit();
+
+    expect((await within(dialog).findAllByText("That username is already taken")).length).toBeGreaterThan(0);
+    expect(within(dialog).getByLabelText("Email")).toHaveValue("new@isu.edu.ph");
+    expect(within(dialog).getByLabelText("Role")).toHaveValue("superadmin");
+  });
+
+  it("asks again when the server says the confirmation has expired", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "save").mockRejectedValue(new PasswordConfirmationRequiredError("Confirm your password to create a superadmin."));
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fillDetails();
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    submit();
+
+    expect(await within(dialog).findByText("Your password confirmation expired. Enter it again to create this account.")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Confirm your password")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Username")).toHaveValue("admin_new");
+  });
+
+  it("shows a role error from the server against the role choice", async () => {
+    vi.spyOn(services.admins, "save").mockRejectedValue(
+      Object.assign(new Error("Role must be Administrator or Superadmin."), { fieldErrors: { role: "Role must be Administrator or Superadmin." } }),
+    );
+    const dialog = await openAddForm();
+
+    fillDetails();
+    submit();
+
+    const role = within(dialog).getByLabelText("Role");
+    await waitFor(() => expect(role).toHaveAccessibleDescription(/Role must be Administrator or Superadmin\./));
+    expect(role).toBeInvalid();
+  });
+
+  it("drops the confirmation when the choice goes back to Administrator", async () => {
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "admin" } });
+    expect(within(dialog).queryByLabelText("Confirm your password")).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    expect(within(dialog).getByLabelText("Confirm your password")).toHaveValue("");
+  });
+
+  it("resets the role to Administrator when the form is reopened after cancelling or saving", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "save").mockResolvedValue(added("superadmin"));
+    const dialog = await openAddForm();
+
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
+    fireEvent.change(within(dialog).getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    expect(screen.getByLabelText("Role")).toHaveValue("admin");
+    expect(screen.queryByLabelText("Confirm your password")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Role"), { target: { value: "superadmin" } });
+    expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+    fillDetails();
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "password123" } });
+    submit();
+    await screen.findByText("admin_new was added successfully.");
+
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    expect(screen.getByLabelText("Role")).toHaveValue("admin");
+    expect(screen.queryByLabelText("Confirm your password")).not.toBeInTheDocument();
+  });
+
+  it("does not offer the form to a plain administrator", async () => {
+    signInAs("admin", "admin_registrar");
+    vi.spyOn(services.admins, "list").mockResolvedValue(directoryForRegistrar());
+    await openAdministrators();
+    expect(screen.queryByRole("button", { name: /add administrator/i })).not.toBeInTheDocument();
+  });
+});

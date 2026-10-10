@@ -1,7 +1,8 @@
 import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
-import { SuperadminRequiredError } from "./errors";
+import { PasswordConfirmationRequiredError, SuperadminRequiredError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
 
+const ROLE_MESSAGE = "Role must be Administrator or Superadmin.";
 const LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first.";
 
 type Directory = ReturnType<typeof createLocalAdapter>["directory"];
@@ -14,7 +15,7 @@ type Audit = (action: string, target: string, targetId: string) => void;
  * self rules and its messages. The records are the adapter's sign-in accounts,
  * so who is "current" and what they may do follow whoever signed in.
  */
-export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit) => {
+export const createLocalAdmins = ({ accounts, viewer, recentlyConfirmed }: Directory, audit: Audit) => {
   const asAccount = (record: FixtureAccount): AdminAccount => ({
     id: record.id,
     username: record.username,
@@ -51,6 +52,11 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
       const email = draft.email.trim();
       // Adding is superadmin-only; editing is only ever of one's own account.
       if (!draft.id) requireSuperadmin();
+      // A role is only chosen when adding; editing one's own details cannot change it.
+      const role = draft.id ? undefined : draft.role ?? "admin";
+      if (role !== undefined && role !== "admin" && role !== "superadmin") {
+        throw Object.assign(new Error(ROLE_MESSAGE), { fieldErrors: { role: ROLE_MESSAGE } });
+      }
       const duplicate = accounts.some((account) =>
         account.username.toLowerCase() === username.toLowerCase() && account.id !== draft.id);
       if (duplicate) {
@@ -68,11 +74,15 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
         audit("Updated Administrator", username, existing.id);
         return asAccount(existing);
       }
+      // Reported after the field errors above, as the server does, so the form can show them before asking for a password.
+      if (role === "superadmin" && !recentlyConfirmed()) {
+        throw new PasswordConfirmationRequiredError("Confirm your password to create a superadmin.");
+      }
       const created: FixtureAccount = {
         id: `admin-${Date.now()}`,
         username,
         email,
-        role: "admin",
+        role: role ?? "admin",
         status: "Active",
         password: draft.password ?? "",
       };
@@ -100,8 +110,7 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
       const caller = requireSuperadmin();
       const record = find(id);
       if (role !== "admin" && role !== "superadmin") {
-        const message = "Role must be Administrator or Superadmin.";
-        throw Object.assign(new Error(message), { fieldErrors: { role: message } });
+        throw Object.assign(new Error(ROLE_MESSAGE), { fieldErrors: { role: ROLE_MESSAGE } });
       }
       if (record.id === caller.id) throw new Error("You cannot change your own role.");
       if (record.role === role) return asAccount(record);

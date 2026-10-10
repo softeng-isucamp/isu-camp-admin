@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar } from "../../components/UI";
+import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
@@ -16,7 +16,13 @@ const ROLE_CHANGE_WORDING: PasswordConfirmationWording = {
   hint: "Changing a role needs your password.",
 };
 
-const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "" });
+const CREATE_SUPERADMIN_WORDING: PasswordConfirmationWording = {
+  missing: "Enter your password to confirm creating a superadmin.",
+  expired: "Your password confirmation expired. Enter it again to create this account.",
+  hint: "Creating a superadmin needs your password.",
+};
+
+const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "", role: "admin" });
 
 type Dialog =
   | { kind: "add" }
@@ -53,7 +59,9 @@ export function AdministratorsPanel() {
   const { session } = useAuth();
   const canManage = session?.role === "superadmin";
   const [dialog, setDialog] = useState<Dialog>(null);
-  const passwordConfirmation = usePasswordConfirmation(dialog?.kind === "role" ? ROLE_CHANGE_WORDING : undefined);
+  const passwordConfirmation = usePasswordConfirmation(
+    dialog?.kind === "role" ? ROLE_CHANGE_WORDING : dialog?.kind === "add" ? CREATE_SUPERADMIN_WORDING : undefined,
+  );
   const [draft, setDraft] = useState<AdminAccountDraft>(blankDraft());
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -97,7 +105,10 @@ export function AdministratorsPanel() {
       feedback.reportSuccess(`${saved.username} was added successfully.`);
       closeDialog();
     },
-    onError: (cause) => reportFailure(cause, "Unable to save the administrator."),
+    onError: (cause) => {
+      if (passwordConfirmation.handleRejection(cause)) return;
+      reportFailure(cause, "Unable to save the administrator.");
+    },
   });
 
   const setStatus = useMutation({
@@ -162,7 +173,7 @@ export function AdministratorsPanel() {
     else setDialog({ kind: "deactivate", account });
   };
 
-  const submitDraft = () => {
+  const submitDraft = async () => {
     setError("");
     setFieldErrors({});
     const username = draft.username.trim();
@@ -178,6 +189,8 @@ export function AdministratorsPanel() {
       setFieldErrors(issues);
       return;
     }
+    // Creating a superadmin is guarded like promoting one; the form keeps its details if the password is refused.
+    if (draft.role === "superadmin" && !await passwordConfirmation.confirm()) return;
     save.mutate({ ...draft, username, email });
   };
 
@@ -203,7 +216,7 @@ export function AdministratorsPanel() {
           <p>Portal accounts that can sign in and manage campus data.</p>
         </div>
         {canManage && (
-          <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); setDialog({ kind: "add" }); }}>
+          <Button onClick={() => { setDraft(blankDraft()); setFieldErrors({}); setError(""); passwordConfirmation.reset(); setDialog({ kind: "add" }); }}>
             ＋ Add Administrator
           </Button>
         )}
@@ -363,11 +376,37 @@ export function AdministratorsPanel() {
               error={fieldErrors.password}
               onChange={(event) => setDraft({ ...draft, password: event.target.value })}
             />
+            <SelectField
+              label="ROLE"
+              aria-label="Role"
+              value={draft.role}
+              error={fieldErrors.role}
+              disabled={save.isPending || passwordConfirmation.confirming}
+              subhelper={draft.role === "superadmin"
+                ? "Superadmins can add, deactivate and remove administrators and change their roles."
+                : "Administrators can read this list but cannot manage accounts."}
+              onChange={(event) => {
+                setDraft({ ...draft, role: event.target.value as AdminRole });
+                setFieldErrors({ ...fieldErrors, role: "" });
+                // A password typed for a superadmin is not carried over to a plain administrator.
+                passwordConfirmation.reset();
+              }}
+            >
+              <option value="admin">Administrator</option>
+              <option value="superadmin">Superadmin</option>
+            </SelectField>
+            {draft.role === "superadmin" && (
+              <PasswordConfirmationField
+                confirmation={passwordConfirmation}
+                disabled={save.isPending}
+                onSubmit={() => void submitDraft()}
+              />
+            )}
           </div>
           <div className="modal-actions">
-            <Button variant="subtle" disabled={save.isPending} onClick={closeDialog}>Cancel</Button>
-            <Button loading={save.isPending} onClick={submitDraft}>
-              {save.isPending ? "Saving…" : "Add Administrator"}
+            <Button variant="subtle" disabled={save.isPending || passwordConfirmation.confirming} onClick={closeDialog}>Cancel</Button>
+            <Button loading={save.isPending || passwordConfirmation.confirming} onClick={() => void submitDraft()}>
+              {save.isPending ? "Saving…" : passwordConfirmation.confirming ? "Confirming…" : "Add Administrator"}
             </Button>
           </div>
         </Modal>

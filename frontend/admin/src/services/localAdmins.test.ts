@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SuperadminRequiredError } from "./errors";
+import { PasswordConfirmationRequiredError, SuperadminRequiredError } from "./errors";
 import { createLocalAdapter } from "./localAdapter";
 import { createLocalAdmins } from "./localAdmins";
 
@@ -104,6 +104,13 @@ describe("fixture refusals for a plain administrator", () => {
     expect((await fixture.admins.list()).map((account) => account.username)).not.toContain("admin_new");
   });
 
+  it("refuses a superadmin create with the superadmin refusal, never a password prompt", async () => {
+    const error = await failure(fixture.admins.save({
+      username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin",
+    }));
+    expect(error).toBeInstanceOf(SuperadminRequiredError);
+  });
+
   it("refuses a status change", async () => {
     const error = await failure(fixture.admins.setStatus("3", "Inactive"));
     expect(error).toBeInstanceOf(SuperadminRequiredError);
@@ -153,6 +160,50 @@ describe("fixture rules for a superadmin", () => {
   it("adds a plain administrator", async () => {
     const created = await fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "a-long-enough-secret" });
     expect(created).toMatchObject({ username: "admin_new", role: "admin", status: "Active", isCurrent: false });
+  });
+
+  it("adds a superadmin only after the password was confirmed, and says so before the account exists", async () => {
+    const draft = { username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin" as const };
+
+    const refusal = await failure(fixture.admins.save(draft));
+    expect(refusal).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(refusal).toMatchObject({ message: "Confirm your password to create a superadmin." });
+    expect((await fixture.admins.list()).map((account) => account.username)).not.toContain("admin_boss");
+
+    await expect(fixture.adapter.auth.confirmPassword("wrong")).rejects.toThrow("Password is incorrect");
+    expect(await failure(fixture.admins.save(draft))).toBeInstanceOf(PasswordConfirmationRequiredError);
+
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
+    await expect(fixture.admins.save(draft)).resolves.toMatchObject({ username: "admin_boss", role: "superadmin", status: "Active" });
+    expect((await fixture.admins.list()).find((account) => account.username === "admin_boss")?.role).toBe("superadmin");
+  });
+
+  it("needs no confirmation to add a plain administrator, whether the role is named or not", async () => {
+    await expect(fixture.admins.save({ username: "a_one", email: "a1@isu.edu.ph", password: "a-long-enough-secret", role: "admin" }))
+      .resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.save({ username: "a_two", email: "a2@isu.edu.ph", password: "a-long-enough-secret" }))
+      .resolves.toMatchObject({ role: "admin" });
+  });
+
+  it("forgets the confirmation when the account signs out", async () => {
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
+    await fixture.adapter.auth.logout();
+    await fixture.adapter.auth.login("admin_justine", PASSWORD);
+    const error = await failure(fixture.admins.save({
+      username: "admin_boss", email: "boss@isu.edu.ph", password: "a-long-enough-secret", role: "superadmin",
+    }));
+    expect(error).toBeInstanceOf(PasswordConfirmationRequiredError);
+  });
+
+  it("reports an unrecognized role against the role field, and a duplicate username before asking for the password", async () => {
+    const base = { email: "x@isu.edu.ph", password: "a-long-enough-secret" };
+    const badRole = await failure(fixture.admins.save({ ...base, username: "admin_x", role: "owner" as never }));
+    expect(badRole).toMatchObject({ message: "Role must be Administrator or Superadmin.", fieldErrors: { role: "Role must be Administrator or Superadmin." } });
+
+    // Not confirmed yet: the duplicate is still what is reported.
+    const duplicate = await failure(fixture.admins.save({ ...base, username: "admin_registrar", role: "superadmin" }));
+    expect(duplicate).not.toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(duplicate).toMatchObject({ fieldErrors: { username: "That username is already taken" } });
   });
 
   it("deactivates, reactivates and removes another account", async () => {
