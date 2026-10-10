@@ -147,6 +147,37 @@ def _connection_environment():
 # Archive Metadata
 # ==========================================
 
+def iso_utc(moment):
+    """A timestamp in the Z-suffixed form the frontend's schema accepts.
+
+    ``datetime.isoformat()`` writes a ``+00:00`` offset, and the Zod schema in
+    services/profile.ts uses ``z.string().datetime()``, which rejects an offset
+    unless it is asked to allow one. The two forms mean the same instant, so
+    this is purely about agreeing on a spelling.
+    """
+
+    return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _normalized_timestamp(value):
+    """Re-spell a stored timestamp as Z-suffixed UTC, or None if unreadable.
+
+    Applied on read as well as write, so archives written before this was
+    fixed - and any sidecar edited by hand - still describe themselves in a
+    form the frontend can parse.
+    """
+
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return iso_utc(moment)
+
+
 def _metadata_path(archive):
     return archive.with_suffix(".json")
 
@@ -157,17 +188,23 @@ def _write_metadata(archive, **fields):
 
 def _read_metadata(archive):
     try:
-        return json.loads(_metadata_path(archive).read_text(encoding="utf-8"))
+        metadata = json.loads(_metadata_path(archive).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        # An archive whose sidecar is missing or unreadable is still a real
-        # file, so describe what can be seen rather than hiding it.
-        stat = archive.stat()
-        return {
-            "createdAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-            "createdBy": "unknown",
-            "scope": f"{DUMP_SCHEMA} schema",
-            "status": "ready",
-        }
+        metadata = {}
+
+    # An archive whose sidecar is missing or unreadable is still a real file,
+    # so describe what can be seen rather than hiding it. The file's own
+    # modification time is the best available answer for when it was taken.
+    created_at = _normalized_timestamp(metadata.get("createdAt"))
+    if created_at is None:
+        created_at = iso_utc(datetime.fromtimestamp(archive.stat().st_mtime, timezone.utc))
+
+    return {
+        "createdAt": created_at,
+        "createdBy": metadata.get("createdBy") or "unknown",
+        "scope": metadata.get("scope") or f"{DUMP_SCHEMA} schema",
+        "status": metadata.get("status") or "ready",
+    }
 
 
 def list_backups():
@@ -178,11 +215,11 @@ def list_backups():
         metadata = _read_metadata(archive)
         items.append({
             "id": archive.stem,
-            "createdAt": metadata.get("createdAt", ""),
-            "createdBy": metadata.get("createdBy", "unknown"),
+            "createdAt": metadata["createdAt"],
+            "createdBy": metadata["createdBy"],
             "sizeBytes": archive.stat().st_size,
-            "scope": metadata.get("scope", f"{DUMP_SCHEMA} schema"),
-            "status": metadata.get("status", "ready"),
+            "scope": metadata["scope"],
+            "status": metadata["status"],
         })
     items.sort(key=lambda item: item["createdAt"], reverse=True)
     return items
@@ -318,7 +355,7 @@ def start_backup(actor):
     def record():
         _write_metadata(
             archive,
-            createdAt=stamp.isoformat(),
+            createdAt=iso_utc(stamp),
             createdBy=actor,
             scope=f"{DUMP_SCHEMA} schema",
             status="ready",

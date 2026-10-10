@@ -129,8 +129,8 @@ def test_history_is_empty_before_any_backup(app, monkeypatch):
 def test_history_describes_stored_archives_newest_first(app, monkeypatch, tmp_path):
     with app.app_context():
         sign_in(monkeypatch)
-        for name, when in (("20261001-000000Z", "2026-10-01T00:00:00+00:00"),
-                           ("20261009-000000Z", "2026-10-09T00:00:00+00:00")):
+        for name, when in (("20261001-000000Z", "2026-10-01T00:00:00Z"),
+                           ("20261009-000000Z", "2026-10-09T00:00:00Z")):
             (tmp_path / f"{name}.dump").write_bytes(b"PGDMP" + b"x" * 100)
             (tmp_path / f"{name}.json").write_text(json.dumps({
                 "createdAt": when, "createdBy": "admin01",
@@ -157,6 +157,58 @@ def test_an_archive_without_metadata_is_still_listed(app, monkeypatch, tmp_path)
     assert len(items) == 1
     assert items[0]["id"] == "orphan"
     assert items[0]["createdBy"] == "unknown"
+
+
+def test_created_at_is_z_suffixed_not_an_offset(app, monkeypatch, tmp_path):
+    """services/profile.ts parses createdAt with Zod's z.string().datetime().
+
+    That rejects a "+00:00" offset unless told to allow one, and Python's
+    isoformat() writes exactly that - which failed every row in the panel with
+    "Invalid datetime" while the timestamps were perfectly correct.
+    """
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        (tmp_path / "a.dump").write_bytes(b"PGDMP")
+        (tmp_path / "a.json").write_text(json.dumps({
+            # The form the old code wrote.
+            "createdAt": "2026-10-10T11:18:10.116684+00:00",
+            "createdBy": "user", "scope": "public schema", "status": "ready",
+        }), encoding="utf-8")
+
+        items = app.test_client().get("/api/backups").get_json()["items"]
+
+    assert items[0]["createdAt"] == "2026-10-10T11:18:10.116684Z"
+    assert "+00:00" not in items[0]["createdAt"]
+
+
+def test_a_naive_stored_timestamp_is_read_as_utc(app, monkeypatch, tmp_path):
+    with app.app_context():
+        sign_in(monkeypatch)
+        (tmp_path / "a.dump").write_bytes(b"PGDMP")
+        (tmp_path / "a.json").write_text(json.dumps({
+            "createdAt": "2026-10-10T11:18:10", "createdBy": "user",
+            "scope": "public schema", "status": "ready",
+        }), encoding="utf-8")
+
+        items = app.test_client().get("/api/backups").get_json()["items"]
+
+    assert items[0]["createdAt"] == "2026-10-10T11:18:10Z"
+
+
+def test_an_unreadable_timestamp_falls_back_to_the_file_time(app, monkeypatch, tmp_path):
+    """A row must still parse, so a broken value cannot reach the frontend."""
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        (tmp_path / "a.dump").write_bytes(b"PGDMP")
+        (tmp_path / "a.json").write_text(json.dumps({
+            "createdAt": "not a timestamp", "createdBy": "user",
+        }), encoding="utf-8")
+
+        items = app.test_client().get("/api/backups").get_json()["items"]
+
+    assert items[0]["createdAt"].endswith("Z")
 
 
 # ==========================================
