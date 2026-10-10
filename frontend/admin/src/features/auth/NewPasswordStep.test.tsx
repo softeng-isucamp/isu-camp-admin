@@ -51,7 +51,7 @@ const reachNewPassword = async () => {
   fireEvent.click(screen.getByRole("button", { name: /send code/i }));
   await screen.findByRole("heading", { name: /verification code/i });
   [..."000000"].forEach((digit, i) =>
-    fireEvent.change(screen.getByLabelText(`Digit ${i + 1} of 6`), { target: { value: digit } }),
+    fireEvent.input(screen.getByLabelText(`Digit ${i + 1} of 6`), { target: { value: digit } }),
   );
   await screen.findByRole("heading", { name: /create a new password/i });
 };

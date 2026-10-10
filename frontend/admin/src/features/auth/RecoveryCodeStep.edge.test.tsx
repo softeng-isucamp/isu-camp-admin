@@ -23,7 +23,7 @@ const tickSeconds = async (seconds: number) => {
 
 const codeHeading = () => screen.getByRole("heading", { name: /verification code/i });
 const box = (position: number) => screen.getByLabelText(`Digit ${position} of 6`);
-const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.change(box(i + 1), { target: { value: digit } }));
+const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.input(box(i + 1), { target: { value: digit } }));
 const expectBoxes = (code: string) => [1, 2, 3, 4, 5, 6].forEach((position) => expect(box(position)).toHaveValue(code[position - 1] ?? ""));
 
 /** Fake timers cover the countdowns only, so promises and testing-library polling keep working. */

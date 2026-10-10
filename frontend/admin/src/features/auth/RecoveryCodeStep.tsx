@@ -43,7 +43,7 @@ const expiryText = (seconds: number) => {
   return `The code expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 };
 
-/** Collects the 6-digit code, submits it once when complete, and offers a manual Verify and Resend. */
+/** Collects the 6-digit code, submits it when an entry completes it, and offers a manual Verify (or Enter) and Resend. */
 export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead }: RecoveryCodeStepProps) {
   const sentId = useId();
   const [state, setState] = useState<CodeStepState>(initialDead ?? "entering");
@@ -121,7 +121,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         verifyWait.start(err.retryAfterSeconds);
       } else {
         if (err instanceof AuthError && err.kind === "invalid_code") {
-          // The boxes empty but show the rejected digits, marked invalid, so the admin can see what was wrong.
+          // The digits stay as editable values, marked invalid, so the admin can fix one or retype them.
           otp.current?.markRejected();
         } else {
           otp.current?.clear();
@@ -138,7 +138,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
   };
 
-  // A complete code held in the boxes while a rate-limit wait runs is sent once when the wait ends.
+  // A complete code held in the boxes while a rate-limit wait runs is sent once when the wait ends. That is the code which was rate
+  // limited or one entered during the wait, never a rejected one: a wait only starts from a verify, which leaves its code unjudged.
   const waited = useRef(false);
   useEffect(() => {
     if (verifyWait.seconds > 0) {
@@ -193,7 +194,13 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const resendBlocked = resendWait.seconds > 0 || resending || verifying;
 
   return (
-    <>
+    <form
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        void verify(code);
+      }}
+    >
       {/* The heading takes focus on arrival, so its description carries the code-sent confirmation to screen readers. */}
       <h2 aria-describedby={sentId}>Enter verification code</h2>
       <p className="muted recovery-copy">
@@ -239,9 +246,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </Button>
       ) : (
         <Button
-          type="button"
+          type="submit"
           className="recovery-primary recovery-submit"
-          onClick={() => void verify(code)}
           loading={verifying}
           disabled={verifyWait.seconds > 0}
         >
@@ -249,6 +255,6 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </Button>
       )}
       <BackToLogin />
-    </>
+    </form>
   );
 }

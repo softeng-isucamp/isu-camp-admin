@@ -1497,16 +1497,10 @@ td small {
   box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2);
   outline: none;
 }
-/* A rejected code shown as ghost digits in empty boxes: the alert's own red, until the admin starts editing. */
+/* A rejected code: the digits keep the normal value colour; only the border and fill turn the alert's red, until the admin edits. */
 .recovery-modal .field .segmented-code-input[aria-invalid="true"] {
   border-color: #f0bcbc;
   background: #fff0f0;
-  color: var(--danger);
-}
-/* Browsers fade placeholders; the rejected digits must stay as readable as typed ones (about 5.9:1 on this background). */
-.recovery-modal .field .segmented-code-input[aria-invalid="true"]::placeholder {
-  color: var(--danger);
-  opacity: 1;
 }
 .recovery-modal .field .segmented-code-input[aria-invalid="true"]:focus {
   border-color: var(--danger);
