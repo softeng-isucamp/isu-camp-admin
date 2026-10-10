@@ -174,8 +174,10 @@ def _totals(rows):
 def _app_accounts():
     """App accounts joined to their registration details.
 
-    The same join the dashboard summary counts Registered Users from, so an
-    orphan ``userInfo`` row with no account is not a registration.
+    Registrations are counted from accounts that have registration details, so
+    an orphan ``userInfo`` row with no account is not a registration. An account
+    without details, or with an unrecognized type, still counts in Registered
+    Users on the summary but not in the registrations chart.
     """
 
     return db.session.query(AppUser).join(UserInfo, AppUser.info_id == UserInfo.id)
