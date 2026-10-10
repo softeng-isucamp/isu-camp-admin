@@ -20,3 +20,10 @@ reference/
 # Local database migrations and feature specifications.
 /migrations/
 /docs/specs/
+
+# Leftovers from an earlier dev runner. Nothing reads them now, and a
+# committed pid file is worse than none: pids are reused, so a stale one
+# names whatever process inherited that number.
+frontend.pid
+frontend.out.log
+frontend.err.log
