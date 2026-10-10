@@ -56,8 +56,6 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const [resendLimited, setResendLimited] = useState(false);
   const otp = useRef<OtpInputHandle>(null);
   const inFlight = useRef(false);
-  // The digits in the boxes are the code the server just rejected. Nothing submits them again unless the admin presses Verify.
-  const stale = useRef(false);
   // The issued code can no longer be accepted. Set the moment that is known, ahead of any render, so no timer's callback can still send it.
   const unusable = useRef(initialDead !== undefined);
   const verifyWait = useCountdown();
@@ -123,8 +121,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         verifyWait.start(err.retryAfterSeconds);
       } else {
         if (err instanceof AuthError && err.kind === "invalid_code") {
-          // Keep the digits on screen, marked invalid, so the admin can see what was wrong.
-          stale.current = true;
+          // The boxes empty but show the rejected digits, marked invalid, so the admin can see what was wrong.
           otp.current?.markRejected();
         } else {
           otp.current?.clear();
@@ -141,7 +138,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
   };
 
-  // A code held in the boxes while a rate-limit wait runs is sent once when the wait ends, unless it is the rejected one.
+  // A complete code held in the boxes while a rate-limit wait runs is sent once when the wait ends.
   const waited = useRef(false);
   useEffect(() => {
     if (verifyWait.seconds > 0) {
@@ -150,7 +147,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
     if (!waited.current) return;
     waited.current = false;
-    if (state === "entering" && code.length === 6 && !stale.current) void verify(code);
+    if (state === "entering" && code.length === 6) void verify(code);
     // Only the end of the wait matters; later renders must never resend.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifyWait.seconds]);
@@ -215,7 +212,6 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           disabled={verifying || dead}
           onChange={(next) => {
             setCode(next);
-            stale.current = false;
             // Typing answers "enter the code"; a rejected code's message stays until the next attempt.
             setError((current) => (current === CODE_INCOMPLETE ? "" : current));
           }}

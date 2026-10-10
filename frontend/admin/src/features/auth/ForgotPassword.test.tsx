@@ -46,6 +46,8 @@ const box = (position: number) => screen.getByLabelText(`Digit ${position} of 6`
 const typeCode = (code: string) => [...code].forEach((digit, i) => fireEvent.change(box(i + 1), { target: { value: digit } }));
 const pasteCode = (position: number, text: string) =>
   fireEvent.paste(box(position), { clipboardData: { getData: () => text } });
+/** The rejected digits shown in the empty boxes, read from the boxes found by their labels. */
+const ghostDigits = () => [1, 2, 3, 4, 5, 6].map((position) => box(position).getAttribute("placeholder") ?? "").join("");
 const expectBoxes = (code: string) => [...code].forEach((digit, i) => expect(box(i + 1)).toHaveValue(digit));
 
 /** Types a valid code and waits for the wrong-code reply to be shown. */
@@ -230,7 +232,7 @@ describe("forgot-password: code step", () => {
     expect(box(1)).toBeEnabled();
   });
 
-  it("keeps the rejected digits visible and invalid, refocuses box 1 and says how many attempts are left", async () => {
+  it("shows the rejected digits as ghosts in empty invalid boxes, refocuses box 1 and says how many attempts are left", async () => {
     mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4)] });
     renderForgotPassword();
     await sendCodeTo();
@@ -238,7 +240,8 @@ describe("forgot-password: code step", () => {
     await failVerification();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
-    expectBoxes("111111");
+    expectBoxes("");
+    expect(ghostDigits()).toBe("111111");
     for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeInvalid();
     // The alert renders before the passive effect that refocuses box 1 has run.
     await waitFor(() => expect(box(1)).toHaveFocus());
@@ -266,7 +269,7 @@ describe("forgot-password: code step", () => {
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
-  it("does not resend rejected digits on its own, but the same code entered again or sent with Verify is checked", async () => {
+  it("does not resend rejected digits on its own; the same code entered again is checked, and Verify on the empty boxes is not", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2)] });
     renderForgotPassword();
@@ -278,7 +281,8 @@ describe("forgot-password: code step", () => {
     await tickSecond();
     await tickSecond();
     expect(sent[VERIFY]).toHaveLength(1);
-    expectBoxes("111111");
+    expectBoxes("");
+    expect(ghostDigits()).toBe("111111");
 
     // Pasting the same code again is a new entry: the server answers again.
     pasteCode(1, "111111");
@@ -286,11 +290,16 @@ describe("forgot-password: code step", () => {
     expect(sent[VERIFY]).toHaveLength(2);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
 
-    // Pressing Verify is the admin's explicit retry and counts too.
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    // Typing it again is just as good.
+    typeCode("111111");
     await settle();
     expect(sent[VERIFY]).toHaveLength(3);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 2 attempts left.");
+
+    // Verify has nothing to send while only the ghost digits are showing.
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter the 6-digit verification code.");
+    expect(sent[VERIFY]).toHaveLength(3);
   });
 
   it("still auto-submits a different code after one was rejected", async () => {

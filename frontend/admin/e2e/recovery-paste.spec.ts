@@ -21,76 +21,91 @@ async function ctrlV(page: Page, text: string) {
 const boxValues = (page: Page) =>
   Promise.all([1, 2, 3, 4, 5, 6].map((n) => page.getByLabel(`Digit ${n} of 6`).inputValue())).then((values) => values.join(""));
 
-test("a wrong code pasted with Ctrl+V stays visible and invalid next to the error", async ({ page }) => {
-  await reachCodeStep(page);
-  await page.getByLabel("Digit 1 of 6").focus();
+/** The rejected digits shown in the empty boxes. */
+const ghostDigits = (page: Page) =>
+  Promise.all([1, 2, 3, 4, 5, 6].map((n) => page.getByLabel(`Digit ${n} of 6`).getAttribute("placeholder"))).then((values) =>
+    values.map((value) => value ?? "").join(""),
+  );
 
-  await ctrlV(page, "123456");
+async function pasteWrongCode(page: Page, code: string) {
+  await page.getByLabel("Digit 1 of 6").focus();
+  await ctrlV(page, code);
+  await expect(page.getByRole("alert")).toContainText("Incorrect code.");
+}
+
+test("a wrong code pasted with Ctrl+V shows as readable ghost digits in empty invalid boxes", async ({ page }) => {
+  await reachCodeStep(page);
+
+  await pasteWrongCode(page, "123456");
 
   await expect(page.getByRole("alert")).toContainText("Incorrect code. 4 attempts left.");
-  expect(await boxValues(page)).toBe("123456");
-  await expect(page.getByLabel("Digit 1 of 6")).toHaveAttribute("aria-invalid", "true");
-  await expect(page.getByLabel("Digit 1 of 6")).toBeFocused();
+  expect(await boxValues(page)).toBe("");
+  await expect.poll(() => ghostDigits(page)).toBe("123456");
+  const first = page.getByLabel("Digit 1 of 6");
+  await expect(first).toHaveAttribute("aria-invalid", "true");
+  await expect(first).toBeFocused();
+  // Browsers fade placeholders by default; the ghost digits must keep the error colour at full strength.
+  const ghostStyle = await first.evaluate((el) => {
+    const style = getComputedStyle(el, "::placeholder");
+    return { color: style.color, opacity: style.opacity };
+  });
+  expect(ghostStyle).toEqual({ color: "rgb(167, 53, 53)", opacity: "1" });
+});
+
+test("a new code inserted into box 3 without keystrokes replaces everything and is checked as typed", async ({ page }) => {
+  await reachCodeStep(page);
+  await pasteWrongCode(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+
+  // The path of IME composition, autofill and touch-keyboard suggestions: one input event, no key events.
+  await page.getByLabel("Digit 3 of 6").click();
+  await page.keyboard.insertText("365432");
+
+  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect.poll(() => ghostDigits(page)).toBe("365432");
+  expect(await boxValues(page)).toBe("");
 });
 
 test("pasting the same wrong code again, or a different one, is checked again", async ({ page }) => {
   await reachCodeStep(page);
-  await page.getByLabel("Digit 1 of 6").focus();
+  await pasteWrongCode(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
 
   await ctrlV(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-  await ctrlV(page, "123456");
   await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect.poll(() => ghostDigits(page)).toBe("123456");
   await ctrlV(page, "654321");
   await expect(page.getByRole("alert")).toContainText("2 attempts left.");
+  await expect.poll(() => ghostDigits(page)).toBe("654321");
 });
 
-test("typing one digit over a rejected code starts over instead of submitting a mixed code", async ({ page }) => {
+test("typing one digit over the ghost, even the same digit, starts a fresh entry and removes the ghost", async ({ page }) => {
   await reachCodeStep(page);
-  await page.getByLabel("Digit 1 of 6").focus();
-  await ctrlV(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-
-  await page.keyboard.press("7");
-
-  expect(await boxValues(page)).toBe("7");
-  await expect(page.getByLabel("Digit 1 of 6")).not.toHaveAttribute("aria-invalid", "true");
-  await page.waitForTimeout(300);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-});
-
-test("a digit typed after only moving the caret, or in a later box, never joins the rejected digits", async ({ page }) => {
-  await reachCodeStep(page);
-  await page.getByLabel("Digit 1 of 6").focus();
-  await ctrlV(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
-
-  await page.keyboard.press("ArrowRight");
-  await expect.poll(() => boxValues(page)).toBe("123456");
-  await page.keyboard.press("7");
-  expect(await boxValues(page)).toBe("7");
-
-  // A second rejection, then a whole code typed starting from the middle of the row.
-  await page.getByLabel("Digit 1 of 6").focus();
-  await ctrlV(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
-  await page.getByLabel("Digit 3 of 6").click();
-  await page.keyboard.type("6543");
-
-  expect(await boxValues(page)).toBe("6543");
-  await page.waitForTimeout(300);
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
-});
-
-test("typing the same first digit over a rejected code starts over", async ({ page }) => {
-  await reachCodeStep(page);
-  await page.getByLabel("Digit 1 of 6").focus();
-  await ctrlV(page, "123456");
+  await pasteWrongCode(page, "123456");
   await expect(page.getByRole("alert")).toContainText("4 attempts left.");
 
   await page.keyboard.press("1");
 
   expect(await boxValues(page)).toBe("1");
+  expect(await ghostDigits(page)).toBe("");
   await expect(page.getByLabel("Digit 1 of 6")).not.toHaveAttribute("aria-invalid", "true");
   await expect(page.getByLabel("Digit 2 of 6")).toBeFocused();
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+});
+
+test("digits typed in a later box fill like fresh boxes and never join the ghost digits", async ({ page }) => {
+  await reachCodeStep(page);
+  await pasteWrongCode(page, "123456");
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => ghostDigits(page)).toBe("123456");
+  await page.getByLabel("Digit 3 of 6").click();
+  await page.keyboard.type("6543");
+
+  expect(await boxValues(page)).toBe("6543");
+  expect(await ghostDigits(page)).toBe("");
+  await page.waitForTimeout(300);
+  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
 });
