@@ -2,10 +2,10 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, deactivated and removed, by superadmins only. Editing is
-limited to the signed-in account: every other administrator can be deactivated
-or removed, but not rewritten. Any active administrator can list the accounts
-and send a password reset code.
+they are created, deactivated, given a role and removed, by superadmins only.
+Editing is limited to the signed-in account: every other administrator can be
+deactivated or removed, but not rewritten. Any active administrator can list
+the accounts and send a password reset code.
 """
 
 import re
@@ -28,6 +28,8 @@ from services.security import hash_password
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 
 MIN_PASSWORD_LENGTH = 8
+ROLES = ("admin", "superadmin")
+LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -78,6 +80,27 @@ def _read_identity(data, *, require_password):
             )
 
     return {"username": username, "email": email, "password": password}, None
+
+
+def _read_role(value):
+    """Returns the stored role a request names, or None when it names neither."""
+
+    role = value.strip().lower() if isinstance(value, str) else None
+    return role if role in ROLES else None
+
+
+def _is_last_active_superadmin(record):
+    """True when losing this account's superadmin access would leave nobody with it.
+
+    Only an active superadmin counts, so a deactivated one neither blocks the
+    change nor is protected by it. Applies to demoting, deactivating and
+    removing alike.
+    """
+
+    if not (record.is_active and record.is_superadmin):
+        return False
+    active_superadmins = Admin.query.filter(Admin.role == "superadmin").filter(Admin.status == "active").count()
+    return active_superadmins <= 1
 
 
 def _username_taken(username, *, excluding_id=None):
@@ -200,6 +223,8 @@ def set_admin_status(admin_id):
         active_admins = Admin.query.filter(Admin.status == "active").count()
         if active_admins <= 1:
             return _error("The last active administrator cannot be deactivated.", status=409)
+        if _is_last_active_superadmin(record):
+            return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     if record.status == status:
         return jsonify({
@@ -222,6 +247,64 @@ def set_admin_status(admin_id):
     except Exception:
         db.session.rollback()
         return _error("Failed to update the administrator's status.", status=500)
+
+
+@admins_bp.put("/<int:admin_id>/role")
+def set_admin_role(admin_id):
+    """Promotes an administrator to superadmin or demotes a superadmin.
+
+    Shaped like the status route. Granting or withdrawing account management is
+    deliberate, so it needs a recent password confirmation, and an account
+    cannot change its own role.
+    """
+
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
+    _, error = reauth_required("Confirm your password to change this administrator's role.")
+    if error:
+        return error
+
+    record = db.session.get(Admin, admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    data = request.get_json(silent=True)
+    role = _read_role(data.get("role") if isinstance(data, dict) else None)
+    if role is None:
+        return _error("Role must be Administrator or Superadmin.", field="role")
+
+    if record.id == session.get("admin_id"):
+        return _error("You cannot change your own role.", status=409)
+
+    noun = "a superadmin" if role == "superadmin" else "an administrator"
+    if record.is_superadmin == (role == "superadmin"):
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} is already {noun}.",
+            "admin": _as_dict(record),
+        }), 200
+
+    if role == "admin" and _is_last_active_superadmin(record):
+        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
+
+    try:
+        record.role = role
+        action = "promote" if role == "superadmin" else "demote"
+        log_audit("Admin", None, action, "Administrator", record.id, record.username)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} was "
+                       f"{'promoted to superadmin' if role == 'superadmin' else 'demoted to administrator'} successfully.",
+            "admin": _as_dict(record),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return _error("Failed to update the administrator's role.", status=500)
 
 
 @admins_bp.post("/<int:admin_id>/password-reset")
@@ -293,6 +376,9 @@ def delete_admin(admin_id):
 
     if Admin.query.count() <= 1:
         return _error("The last administrator account cannot be removed.", status=409)
+
+    if _is_last_active_superadmin(record):
+        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     try:
         username = record.username

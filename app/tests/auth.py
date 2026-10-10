@@ -366,3 +366,32 @@ def test_reauth_expires_after_its_window(monkeypatch):
     # The stale stamp is cleared so it cannot be reused.
     with probe.session_transaction() as flask_session:
         assert "reauth_at" not in flask_session
+
+
+def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    signed_in_client(monkeypatch)
+    app = auth_app()
+
+    @app.route("/api/_default_probe", methods=["DELETE"])
+    def default_probe():
+        _, error = auth_module.reauth_required()
+        return error
+
+    @app.route("/api/_custom_probe", methods=["PUT"])
+    def custom_probe():
+        _, error = auth_module.reauth_required("Confirm your password to do the thing.")
+        return error
+
+    probe = app.test_client()
+    with probe.session_transaction() as flask_session:
+        flask_session["admin_id"] = 7
+        flask_session["admin_username"] = "admin01"
+
+    default = probe.delete("/api/_default_probe")
+    custom = probe.put("/api/_custom_probe")
+
+    assert default.json["message"] == "Confirm your password to delete this record."
+    assert custom.json["message"] == "Confirm your password to do the thing."
+    # The code is what the frontend reads, so wording never changes it.
+    assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE

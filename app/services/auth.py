@@ -387,6 +387,9 @@ REAUTH_MAX_AGE_SECONDS = 300
 # The frontend prompts for the password again when it sees this code.
 REAUTH_REQUIRED_CODE = "password_confirmation_required"
 
+# What a refusal says when the route does not word it for its own action.
+REAUTH_DEFAULT_MESSAGE = "Confirm your password to delete this record."
+
 
 @auth_bp.route("/confirm-password", methods=["POST"])
 def confirm_password():
@@ -443,11 +446,13 @@ def confirm_password():
     }), 200
 
 
-def reauth_required():
+def reauth_required(message=REAUTH_DEFAULT_MESSAGE):
     """Guard a destructive route behind a recent password confirmation.
 
     Returns ``(None, response)`` when the caller must confirm its password
     again, mirroring :func:`admin_required` so routes can chain both guards.
+    A route that is not a delete passes ``message`` so the prompt names its own
+    action; the code, which the frontend reads, never changes.
     """
 
     admin, error = admin_required()
@@ -462,7 +467,7 @@ def reauth_required():
             jsonify({
                 "success": False,
                 "code": REAUTH_REQUIRED_CODE,
-                "message": "Confirm your password to delete this record."
+                "message": message
             }),
             403
         )
