@@ -86,7 +86,7 @@ Use errors such as 401 (sign-in required), 403 (role/password denied), 404 (back
 
 ## Fixture demonstration and verification
 
-Run `./dev.sh --fixture` from the repository root. The fixture account `admin_justine` / `password123` is a demo superadmin. Backup creation demonstrates queued/running/succeeded states and adds illustrative history. Restore validates the fixture password and simulates a job; it never restores any map, database, or server data. The page explicitly labels this behavior. Demo histories/jobs and changed passwords last only in the running page's adapter; reload resets them. Username/email are saved to session storage; clear the session storage to reset the identity. No password is written to storage.
+Run `./dev.sh --fixture` from the repository root. The fixture account `admin_justine` / `password123` is a demo superadmin; `admin_dean` is a second superadmin and `admin_registrar` a plain administrator, both with the same password. Backup creation demonstrates queued/running/succeeded states and adds illustrative history. Restore validates the fixture password and simulates a job; it never restores any map, database, or server data. The page explicitly labels this behavior. Demo histories/jobs and changed passwords last only in the running page's adapter; reload resets them. Username/email are saved to session storage; clear the session storage to reset the identity. No password is written to storage.
 
 Real mode never falls back to fixture behavior. Until the new endpoints and session role exist, profile/backup controls report unavailability or stay hidden. The fixture cannot establish backend authorization or database recovery correctness.
 
