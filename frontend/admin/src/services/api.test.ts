@@ -1292,6 +1292,22 @@ describe("real administrators service boundary", () => {
     ]);
   });
 
+  it("changes a role through the role route and returns the updated account", async () => {
+    const { services: admins } = await httpServices();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      success: true,
+      message: "staff was promoted to superadmin successfully.",
+      admin: { id: "2", username: "staff", email: "", status: "Active", role: "superadmin", isCurrent: false },
+    }));
+
+    await expect(admins.admins.setRole("2", "superadmin")).resolves.toMatchObject({ username: "staff", role: "superadmin" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/admins\/2\/role$/);
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(init?.body))).toEqual({ role: "superadmin" });
+  });
+
   it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
     const { services: admins, errors } = await httpServices();
     const fetchMock = vi.spyOn(globalThis, "fetch");

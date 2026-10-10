@@ -3,12 +3,32 @@ import { Field } from "../../components/UI";
 import { services } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
 
+/** What the prompt says about the action it guards; each caller can supply its own. */
+export type PasswordConfirmationWording = {
+  /** Shown when Confirm is pressed with the field empty. */
+  missing: string;
+  /** Shown when the backend reports the confirmation has expired. */
+  expired: string;
+  /** The hint under the field. */
+  hint: string;
+};
+
+/** The wording of a delete, which is what most callers guard. */
+export const DELETE_CONFIRMATION_WORDING: PasswordConfirmationWording = {
+  missing: "Enter your password to confirm this deletion.",
+  expired: "Your password confirmation expired. Enter it again to delete this record.",
+  hint: "This permanent deletion needs your password.",
+};
+
 /**
- * Re-authentication in front of a destructive action. A delete only proceeds
- * once the signed-in admin has retyped their own password, so an unattended
- * session cannot be used to remove records.
+ * Re-authentication in front of a destructive or sensitive action. It only
+ * proceeds once the signed-in admin has retyped their own password, so an
+ * unattended session cannot be used to remove records or change who may
+ * manage accounts. The wording defaults to a delete's; pass another for a
+ * different action. It may change between renders, so one hook can serve
+ * several dialogs.
  */
-export function usePasswordConfirmation() {
+export function usePasswordConfirmation(wording: PasswordConfirmationWording = DELETE_CONFIRMATION_WORDING) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -22,7 +42,7 @@ export function usePasswordConfirmation() {
   /** Resolves true when the password was accepted and the action may proceed. */
   const confirm = useCallback(async () => {
     if (!password) {
-      setError("Enter your password to confirm this deletion.");
+      setError(wording.missing);
       return false;
     }
     setConfirming(true);
@@ -36,25 +56,25 @@ export function usePasswordConfirmation() {
     } finally {
       setConfirming(false);
     }
-  }, [password]);
+  }, [password, wording.missing]);
 
   /**
-   * Re-prompts when the backend refuses a delete whose confirmation has since
+   * Re-prompts when the backend refuses an action whose confirmation has since
    * expired. Returns true when it handled the cause.
    */
   const handleRejection = useCallback((cause: unknown) => {
     if (!(cause instanceof PasswordConfirmationRequiredError)) return false;
     setPassword("");
-    setError("Your password confirmation expired. Enter it again to delete this record.");
+    setError(wording.expired);
     return true;
-  }, []);
+  }, [wording.expired]);
 
-  return { password, setPassword, error, setError, confirm, confirming, reset, handleRejection };
+  return { password, setPassword, error, setError, confirm, confirming, reset, handleRejection, wording };
 }
 
 export type PasswordConfirmation = ReturnType<typeof usePasswordConfirmation>;
 
-/** The password prompt shown inside a delete confirmation dialog. */
+/** The password prompt shown inside a confirmation dialog, worded by the hook it is given. */
 export function PasswordConfirmationField({
   confirmation,
   disabled = false,
@@ -74,7 +94,7 @@ export function PasswordConfirmationField({
         autoComplete="current-password"
         placeholder="Enter your admin password"
         required
-        subhelper="This permanent deletion needs your password."
+        subhelper={confirmation.wording.hint}
         error={confirmation.error}
         value={confirmation.password}
         disabled={disabled || confirmation.confirming}

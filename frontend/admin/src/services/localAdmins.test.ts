@@ -116,8 +116,16 @@ describe("fixture refusals for a plain administrator", () => {
     expect(await fixture.admins.list()).toHaveLength(3);
   });
 
+  it("refuses a role change", async () => {
+    const error = await failure(fixture.admins.setRole("3", "admin"));
+    expect(error).toBeInstanceOf(SuperadminRequiredError);
+    expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("superadmin");
+  });
+
   it("refuses before any rule about the row, as the server does", async () => {
     // A missing account, the caller's own account: the superadmin check comes first.
+    expect(await failure(fixture.admins.setRole("missing", "superadmin"))).toBeInstanceOf(SuperadminRequiredError);
+    expect(await failure(fixture.admins.setRole("2", "superadmin"))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.setStatus("missing", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.setStatus("2", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.remove("2"))).toBeInstanceOf(SuperadminRequiredError);
@@ -174,5 +182,106 @@ describe("fixture rules for a superadmin", () => {
     expect(await failure(fixture.admins.remove("3"))).toMatchObject({
       message: "You cannot remove your own administrator account.",
     });
+  });
+});
+
+describe("fixture role changes", () => {
+  let fixture: ReturnType<typeof setup>;
+
+  beforeEach(async () => {
+    fixture = setup();
+    await fixture.adapter.auth.login("admin_justine", PASSWORD);
+  });
+
+  it("promotes an administrator and demotes a superadmin, returning the updated account", async () => {
+    await expect(fixture.admins.setRole("2", "superadmin")).resolves.toMatchObject({
+      username: "admin_registrar", role: "superadmin", isCurrent: false,
+    });
+    expect((await fixture.admins.list()).find((account) => account.id === "2")?.role).toBe("superadmin");
+
+    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ username: "admin_dean", role: "admin" });
+    expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("admin");
+  });
+
+  it("is what the promoted account's next sign-in and session read report", async () => {
+    await fixture.admins.setRole("2", "superadmin");
+    await fixture.adapter.auth.logout();
+
+    await expect(fixture.adapter.auth.login("admin_registrar", PASSWORD)).resolves.toMatchObject({ role: "superadmin" });
+    await expect(fixture.adapter.auth.me()).resolves.toMatchObject({ role: "superadmin" });
+  });
+
+  it("takes effect on the demoted account's very next request", async () => {
+    await fixture.admins.setRole("3", "admin");
+    await fixture.adapter.auth.login("admin_dean", PASSWORD);
+
+    expect(await failure(fixture.admins.setStatus("2", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
+  });
+
+  it("records a promotion and a demotion against the account", async () => {
+    await fixture.admins.setRole("2", "superadmin");
+    await fixture.admins.setRole("3", "admin");
+
+    expect(fixture.audit).toHaveBeenNthCalledWith(1, "Promoted Administrator", "admin_registrar", "2");
+    expect(fixture.audit).toHaveBeenNthCalledWith(2, "Demoted Administrator", "admin_dean", "3");
+  });
+
+  it("refuses to change the signed-in account's own role, even to the role it holds", async () => {
+    expect(await failure(fixture.admins.setRole("1", "admin"))).toMatchObject({ message: "You cannot change your own role." });
+    expect(await failure(fixture.admins.setRole("1", "superadmin"))).toMatchObject({ message: "You cannot change your own role." });
+    expect((await fixture.admins.list()).find((account) => account.id === "1")?.role).toBe("superadmin");
+  });
+
+  it("succeeds without a write or an audit entry when the account already holds the role", async () => {
+    await expect(fixture.admins.setRole("2", "admin")).resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.setRole("3", "superadmin")).resolves.toMatchObject({ role: "superadmin" });
+    expect(fixture.audit).not.toHaveBeenCalled();
+  });
+
+  it("reports an unknown account and an unknown role", async () => {
+    expect(await failure(fixture.admins.setRole("missing", "admin"))).toMatchObject({ message: "Administrator not found." });
+    const error = await failure(fixture.admins.setRole("2", "owner" as never));
+    expect(error).toMatchObject({
+      message: "Role must be Administrator or Superadmin.",
+      fieldErrors: { role: "Role must be Administrator or Superadmin." },
+    });
+  });
+});
+
+describe("fixture last-superadmin rule", () => {
+  const LAST_SUPERADMIN = "At least one active superadmin is required. Promote another account first.";
+  let fixture: ReturnType<typeof setup>;
+
+  // A signed-in caller can never be the one left, so the lone active superadmin is another account
+  // and the caller's own seat is emptied through the directory, as ticket 02's backend tests do.
+  beforeEach(async () => {
+    fixture = setup();
+    await fixture.adapter.auth.login("admin_justine", PASSWORD);
+    fixture.adapter.directory.accounts.find((account) => account.id === "1")!.status = "Inactive";
+  });
+
+  it("refuses to demote, deactivate or remove the only active superadmin", async () => {
+    expect(await failure(fixture.admins.setRole("3", "admin"))).toMatchObject({ message: LAST_SUPERADMIN });
+    expect(await failure(fixture.admins.setStatus("3", "Inactive"))).toMatchObject({ message: LAST_SUPERADMIN });
+    expect(await failure(fixture.admins.remove("3"))).toMatchObject({ message: LAST_SUPERADMIN });
+
+    const dean = (await fixture.admins.list()).find((account) => account.id === "3");
+    expect(dean).toMatchObject({ role: "superadmin", status: "Active" });
+    expect(fixture.audit).not.toHaveBeenCalled();
+  });
+
+  it("lets it through once another active superadmin exists", async () => {
+    await fixture.admins.setRole("2", "superadmin");
+
+    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin" });
+  });
+
+  it("does not count a deactivated superadmin, nor refuse changing one", async () => {
+    // Back to justine as the only active superadmin: demoting the deactivated dean leaves her in place.
+    const { accounts } = fixture.adapter.directory;
+    accounts.find((account) => account.id === "1")!.status = "Active";
+    accounts.find((account) => account.id === "3")!.status = "Inactive";
+
+    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin" });
   });
 });

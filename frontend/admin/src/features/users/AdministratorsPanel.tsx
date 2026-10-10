@@ -3,12 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
-import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
+import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
-import type { AdminAccount, AdminAccountDraft } from "../../types";
+import type { AdminAccount, AdminAccountDraft, AdminRole } from "../../types";
 
 const ROLE_LABELS: Record<AdminAccount["role"], string> = { admin: "Administrator", superadmin: "Superadmin" };
+
+const ROLE_CHANGE_WORDING: PasswordConfirmationWording = {
+  missing: "Enter your password to confirm this role change.",
+  expired: "Your password confirmation expired. Enter it again to change this role.",
+  hint: "Changing a role needs your password.",
+};
 
 const blankDraft = (): AdminAccountDraft => ({ username: "", email: "", password: "" });
 
@@ -17,6 +23,7 @@ type Dialog =
   | { kind: "deactivate"; account: AdminAccount }
   | { kind: "reset"; account: AdminAccount }
   | { kind: "remove"; account: AdminAccount }
+  | { kind: "role"; account: AdminAccount; role: AdminRole }
   | null;
 
 /**
@@ -35,7 +42,9 @@ type Dialog =
  * Managing accounts belongs to superadmins. Any administrator can read the list,
  * open an account's activity and send a reset code; the rest of the menu and the
  * Add button are left out for them. The server refuses those requests too — the
- * viewer's role only decides what is offered.
+ * viewer's role only decides what is offered. A superadmin also promotes and
+ * demotes other accounts here, after retyping their own password; nobody changes
+ * their own role.
  */
 export function AdministratorsPanel() {
   const navigate = useNavigate();
@@ -43,8 +52,8 @@ export function AdministratorsPanel() {
   const feedback = useFeedback();
   const { session } = useAuth();
   const canManage = session?.role === "superadmin";
-  const passwordConfirmation = usePasswordConfirmation();
   const [dialog, setDialog] = useState<Dialog>(null);
+  const passwordConfirmation = usePasswordConfirmation(dialog?.kind === "role" ? ROLE_CHANGE_WORDING : undefined);
   const [draft, setDraft] = useState<AdminAccountDraft>(blankDraft());
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -124,6 +133,22 @@ export function AdministratorsPanel() {
     },
   });
 
+  const setRole = useMutation({
+    mutationFn: ({ account, role }: { account: AdminAccount; role: AdminRole }) =>
+      services.admins.setRole(account.id, role),
+    onSuccess: async (saved) => {
+      await refresh();
+      feedback.reportSuccess(
+        `${saved.username} was ${saved.role === "superadmin" ? "promoted to superadmin" : "demoted to administrator"} successfully.`,
+      );
+      closeDialog();
+    },
+    onError: (cause) => {
+      if (passwordConfirmation.handleRejection(cause)) return;
+      reportFailure(cause, "Unable to change the administrator's role.");
+    },
+  });
+
   const viewActivity = (account: AdminAccount) => {
     setActionMenuId(null);
     navigate(`/system-logs?${new URLSearchParams({ q: account.username, category: "Admin" })}`);
@@ -160,6 +185,12 @@ export function AdministratorsPanel() {
     setError("");
     if (!await passwordConfirmation.confirm()) return;
     remove.mutate(account);
+  };
+
+  const confirmRoleChange = async (account: AdminAccount, role: AdminRole) => {
+    setError("");
+    if (!await passwordConfirmation.confirm()) return;
+    setRole.mutate({ account, role });
   };
 
   return (
@@ -230,6 +261,21 @@ export function AdministratorsPanel() {
                             onClick={() => changeStatus(account)}
                           >
                             {account.status === "Active" ? "Deactivate account" : "Activate account"}
+                          </button>
+                        )}
+                        {canManage && (
+                          <button
+                            role="menuitem"
+                            disabled={account.isCurrent}
+                            title={account.isCurrent ? "You cannot change your own role." : undefined}
+                            onClick={() => {
+                              setError("");
+                              passwordConfirmation.reset();
+                              setDialog({ kind: "role", account, role: account.role === "superadmin" ? "admin" : "superadmin" });
+                              setActionMenuId(null);
+                            }}
+                          >
+                            {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
                           </button>
                         )}
                         {/* Helps a locked-out colleague without touching their
@@ -373,6 +419,55 @@ export function AdministratorsPanel() {
             </Button>
             <Button loading={sendReset.isPending} onClick={() => sendReset.mutate(dialog.account)}>
               {sendReset.isPending ? "Sending…" : "Send Reset Code"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {dialog?.kind === "role" && (
+        <Modal
+          title={dialog.role === "superadmin" ? "Make superadmin?" : "Make administrator?"}
+          subtitle={dialog.role === "superadmin"
+            ? "This gives the account control of administrator accounts."
+            : "This withdraws the account's control of administrator accounts."}
+          size="sm"
+          onClose={closeDialog}
+        >
+          <p className="admin-remove-copy">
+            {dialog.role === "superadmin" ? (
+              <>
+                <strong>{dialog.account.username}</strong> will be able to add, deactivate and remove administrators and
+                change their roles, yours included. Only grant this to someone you trust with that control.
+              </>
+            ) : (
+              <>
+                <strong>{dialog.account.username}</strong> keeps their account and can still sign in, see this list and
+                send reset codes. They can no longer add, deactivate or remove administrators or change their roles —
+                their next attempt will be refused.
+              </>
+            )}
+          </p>
+          {error && <div role="alert" className="admin-form-error">{error}</div>}
+          <PasswordConfirmationField
+            confirmation={passwordConfirmation}
+            disabled={setRole.isPending}
+            onSubmit={() => void confirmRoleChange(dialog.account, dialog.role)}
+          />
+          <div className="modal-actions">
+            <Button
+              variant="subtle"
+              data-modal-initial
+              disabled={setRole.isPending || passwordConfirmation.confirming}
+              onClick={closeDialog}
+            >
+              Cancel
+            </Button>
+            <Button
+              loading={setRole.isPending || passwordConfirmation.confirming}
+              onClick={() => void confirmRoleChange(dialog.account, dialog.role)}
+            >
+              {setRole.isPending ? "Updating…" : passwordConfirmation.confirming ? "Confirming…"
+                : dialog.role === "superadmin" ? "Make Superadmin" : "Make Administrator"}
             </Button>
           </div>
         </Modal>

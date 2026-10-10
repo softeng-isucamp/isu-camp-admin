@@ -3,6 +3,7 @@ import type {
   AccountStatus,
   AdminAccount,
   AdminAccountDraft,
+  AdminRole,
   AuditEntry,
   Building,
   DashboardAnalytics,
@@ -668,6 +669,8 @@ export interface Services {
     save(draft: AdminAccountDraft): Promise<AdminAccount>;
     /** Activates or deactivates an administrator's access to the portal. */
     setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
+    /** Promotes an administrator to superadmin or demotes a superadmin; returns the updated account. */
+    setRole(id: string, role: AdminRole): Promise<AdminAccount>;
     /** Emails a password reset code to that account's own address. */
     sendPasswordReset(id: string): Promise<string>;
     remove(id: string): Promise<void>;
@@ -1477,6 +1480,17 @@ export const services: Services = {
         return normalizeAdmin(response.admin);
       }
       return wait(await localAdmins.setStatus(id, status));
+    },
+
+    setRole: async (id, role) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ admin: AdminAccount }>(
+          `/api/admins/${encodeURIComponent(id)}/role`,
+          { method: "PUT", body: JSON.stringify({ role }) },
+        );
+        return normalizeAdmin(response.admin);
+      }
+      return wait(await localAdmins.setRole(id, role));
     },
 
     sendPasswordReset: async (id) => {

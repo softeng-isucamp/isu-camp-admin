@@ -148,11 +148,12 @@ describe("Administrator accounts in User Management", () => {
 
     // Sign-in details are changed through account customization, so the row
     // actions stop short of them — on your own row as much as anyone else's.
+    const roleAction: Record<string, string> = { admin_registrar: "Make superadmin", admin_justine: "Make administrator" };
     for (const username of ["admin_registrar", "admin_justine"]) {
       openRowMenu(username);
       const actions = within(screen.getByRole("menu")).getAllByRole("menuitem");
       expect(actions.map((action) => action.textContent)).toEqual([
-        "View activity", "Deactivate account", "Send password reset code", "Remove administrator",
+        "View activity", "Deactivate account", roleAction[username], "Send password reset code", "Remove administrator",
       ]);
       openRowMenu(username);
     }
@@ -333,6 +334,188 @@ describe("Administrator accounts in User Management", () => {
 
     expect(await screen.findByText(/Your password confirmation expired/)).toBeInTheDocument();
     expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+  });
+});
+
+describe("Changing an administrator's role", () => {
+  const dean: AdminAccount = { id: "3", username: "admin_dean", email: "dean@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false };
+
+  beforeEach(() => {
+    signInAs("superadmin");
+    vi.spyOn(services.admins, "list").mockResolvedValue([...directory.map((admin) => ({ ...admin })), { ...dean }]);
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const confirmWith = (password: string, button: string) => {
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: password } });
+    fireEvent.click(screen.getByRole("button", { name: button }));
+  };
+
+  it("offers the change the row's current role allows, and never the one it already has", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    expect(screen.getByRole("menuitem", { name: "Make superadmin" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "Make administrator" })).not.toBeInTheDocument();
+    openRowMenu("admin_registrar");
+
+    openRowMenu("admin_dean");
+    expect(screen.getByRole("menuitem", { name: "Make administrator" })).toBeEnabled();
+    expect(screen.queryByRole("menuitem", { name: "Make superadmin" })).not.toBeInTheDocument();
+  });
+
+  it("promotes an administrator only after the password is confirmed", async () => {
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...directory[1], role: "superadmin" });
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+
+    // The dialog names the account and what the role allows; nothing is sent until confirmed.
+    const dialog = screen.getByRole("dialog", { name: "Make superadmin?" });
+    expect(within(dialog).getByText("admin_registrar")).toBeInTheDocument();
+    expect(within(dialog).getByText(/add, deactivate and remove administrators/)).toBeInTheDocument();
+    expect(setRole).not.toHaveBeenCalled();
+
+    confirmWith("password123", "Make Superadmin");
+
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("2", "superadmin"));
+    expect(confirmPassword).toHaveBeenCalledWith("password123");
+    expect(await screen.findByText("admin_registrar was promoted to superadmin successfully.")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Make superadmin?" })).not.toBeInTheDocument();
+  });
+
+  it("demotes a superadmin and says what they keep and lose", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+    await openAdministrators();
+
+    openRowMenu("admin_dean");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Make administrator?" });
+    expect(within(dialog).getByText("admin_dean")).toBeInTheDocument();
+    expect(within(dialog).getByText(/keeps their account/)).toBeInTheDocument();
+    confirmWith("password123", "Make Administrator");
+
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("3", "admin"));
+    expect(await screen.findByText("admin_dean was demoted to administrator successfully.")).toBeInTheDocument();
+  });
+
+  it("refreshes the list after a change", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...directory[1], role: "superadmin" });
+    const list = vi.mocked(services.admins.list);
+    await openAdministrators();
+    const before = list.mock.calls.length;
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    confirmWith("password123", "Make Superadmin");
+
+    await screen.findByText("admin_registrar was promoted to superadmin successfully.");
+    expect(list.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("reports a rejected password in the dialog and keeps it open for a retry", async () => {
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword")
+      .mockRejectedValueOnce(new Error("Password is incorrect"))
+      .mockResolvedValueOnce(undefined);
+    const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...directory[1], role: "superadmin" });
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    confirmWith("wrong", "Make Superadmin");
+
+    expect(await screen.findByText("Password is incorrect")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Make superadmin?" })).toBeInTheDocument();
+    expect(setRole).not.toHaveBeenCalled();
+
+    confirmWith("password123", "Make Superadmin");
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("2", "superadmin"));
+    expect(confirmPassword).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for the password before sending anything, in the role change's own words", async () => {
+    const setRole = vi.spyOn(services.admins, "setRole");
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    fireEvent.click(screen.getByRole("button", { name: "Make Superadmin" }));
+
+    expect(await screen.findByText("Enter your password to confirm this role change.")).toBeInTheDocument();
+    expect(screen.getByText("Changing a role needs your password.")).toBeInTheDocument();
+    expect(screen.queryByText(/deletion/)).not.toBeInTheDocument();
+    expect(setRole).not.toHaveBeenCalled();
+  });
+
+  it("re-prompts when the backend reports the confirmation expired", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "setRole").mockRejectedValue(new PasswordConfirmationRequiredError());
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    confirmWith("password123", "Make Superadmin");
+
+    expect(await screen.findByText("Your password confirmation expired. Enter it again to change this role.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+    expect(screen.getByRole("dialog", { name: "Make superadmin?" })).toBeInTheDocument();
+  });
+
+  it("shows any other refusal in the dialog and leaves it open", async () => {
+    vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    vi.spyOn(services.admins, "setRole")
+      .mockRejectedValue(new Error("At least one active superadmin is required. Promote another account first."));
+    await openAdministrators();
+
+    openRowMenu("admin_dean");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+    confirmWith("password123", "Make Administrator");
+
+    expect(await screen.findByText("At least one active superadmin is required. Promote another account first."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Make administrator?" })).toBeInTheDocument();
+  });
+
+  it("discards a half-typed password when the dialog is cancelled", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: "half" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+  });
+
+  it("disables the role action on the signed-in account's own row, saying why", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_justine");
+    const item = screen.getByRole("menuitem", { name: "Make administrator" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "You cannot change your own role.");
+  });
+
+  it("keeps the removal dialog's wording as it was", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_registrar");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove administrator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Administrator" }));
+
+    expect(await screen.findByText("Enter your password to confirm this deletion.")).toBeInTheDocument();
+    expect(screen.getByText("This permanent deletion needs your password.")).toBeInTheDocument();
   });
 });
 

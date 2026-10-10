@@ -1,6 +1,8 @@
-import type { AccountStatus, AdminAccount, AdminAccountDraft } from "../types";
+import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
 import { SuperadminRequiredError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
+
+const LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first.";
 
 type Directory = ReturnType<typeof createLocalAdapter>["directory"];
 
@@ -35,6 +37,11 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
     if (!record) throw new Error("Administrator not found.");
     return record;
   };
+
+  /** True when the record is the only active superadmin, so changing it would leave none. */
+  const isLastActiveSuperadmin = (record: FixtureAccount): boolean =>
+    record.role === "superadmin" && record.status === "Active"
+    && accounts.filter((account) => account.role === "superadmin" && account.status === "Active").length <= 1;
 
   return {
     list: async (): Promise<AdminAccount[]> => accounts.map(asAccount),
@@ -81,9 +88,26 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
         if (record.id === caller.id) throw new Error("You cannot deactivate your own administrator account.");
         const activeAdmins = accounts.filter((account) => account.status === "Active").length;
         if (activeAdmins <= 1) throw new Error("The last active administrator cannot be deactivated.");
+        if (isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
       }
       record.status = status;
       audit(status === "Inactive" ? "Deactivated Administrator" : "Activated Administrator", record.username, record.id);
+      return asAccount(record);
+    },
+
+    /** Setting the role an account already holds succeeds without a change or a log entry. */
+    setRole: async (id: string, role: AdminRole): Promise<AdminAccount> => {
+      const caller = requireSuperadmin();
+      const record = find(id);
+      if (role !== "admin" && role !== "superadmin") {
+        const message = "Role must be Administrator or Superadmin.";
+        throw Object.assign(new Error(message), { fieldErrors: { role: message } });
+      }
+      if (record.id === caller.id) throw new Error("You cannot change your own role.");
+      if (record.role === role) return asAccount(record);
+      if (role === "admin" && isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
+      record.role = role;
+      audit(role === "superadmin" ? "Promoted Administrator" : "Demoted Administrator", record.username, record.id);
       return asAccount(record);
     },
 
@@ -100,6 +124,7 @@ export const createLocalAdmins = ({ accounts, viewer }: Directory, audit: Audit)
       const record = find(id);
       if (record.id === caller.id) throw new Error("You cannot remove your own administrator account.");
       if (accounts.length <= 1) throw new Error("The last administrator account cannot be removed.");
+      if (isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
       accounts.splice(accounts.indexOf(record), 1);
       audit("Deleted Administrator", record.username, record.id);
     },
