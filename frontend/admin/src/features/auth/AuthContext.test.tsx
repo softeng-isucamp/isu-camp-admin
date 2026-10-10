@@ -73,4 +73,38 @@ describe('refreshSession', () => {
 
     expect(screen.getByText('Signed out')).toBeInTheDocument();
   });
+  it('does not sign out an account that signed in after the refresh began', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    vi.spyOn(services.auth, 'logout').mockResolvedValue(undefined);
+    vi.spyOn(services.auth, 'login').mockResolvedValue({ id: '2', username: 'registrar', role: 'admin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    let release!: (value: null) => void;
+    me.mockReturnValueOnce(new Promise<null>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    await act(async () => { await handle.auth.logout(); });
+    await act(async () => { await handle.auth.login('registrar', 'password123'); });
+    await act(async () => { release(null); await pending; });
+
+    expect(screen.getByText('registrar:admin')).toBeInTheDocument();
+  });
+  it('does not sign out the same account that signed in again after the refresh began', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    vi.spyOn(services.auth, 'logout').mockResolvedValue(undefined);
+    vi.spyOn(services.auth, 'login').mockResolvedValue({ id: '1', username: 'justine', role: 'superadmin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    let release!: (value: null) => void;
+    me.mockReturnValueOnce(new Promise<null>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    await act(async () => { await handle.auth.logout(); });
+    await act(async () => { await handle.auth.login('justine', 'password123'); });
+    await act(async () => { release(null); await pending; });
+
+    expect(screen.getByText('justine:superadmin')).toBeInTheDocument();
+  });
 });
