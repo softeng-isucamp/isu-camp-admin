@@ -270,6 +270,132 @@ def test_creating_requires_a_signed_in_account():
     assert response.status_code == 401
 
 
+NEW_ACCOUNT = {"username": "admin03", "email": "admin03@example.com", "password": "another-secret"}
+
+
+def created_accounts():
+    return [record for record in FakeAdmin.store if record.id not in (1, 2)]
+
+
+def test_creating_without_a_role_makes_an_administrator(admin_directory):
+    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json=NEW_ACCOUNT)
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "admin"
+    assert [record.role for record in created_accounts()] == ["admin"]
+
+
+def test_creating_with_a_null_role_makes_an_administrator():
+    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": None})
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "admin"
+
+
+def test_creating_an_administrator_by_role_needs_no_password_confirmation():
+    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": "admin"})
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "admin"
+    assert [record.role for record in created_accounts()] == ["admin"]
+
+
+def test_creating_a_superadmin_with_a_recent_confirmation():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "superadmin"
+    assert [record.role for record in created_accounts()] == ["superadmin"]
+
+
+def test_the_role_is_read_like_the_role_routes_does():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": " SuperAdmin "})
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "superadmin"
+
+
+def test_creating_a_superadmin_without_a_confirmation_is_refused(admin_directory):
+    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+
+    assert response.status_code == 403
+    assert response.json == {
+        "success": False,
+        "code": "password_confirmation_required",
+        "message": "Confirm your password to create a superadmin.",
+    }
+    assert admin_directory.committed is False
+    assert created_accounts() == []
+
+
+def test_creating_a_superadmin_with_an_expired_confirmation_is_refused(admin_directory):
+    client = signed_in(admins_app())
+    with client.session_transaction() as flask_session:
+        flask_session["reauth_at"] = time.time() - 3600
+
+    response = client.post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
+    assert created_accounts() == []
+
+
+@pytest.mark.parametrize("role", ["owner", "", "root", 1, True, ["superadmin"], {"role": "admin"}])
+def test_an_unrecognized_role_is_a_field_error(role, admin_directory):
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": role})
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {"role": "Role must be Administrator or Superadmin."}
+    assert admin_directory.committed is False
+    assert created_accounts() == []
+
+
+def test_an_unrecognized_role_is_a_field_error_even_without_a_confirmation():
+    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": "owner"})
+
+    assert response.status_code == 400
+    assert "role" in response.json["fields"]
+
+
+def test_a_plain_administrator_is_refused_before_a_password_is_asked_for(admin_directory):
+    response = signed_in(admins_app(), admin_id=2, confirmed=False).post(
+        "/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"},
+    )
+
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+    assert created_accounts() == []
+
+
+def test_a_confirmation_does_not_override_the_other_validation():
+    client = signed_in(admins_app())
+
+    short = client.post("/api/admins", json={**NEW_ACCOUNT, "password": "short", "role": "superadmin"})
+    duplicate = client.post("/api/admins", json={**NEW_ACCOUNT, "username": "ADMIN02", "role": "superadmin"})
+
+    assert short.status_code == 400 and "password" in short.json["fields"]
+    assert duplicate.status_code == 409 and "username" in duplicate.json["fields"]
+    assert created_accounts() == []
+
+
+def test_incomplete_details_are_reported_before_a_missing_confirmation_is():
+    response = signed_in(admins_app(), confirmed=False).post(
+        "/api/admins", json={**NEW_ACCOUNT, "email": "nope", "role": "superadmin"},
+    )
+
+    assert response.status_code == 400
+    assert "email" in response.json["fields"]
+
+
+def test_a_created_account_is_listed_with_its_role():
+    client = signed_in(admins_app())
+    client.post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+
+    roles = {item["username"]: item["role"] for item in client.get("/api/admins").json["items"]}
+
+    assert roles["admin03"] == "superadmin"
+
+
 @pytest.mark.parametrize(
     "body,expected_field",
     [

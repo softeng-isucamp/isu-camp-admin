@@ -130,8 +130,21 @@ def create_admin():
     if invalid:
         return invalid
 
+    # Left out (or null) means a plain administrator; anything else must name a role.
+    requested = request.get_json(silent=True).get("role")
+    role = "admin" if requested is None else _read_role(requested)
+    if role is None:
+        return _error("Role must be Administrator or Superadmin.", field="role")
+
     if _username_taken(values["username"]):
         return _error("That username is already taken", status=409, field="username")
+
+    # Minting a superadmin is as deliberate as promoting one, so it asks for the
+    # password too. A plain administrator is created without the prompt.
+    if role == "superadmin":
+        _, error = reauth_required("Confirm your password to create a superadmin.")
+        if error:
+            return error
 
     try:
         # public.admin.id is an identity column, so the database assigns it.
@@ -141,6 +154,7 @@ def create_admin():
             # plaintext row to the ones already there.
             password=hash_password(values["password"]),
             gmail=values["email"],
+            role=role,
         )
         db.session.add(record)
         db.session.flush()
