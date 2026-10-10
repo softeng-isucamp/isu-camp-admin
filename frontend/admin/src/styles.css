@@ -1206,6 +1206,8 @@ td small {
   min-height: 100vh;
   background: var(--green);
   display: grid;
+  /* A shrinkable track, so the card's max-width can hold it inside a narrow viewport. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   position: relative;
   overflow: hidden;
@@ -1291,24 +1293,61 @@ td small {
 .password button {
   position: absolute;
   right: 12px;
-  top: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
   background: transparent;
   color: #64716a;
   padding: 0;
 }
-.password button img {
-  display: block;
-  width: 18px;
-  height: 13px;
-}
 .forgot {
-  text-align: right;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: -8px;
 }
+.forgot-username {
+  justify-content: flex-end;
+}
+.caps-lock-warning {
+  color: #8a5a00;
+  font-size: 12px;
+  font-weight: 700;
+}
+/* Every text link on the login and recovery screens. */
 .forgot a,
-.back-link {
+.back-link,
+.recovery-modal .recovery-link,
+.recovery-modal .recovery-resend .btn {
   color: var(--green-2);
   font-weight: 700;
   font-size: 13px;
+  text-decoration: none;
+}
+.forgot a:hover,
+.back-link:hover,
+.recovery-modal .recovery-link:hover:not(:disabled),
+.recovery-modal .recovery-resend .btn:hover:not(:disabled) {
+  text-decoration: underline;
+}
+/* Focus ring for every text input on the login and recovery screens, matching the code boxes. */
+.login-card .field input:focus-visible,
+.recovery-modal .field input:focus-visible {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2);
+}
+/* Locked controls (lockout, rate-limit waits) must look locked. A busy button keeps full strength beside its spinner. */
+.login-card .btn:disabled:not([aria-busy]),
+.recovery-modal .recovery-primary:disabled:not([aria-busy]) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.login-card .field input:disabled,
+.recovery-modal .field input:disabled {
+  background: #f1f3f2;
+  color: #8a948f;
+  cursor: not-allowed;
 }
 .error {
   background: #fff0f0;
@@ -1317,6 +1356,29 @@ td small {
   padding: 10px 12px;
   border-radius: 12px;
   font-size: 12px;
+}
+/* The one error box for login and recovery; urgency adds only the icon and a bold count. */
+.auth-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid #f0bcbc;
+  border-radius: 14px;
+  background: #fff0f0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: left;
+}
+.auth-alert-icon {
+  flex: none;
+  margin-top: 2px;
+}
+.auth-alert strong {
+  font-weight: 800;
 }
 .login-card footer {
   border-top: 1px solid #e1e3e4;
@@ -1337,6 +1399,7 @@ td small {
   inset: 0;
   z-index: 4;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   background: #0e12107a;
   padding: 24px;
@@ -1344,23 +1407,62 @@ td small {
 .recovery-modal {
   width: 460px;
   max-width: 100%;
-  min-height: 300px;
-  padding: 34px;
+  padding: 32px;
   border-radius: 28px;
+}
+.recovery-step,
+.recovery-step > form,
+.recovery-success {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .recovery-modal h2 {
-  font-size: 26px;
+  margin: 0;
+  font-size: 24px;
   line-height: 1.3;
+  color: #191c1d;
+}
+/* The subtext belongs to its heading, so it sits closer than the next block. */
+.recovery-modal h2 + .recovery-copy {
+  margin-top: -10px;
+}
+.recovery-modal .recovery-copy {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #525c57;
+}
+.recovery-modal .recovery-copy strong {
+  color: #191c1d;
+}
+.recovery-modal .recovery-copy .nowrap {
+  white-space: nowrap;
 }
 .recovery-modal .field {
-  gap: 6px;
+  gap: 8px;
+  color: #525c57;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 .recovery-modal .field input {
-  height: 54px;
-  border-radius: 999px;
+  height: 48px;
+  border-radius: 18px;
+  font-size: 14px;
+}
+/* Field labels share the login form's small caps style. The markup is sentence case, so screen readers read words, not letters. */
+.login-card .field > span,
+.recovery-modal .recovery-label {
+  color: #3f4941;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* Empty live regions stay in the tree for announcements but take no room. */
+.recovery-modal .field > [role="status"]:empty {
+  margin-top: -8px;
 }
 .recovery-modal .segmented-code-container {
   display: grid;
@@ -1369,45 +1471,189 @@ td small {
   width: 100%;
   box-sizing: border-box;
 }
-.recovery-modal .segmented-code-input {
-  width: 100% !important;
-  height: 52px !important;
-  min-width: 0 !important;
-  border-radius: 14px !important;
-  text-align: center !important;
-  font-size: 20px !important;
-  font-weight: bold !important;
-  background: #e1e3e4 !important;
-  border: 1px solid #d1d5db !important;
-  color: #191c1d !important;
-  padding: 0 !important;
-  box-sizing: border-box !important;
+.recovery-modal .field .segmented-code-input {
+  width: 100%;
+  height: 52px;
+  min-width: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #191c1d;
+  text-align: center;
+  font-size: 20px;
+  font-weight: bold;
 }
-.recovery-modal .segmented-code-input:focus {
-  border-color: var(--green) !important;
-  box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2) !important;
-  outline: none !important;
+/* A dead or checking code: the boxes go grey so they read as locked. */
+.recovery-modal .field .segmented-code-input:disabled {
+  border-color: #d1d5db;
+  background: #e1e3e4;
+  color: #8a948f;
+  cursor: not-allowed;
+}
+.recovery-modal .field .segmented-code-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(0, 89, 49, 0.2);
+  outline: none;
+}
+/* A rejected code: the digits keep the normal value colour; only the border and fill turn the alert's red, until the admin edits. */
+.recovery-modal .field .segmented-code-input[aria-invalid="true"] {
+  border-color: #f0bcbc;
+  background: #fff0f0;
+}
+.recovery-modal .field .segmented-code-input[aria-invalid="true"]:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(167, 53, 53, 0.2);
+}
+.recovery-modal .recovery-resend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+.recovery-modal .recovery-resend .btn {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  gap: 6px;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+.recovery-modal .recovery-link:disabled,
+.recovery-modal .recovery-resend .btn:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
+}
+/* Status lines (resend confirmation, passwords match) share one small bold style. */
+.recovery-modal .recovery-status,
+.recovery-modal .recovery-match {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green-2);
+}
+.recovery-modal .recovery-username {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #f6f8f7;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.recovery-modal .recovery-password {
+  position: relative;
+}
+.recovery-modal .recovery-password input {
+  width: 100%;
+  padding-right: 48px;
+}
+.recovery-modal .recovery-password-toggle {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  background: transparent;
+  padding: 0;
+  color: #64716a;
+}
+.recovery-modal .recovery-rules {
+  list-style: none;
+  margin: -6px 0 0;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: #f0f8f3;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 19px;
+}
+.recovery-modal .recovery-rules li {
+  display: flex;
+  gap: 8px;
+  color: #525c57;
+}
+.recovery-modal .recovery-rules li > span {
+  width: 12px;
+  text-align: center;
+}
+.recovery-modal .recovery-rules .rule-met {
+  color: #0c5430;
+  font-weight: 600;
+}
+.recovery-modal .recovery-match {
+  min-height: 18px;
+}
+.recovery-modal .recovery-match-match {
+  color: #0c7441;
+}
+.recovery-modal .recovery-match-mismatch {
+  color: var(--danger);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 .recovery-modal .btn {
   width: 100%;
   min-height: 50px;
+}
+.recovery-modal .recovery-primary {
+  width: 100%;
+  height: 50px;
+  border-radius: 999px;
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+  font-size: 15px;
+}
+/* The same green and hover as the login button, so the modal and the card behind it share one primary. */
+.recovery-modal .recovery-primary:hover:not(:disabled) {
+  border-color: #004727;
+  background: #004727;
+}
+.recovery-modal .recovery-submit {
   margin-top: 4px;
+}
+.recovery-success {
+  align-items: center;
+  text-align: center;
 }
 .recovery-success-icon {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 4px;
-  border-radius: 50%;
-  background: #d6ede0;
-  color: var(--green);
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
   font-size: 28px;
   font-weight: 800;
 }
 .back-link {
   text-align: center;
   text-decoration: none;
+}
+.recovery-modal .back-link {
+  align-self: center;
+  margin-top: -4px;
 }
 .modal-backdrop {
   position: fixed;
@@ -2610,7 +2856,8 @@ td small {
   height: 16px;
 }
 .login-card .btn {
-  min-height: 46px;
+  min-height: 50px;
+  font-size: 15px;
 }
 .pagination {
   display: flex;
@@ -3728,4 +3975,18 @@ td small {
   .analytics-kpis {
     grid-template-columns: 1fr;
   }
+}
+.recovery-modal h2:focus {
+  outline: none;
+}
+.recovery-modal .recovery-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+/* "Change email" sits inside the subtext, so it takes the subtext's size. */
+.recovery-modal .recovery-copy .recovery-link {
+  font-size: inherit;
 }

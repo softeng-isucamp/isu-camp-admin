@@ -1,0 +1,84 @@
+import type { PropsWithChildren } from "react";
+import { Link } from "react-router-dom";
+import { Button, Card } from "../../components/UI";
+import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
+import userIcon from "../../assets/figma/login/login-icon-4.svg";
+import lockIcon from "../../assets/figma/login/login-icon-1.svg";
+import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
+import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
+
+/** A picture of the login card behind the modal. `inert` keeps its controls out of the tab order and the accessibility tree. */
+function LoginPreview() {
+  return (
+    <Card className="login-card" aria-hidden="true" inert>
+      <div className="auth-brand">
+        <div className="auth-mark">
+          <img src={kumpasLogo} alt="KUMPAS logo" />
+        </div>
+        <h1>KUMPAS</h1>
+        <p>Admin Login</p>
+      </div>
+      <form>
+        <label className="field">
+          <span>Username</span>
+          <div className="input-with-icon">
+            <img src={userIcon} alt="" />
+            <input placeholder="Enter your username" readOnly />
+          </div>
+        </label>
+        <div className="forgot forgot-username">
+          <a>Forgot username?</a>
+        </div>
+        <label className="field">
+          <span>Password</span>
+          <div className="password">
+            <img className="password-icon" src={lockIcon} alt="" />
+            <input placeholder="Enter your password" type="password" readOnly />
+            <button type="button">
+              <PasswordVisibilityIcon shown={false} />
+            </button>
+          </div>
+        </label>
+        <div className="forgot forgot-username">
+          <a>Forgot password?</a>
+        </div>
+        <Button type="button">
+          Login <img src={arrowIcon} alt="" />
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+/** The recovery modal over the blurred login preview. Every recovery step renders inside it. */
+export function RecoveryFrame({ children }: PropsWithChildren) {
+  return (
+    <div className="auth-page">
+      <div className="ambient" />
+      <LoginPreview />
+      <div className="recovery-overlay">
+        <Card className="recovery-modal">{children}</Card>
+      </div>
+    </div>
+  );
+}
+
+/** The check mark that heads both final screens. */
+export function SuccessIcon() {
+  return (
+    <div className="recovery-success-icon">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </div>
+  );
+}
+
+/** The exit every recovery step offers; use it as the last child of a step. */
+export function BackToLogin() {
+  return (
+    <Link className="back-link" to="/login">
+      Back to login
+    </Link>
+  );
+}

@@ -1,46 +1,72 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { CapsLockWarning, useCapsLock } from "./capsLock";
+import { AuthError } from "../../services/errors";
+import { readLoginPrefill } from "./loginPrefill";
+import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { Button, Card, Field } from "../../components/UI";
-import { RateLimitError, services } from "../../services/api";
-import {
-  loginSchema,
-  resetPasswordSchema,
-  resetRequestSchema,
-  resetSchema,
-} from "../../services/schemas";
+import { RateLimitError } from "../../services/api";
+import { loginSchema } from "../../services/schemas";
 import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
 import userIcon from "../../assets/figma/login/login-icon-4.svg";
 import lockIcon from "../../assets/figma/login/login-icon-1.svg";
-import eyeIcon from "../../assets/figma/login/login-icon-2.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
 export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [loginCountdown, setLoginCountdown] = useState(0);
   const [loginPending, setLoginPending] = useState(false);
+  const [attemptsRemaining, setAttemptsRemaining] = useState<number | undefined>();
+  // The field a client-side check rejected; it is marked invalid and points at the alert until edited.
+  const [invalidField, setInvalidField] = useState<"username" | "password" | null>(null);
+  const alertId = useId();
+  const capsLock = useCapsLock();
   const loginInFlight = useRef(false);
   useEffect(() => {
     if (loginCountdown <= 0) return;
     const timer = setTimeout(() => setLoginCountdown((seconds) => seconds - 1), 1000);
     return () => clearTimeout(timer);
   }, [loginCountdown]);
+  const prefilledUsername = readLoginPrefill(location.state);
   const {
     register,
     handleSubmit,
+    setFocus,
     formState: { errors },
   } = useForm({
-    defaultValues: { username: "", password: "" },
+    defaultValues: { username: prefilledUsername, password: "" },
   });
-  const submit = async (values: { username: string; password: string }) => {
-    if (loginInFlight.current || loginCountdown > 0) return;
+  // A recovery flow handed over the username, so the password is all that is left to type.
+  useEffect(() => {
+    if (prefilledUsername) setFocus("password");
+  }, [prefilledUsername, setFocus]);
+  // Editing the rejected field clears its validation error; server errors stay until the next attempt.
+  const clearInvalid = (field: "username" | "password") => {
+    if (invalidField !== field) return;
+    setInvalidField(null);
     setError("");
+  };
+  const usernameField = register("username", { onChange: () => clearInvalid("username") });
+  const passwordField = register("password", { onChange: () => clearInvalid("password") });
+  const fieldErrorProps = (field: "username" | "password") =>
+    invalidField === field ? { "aria-invalid": true, "aria-describedby": alertId } : {};
+  const lockedOut = loginCountdown > 0;
+  const submit = async (values: { username: string; password: string }) => {
+    if (loginInFlight.current || lockedOut) return;
+    setError("");
+    setAttemptsRemaining(undefined);
+    setInvalidField(null);
     const parsed = loginSchema.safeParse(values);
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Check your credentials.");
+      const issue = parsed.error.issues[0];
+      setError(issue?.message ?? "Check your credentials.");
+      setInvalidField(issue?.path[0] === "password" ? "password" : "username");
       return;
     }
     loginInFlight.current = true;
@@ -49,8 +75,15 @@ export function Login() {
       await login(values.username, values.password);
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in.");
-      if (err instanceof RateLimitError) setLoginCountdown(err.retryAfterSeconds);
+      if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
+        setError("Incorrect username or password.");
+        setAttemptsRemaining(err.attemptsRemaining);
+      } else if (err instanceof RateLimitError) {
+        setError(RATE_LIMIT_MESSAGE);
+        setLoginCountdown(err.retryAfterSeconds);
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to sign in.");
+      }
     } finally {
       loginInFlight.current = false;
       setLoginPending(false);
@@ -69,406 +102,58 @@ export function Login() {
         </div>
         <form onSubmit={handleSubmit(submit)}>
           <label className="field">
-            <span>USERNAME</span>
+            <span>Username</span>
             <div className="input-with-icon">
               <img src={userIcon} alt="" />
               <input
-                {...register("username")}
+                {...usernameField}
+                {...fieldErrorProps("username")}
+                disabled={lockedOut}
                 autoComplete="username"
                 placeholder="Enter your username"
               />
             </div>
           </label>
+          <div className="forgot forgot-username">
+            <Link to="/forgot-username">Forgot username?</Link>
+          </div>
           <label className="field">
-            <span>PASSWORD</span>
+            <span>Password</span>
             <div className="password">
               <img className="password-icon" src={lockIcon} alt="" />
               <input
-                {...register("password")}
+                {...passwordField}
+                {...fieldErrorProps("password")}
+                onBlur={(event) => {
+                  void passwordField.onBlur(event);
+                  capsLock.onBlur();
+                }}
+                onKeyDown={capsLock.onKeyDown}
+                onKeyUp={capsLock.onKeyUp}
+                disabled={lockedOut}
                 type={show ? "text" : "password"}
                 autoComplete="current-password"
                 placeholder="Enter your password"
               />
-              <button
-                type="button"
-                onClick={() => setShow(!show)}
-                aria-label="Toggle password visibility"
-              >
-                <img src={eyeIcon} alt="" />
+              <button type="button" onClick={() => setShow(!show)} aria-pressed={show} aria-label="Show password">
+                <PasswordVisibilityIcon shown={show} />
               </button>
             </div>
           </label>
           <div className="forgot">
-            <Link to="/reset-password">Forgot password?</Link>
+            <CapsLockWarning visible={capsLock.capsLockOn && !lockedOut} />
+            <Link to="/forgot-password">Forgot password?</Link>
           </div>
           {(error || errors.username || errors.password) && (
-            <div className="error" role="alert">
+            <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} urgent={lockedOut}>
               {error || errors.username?.message || errors.password?.message}
-            </div>
+            </AuthAlert>
           )}
-          <Button type="submit" loading={loginPending} disabled={loginCountdown > 0}>
-            {loginPending ? "Logging in…" : loginCountdown > 0 ? `Login in ${loginCountdown}s` : "Login"} <img src={arrowIcon} alt="" />
+          <Button type="submit" loading={loginPending} disabled={lockedOut}>
+            {loginPending ? "Logging in…" : lockedOut ? tryAgainLabel(loginCountdown) : <>Login <img src={arrowIcon} alt="" /></>}
           </Button>
         </form>
       </Card>
-    </div>
-  );
-}
-
-function LoginPreview() {
-  return (
-    <Card className="login-card" aria-hidden="true">
-      <div className="auth-brand">
-        <div className="auth-mark">
-          <img src={kumpasLogo} alt="KUMPAS logo" />
-        </div>
-        <h1>KUMPAS</h1>
-        <p>Admin Login</p>
-      </div>
-      <form>
-        <label className="field">
-          <span>USERNAME</span>
-          <div className="input-with-icon">
-            <img src={userIcon} alt="" />
-            <input placeholder="Enter your username" readOnly />
-          </div>
-        </label>
-        <label className="field">
-          <span>PASSWORD</span>
-          <div className="password">
-            <img className="password-icon" src={lockIcon} alt="" />
-            <input placeholder="Enter your password" type="password" readOnly />
-            <button type="button" tabIndex={-1}>
-              <img src={eyeIcon} alt="" />
-            </button>
-          </div>
-        </label>
-        <div className="forgot">Forgot password?</div>
-        <Button type="button">
-          Login <img src={arrowIcon} alt="" />
-        </Button>
-      </form>
-    </Card>
-  );
-}
-
-export function PasswordReset() {
-  const navigate = useNavigate();
-  const [step, setStep] = useState<"request" | "code" | "new" | "success">(
-    "request",
-  );
-  const [error, setError] = useState("");
-  const [resendMessage, setResendMessage] = useState("");
-  const [resendCountdown, setResendCountdown] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const submissionInFlight = useRef(false);
-  const [digits, setDigits] = useState<string[]>(["", "", "", "", "", ""]);
-
-  useEffect(() => {
-    if (resendCountdown <= 0) return;
-    const timer = setTimeout(() => setResendCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [resendCountdown]);
-
-  const handleResendCode = async () => {
-    if (submissionInFlight.current || resendCountdown > 0) return;
-    submissionInFlight.current = true;
-    setError("");
-    setResendMessage("");
-    setSubmitting(true);
-    try {
-      await services.auth.requestReset(getValues("username"));
-      setDigits(["", "", "", "", "", ""]);
-      setValue("code", "");
-      setResendMessage("A new 6-digit verification code has been sent.");
-      setResendCountdown(60);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to resend code.";
-      setError(msg);
-      if (err instanceof RateLimitError) setResendCountdown(err.retryAfterSeconds);
-    } finally {
-      submissionInFlight.current = false;
-      setSubmitting(false);
-    }
-  };
-  const { register, getValues, setValue } = useForm({
-    defaultValues: {
-      username: "",
-      code: "",
-      password: "",
-      confirmPassword: "",
-    },
-  });
-
-  const handleDigitChange = (index: number, val: string) => {
-    const clean = val.replace(/\D/g, "");
-    if (!clean) {
-      const nextDigits = [...digits];
-      nextDigits[index] = "";
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      return;
-    }
-    const nextDigits = [...digits];
-    if (clean.length > 1) {
-      const chars = clean.slice(0, 6).split("");
-      const startIndex = chars.length === 6 ? 0 : index;
-      for (let i = 0; i < chars.length; i++) {
-        if (startIndex + i < 6) nextDigits[startIndex + i] = chars[i];
-      }
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      const nextInput = document.getElementById(`digit-${Math.min(5, startIndex + chars.length - 1)}`);
-      nextInput?.focus();
-      return;
-    }
-    nextDigits[index] = clean[clean.length - 1];
-    setDigits(nextDigits);
-    setValue("code", nextDigits.join(""));
-    if (index < 5) {
-      const nextInput = document.getElementById(`digit-${index + 1}`);
-      nextInput?.focus();
-    }
-  };
-
-  const handlePaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pasted) return;
-    const nextDigits = [...digits];
-    const startIndex = pasted.length === 6 ? 0 : index;
-    for (let i = 0; i < pasted.length; i++) {
-      if (startIndex + i < 6) {
-        nextDigits[startIndex + i] = pasted[i];
-      }
-    }
-    setDigits(nextDigits);
-    setValue("code", nextDigits.join(""));
-    const focusTarget = Math.min(5, startIndex + pasted.length - 1);
-    const nextInput = document.getElementById(`digit-${focusTarget}`);
-    nextInput?.focus();
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace" && !digits[index] && index > 0) {
-      const nextDigits = [...digits];
-      nextDigits[index - 1] = "";
-      setDigits(nextDigits);
-      setValue("code", nextDigits.join(""));
-      const prevInput = document.getElementById(`digit-${index - 1}`);
-      prevInput?.focus();
-    }
-  };
-
-  const submit = async (values: {
-    username: string;
-    code: string;
-    password: string;
-    confirmPassword: string;
-  }) => {
-    if (submissionInFlight.current) return;
-    submissionInFlight.current = true;
-    setError("");
-    setSubmitting(true);
-    try {
-      if (step === "request") {
-        const parsed = resetRequestSchema.safeParse({ username: values.username });
-        if (!parsed.success) {
-          setError(
-            parsed.error.issues[0]?.message ?? "Username is required.",
-          );
-          return;
-        }
-        await services.auth.requestReset(values.username);
-        setResendCountdown(60);
-        setStep("code");
-      } else if (step === "code") {
-        const rawCode = values.code || digits.join("");
-        const parsed = resetSchema.shape.code.safeParse(rawCode);
-        if (!parsed.success) {
-          setError(
-            parsed.error.issues[0]?.message ?? "Enter the 6-digit verification code.",
-          );
-          return;
-        }
-        setValue("code", parsed.data);
-        await services.auth.verifyReset(values.username, parsed.data);
-        setStep("new");
-      } else if (step === "new") {
-        const rawCode = values.code || digits.join("");
-        const parsed = resetPasswordSchema.safeParse({ ...values, code: rawCode });
-        if (!parsed.success) {
-          setError(
-            parsed.error.issues[0]?.message ?? "Check your new password.",
-          );
-          return;
-        }
-        await services.auth.reset(
-          values.username,
-          parsed.data.code,
-          parsed.data.password,
-        );
-        setStep("success");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to reset password");
-      if (e instanceof RateLimitError && step === "code") setResendCountdown(e.retryAfterSeconds);
-    } finally {
-      submissionInFlight.current = false;
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="auth-page">
-      <div className="ambient" />
-      <LoginPreview />
-      <div className="recovery-overlay">
-        <Card className="recovery-modal">
-          {step === "success" ? (
-            <>
-              <div className="recovery-success-icon" style={{ background: "#0c7441", color: "#fff", width: "54px", height: "54px", borderRadius: "999px", display: "grid", placeItems: "center" }}>
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </div>
-              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>Password reset successful</h2>
-              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
-                Your admin password has been updated. You can now sign in using your new password.
-              </p>
-              <div style={{ flex: 1, minHeight: "12px" }} />
-              <Button style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%" }} onClick={() => navigate("/login")}>
-                Return to Login
-              </Button>
-            </>
-          ) : (
-            <>
-              <h2 style={{ fontSize: "26px", color: "#191c1d", margin: "0" }}>
-                {step === "request"
-                  ? "Reset your password"
-                  : step === "code"
-                    ? "Enter verification code"
-                    : "Create a new password"}
-              </h2>
-              <p className="muted" style={{ fontSize: "16px", color: "#525c57", lineHeight: "24px" }}>
-                {step === "request"
-                  ? "Enter your admin username to receive a six-digit code."
-                  : step === "code"
-                    ? "We sent a 6-digit verification code to the admin’s email on file."
-                    : "Choose a strong password for the admin account."}
-              </p>
-              {step === "request" && (
-                <label className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>ADMIN USERNAME</span>
-                  <input {...register("username")} type="text" placeholder="admin01" />
-                </label>
-              )}
-              {step === "code" && (
-                <div className="field">
-                  <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>VERIFICATION CODE</span>
-                  <div className="segmented-code-container" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "8px", width: "100%", boxSizing: "border-box" }}>
-                    {digits.map((digit, i) => (
-                      <input
-                        key={i}
-                        id={`digit-${i}`}
-                        type="text"
-                        inputMode="numeric"
-                        value={digit}
-                        onChange={(e) => handleDigitChange(i, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(i, e)}
-                        onPaste={(e) => handlePaste(i, e)}
-                        onFocus={(e) => e.target.select()}
-                        className="segmented-code-input"
-                        style={{
-                          width: "100%",
-                          height: "52px",
-                          minWidth: 0,
-                          textAlign: "center",
-                          fontSize: "20px",
-                          fontWeight: "bold",
-                          borderRadius: "14px",
-                          background: "#e1e3e4",
-                          border: "1px solid #d1d5db",
-                          color: "#191c1d",
-                          boxSizing: "border-box",
-                        }}
-                        aria-label={`Digit ${i + 1}`}
-                      />
-                    ))}
-                  </div>
-                  {/* Accessible/Test input */}
-                  <input
-                    {...register("code")}
-                    type="text"
-                    aria-label="VERIFICATION CODE"
-                    style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
-                    onChange={(e) => {
-                      setValue("code", e.target.value);
-                      const chars = e.target.value.slice(0, 6).split("");
-                      const next = ["", "", "", "", "", ""];
-                      for (let i = 0; i < chars.length; i++) next[i] = chars[i];
-                      setDigits(next);
-                    }}
-                  />
-                  <small style={{ color: "#666e69", fontSize: "13px", marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span>Didn't receive code?</span>
-                    <button
-                      type="button"
-                      onClick={handleResendCode}
-                      disabled={resendCountdown > 0 || submitting}
-                      style={{ background: "none", border: "none", color: resendCountdown > 0 || submitting ? "#999" : "#0c7441", fontWeight: 600, fontSize: "13px", cursor: resendCountdown > 0 || submitting ? "default" : "pointer", padding: 0 }}
-                    >
-                      {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : "Resend code"}
-                    </button>
-                  </small>
-                  {resendMessage && (
-                    <div style={{ color: "#0c7441", fontSize: "13px", marginTop: "6px", fontWeight: 500 }}>
-                      {resendMessage}
-                    </div>
-                  )}
-                </div>
-              )}
-              {step === "new" && (
-                <>
-                  <label className="field">
-                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>NEW PASSWORD</span>
-                    <input {...register("password")} type="password" placeholder="Enter new password" />
-                  </label>
-                  <label className="field">
-                    <span style={{ fontSize: "12px", color: "#191c1d", fontWeight: 600 }}>CONFIRM NEW PASSWORD</span>
-                    <input {...register("confirmPassword")} type="password" placeholder="Confirm new password" />
-                  </label>
-                  <div style={{ background: "#f0f8f3", borderRadius: "14px", padding: "12px 16px", color: "#0c5430", fontSize: "13px", lineHeight: "19px" }}>
-                    Use a strong password with at least one uppercase letter, one lowercase letter, one number, and one symbol.
-                  </div>
-                </>
-              )}
-              {error && (
-                <div className="error" role="alert">
-                  {error}
-                </div>
-              )}
-              <Button
-                type="button"
-                style={{ background: "#0c7441", height: "50px", borderRadius: "999px", color: "#fff", fontSize: "16px", width: "100%", marginTop: "8px" }}
-                onClick={() => void submit(getValues())}
-                loading={submitting}
-              >
-                {submitting
-                  ? "Working…"
-                  : step === "request"
-                    ? "Send Code →"
-                    : step === "code"
-                      ? "Continue"
-                      : "Reset Password"}
-              </Button>
-              <Link className="back-link" to="/login" style={{ color: "#0c7441", textAlign: "center", fontSize: "14px", marginTop: "4px" }}>
-                Back to login
-              </Link>
-            </>
-          )}
-        </Card>
-      </div>
     </div>
   );
 }

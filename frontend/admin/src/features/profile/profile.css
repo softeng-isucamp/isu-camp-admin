@@ -17,7 +17,6 @@
 .sidebar-profile-link:hover, .sidebar-profile-link[aria-current="page"] { background: #ffffff12; }
 .sidebar-profile-link:focus-visible, .profile-page .btn:focus-visible, .content > header a:focus-visible { outline: 2px solid #68b184; outline-offset: 4px; }
 .minimized-profile-container > a { display: grid; place-items: center; text-decoration: none; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @media (max-width: 700px) {
   .profile-account { flex-direction: column; align-items: stretch; }
   .profile-actions .btn { flex: 1; }
