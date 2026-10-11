@@ -53,11 +53,11 @@ const crossing = (a: string, b: string, latitude = 16.7205, longitude = 121.6895
   point: { latitude, longitude },
 });
 
-const derive = (objects: Partial<MapIssueSources> = {}, actions: Partial<Parameters<typeof deriveMapIssues>[2]> = {}) =>
+const derive = (objects: Partial<MapIssueSources> = {}, fixCrossing: (crossing: PathwayCrossing) => void = vi.fn()) =>
   deriveMapIssues(
     { buildings: [], locations: [], nodes: [], pathways: [], pathwayCrossings: [], ...objects },
     echagueCampusBoundary,
-    { fixCrossing: vi.fn(), ...actions },
+    fixCrossing,
   );
 
 describe("deriveMapIssues", () => {
@@ -76,7 +76,7 @@ describe("deriveMapIssues", () => {
     const issues = derive({
       pathways: [pathway("p1", "Main Road"), pathway("p2", "Gym Walkway"), pathway("p3", "")],
       pathwayCrossings: [first, second],
-    }, { fixCrossing });
+    }, fixCrossing);
 
     expect(issues).toHaveLength(2);
     expect(issues[0]).toMatchObject({

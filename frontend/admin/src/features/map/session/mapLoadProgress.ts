@@ -83,6 +83,11 @@ export interface MapLoad {
   error: string | null;
 }
 
+/** What the editor gets from `useMapData`: the load plus re-running whatever failed. */
+export interface MapLoadState extends MapLoad {
+  retry: () => void;
+}
+
 /** Turns the two queries and the fetch progress into the stages the loading display shows. */
 export function deriveMapLoad({ map, directory, progress }: {
   map: QueryLoadState;

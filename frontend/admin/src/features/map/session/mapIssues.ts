@@ -57,10 +57,6 @@ export interface MapIssueSources {
   pathwayCrossings: PathwayCrossing[];
 }
 
-export interface MapIssueActions {
-  fixCrossing: (crossing: PathwayCrossing) => void;
-}
-
 const groupOrder = (kind: MapIssueKind) => MAP_ISSUE_GROUPS.findIndex((group) => group.kind === kind);
 
 /**
@@ -71,7 +67,7 @@ const groupOrder = (kind: MapIssueKind) => MAP_ISSUE_GROUPS.findIndex((group) =>
 export function deriveMapIssues(
   { buildings, locations, nodes, pathways, pathwayCrossings }: MapIssueSources,
   campusBoundary: MapPoint[],
-  actions: MapIssueActions,
+  fixCrossing: (crossing: PathwayCrossing) => void,
 ): MapIssue[] {
   const issues: MapIssue[] = [];
   const pathwayName = (id: string) => {
@@ -92,7 +88,7 @@ export function deriveMapIssues(
       action: {
         label: `Create Junction & Split Pathway: ${title}`,
         shortLabel: "Create Junction",
-        onClick: () => actions.fixCrossing(crossing),
+        onClick: () => fixCrossing(crossing),
       },
     });
   });
@@ -140,10 +136,7 @@ export function deriveMapIssues(
     .forEach((item) => addOutside(`building:${item.id}`, item.name, "Building",
       polygonFeatureAnchor(item.points), { type: "building", id: item.id }));
 
-  return issues
-    .map((issue, index) => ({ issue, index }))
-    .sort((a, b) => groupOrder(a.issue.kind) - groupOrder(b.issue.kind) || a.index - b.index)
-    .map(({ issue }) => issue);
+  return issues.sort((a, b) => groupOrder(a.kind) - groupOrder(b.kind));
 }
 
 export interface MapIssueFocus {
@@ -161,18 +154,18 @@ export interface MapIssueFocus {
 export function useMapIssues(
   sources: MapIssueSources,
   campusBoundary: MapPoint[],
-  actions: MapIssueActions,
+  fixCrossing: (crossing: PathwayCrossing) => void,
   focus: MapIssueFocus,
 ) {
   const { buildings, locations, nodes, pathways, pathwayCrossings } = sources;
-  // The editor's handlers are recreated every render; rows always call the latest ones.
-  const latestActions = useRef(actions);
-  latestActions.current = actions;
+  // The editor recreates its handler every render; the ref keeps the derived issues memoized.
+  const latestFixCrossing = useRef(fixCrossing);
+  latestFixCrossing.current = fixCrossing;
   const issues = useMemo(
     () => deriveMapIssues(
       { buildings, locations, nodes, pathways, pathwayCrossings },
       campusBoundary,
-      { fixCrossing: (crossing) => latestActions.current.fixCrossing(crossing) },
+      (crossing) => latestFixCrossing.current(crossing),
     ),
     [buildings, locations, nodes, pathways, pathwayCrossings, campusBoundary],
   );

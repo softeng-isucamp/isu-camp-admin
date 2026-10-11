@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MapLoadingOverlay } from "./MapLoadingOverlay";
-import type { MapLoad, MapLoadStage } from "./session/mapLoadProgress";
+import type { MapLoadStage, MapLoadState } from "./session/mapLoadProgress";
 
 const stages = (...statuses: MapLoadStage["status"][]): MapLoadStage[] => [
   { key: "buildings", label: "Buildings" },
@@ -11,11 +11,13 @@ const stages = (...statuses: MapLoadStage["status"][]): MapLoadStage[] => [
   { key: "directory", label: "Locations directory" },
 ].map((stage, index) => ({ ...stage, key: stage.key as MapLoadStage["key"], status: statuses[index] ?? "pending" }));
 
-const loading = (overrides: Partial<MapLoad> = {}): MapLoad => ({
+const retry = vi.fn();
+const loading = (overrides: Partial<MapLoadState> = {}): MapLoadState => ({
   stages: stages("done", "done", "loading"),
   progress: 2 / 5,
   loaded: false,
   error: null,
+  retry,
   ...overrides,
 });
 
@@ -26,13 +28,16 @@ const matchMedia = (reduced: boolean) => vi.stubGlobal("matchMedia", (query: str
   removeEventListener: () => undefined,
 }));
 
-const renderOverlay = (load: MapLoad, onRetry = vi.fn()) => {
-  const view = render(<MapLoadingOverlay load={load} onRetry={onRetry} />);
-  return { ...view, onRetry, root: () => view.container.firstElementChild as HTMLElement | null };
+const renderOverlay = (load: MapLoadState) => {
+  const view = render(<MapLoadingOverlay load={load} />);
+  return { ...view, root: () => view.container.firstElementChild as HTMLElement | null };
 };
 
 describe("MapLoadingOverlay", () => {
-  beforeEach(() => matchMedia(true));
+  beforeEach(() => {
+    retry.mockClear();
+    matchMedia(true);
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -61,7 +66,7 @@ describe("MapLoadingOverlay", () => {
   });
 
   it("turns into an alert with the error and a Retry button on failure", () => {
-    const { onRetry } = renderOverlay(loading({
+    renderOverlay(loading({
       stages: stages("done", "done", "done", "error"),
       error: "Pathways could not be loaded.",
     }));
@@ -71,12 +76,12 @@ describe("MapLoadingOverlay", () => {
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "40");
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it("returns to the loading display when a retry clears the error", () => {
-    const { rerender, onRetry } = renderOverlay(loading({ error: "Down." }));
-    rerender(<MapLoadingOverlay load={loading()} onRetry={onRetry} />);
+    const { rerender } = renderOverlay(loading({ error: "Down." }));
+    rerender(<MapLoadingOverlay load={loading()} />);
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -89,9 +94,9 @@ describe("MapLoadingOverlay", () => {
   });
 
   it("goes away at once under reduced motion when loading finishes", () => {
-    const { rerender, container, onRetry } = renderOverlay(loading());
+    const { rerender, container } = renderOverlay(loading());
 
-    rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} onRetry={onRetry} />);
+    rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} />);
 
     expect(container).toBeEmptyDOMElement();
   });
@@ -99,9 +104,9 @@ describe("MapLoadingOverlay", () => {
   it("holds at 100%, fades and then unmounts when loading finishes", () => {
     matchMedia(false);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { rerender, root, onRetry } = renderOverlay(loading());
+    const { rerender, root } = renderOverlay(loading());
 
-    rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} onRetry={onRetry} />);
+    rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} />);
     expect(root()).not.toHaveClass("pointer-events-none");
     expect(screen.getByRole("status")).toHaveTextContent("Map ready");
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Spinner } from "../../components/UI";
 import { cx } from "../../lib/format";
-import type { MapLoad } from "./session/mapLoadProgress";
+import type { MapLoadState } from "./session/mapLoadProgress";
 import { useSmoothedProgress } from "./useSmoothedProgress";
 
 /** How long the bar rests at 100% before the overlay fades, and how long the fade takes. */
@@ -39,17 +39,12 @@ function useOverlayPhase(loaded: boolean, reduced: boolean): Phase {
   return phase;
 }
 
-interface MapLoadingOverlayProps {
-  load: MapLoad;
-  onRetry: () => void;
-}
-
 /**
  * A veil over the map canvas while the editor's campus data loads: a progress bar along the
  * top edge and a status chip naming the stage in progress. A failure turns it into an alert
  * with Retry. Basemap tiles do not hold it up; the map stays visible behind the frost.
  */
-export function MapLoadingOverlay({ load, onRetry }: MapLoadingOverlayProps) {
+export function MapLoadingOverlay({ load }: { load: MapLoadState }) {
   const { stages, loaded, error } = load;
   const [reduced] = useState(prefersReducedMotion);
   const phase = useOverlayPhase(loaded, reduced);
@@ -99,7 +94,7 @@ export function MapLoadingOverlay({ load, onRetry }: MapLoadingOverlayProps) {
               <strong className="block">Map data failed to load</strong>
               <span className="block truncate" title={error}>{error}</span>
             </div>
-            <Button variant="danger" className="shrink-0 !px-4 !py-2" onClick={onRetry}>Retry</Button>
+            <Button variant="danger" className="shrink-0 !px-4 !py-2" onClick={load.retry}>Retry</Button>
           </div>
         ) : (
           <div className="map-glass-panel flex items-center gap-3 rounded-2xl px-4 py-3 text-xs">

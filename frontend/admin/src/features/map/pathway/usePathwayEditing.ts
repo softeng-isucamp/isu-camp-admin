@@ -256,12 +256,11 @@ export function usePathwayEditing({
     return true;
   };
 
-  /** Splits the crossing's two Pathways at a new Junction; defaults to the first crossing. */
+  /** Splits the crossing's two Pathways at a new Junction. */
   const createJunctionAtCrossing = async (
     onCreated: (junction: RouteNode) => void,
-    crossing: PathwayCrossing | undefined = pathwayCrossings[0],
+    crossing: PathwayCrossing,
   ) => {
-    if (!crossing) return;
     const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
     const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);
     if (!pathwayA || !pathwayB) return;

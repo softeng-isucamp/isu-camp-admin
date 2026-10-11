@@ -17,6 +17,8 @@ const deferred = <T,>() => {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
+/** jsdom does not implement `inert`, so assert the attribute on an ancestor like the app's other inert tests do. */
+const toolRailInert = () => screen.getByRole("button", { name: "Building Polygon" }).closest("[inert]") !== null;
 const overlay = () => screen.queryByRole("progressbar", { name: "Map data loading" });
 
 describe("Map Editor loading overlay", () => {
@@ -35,11 +37,15 @@ describe("Map Editor loading overlay", () => {
     expect(overlay()).toHaveAttribute("aria-valuenow", expect.stringMatching(/^\d+$/));
     expect(screen.getByRole("status")).toHaveTextContent("Buildings");
     expect(services.map.locations).not.toHaveBeenCalled();
+    // The chrome behind the veil is out of keyboard reach; the overlay itself is not.
+    expect(toolRailInert()).toBe(true);
+    expect(overlay()?.closest("[inert]")).toBeNull();
 
     buildings.resolve([]);
 
     await waitFor(() => expect(overlay()).not.toBeInTheDocument(), { timeout: 3000 });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(toolRailInert()).toBe(false);
   });
 
   it("reports a failed load with Retry, which reloads only what failed", async () => {
@@ -49,11 +55,14 @@ describe("Map Editor loading overlay", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Pathways could not be loaded.");
     expect(overlay()).toBeInTheDocument();
     expect(services.locations.list).toHaveBeenCalledTimes(1);
+    expect(toolRailInert()).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry" }).closest("[inert]")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(overlay()).not.toBeInTheDocument(), { timeout: 3000 });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(toolRailInert()).toBe(false);
     expect(services.map.pathways).toHaveBeenCalledTimes(2);
     expect(services.locations.list).toHaveBeenCalledTimes(1);
   });
@@ -70,6 +79,7 @@ describe("Map Editor loading overlay", () => {
     await waitFor(() => expect(services.map.buildings).toHaveBeenCalled());
     expect(overlay()).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(toolRailInert()).toBe(false);
     refetch.resolve([]);
     await waitFor(() => expect(queryClient.isFetching({ queryKey: ["map"] })).toBe(0));
     expect(overlay()).not.toBeInTheDocument();

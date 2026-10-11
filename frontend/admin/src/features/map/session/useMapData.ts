@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { services } from "../../../services/api";
 import { echagueCampusBoundary } from "../campusBoundary";
-import { deriveMapLoad, mapLoadProgressFor, type QueryLoadState } from "./mapLoadProgress";
+import { deriveMapLoad, mapLoadProgressFor, type MapLoadState, type QueryLoadState } from "./mapLoadProgress";
 
 const queryLoadState = (query: UseQueryResult<unknown>): QueryLoadState => ({
   hasData: query.data !== undefined,
@@ -63,7 +63,7 @@ export function useMapData() {
   const progress = useSyncExternalStore(loadProgress.subscribe, loadProgress.getSnapshot);
   const mapState = queryLoadState(mapQuery);
   const directoryState = queryLoadState(directoryQuery);
-  const load = deriveMapLoad({ map: mapState, directory: directoryState, progress });
+  const derivedLoad = deriveMapLoad({ map: mapState, directory: directoryState, progress });
   const { refetch: refetchMap } = mapQuery;
   const { refetch: refetchDirectory } = directoryQuery;
   // Retry re-runs only the query that failed.
@@ -71,6 +71,8 @@ export function useMapData() {
     if (mapState.error) void refetchMap();
     if (directoryState.error) void refetchDirectory();
   }, [mapState.error, directoryState.error, refetchMap, refetchDirectory]);
+
+  const load: MapLoadState = { ...derivedLoad, retry };
 
   const directoryLocations = data?.locations || [];
   const directoryNodes = data?.nodes || [];
@@ -85,6 +87,6 @@ export function useMapData() {
     directoryNodes,
     directoryPathways,
     campusBoundary,
-    load: { ...load, retry },
+    load,
   };
 }
