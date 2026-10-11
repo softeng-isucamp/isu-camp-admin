@@ -335,6 +335,10 @@ def _start(kind, worker):
 # about 730 MB a month, so something has to age them out.
 DEFAULT_KEEP = 14
 
+# The archive taken automatically before a restore, so the restore can itself
+# be undone. Recognisable in the listing by its createdBy.
+PRE_RESTORE_ACTOR = "pre-restore safety copy"
+
 
 def _backup_plan(actor):
     """The command, environment and completion step for one dump.
@@ -492,6 +496,39 @@ def start_restore(backup_id, actor):
     ]
 
     def worker(job_id):
+        # A restore replaces everything, including work this archive predates,
+        # so the state about to be discarded is captured first. That makes the
+        # restore itself undoable: if the wrong archive was chosen, or it turns
+        # out to be the wrong decision, PRE_RESTORE_ACTOR names the way back.
+        #
+        # It runs before the restore rather than alongside it because the two
+        # cannot overlap - pg_restore drops the tables pg_dump would be reading.
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["status"] = "running"
+                _jobs[job_id]["message"] = "Backing up the current data before restoring."
+
+        try:
+            safety = run_backup(PRE_RESTORE_ACTOR)
+        except BackupError as failure:
+            _finish(
+                job_id, "failed",
+                f"Stopped before restoring: the current data could not be backed "
+                f"up first ({failure}). Nothing was changed.",
+            )
+            return
+        except Exception as failure:
+            _finish(
+                job_id, "failed",
+                f"Stopped before restoring: the current data could not be backed "
+                f"up first ({failure}). Nothing was changed.",
+            )
+            return
+
+        with _jobs_lock:
+            if job_id in _jobs:
+                _jobs[job_id]["message"] = f"Current data saved as {safety['id']}."
+
         _run(job_id, command, environment)
 
     return _start("restore", worker)

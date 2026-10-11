@@ -527,6 +527,13 @@ def test_restore_runs_pg_restore_over_the_schema(app, monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(command, env=None, **kwargs):
+        # A restore takes a safety backup first, so this stub serves both tools
+        # and only records the pg_restore invocation.
+        if any("pg_dump" in str(part) for part in command):
+            target = command[command.index("--file") + 1]
+            with open(target, "wb") as handle:
+                handle.write(b"PGDMP-safety")
+            return FakeCompleted()
         captured["command"] = command
         return FakeCompleted()
 
@@ -550,6 +557,72 @@ def test_restore_runs_pg_restore_over_the_schema(app, monkeypatch, tmp_path):
     assert "--clean" in captured["command"]
     assert "--if-exists" in captured["command"]
     assert "--schema=public" in captured["command"]
+
+
+def test_a_restore_backs_up_the_current_data_first(app, monkeypatch, tmp_path):
+    """The restore has to be undoable, so what it discards is captured first."""
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "true")
+    (tmp_path / "20261009-000000Z.dump").write_bytes(b"PGDMP")
+    calls = []
+
+    def fake_run(command, env=None, **kwargs):
+        tool = "pg_dump" if any("pg_dump" in str(part) for part in command) else "pg_restore"
+        calls.append(tool)
+        if tool == "pg_dump":
+            target = command[command.index("--file") + 1]
+            with open(target, "wb") as handle:
+                handle.write(b"PGDMP-safety")
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post(
+            "/api/backups/20261009-000000Z/restore",
+            json={"currentPassword": PASSWORD},
+        ).get_json()
+        assert wait_for_terminal(body["id"], timeout=10)["status"] == "succeeded"
+
+        items = backup_jobs.list_backups()
+
+    # The dump runs before the restore, never alongside it: pg_restore drops
+    # the very tables pg_dump would be reading.
+    assert calls == ["pg_dump", "pg_restore"]
+    assert any(item["createdBy"] == backup_jobs.PRE_RESTORE_ACTOR for item in items)
+
+
+def test_a_restore_is_abandoned_if_the_safety_backup_fails(app, monkeypatch, tmp_path):
+    """Nothing is replaced unless the way back exists first."""
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "true")
+    (tmp_path / "20261009-000000Z.dump").write_bytes(b"PGDMP")
+    calls = []
+
+    def fake_run(command, env=None, **kwargs):
+        if any("pg_dump" in str(part) for part in command):
+            calls.append("pg_dump")
+            return FakeCompleted(returncode=1, stderr="pg_dump: error: disk full")
+        calls.append("pg_restore")
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post(
+            "/api/backups/20261009-000000Z/restore",
+            json={"currentPassword": PASSWORD},
+        ).get_json()
+        job = wait_for_terminal(body["id"], timeout=10)
+
+    assert job["status"] == "failed"
+    assert "Nothing was changed" in job["message"]
+    # pg_restore was never reached.
+    assert calls == ["pg_dump"]
 
 
 def test_restoring_a_missing_archive_is_not_found(app, monkeypatch):

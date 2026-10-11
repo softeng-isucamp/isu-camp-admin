@@ -152,10 +152,20 @@ Each archive is about 24 MB, so a nightly schedule is roughly 730 MB a month. Af
 
 A dump in progress writes to a `.dump.partial` name and is renamed only once `pg_dump` exits cleanly. The listing only ever shows `*.dump`, so a backup interrupted by a crash or a restart is never offered for restore; the next scheduled run clears the leftover.
 
-### Restoring is off by default
+### Restoring
 
-`POST /api/backups/<id>/restore` answers `403` unless `BACKUP_RESTORE_ENABLED=true`. A restore runs `pg_restore --clean --if-exists --single-transaction` over the live `public` schema: it replaces every table, including `public.admin`, in a database the companion User App also reads. It undoes other people's work, not just the caller's. The flag exists so enabling it is a decision somebody makes on purpose rather than a button that happens to be present.
+`POST /api/backups/<id>/restore` is enabled by `BACKUP_RESTORE_ENABLED=true` and refuses with a `403` otherwise. The caller's password is required, and is checked **before** the flag, so somebody who cannot authenticate learns nothing about whether restoring is available here.
 
-The caller's password is required and is checked **before** the flag, so a caller who cannot authenticate learns nothing about whether restoring is available.
+**A restore takes a safety backup of the current data first.** Only if that succeeds does `pg_restore` run; if the dump fails, the restore is abandoned and nothing is replaced. The safety copy appears in the list with `created by: pre-restore safety copy`, and it is the way back if the wrong archive was chosen. Expect a restore to take roughly twice as long as a backup for that reason.
 
-**An archive is a complete copy of the database, including the `public.admin` password hashes.** Treat a `.dump` file as credential material: `backups/` is gitignored, and a copy moved anywhere else needs the same care.
+The restore itself runs `pg_restore --clean --if-exists --single-transaction` over the live `public` schema. Every table is dropped and recreated from the archive, in one transaction, so a failure part-way applies nothing.
+
+What that means, and none of it is obvious from the button:
+
+- **Everything created after the archive is discarded**, across all 17 tables — locations, buildings, pathways, the audit log, app user activity. Not only the caller's work: everyone's.
+- **The companion User App reads the same database**, and its data is rolled back with no indication to it.
+- **`public.admin` is in the archive**, so administrator accounts revert to their state at that moment. An account created since then disappears, and a password changed since then reverts. You can lock yourself out of the account you clicked the button with. Archives taken before password hashing landed hold the older plaintext values.
+- **The audit log reverts too**, so the record of whatever went wrong is lost. Read it before restoring, not after.
+
+For a problem affecting a few rows, editing them directly is almost always the better answer: a restore is a point-in-time rollback, not a repair. `location` in particular is referenced by `route_node` (`on delete set null`), `location_photo` (`cascade`) and `UserHistory` (`no action`, which refuses the delete outright), so a single-table reload is not something to improvise against live data. Restoring the archive into a scratch database and copying the rows across is the surgical route.
+
