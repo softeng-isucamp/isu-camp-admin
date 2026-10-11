@@ -97,12 +97,13 @@ def require_tool(name):
     return tool
 
 
-def backup_directory():
-    """Where archives are kept, created on first use.
+def backup_directory(create=False):
+    """Return the archive directory, optionally creating it for a new dump.
 
     Defaults to ``backups/`` beside the repository. In a container this must be
-    a mounted volume or the archives disappear with the container - see the
-    backup section of the README.
+    a mounted volume or the archives disappear with the container. Reads must
+    not create the directory: that makes a missing store look like an empty
+    history and keeps a list request from needing write access.
     """
 
     configured = os.getenv("BACKUP_DIR")
@@ -110,7 +111,40 @@ def backup_directory():
         directory = Path(configured)
     else:
         directory = Path(__file__).resolve().parents[2] / "backups"
-    directory.mkdir(parents=True, exist_ok=True)
+    if create:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as failure:
+            raise BackupError(
+                "Backup storage is unavailable. Check the backup directory and its permissions.",
+                status=503,
+            ) from failure
+
+    try:
+        directory.stat()
+    except FileNotFoundError:
+        return None
+    except OSError as failure:
+        raise BackupError(
+            "Backup storage is unavailable. Check the backup directory and its permissions.",
+            status=503,
+        ) from failure
+
+    try:
+        if not directory.is_dir():
+            raise BackupError("Backup storage is not a directory.", status=503)
+        # Path.glob can suppress some directory scan errors. Check access here
+        # so a broken mount is reported as a service configuration problem.
+        with os.scandir(directory):
+            pass
+    except BackupError:
+        raise
+    except OSError as failure:
+        raise BackupError(
+            "Backup storage is unavailable. Check the backup directory and its permissions.",
+            status=503,
+        ) from failure
+
     return directory
 
 
@@ -211,7 +245,11 @@ def list_backups():
     """Stored archives, newest first, in the shape the frontend parses."""
 
     items = []
-    for archive in sorted(backup_directory().glob("*.dump"), reverse=True):
+    directory = backup_directory()
+    if directory is None:
+        return items
+
+    for archive in sorted(directory.glob("*.dump"), reverse=True):
         metadata = _read_metadata(archive)
         items.append({
             "id": archive.stem,
@@ -232,7 +270,10 @@ def find_archive(backup_id):
     # segment must never be joined onto the backup directory.
     if not backup_id or "/" in backup_id or "\\" in backup_id or ".." in backup_id:
         return None
-    archive = backup_directory() / f"{backup_id}.dump"
+    directory = backup_directory()
+    if directory is None:
+        return None
+    archive = directory / f"{backup_id}.dump"
     return archive if archive.is_file() else None
 
 
@@ -336,7 +377,7 @@ def start_backup(actor):
 
     tool = require_tool("pg_dump")
     environment = _connection_environment()
-    directory = backup_directory()
+    directory = backup_directory(create=True)
     stamp = datetime.now(timezone.utc)
     archive = directory / f"{stamp.strftime('%Y%m%d-%H%M%S')}Z.dump"
 

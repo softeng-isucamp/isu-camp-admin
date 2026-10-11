@@ -126,6 +126,37 @@ def test_history_is_empty_before_any_backup(app, monkeypatch):
     assert response.get_json() == {"items": [], "activeJob": None}
 
 
+def test_reading_history_does_not_create_a_missing_backup_directory(app, monkeypatch, tmp_path):
+    backup_dir = tmp_path / "not-created"
+    monkeypatch.setenv("BACKUP_DIR", str(backup_dir))
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        response = app.test_client().get("/api/backups")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"items": [], "activeJob": None}
+    assert not backup_dir.exists()
+
+
+def test_unreadable_backup_directory_returns_service_unavailable(app, monkeypatch, tmp_path):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    monkeypatch.setenv("BACKUP_DIR", str(backup_dir))
+
+    def denied_scan(_directory):
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(backup_jobs.os, "scandir", denied_scan)
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        response = app.test_client().get("/api/backups")
+
+    assert response.status_code == 503
+    assert "Backup storage is unavailable" in response.get_json()["message"]
+
+
 def test_history_describes_stored_archives_newest_first(app, monkeypatch, tmp_path):
     with app.app_context():
         sign_in(monkeypatch)

@@ -7,6 +7,12 @@ services:
     environment:
       SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL:?Backend database URL is required}
       SECRET_KEY: ${SECRET_KEY:?A production session secret is required}
+    volumes:
+      - type: bind
+        source: ${ADMIN_BACKUP_DIR:?Set an absolute host directory for backup archives}
+        target: /var/lib/admin-api/backups
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]

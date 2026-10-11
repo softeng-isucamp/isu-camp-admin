@@ -107,10 +107,10 @@ These are jobs rather than plain responses because of that runtime. The API runs
 
 ### What a deployment needs
 
-Two things that are **not** in place today:
+Two deployment requirements:
 
-1. **`pg_dump` and `pg_restore` must be on the server.** The API image (`python:3.12-slim-bookworm`) does not include them, so a deployed backup fails with a clear `503` rather than a crash. Debian bookworm's `postgresql-client` is version 15, and **a 15 client refuses to dump a 17 server** — Supabase runs 17.6, so the client must be 17 or newer. Installing that needs the PostgreSQL APT repository, which would add an unpinned source to an image that otherwise pins its base by digest and its Python packages by hash. That trade is a deliberate decision, so it has not been made here. Set `PG_DUMP_PATH` and `PG_RESTORE_PATH` to point at specific binaries.
-2. **The archive directory must outlive the container.** Archives are written to `BACKUP_DIR` (default `backups/`, gitignored). `deploy/compose.yaml` mounts no volume, so in a container they would disappear on the next deployment. Mount a volume at the configured path, or move storage to object storage.
+1. **`pg_dump` and `pg_restore` must be on the server.** The API image does not include them, so creating or restoring a deployed backup returns `503` until PostgreSQL client tools that support the server version are installed and configured with `PG_DUMP_PATH` and `PG_RESTORE_PATH`.
+2. **The archive directory must outlive the container.** `deploy/compose.yaml` bind-mounts the required host directory from `ADMIN_BACKUP_DIR` at `/var/lib/admin-api/backups`. Create the same absolute host directory for every release, owned by UID/GID 10001 with mode 700. Do not point it inside a release directory. This survives container replacement on this host; copy archives off-host separately for disaster recovery.
 
 Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
 

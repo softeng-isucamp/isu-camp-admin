@@ -12,10 +12,14 @@ PROJECT="isu-build-smoke-$$"
 export ADMIN_WEB_IMAGE=isu-camp/must-not-run:smoke
 export ADMIN_API_IMAGE=isu-camp/must-not-run:smoke
 export ADMIN_RUNTIME_ENV="$TEMPORARY/runtime.env"
+export ADMIN_BACKUP_DIR="$TEMPORARY/backups"
 export SUPABASE_DATABASE_URL=sqlite:////tmp/build-smoke.db
 export SECRET_KEY=disposable-build-smoke-session-secret
 export ADMIN_HTTP_PORT=0
 printf 'SUPABASE_DATABASE_URL=%s\nSECRET_KEY=%s\nADMIN_WEB_IMAGE=isu-camp/must-not-run:runtime\nADMIN_API_IMAGE=isu-camp/must-not-run:runtime\n' "$SUPABASE_DATABASE_URL" "$SECRET_KEY" > "$ADMIN_RUNTIME_ENV"
+mkdir -p "$ADMIN_BACKUP_DIR"
+# The temporary parent is mode 700, so the disposable mount remains private.
+chmod 777 "$ADMIN_BACKUP_DIR"
 chmod 600 "$ADMIN_RUNTIME_ENV"
 compose() {
     docker compose --project-name "$PROJECT" --env-file "$RELEASE/release.env" --env-file "$ADMIN_RUNTIME_ENV" -f "$RELEASE/compose.yaml" "$@"
@@ -32,6 +36,7 @@ BASE="http://$ADDRESS"
 curl --max-time 30 -fsS "$BASE/login" > "$TEMPORARY/login.html"
 curl --max-time 30 -fsS "$BASE/build-info.json" > "$TEMPORARY/build-info.json"
 [ "$(curl --max-time 30 -sS -o "$TEMPORARY/me.json" -w '%{http_code}' "$BASE/api/me")" = 401 ]
+[ "$(curl --max-time 30 -sS -o "$TEMPORARY/backups.json" -w '%{http_code}' "$BASE/api/backups")" = 401 ]
 [ "$(curl --max-time 30 -sS -o "$TEMPORARY/login.json" -w '%{http_code}' -H 'Content-Type: application/json' --data '{}' "$BASE/api/login")" = 400 ]
 [ "$(curl --max-time 30 -sS -o /dev/null -w '%{http_code}' "$BASE/assets/missing.js")" = 404 ]
 python3 - "$TEMPORARY" "$RELEASE" <<'PY'

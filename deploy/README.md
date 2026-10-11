@@ -35,7 +35,7 @@ These checks exercise the container/proxy contract without a production database
 
 ## Stage the saved images
 
-Copy the release directory to its own server release path. Prepare a protected backend environment file outside the source checkout using [runtime.env.example](runtime.env.example); it must contain the database URL, a random session secret, and the email settings needed by the deployment.
+Copy the release directory to its own server release path. Prepare a protected backend environment file outside the source checkout using [runtime.env.example](runtime.env.example); it must contain the database URL, a random session secret, the email settings needed by the deployment, and `ADMIN_BACKUP_DIR` set to one stable absolute host directory shared by every release. Create the directory before `up`, owned by UID/GID `10001` with mode `700`; the API mounts it at `/var/lib/admin-api/backups`. Never put it inside a release directory.
 
 ```bash
 chmod 600 /absolute/path/admin-runtime.env
