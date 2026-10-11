@@ -114,6 +114,44 @@ Two things that are **not** in place today:
 
 Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
 
+### Scheduled nightly backups
+
+`scripts/nightly_backup.py` takes one backup and exits: `0` if an archive was written, `1` otherwise, with a line appended to `backups/nightly.log` either way.
+
+```sh
+python scripts/nightly_backup.py
+```
+
+It runs **outside** the web process deliberately. A timer inside Flask only fires while Flask happens to be running, which it is not at 8pm on a laptop that has been closed; Flask's debug reloader runs two processes, so an in-process timer fires twice; and gunicorn would fire once per worker. A scheduler wants an exit code, which this gives it.
+
+Register it on Windows — one command, in PowerShell as administrator, with `$root` set to this checkout:
+
+```powershell
+$root = "C:\Users\justine asuncion\OneDrive\Documents\SoftwarEng\isumap\isu-camp-backup"
+Register-ScheduledTask -TaskName "ISU-CAMP nightly backup" `
+  -Action (New-ScheduledTaskAction -Execute "$root\venv\Scripts\python.exe" `
+           -Argument "scripts\nightly_backup.py" -WorkingDirectory $root) `
+  -Trigger (New-ScheduledTaskTrigger -Daily -At 8pm) `
+  -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) `
+  -Description "Nightly pg_dump of the ISU-CAMP public schema."
+```
+
+`-StartWhenAvailable` runs a missed backup as soon as the machine is next awake, so a laptop that was shut at 8pm still gets one.
+
+On a Linux host, cron instead:
+
+```
+0 20 * * * cd /srv/isu-camp-admin && venv/bin/python scripts/nightly_backup.py
+```
+
+Two things to expect. **Cron and Task Scheduler fire in the machine's local time, while the log timestamps are UTC** — an 8pm Manila run appears in the log as `12:00Z`. And **a dump takes between about 2 and 5 minutes**, varying with pooler latency; the script gives up after 10.
+
+### Retention
+
+Each archive is about 24 MB, so a nightly schedule is roughly 730 MB a month. After a successful dump the script deletes all but the newest `BACKUP_KEEP` archives (default 14), taking each one's metadata with it. Pruning happens only after a dump succeeds, so a failed backup is never the reason an older one was removed. A `BACKUP_KEEP` below 1 is refused rather than honoured.
+
+A dump in progress writes to a `.dump.partial` name and is renamed only once `pg_dump` exits cleanly. The listing only ever shows `*.dump`, so a backup interrupted by a crash or a restart is never offered for restore; the next scheduled run clears the leftover.
+
 ### Restoring is off by default
 
 `POST /api/backups/<id>/restore` answers `403` unless `BACKUP_RESTORE_ENABLED=true`. A restore runs `pg_restore --clean --if-exists --single-transaction` over the live `public` schema: it replaces every table, including `public.admin`, in a database the companion User App also reads. It undoes other people's work, not just the caller's. The flag exists so enabling it is a decision somebody makes on purpose rather than a button that happens to be present.

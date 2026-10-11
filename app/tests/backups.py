@@ -336,6 +336,127 @@ def test_only_one_job_runs_at_a_time(app, monkeypatch):
 
 
 # ==========================================
+# RETENTION AND INTERRUPTED DUMPS
+# ==========================================
+
+def test_a_dump_writes_to_a_partial_name_and_is_renamed_on_success(app, monkeypatch, tmp_path):
+    """So an interrupted dump never appears in the list as restorable.
+
+    Previously pg_dump wrote straight to the final name, so a crash left a
+    truncated archive that listed as "ready" and failed only when someone
+    tried to restore it.
+    """
+
+    seen = {}
+
+    def fake_run(command, env=None, **kwargs):
+        target = command[command.index("--file") + 1]
+        seen["target"] = target
+        with open(target, "wb") as handle:
+            handle.write(b"PGDMP")
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post("/api/backups").get_json()
+        assert wait_for_terminal(body["id"])["status"] == "succeeded"
+
+    assert seen["target"].endswith(".dump.partial")
+    # Renamed, so nothing partial is left behind.
+    assert list(tmp_path.glob("*.partial")) == []
+    assert len(list(tmp_path.glob("*.dump"))) == 1
+
+
+def test_an_interrupted_dump_is_not_offered_for_restore(app, monkeypatch, tmp_path):
+    with app.app_context():
+        sign_in(monkeypatch)
+        # What a crash mid-dump leaves behind.
+        (tmp_path / "20261011-200000Z.dump.partial").write_bytes(b"PGDMP-truncated")
+
+        items = app.test_client().get("/api/backups").get_json()["items"]
+
+    assert items == []
+
+
+def test_clearing_partial_archives_removes_only_those(app, tmp_path):
+    with app.app_context():
+        (tmp_path / "good.dump").write_bytes(b"PGDMP")
+        (tmp_path / "bad.dump.partial").write_bytes(b"PGDMP")
+
+        removed = backup_jobs.clear_partial_archives()
+
+    assert removed == ["bad.dump.partial"]
+    assert (tmp_path / "good.dump").exists()
+
+
+def test_pruning_keeps_the_newest_and_deletes_the_rest(app, tmp_path):
+    with app.app_context():
+        for name in ("20261008-000000Z", "20261009-000000Z", "20261010-000000Z"):
+            (tmp_path / f"{name}.dump").write_bytes(b"PGDMP")
+            (tmp_path / f"{name}.json").write_text("{}", encoding="utf-8")
+
+        removed = backup_jobs.prune_backups(keep=2)
+
+    assert removed == ["20261008-000000Z"]
+    assert sorted(p.stem for p in tmp_path.glob("*.dump")) ==         ["20261009-000000Z", "20261010-000000Z"]
+    # The sidecar goes with its archive rather than being orphaned.
+    assert not (tmp_path / "20261008-000000Z.json").exists()
+
+
+def test_pruning_refuses_to_keep_nothing(app):
+    with app.app_context():
+        with pytest.raises(backup_jobs.BackupError):
+            backup_jobs.prune_backups(keep=0)
+
+
+def test_retention_reads_its_size_from_the_environment(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("BACKUP_KEEP", "1")
+
+    with app.app_context():
+        for name in ("20261009-000000Z", "20261010-000000Z"):
+            (tmp_path / f"{name}.dump").write_bytes(b"PGDMP")
+
+        removed = backup_jobs.prune_backups()
+
+    assert removed == ["20261009-000000Z"]
+
+
+def test_the_scheduled_run_returns_the_archive_it_wrote(app, monkeypatch, tmp_path):
+    """run_backup is synchronous, because a scheduler wants an exit code."""
+
+    def fake_run(command, env=None, **kwargs):
+        target = command[command.index("--file") + 1]
+        with open(target, "wb") as handle:
+            handle.write(b"PGDMP" + b"x" * 50)
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        result = backup_jobs.run_backup("scheduled")
+
+    assert result["sizeBytes"] == 55
+    assert (tmp_path / f"{result['id']}.dump").exists()
+    assert backup_jobs.list_backups()[0]["createdBy"] == "scheduled"
+
+
+def test_a_failing_scheduled_run_raises_rather_than_reporting_success(app, monkeypatch):
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: FakeCompleted(returncode=1, stderr="pg_dump: error: boom"))
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        with pytest.raises(backup_jobs.BackupError) as failure:
+            backup_jobs.run_backup("scheduled")
+
+    assert "boom" in str(failure.value)
+
+
+# ==========================================
 # JOBS
 # ==========================================
 

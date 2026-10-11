@@ -331,14 +331,30 @@ def _start(kind, worker):
     return _job_view({"id": job_id, "kind": kind, "status": "queued"})
 
 
-def start_backup(actor):
-    """Dumps the schema to a new archive in the background."""
+# How many archives to keep. At roughly 24 MB a dump, a nightly schedule is
+# about 730 MB a month, so something has to age them out.
+DEFAULT_KEEP = 14
+
+
+def _backup_plan(actor):
+    """The command, environment and completion step for one dump.
+
+    Shared by the background job and the scheduled run so the two cannot drift
+    into producing different archives.
+    """
 
     tool = require_tool("pg_dump")
     environment = _connection_environment()
     directory = backup_directory()
     stamp = datetime.now(timezone.utc)
     archive = directory / f"{stamp.strftime('%Y%m%d-%H%M%S')}Z.dump"
+
+    # pg_dump writes to a .partial name and the file is renamed only once it
+    # exits cleanly. list_backups globs *.dump, so a dump interrupted by a
+    # crash or a restart leaves a .partial that is never offered for restore -
+    # previously it left a truncated archive that listed as ready and failed
+    # only when someone tried to use it.
+    partial = archive.with_suffix(".dump.partial")
 
     command = [
         tool,
@@ -349,10 +365,11 @@ def start_backup(actor):
         "--no-acl",
         "--format=custom",
         "--compress=6",
-        "--file", str(archive),
+        "--file", str(partial),
     ]
 
     def record():
+        partial.replace(archive)
         _write_metadata(
             archive,
             createdAt=iso_utc(stamp),
@@ -360,6 +377,71 @@ def start_backup(actor):
             scope=f"{DUMP_SCHEMA} schema",
             status="ready",
         )
+
+    return command, environment, archive, record
+
+
+def prune_backups(keep=None):
+    """Delete all but the newest ``keep`` archives. Returns the ids removed.
+
+    Archives are named by UTC timestamp, so newest-first is their reverse
+    filename order; no metadata has to be read to decide what goes.
+    """
+
+    if keep is None:
+        keep = int(os.getenv("BACKUP_KEEP", DEFAULT_KEEP))
+    if keep < 1:
+        # Refusing is safer than honouring a mistake that deletes everything.
+        raise BackupError("BACKUP_KEEP must be at least 1.")
+
+    archives = sorted(backup_directory().glob("*.dump"), reverse=True)
+    removed = []
+    for archive in archives[keep:]:
+        metadata = _metadata_path(archive)
+        archive.unlink(missing_ok=True)
+        metadata.unlink(missing_ok=True)
+        removed.append(archive.stem)
+    return removed
+
+
+def clear_partial_archives():
+    """Remove leftovers from dumps that never finished. Returns the names."""
+
+    removed = []
+    for partial in backup_directory().glob("*.dump.partial"):
+        partial.unlink(missing_ok=True)
+        removed.append(partial.name)
+    return removed
+
+
+def run_backup(actor):
+    """Takes one backup and waits for it. Used by the scheduled run.
+
+    Synchronous on purpose: a scheduler wants an exit code, not a job to poll,
+    and there is no request waiting on it to time out.
+    """
+
+    command, environment, archive, record = _backup_plan(actor)
+
+    try:
+        completed = subprocess.run(
+            command, env=environment, capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        raise BackupError("The backup timed out after 10 minutes.")
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip().splitlines()
+        raise BackupError(detail[-1][:300] if detail else "pg_dump failed.")
+
+    record()
+    return {"id": archive.stem, "sizeBytes": archive.stat().st_size}
+
+
+def start_backup(actor):
+    """Dumps the schema to a new archive in the background."""
+
+    command, environment, _archive, record = _backup_plan(actor)
 
     def worker(job_id):
         _run(job_id, command, environment, on_success=record)
