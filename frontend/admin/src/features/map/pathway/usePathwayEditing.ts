@@ -12,7 +12,7 @@ import type { WorkingSessionManager } from "../WorkingSessionManager";
 import type { PathPointConversionDraft } from "./PathPointConversionModal";
 import { createRoutableCrossing } from "./pathwayCommands";
 import { isPathwayDraft } from "./pathwayDrafts";
-import { findPathwayCrossings, insertPathPointAtSegmentMidpoint, pathwayConnectionError } from "./pathwayTopology";
+import { findPathwayCrossings, insertPathPointAtSegmentMidpoint, pathwayConnectionError, type PathwayCrossing } from "./pathwayTopology";
 import { createPathwayWorkflow } from "./PathwayWorkflow";
 
 export interface PathwayNetwork {
@@ -256,8 +256,11 @@ export function usePathwayEditing({
     return true;
   };
 
-  const createJunctionAtCrossing = async (onCreated: (junction: RouteNode) => void) => {
-    const crossing = pathwayCrossings[0];
+  /** Splits the crossing's two Pathways at a new Junction; defaults to the first crossing. */
+  const createJunctionAtCrossing = async (
+    onCreated: (junction: RouteNode) => void,
+    crossing: PathwayCrossing | undefined = pathwayCrossings[0],
+  ) => {
     if (!crossing) return;
     const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
     const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);

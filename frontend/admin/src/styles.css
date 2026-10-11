@@ -2533,6 +2533,20 @@ td small {
   backdrop-filter: blur(18px) saturate(135%);
   -webkit-backdrop-filter: blur(18px) saturate(135%);
 }
+
+/* Moving highlight along the Map Editor's loading bar; still for reduced motion. */
+@keyframes map-load-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.map-load-sheen {
+  animation: map-load-sheen 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-load-sheen {
+    animation: none;
+  }
+}
 .map-workspace {
   position: relative;
   width: 100%;
