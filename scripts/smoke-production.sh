@@ -30,6 +30,11 @@ cleanup() {
 }
 trap cleanup EXIT
 docker load --input "$RELEASE/images.tar.gz" >/dev/null
+API_IMAGE_ID="$(sed -n 's/^ADMIN_API_IMAGE=//p' "$RELEASE/release.env")"
+docker run --rm --entrypoint pg_dump "$API_IMAGE_ID" --version > "$TEMPORARY/pg-dump-version.txt"
+docker run --rm --entrypoint pg_restore "$API_IMAGE_ID" --version > "$TEMPORARY/pg-restore-version.txt"
+grep -q '^pg_dump (PostgreSQL) 17\.' "$TEMPORARY/pg-dump-version.txt"
+grep -q '^pg_restore (PostgreSQL) 17\.' "$TEMPORARY/pg-restore-version.txt"
 compose up -d --wait --wait-timeout 90
 ADDRESS="$(compose port admin-web 8080)"
 BASE="http://$ADDRESS"
@@ -56,4 +61,4 @@ with (temporary / 'upload.bin').open('wb') as body:
         body.write(b'x' * 1024 * 1024)
 PY
 [ "$(curl --max-time 30 -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' --data-binary "@$TEMPORARY/upload.bin" "$BASE/api/login")" = 400 ]
-echo "Container smoke checks passed: SPA, same-origin auth, metadata, missing assets, and 51 MiB upload proxying."
+echo "Container smoke checks passed: PostgreSQL 17 archive tools, SPA, same-origin auth, metadata, missing assets, and 51 MiB upload proxying."

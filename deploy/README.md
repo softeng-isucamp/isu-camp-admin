@@ -29,7 +29,7 @@ Image IDs are the immutable local references returned by `docker image inspect`;
 ./scripts/smoke-production.sh dist/releases/<full-commit>
 ```
 
-The smoke check requires curl and Python 3 in addition to Docker Compose. It starts an isolated Compose project on a random loopback port with a disposable SQLite configuration. It verifies the SPA fallback, build provenance, unauthenticated JSON `401`, login validation JSON `400`, missing-asset `404`, and forwarding a 51 MiB request through the upload proxy. It also supplies conflicting shell/runtime image variables to confirm the release runs its bound image IDs. It removes only its own test containers and network afterward.
+The smoke check requires curl and Python 3 in addition to Docker Compose. It starts an isolated Compose project on a random loopback port with a disposable SQLite configuration. It verifies the API image contains PostgreSQL 17 `pg_dump` and `pg_restore`, then checks the SPA fallback, build provenance, unauthenticated JSON `401`, login validation JSON `400`, missing-asset `404`, and forwarding a 51 MiB request through the upload proxy. It also supplies conflicting shell/runtime image variables to confirm the release runs its bound image IDs. It removes only its own test containers and network afterward.
 
 These checks exercise the container/proxy contract without a production database, real accounts, or email delivery. Staged production checks must still confirm schema readiness and an invalid-account login returning JSON `401` against the intended database.
 

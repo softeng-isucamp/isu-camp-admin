@@ -109,7 +109,7 @@ These are jobs rather than plain responses because of that runtime. The API runs
 
 Two deployment requirements:
 
-1. **`pg_dump` and `pg_restore` must be on the server.** The API image does not include them, so creating or restoring a deployed backup returns `503` until PostgreSQL client tools that support the server version are installed and configured with `PG_DUMP_PATH` and `PG_RESTORE_PATH`.
+1. **The API image includes PostgreSQL 17 client tools.** The pinned `pg_dump` and `pg_restore` binaries support the deployed PostgreSQL 17 server. If the database server moves to a newer major version, update the pinned client packages in `deploy/admin-api.Dockerfile`; `PG_DUMP_PATH` and `PG_RESTORE_PATH` can override the bundled tools when needed.
 2. **The archive directory must outlive the container.** `deploy/compose.yaml` bind-mounts the required host directory from `ADMIN_BACKUP_DIR` at `/var/lib/admin-api/backups`. Create the same absolute host directory for every release, owned by UID/GID 10001 with mode 700. Do not point it inside a release directory. This survives container replacement on this host; copy archives off-host separately for disaster recovery.
 
 Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
