@@ -57,10 +57,25 @@ function Get-ProjectDevProcess {
     $candidates = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -in @("python.exe", "pythonw.exe", "node.exe") })
 
+    # Two ways to qualify. The first is the strict one: a command line naming
+    # this checkout and one of the two servers.
+    #
+    # The second exists because Flask's reloader launches its worker with the
+    # system interpreter and a relative script path, so the worker's own
+    # command line names neither this folder nor the venv. It is normally
+    # reached as a descendant of its parent - but once the parent is gone the
+    # worker is reparented, and it was then invisible to this sweep while still
+    # holding port 5000. Matching the script path alone catches it. The cost is
+    # that a second checkout of this repository running its own backend would
+    # also match, which is the same trade dev.sh makes where /proc is absent.
     $seeds = @($candidates | Where-Object {
-        $_.CommandLine -and
-        $_.CommandLine -match $escapedRoot -and
-        ($_.CommandLine -match "database\.py" -or $_.CommandLine -match "vite")
+        $_.CommandLine -and (
+            (
+                $_.CommandLine -match $escapedRoot -and
+                ($_.CommandLine -match "database\.py" -or $_.CommandLine -match "vite")
+            ) -or
+            $_.CommandLine -match "app[\/]services[\/]database\.py"
+        )
     })
 
     # A plain hashtable, not [ordered]@{}: an ordered dictionary treats an
@@ -84,17 +99,36 @@ function Get-ProjectDevProcess {
 function Stop-ProjectDevProcess {
     param([switch]$Quiet)
 
+    # Stop-Process, not taskkill: redirecting a native command's stderr in
+    # PowerShell 5.1 turns each line into a NativeCommandError, and with
+    # $ErrorActionPreference = "Stop" that aborts this whole script. Killing a
+    # tree takes its children with it, so the next pid in the list is often
+    # already gone - and reporting that as an error stopped the runner before
+    # it started anything. A cmdlet with -ErrorAction SilentlyContinue just
+    # shrugs at a process that has already exited.
+    #
+    # /T is not needed either: Get-ProjectDevProcess already walks the tree,
+    # so every descendant is in this list on its own account.
     $stopped = 0
     foreach ($process in Get-ProjectDevProcess) {
         if (-not $Quiet) {
             Write-Host "[PORTS] Stopping leftover pid $($process.ProcessId) ($($process.Name))" -ForegroundColor Yellow
         }
-        # /T kills the tree. Stopping only the parent is what left a reloader
-        # child alive holding port 5000 under a pid that no longer existed.
-        taskkill /PID $process.ProcessId /T /F 2>$null | Out-Null
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
         $stopped++
     }
-    if ($stopped -gt 0) { Start-Sleep -Milliseconds 1200 }
+
+    if ($stopped -eq 0) { return 0 }
+    Start-Sleep -Milliseconds 1200
+
+    # Second pass, because Flask's reloader supervises its worker: killing the
+    # worker first lets the supervisor start a replacement, and that
+    # replacement is what would still be holding the port.
+    foreach ($process in Get-ProjectDevProcess) {
+        Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+        $stopped++
+    }
+    Start-Sleep -Milliseconds 400
     return $stopped
 }
 
@@ -200,14 +234,10 @@ try {
     $FrontendExitCode = $LASTEXITCODE
 } finally {
     Write-Host "Stopping Flask Backend..." -ForegroundColor Yellow
-    if ($BackendProcess) {
-        # taskkill /T rather than Stop-Process: Flask's reloader runs the app in
-        # a child process that inherits the listening socket, and stopping only
-        # the parent left that child holding port 5000.
-        taskkill /PID $BackendProcess.Id /T /F 2>$null | Out-Null
-    }
-    # A sweep as well, because the pid above is only a starting point: if the
-    # parent has already gone, its children are no longer reachable through it.
+    # The sweep covers the backend without naming its pid: the process was
+    # started from this folder running database.py, so it is one of the seeds
+    # Get-ProjectDevProcess finds, and its reloader worker is a descendant.
+    # Working from the pid alone would miss the worker once the parent is gone.
     Stop-ProjectDevProcess -Quiet | Out-Null
 }
 exit $FrontendExitCode
