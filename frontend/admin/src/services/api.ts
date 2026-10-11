@@ -3,6 +3,7 @@ import type {
   AccountStatus,
   AdminAccount,
   AdminAccountDraft,
+  AdminRole,
   AuditEntry,
   Building,
   DashboardAnalytics,
@@ -22,9 +23,18 @@ import type {
   UserAccountType,
 } from "../types";
 import { normalizePathwayWayType, PATHWAY_ALLOWED_MODES } from "../types";
-import { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
+import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
+import {
+  AuthError,
+  type AuthErrorKind,
+  PASSWORD_CONFIRMATION_REQUIRED,
+  PasswordConfirmationRequiredError,
+  RateLimitError,
+  SUPERADMIN_REQUIRED,
+  SuperadminRequiredError,
+} from "./errors";
 
-export { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "./errors";
+export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError, SUPERADMIN_REQUIRED, SuperadminRequiredError } from "./errors";
 import { z } from "zod";
 
 import {
@@ -39,6 +49,7 @@ import {
   locationSchema,
 } from "./schemas";
 import { createLocalAdapter } from "./localAdapter";
+import { createLocalAdmins } from "./localAdmins";
 import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
@@ -487,6 +498,9 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
       throw new PasswordConfirmationRequiredError(envelope.message);
     }
+    if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
+      throw new SuperadminRequiredError(envelope.message);
+    }
     const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
     error.fieldErrors = { ...data?.fields, ...data?.relationships };
     throw error;
@@ -589,6 +603,10 @@ export interface Services {
 
   profile: ReturnType<typeof createProfileService>;
   auth: {
+    /**
+     * Rejects with `AuthError` (`invalid_credentials`, plus `attemptsRemaining`
+     * when the server reports it) or `RateLimitError` once attempts run out.
+     */
     login(
       username: string,
       password: string
@@ -601,15 +619,21 @@ export interface Services {
     /** Re-authenticates the signed-in admin before a destructive action. */
     confirmPassword(password: string): Promise<void>;
 
-    requestReset(username: string): Promise<void>;
+    /**
+     * Asks for a 6-digit code by email. Resolves the same whether or not the
+     * email has an account. The timing fields are present only when the server
+     * sends them.
+     */
+    requestRecovery(email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult>;
 
-    verifyReset(username: string, code: string): Promise<void>;
+    /**
+     * Checks a code and returns the account's username. Rejects with `AuthError`
+     * (`invalid_code`, `code_exhausted`, `code_expired`) or `RateLimitError`.
+     */
+    verifyRecovery(email: string, purpose: RecoveryPurpose, code: string): Promise<RecoveryResult>;
 
-    reset(
-      username: string,
-      code: string,
-      password: string
-    ): Promise<void>;
+    /** Sets a new password with a verified code. Also rejects with `AuthError` `weak_password`. */
+    resetPassword(email: string, code: string, password: string): Promise<RecoveryResult>;
   };
 
   dashboard: {
@@ -645,6 +669,8 @@ export interface Services {
     save(draft: AdminAccountDraft): Promise<AdminAccount>;
     /** Activates or deactivates an administrator's access to the portal. */
     setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
+    /** Promotes an administrator to superadmin or demotes a superadmin; returns the updated account. */
+    setRole(id: string, role: AdminRole): Promise<AdminAccount>;
     /** Emails a password reset code to that account's own address. */
     sendPasswordReset(id: string): Promise<string>;
     remove(id: string): Promise<void>;
@@ -727,12 +753,14 @@ const addAudit = (
 
 const localAuditEntries: AuditEntry[] = createMockAuditLogs();
 const localUsers: UserAccount[] = createMockUsers();
-// The fixture's own administrator directory. The signed-in fixture admin is
-// `admin_justine`, so that row is the one marked current.
-const localAdmins: AdminAccount[] = [
-  { id: "1", username: "admin_justine", email: "justine.admin@isu.edu.ph", status: "Active", isCurrent: true },
-  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", status: "Active", isCurrent: false },
-];
+// The fixture's administrator directory is the adapter's sign-in accounts, so
+// the row marked current and the rules applied follow whoever signed in.
+const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId) =>
+  addAudit(action, target, "Admin", targetId));
+
+/** A missing or unrecognized role means a plain administrator, never a superadmin. */
+const normalizeAdmin = (account: AdminAccount): AdminAccount =>
+  ({ ...account, role: account.role === "superadmin" ? "superadmin" : "admin" });
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -753,16 +781,6 @@ enrichLegacyLocationAuditIds();
 // Services
 // ==========================================
 
-export class RateLimitError extends Error {
-  readonly retryAfterSeconds: number;
-
-  constructor(retryAfterSeconds: number, message?: string) {
-    super(message ?? `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"}.`);
-    this.name = "RateLimitError";
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
 function checkRateLimit(response: Response, message?: string): void {
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
@@ -771,6 +789,51 @@ function checkRateLimit(response: Response, message?: string): void {
     throw new RateLimitError(seconds, message);
   }
 }
+
+/** The response body as an object, or `null` when it is empty, not JSON or not an object (an HTML error page, a bare `429`). */
+async function readJsonObject(response: Response): Promise<Record<string, any> | null> {
+  try {
+    const data = await response.json();
+    return data && typeof data === "object" && !Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `attemptsRemaining` is kept only when it is a non-negative integer; the UI never guesses a count. */
+const parseAttemptsRemaining = (data: Record<string, any>): number | undefined =>
+  Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0 ? data.attemptsRemaining : undefined;
+
+const recoveryErrorKinds: ReadonlySet<string> = new Set(["invalid_code", "code_exhausted", "code_expired", "weak_password"]);
+
+const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0;
+
+/** POSTs a recovery step and returns the JSON body, turning failures into `RateLimitError`, `AuthError` or a plain `Error`. */
+async function recoveryPost(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await readJsonObject(response);
+  // A rate limit needs only the status and Retry-After, so it must not depend on the body.
+  checkRateLimit(response, data?.message);
+  if (!data) throw new Error("Unable to connect to the backend.");
+  if (!response.ok) {
+    const message = data.message || "Account recovery failed.";
+    if (typeof data.code === "string" && recoveryErrorKinds.has(data.code)) {
+      throw new AuthError(data.code as AuthErrorKind, message, parseAttemptsRemaining(data));
+    }
+    throw new Error(message);
+  }
+  return data;
+}
+
+const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
+  if (typeof data.username !== "string" || !data.username) throw new Error("The server did not return a username.");
+  return { username: data.username };
+};
 
 const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
 const photoGalleryKey = (id: string, type: LocationType) => `${type === "Building" || type === "Facility" ? "building" : "location"}:${id}`;
@@ -887,17 +950,23 @@ export const services: Services = {
         }
       );
 
-      let data: any;
+      const data = await readJsonObject(response);
 
-      try {
-        data = await response.json();
-      } catch {
+      checkRateLimit(response, data?.message);
+
+      if (!data) {
         throw new Error(
           "Unable to connect to the backend."
         );
       }
 
-      checkRateLimit(response, data.message);
+      if (response.status === 401) {
+        throw new AuthError(
+          "invalid_credentials",
+          data.message || "Invalid username or password",
+          parseAttemptsRemaining(data)
+        );
+      }
 
       if (!response.ok) {
         throw new Error(
@@ -1046,78 +1115,27 @@ export const services: Services = {
       }
     },
 
-    requestReset: async (username) => {
-      if (API_MODE === "local") {
-        try { return await localAdapter.auth.requestReset(username); } catch { /* fall through to the HTTP-compatible mock seam */ }
-      }
-      const response = await fetch(`${API_URL}/api/reset/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to send verification code");
-      }
-    },
-
-    verifyReset: async (username, code) => {
-      if (API_MODE === "local") {
-        if (username.trim() !== "admin_justine" || code !== "000000") {
-          throw new Error("Invalid verification code.");
-        }
-        return;
-      }
-      const response = await fetch(`${API_URL}/api/reset/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, code }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) throw new Error(data.message || "Invalid verification code");
-    },
-
-
     // --------------------------------------
-    // Password Reset
+    // Account recovery
     // --------------------------------------
 
-    reset: async (
-      username,
-      code,
-      password
-    ) => {
-      if (API_MODE === "local") {
-        try { return await localAdapter.auth.reset(username, code, password); } catch { /* fall through to the HTTP-compatible mock seam */ }
-      }
-      const response = await fetch(`${API_URL}/api/reset-password`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, code, password }),
-      });
-      let data: { message?: string };
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error("Unable to connect to the backend.");
-      }
-      checkRateLimit(response, data.message);
-      if (!response.ok) {
-        throw new Error(data.message || "Password reset failed");
-      }
+    requestRecovery: async (email, purpose) => {
+      if (!USE_HTTP_API) return localAdapter.auth.requestRecovery(email, purpose);
+      const data = await recoveryPost("/api/recovery/request", { email, purpose });
+      return {
+        ...(positiveInteger(data.expiresInSeconds) ? { expiresInSeconds: data.expiresInSeconds } : {}),
+        ...(positiveInteger(data.resendAfterSeconds) ? { resendAfterSeconds: data.resendAfterSeconds } : {}),
+      };
+    },
+
+    verifyRecovery: async (email, purpose, code) => {
+      if (!USE_HTTP_API) return localAdapter.auth.verifyRecovery(email, purpose, code);
+      return recoveryResult(await recoveryPost("/api/recovery/verify", { email, purpose, code }));
+    },
+
+    resetPassword: async (email, code, password) => {
+      if (!USE_HTTP_API) return localAdapter.auth.resetPassword(email, code, password);
+      return recoveryResult(await recoveryPost("/api/recovery/reset-password", { email, code, password }));
     },
   },
 
@@ -1431,9 +1449,9 @@ export const services: Services = {
     list: async () => {
       if (USE_HTTP_API) {
         const response = await apiJson<{ items: AdminAccount[] }>("/api/admins");
-        return response.items ?? [];
+        return (response.items ?? []).map(normalizeAdmin);
       }
-      return wait(clone(localAdmins));
+      return wait(await localAdmins.list());
     },
 
     save: async (draft) => {
@@ -1443,43 +1461,16 @@ export const services: Services = {
           email: draft.email,
           // An empty password on edit leaves the stored one alone.
           ...(draft.password ? { password: draft.password } : {}),
+          // A role is only chosen when adding; the edit route is for one's own sign-in details.
+          ...(!draft.id && draft.role ? { role: draft.role } : {}),
         });
         const response = await apiJson<{ admin: AdminAccount }>(
           draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",
           { method: draft.id ? "PUT" : "POST", body },
         );
-        return response.admin;
+        return normalizeAdmin(response.admin);
       }
-
-      const username = draft.username.trim();
-      const email = draft.email.trim();
-      const duplicate = localAdmins.some((admin) =>
-        admin.username.toLowerCase() === username.toLowerCase() && admin.id !== draft.id);
-      if (duplicate) {
-        const error = new Error("That username is already taken") as Error & { fieldErrors?: Record<string, string> };
-        error.fieldErrors = { username: "That username is already taken" };
-        throw error;
-      }
-
-      const existing = draft.id ? localAdmins.find((admin) => admin.id === draft.id) : undefined;
-      if (existing) {
-        // Sign-in details belong to their holder, as the backend enforces.
-        if (!existing.isCurrent) throw new Error("You can only edit your own administrator account.");
-        existing.username = username;
-        existing.email = email;
-        addAudit("Updated Administrator", username, "Admin", existing.id);
-        return wait(clone(existing));
-      }
-      const created: AdminAccount = {
-        id: `admin-${Date.now()}`,
-        username,
-        email,
-        status: "Active",
-        isCurrent: false,
-      };
-      localAdmins.push(created);
-      addAudit("Created Administrator", username, "Admin", created.id);
-      return wait(clone(created));
+      return wait(await localAdmins.save(draft));
     },
 
     setStatus: async (id, status) => {
@@ -1488,18 +1479,20 @@ export const services: Services = {
           `/api/admins/${encodeURIComponent(id)}/status`,
           { method: "PUT", body: JSON.stringify({ status }) },
         );
-        return response.admin;
+        return normalizeAdmin(response.admin);
       }
-      const admin = localAdmins.find((record) => record.id === id);
-      if (!admin) throw new Error("Administrator not found.");
-      if (status === "Inactive") {
-        if (admin.isCurrent) throw new Error("You cannot deactivate your own administrator account.");
-        const activeAdmins = localAdmins.filter((record) => record.status === "Active").length;
-        if (activeAdmins <= 1) throw new Error("The last active administrator cannot be deactivated.");
+      return wait(await localAdmins.setStatus(id, status));
+    },
+
+    setRole: async (id, role) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ admin: AdminAccount }>(
+          `/api/admins/${encodeURIComponent(id)}/role`,
+          { method: "PUT", body: JSON.stringify({ role }) },
+        );
+        return normalizeAdmin(response.admin);
       }
-      admin.status = status;
-      addAudit(status === "Inactive" ? "Deactivated Administrator" : "Activated Administrator", admin.username, "Admin", admin.id);
-      return wait(clone(admin));
+      return wait(await localAdmins.setRole(id, role));
     },
 
     sendPasswordReset: async (id) => {
@@ -1510,11 +1503,7 @@ export const services: Services = {
         );
         return response.message ?? "A password reset code was sent.";
       }
-      const admin = localAdmins.find((record) => record.id === id);
-      if (!admin) throw new Error("Administrator not found.");
-      if (!admin.email) throw new Error("That account has no email address on file, so a reset code cannot be sent.");
-      addAudit("Sent Password Reset", admin.username, "Admin", admin.id);
-      return wait(`A password reset code was sent to ${admin.email}.`);
+      return wait(await localAdmins.sendPasswordReset(id));
     },
 
     remove: async (id) => {
@@ -1522,12 +1511,7 @@ export const services: Services = {
         await apiJson<unknown>(`/api/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
         return;
       }
-      const index = localAdmins.findIndex((admin) => admin.id === id);
-      if (index < 0) throw new Error("Administrator not found.");
-      if (localAdmins[index].isCurrent) throw new Error("You cannot remove your own administrator account.");
-      if (localAdmins.length <= 1) throw new Error("The last administrator account cannot be removed.");
-      const [removed] = localAdmins.splice(index, 1);
-      addAudit("Deleted Administrator", removed.username, "Admin", removed.id);
+      await localAdmins.remove(id);
       return wait(undefined);
     },
   },

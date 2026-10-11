@@ -2,9 +2,10 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, deactivated and removed. Editing is limited to the signed-in
-account: every other administrator can be deactivated or removed, but not
-rewritten.
+they are created, deactivated, given a role and removed, by superadmins only.
+Editing is limited to the signed-in account: every other administrator can be
+deactivated or removed, but not rewritten. Any active administrator can list
+the accounts and send a password reset code.
 """
 
 import re
@@ -17,15 +18,18 @@ from auth import (
     rate_limited,
     reauth_required,
     send_password_reset_otp,
+    superadmin_required,
 )
 from extensions import db
 from model.record_status import normalized_status, status_label
 from services.audit import log_audit
+from services.password_rules import first_password_issue
 from services.security import hash_password
 
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 
-MIN_PASSWORD_LENGTH = 8
+ROLES = ("admin", "superadmin")
+LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -42,6 +46,7 @@ def _as_dict(admin):
         "username": admin.username,
         "email": admin.gmail or "",
         "status": status_label(admin.status),
+        "role": "superadmin" if admin.is_superadmin else "admin",
         # The signed-in admin is the only one that can be edited, and the only
         # one that cannot be deactivated or removed, so the client marks that
         # row rather than offering actions the server would refuse.
@@ -68,13 +73,56 @@ def _read_identity(data, *, require_password):
     if not EMAIL_PATTERN.match(email):
         return None, _error("Enter a valid email address", field="email")
     if require_password or password:
-        if len(password) < MIN_PASSWORD_LENGTH:
-            return None, _error(
-                f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
-                field="password",
-            )
+        issue = first_password_issue(password)
+        if issue:
+            return None, _error(issue, field="password")
 
     return {"username": username, "email": email, "password": password}, None
+
+
+def _read_role(value):
+    """Returns the stored role a request names, or None when it names neither."""
+
+    role = value.strip().lower() if isinstance(value, str) else None
+    return role if role in ROLES else None
+
+
+def _lock_administrators():
+    """Locks every administrator row for this transaction and returns them by id.
+
+    Every write that changes who can sign in or manage accounts (role, status,
+    removal) starts here and decides from what this returns, never from rows
+    read earlier. The table holds a handful of accounts, so SELECT ... FOR
+    UPDATE over all of it, in id order, is cheap, and it makes these writes
+    run one at a time: a second request waits in this query until the first
+    commits, rolls back or ends, and then reads the rows as the first left
+    them (PostgreSQL re-reads locked rows under READ COMMITTED; populate_existing
+    refreshes the ones this session already holds). Taking every row in one
+    ordered statement means no request holds a lock while waiting for another.
+
+    The caller is judged again from the locked rows, since its role may have
+    changed while it waited. Returns ``(directory, error_response)``.
+    """
+
+    rows = Admin.query.order_by(Admin.id).populate_existing().with_for_update().all()
+    _, error = superadmin_required(rows)
+    return {row.id: row for row in rows}, error
+
+
+def _is_last_active_superadmin(record, directory):
+    """True when losing this account's superadmin access would leave nobody with it.
+
+    Only an active superadmin counts, so a deactivated one neither blocks the
+    change nor is protected by it. Applies to demoting, deactivating and
+    removing alike. ``directory`` is the locked set from
+    :func:`_lock_administrators`. Holding it, the caller is an active
+    superadmin and is never the target, so this cannot be true for a real
+    request; it stays as the second line of defence.
+    """
+
+    if not (record.is_active and record.is_superadmin):
+        return False
+    return sum(1 for row in directory.values() if row.is_active and row.is_superadmin) <= 1
 
 
 def _username_taken(username, *, excluding_id=None):
@@ -96,7 +144,7 @@ def list_admins():
 
 @admins_bp.post("")
 def create_admin():
-    _, error = admin_required()
+    _, error = superadmin_required()
     if error:
         return error
 
@@ -104,8 +152,21 @@ def create_admin():
     if invalid:
         return invalid
 
+    # Left out (or null) means a plain administrator; anything else must name a role.
+    requested = request.get_json(silent=True).get("role")
+    role = "admin" if requested is None else _read_role(requested)
+    if role is None:
+        return _error("Role must be Administrator or Superadmin.", field="role")
+
     if _username_taken(values["username"]):
         return _error("That username is already taken", status=409, field="username")
+
+    # Minting a superadmin is as deliberate as promoting one, so it asks for the
+    # password too. A plain administrator is created without the prompt.
+    if role == "superadmin":
+        _, error = reauth_required("Confirm your password to create a superadmin.")
+        if error:
+            return error
 
     try:
         # public.admin.id is an identity column, so the database assigns it.
@@ -115,6 +176,7 @@ def create_admin():
             # plaintext row to the ones already there.
             password=hash_password(values["password"]),
             gmail=values["email"],
+            role=role,
         )
         db.session.add(record)
         db.session.flush()
@@ -176,11 +238,15 @@ def set_admin_status(admin_id):
     is another administrator's to set.
     """
 
-    _, error = admin_required()
+    _, error = superadmin_required()
     if error:
         return error
 
-    record = db.session.get(Admin, admin_id)
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
 
@@ -194,9 +260,10 @@ def set_admin_status(admin_id):
         if record.id == session.get("admin_id"):
             return _error("You cannot deactivate your own administrator account.", status=409)
         # Someone has to be left who can sign in and undo this.
-        active_admins = Admin.query.filter(Admin.status == "active").count()
-        if active_admins <= 1:
+        if sum(1 for row in directory.values() if row.is_active) <= 1:
             return _error("The last active administrator cannot be deactivated.", status=409)
+        if _is_last_active_superadmin(record, directory):
+            return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     if record.status == status:
         return jsonify({
@@ -219,6 +286,68 @@ def set_admin_status(admin_id):
     except Exception:
         db.session.rollback()
         return _error("Failed to update the administrator's status.", status=500)
+
+
+@admins_bp.put("/<int:admin_id>/role")
+def set_admin_role(admin_id):
+    """Promotes an administrator to superadmin or demotes a superadmin.
+
+    Shaped like the status route. Granting or withdrawing account management is
+    deliberate, so it needs a recent password confirmation, and an account
+    cannot change its own role.
+    """
+
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
+    _, error = reauth_required("Confirm your password to change this administrator's role.")
+    if error:
+        return error
+
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    data = request.get_json(silent=True)
+    role = _read_role(data.get("role") if isinstance(data, dict) else None)
+    if role is None:
+        return _error("Role must be Administrator or Superadmin.", field="role")
+
+    if record.id == session.get("admin_id"):
+        return _error("You cannot change your own role.", status=409)
+
+    noun = "a superadmin" if role == "superadmin" else "an administrator"
+    if record.is_superadmin == (role == "superadmin"):
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} is already {noun}.",
+            "admin": _as_dict(record),
+        }), 200
+
+    if role == "admin" and _is_last_active_superadmin(record, directory):
+        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
+
+    try:
+        record.role = role
+        action = "promote" if role == "superadmin" else "demote"
+        log_audit("Admin", None, action, "Administrator", record.id, record.username)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} was "
+                       f"{'promoted to superadmin' if role == 'superadmin' else 'demoted to administrator'} successfully.",
+            "admin": _as_dict(record),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return _error("Failed to update the administrator's role.", status=500)
 
 
 @admins_bp.post("/<int:admin_id>/password-reset")
@@ -269,21 +398,34 @@ def send_password_reset(admin_id):
 
 @admins_bp.delete("/<int:admin_id>")
 def delete_admin(admin_id):
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
     # Removing an administrator is destructive, so it needs a recent password
     # confirmation like every other delete in the portal.
     _, error = reauth_required()
     if error:
         return error
 
-    record = db.session.get(Admin, admin_id)
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
 
     if record.id == session.get("admin_id"):
         return _error("You cannot remove your own administrator account.", status=409)
 
-    if Admin.query.count() <= 1:
+    if len(directory) <= 1:
         return _error("The last administrator account cannot be removed.", status=409)
+
+    if _is_last_active_superadmin(record, directory):
+        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
     try:
         username = record.username

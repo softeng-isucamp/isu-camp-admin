@@ -33,6 +33,8 @@ it("keeps HTTP Overview searches usable without the future analytics endpoint", 
   expect(analytics).not.toHaveBeenCalled();
 
   await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-  expect(await screen.findByText("Analytics are not available from the backend yet.")).toBeInTheDocument();
+  expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+  expect(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" })).toBeEnabled();
   expect(analytics).toHaveBeenCalledWith("week");
 });

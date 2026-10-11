@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Badge, Button, Card, Field, LoadingState, Modal } from '../../components/UI';
 import { FeedbackStack, useFeedback } from '../../components/Feedback';
 import { PageIcon } from '../../components/PageIcon';
+import { PasswordChecklist } from '../../components/PasswordChecklist';
 import { services } from '../../services/api';
+import { firstPasswordIssue } from '../../services/passwordRules';
 import type { AccountProfile } from '../../services/profile';
 import { useAuth } from '../auth/AuthContext';
 import { BackupRecovery } from './BackupRecovery';
@@ -89,13 +91,16 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [mismatch, setMismatch] = useState('');
+  const [weakness, setWeakness] = useState('');
   const [error, setError] = useState('');
   const [changing, setChanging] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (changing) return;
-    setError(''); setMismatch('');
+    setError(''); setMismatch(''); setWeakness('');
+    const issue = firstPasswordIssue(newPassword);
+    if (issue) { setWeakness(issue); return; }
     if (newPassword !== confirmPassword) { setMismatch('Passwords do not match.'); return; }
     if (newPassword === currentPassword) { setError('Choose a different new password.'); return; }
     setChanging(true);
@@ -106,8 +111,9 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
     <form onSubmit={submit} className="admin-form">
       {error && <div role="alert" className="admin-form-error">{error}</div>}
       <Field label="CURRENT PASSWORD" aria-label="Current password" type={showPasswords ? 'text' : 'password'} autoComplete="current-password" required value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={changing} />
-      <Field label="NEW PASSWORD" aria-label="New password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required minLength={8} subhelper="At least 8 characters." value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={changing} />
-      <Field label="CONFIRM NEW PASSWORD" aria-label="Confirm new password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required minLength={8} error={mismatch} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={changing} />
+      <Field label="NEW PASSWORD" aria-label="New password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required error={weakness} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={changing} />
+      <PasswordChecklist password={newPassword} />
+      <Field label="CONFIRM NEW PASSWORD" aria-label="Confirm new password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required error={mismatch} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={changing} />
       <label className="profile-show-password"><input type="checkbox" checked={showPasswords} disabled={changing} onChange={(e) => setShowPasswords(e.target.checked)} />Show passwords</label>
       <div className="modal-actions">
         <Button type="button" variant="subtle" disabled={changing} onClick={onClose}>Cancel</Button>

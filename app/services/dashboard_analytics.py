@@ -22,7 +22,7 @@ module is the only place that has to change.
 from datetime import datetime, timedelta, timezone
 
 from extensions import db
-from model.app_user import USER_TYPES, UserInfo, normalize_user_type
+from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.building import Building
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.user_history import UserHistory
@@ -140,6 +140,18 @@ def _utc_ceiling(day):
     return _utc_floor(day + timedelta(days=1))
 
 
+def search_window(days, now=None):
+    """The UTC ``(start, end)`` of the last ``days`` Manila calendar days.
+
+    Today and the ``days - 1`` days before it, the window the Analytics tab
+    calls the current period. The Overview summary reads through this too, so
+    the two screens count the same Searches.
+    """
+
+    today = manila_day(now or datetime.now(timezone.utc))
+    return _utc_floor(today - timedelta(days=days - 1)), _utc_ceiling(today)
+
+
 def _totals(rows):
     """Period totals for a set of Search rows.
 
@@ -159,11 +171,23 @@ def _totals(rows):
     }
 
 
+def _app_accounts():
+    """App accounts joined to their registration details.
+
+    Registrations are counted from accounts that have registration details, so
+    an orphan ``userInfo`` row with no account is not a registration. An account
+    without details, or with an unrecognized type, still counts in Registered
+    Users on the summary but not in the registrations chart.
+    """
+
+    return db.session.query(AppUser).join(UserInfo, AppUser.info_id == UserInfo.id)
+
+
 def _earliest_day():
     """The first Manila day with any Search or registration, or None."""
 
     first_search = db.session.query(db.func.min(UserHistory.created_at)).scalar()
-    first_signup = db.session.query(db.func.min(UserInfo.created_at)).scalar()
+    first_signup = _app_accounts().with_entities(db.func.min(UserInfo.created_at)).scalar()
     days = [day for day in (manila_day(first_search), manila_day(first_signup)) if day]
     return min(days) if days else None
 
@@ -262,7 +286,8 @@ def _registrations(days, size):
         return []
 
     rows = (
-        db.session.query(UserInfo.created_at, UserInfo.user_type)
+        _app_accounts()
+        .with_entities(UserInfo.created_at, UserInfo.user_type)
         .filter(UserInfo.created_at.isnot(None))
         .filter(UserInfo.created_at >= _utc_floor(days[0]))
         .filter(UserInfo.created_at < _utc_ceiling(days[-1]))

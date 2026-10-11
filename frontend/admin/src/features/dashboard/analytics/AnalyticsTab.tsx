@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, Empty, ProgressBar } from "../../../components/UI";
+import { Button, Card, Empty, ProgressBar } from "../../../components/UI";
 import { services } from "../../../services/api";
 import type { DashboardRange } from "../../../types";
 import { ActivityKpis } from "./ActivityKpis";
@@ -15,7 +15,7 @@ export const dashboardAnalyticsQueryKey = (range: DashboardRange) => ["dashboard
  * Candidate charts for the Analytics tab. To drop a chart, delete its file and its JSX line below.
  */
 export function AnalyticsTab({ range }: { range: DashboardRange }) {
-  const { data, error, isFetching, isLoading } = useQuery({
+  const { data, error, isFetching, isLoading, refetch } = useQuery({
     queryKey: dashboardAnalyticsQueryKey(range),
     queryFn: () => services.dashboard.analytics(range),
     placeholderData: (previous) => previous,
@@ -24,8 +24,11 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
 
   if (error && !data) {
     return (
-      <Card className="analytics-unavailable">
-        <Empty>Analytics are not available from the backend yet.</Empty>
+      <Card className="analytics-unavailable" role="alert">
+        <Empty>Unable to load analytics. {error instanceof Error ? error.message : "The dashboard service returned an error."}</Empty>
+        <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>
+          {isFetching ? "Retrying…" : "Try again"}
+        </Button>
       </Card>
     );
   }
@@ -33,6 +36,14 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
   return (
     <div className="analytics">
       <ProgressBar active={isFetching && !isLoading} />
+      {error && (
+        <div className="dashboard-error" role="alert">
+          <span>The latest refresh of analytics failed, so the numbers shown may be out of date. {error instanceof Error ? error.message : ""}</span>
+          <button type="button" disabled={isFetching} onClick={() => void refetch()}>
+            {isFetching ? "Retrying…" : "Try again"}
+          </button>
+        </div>
+      )}
       <section aria-labelledby="analytics-app-usage">
         <h2 className="analytics-section" id="analytics-app-usage">App Usage</h2>
         <div className="analytics-grid">

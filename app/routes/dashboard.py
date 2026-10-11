@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -10,7 +10,7 @@ from model.building import Building
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
-from services.dashboard_analytics import RANGE_DAYS, summarize_dashboard_analytics
+from services.dashboard_analytics import RANGE_DAYS, search_window, summarize_dashboard_analytics
 from services.search_analytics import summarize_user_searches
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
@@ -27,7 +27,7 @@ def _as_utc(value):
 def _building_change(days):
     if days is None:
         return None
-    start = datetime.now(timezone.utc) - timedelta(days=days)
+    start, _ = search_window(days)
     records = AuditLog.query.filter(
         AuditLog.target == "Building",
         AuditLog.action.in_(("create", "delete")),

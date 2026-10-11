@@ -8,7 +8,8 @@ from profile import profile_bp
 from services.security import hash_password, is_hashed, verify_password
 
 CURRENT_PASSWORD = "Str0ngCurrent1"
-NEW_PASSWORD = "Str0ngReplacement2"
+# The signed-in password predates the five rules (no symbol), as an older account's would.
+NEW_PASSWORD = "Str0ngReplacement2!"
 
 
 @pytest.fixture
@@ -250,44 +251,88 @@ def test_a_legacy_plaintext_row_can_still_change_its_password(app, monkeypatch):
         assert is_hashed(db.session.get(Admin, 1).password)
 
 
-@pytest.mark.parametrize("new_password, reason", (
-    ("short1", "at least"),
-    ("1234567890123", "letter"),
-    ("abcdefghijklm", "number"),
+@pytest.mark.parametrize("new_password, message", (
+    ("Ab1!xyz", "Password must be at least 8 characters."),
+    ("lowercase1!", "Password must include an uppercase letter."),
+    ("UPPERCASE1!", "Password must include a lowercase letter."),
+    ("NoDigitsHere!", "Password must include a number."),
+    ("NoSymbol123", "Password must include a symbol."),
 ))
-def test_password_change_enforces_the_password_policy(app, monkeypatch, new_password, reason):
+def test_password_change_enforces_the_shared_password_rules(app, monkeypatch, new_password, message):
     with app.app_context():
         record = add_admin()
         sign_in_as(app, monkeypatch, record)
+        before = db.session.get(Admin, 1).password
 
         response = app.test_client().post("/api/profile/password", json={
             "currentPassword": CURRENT_PASSWORD, "newPassword": new_password,
         })
 
-    assert response.status_code == 400
-    assert reason in response.get_json()["message"]
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body["message"] == message
+        assert "newPassword" in body["fields"]
+        assert db.session.get(Admin, 1).password == before
 
 
-def test_a_new_password_may_not_contain_the_username(app, monkeypatch):
-    with app.app_context():
-        record = add_admin(username="admin01")
-        sign_in_as(app, monkeypatch, record)
-
-        response = app.test_client().post("/api/profile/password", json={
-            "currentPassword": CURRENT_PASSWORD, "newPassword": "xxadmin01xx99",
-        })
-
-    assert response.status_code == 400
-    assert "username" in response.get_json()["message"]
-
-
-def test_a_new_password_must_differ_from_the_current_one(app, monkeypatch):
+def test_password_change_reports_only_the_first_unmet_rule(app, monkeypatch):
     with app.app_context():
         record = add_admin()
         sign_in_as(app, monkeypatch, record)
 
         response = app.test_client().post("/api/profile/password", json={
-            "currentPassword": CURRENT_PASSWORD, "newPassword": CURRENT_PASSWORD,
+            "currentPassword": CURRENT_PASSWORD, "newPassword": "abc",
+        })
+
+    assert response.get_json()["message"] == "Password must be at least 8 characters."
+
+
+def test_a_new_password_may_contain_the_username_and_non_ascii_letters(app, monkeypatch):
+    """The five rules are the whole policy: no username check, any script's letters."""
+
+    with app.app_context():
+        record = add_admin(username="admin01")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().post("/api/profile/password", json={
+            "currentPassword": CURRENT_PASSWORD, "newPassword": "Admin01-Ñandú9",
+        })
+
+        assert response.status_code == 200
+
+
+def test_an_account_with_a_weak_password_still_changes_to_a_compliant_one(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(password="weak")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().post("/api/profile/password", json={
+            "currentPassword": "weak", "newPassword": NEW_PASSWORD,
+        })
+
+        assert response.status_code == 200
+        assert verify_password(db.session.get(Admin, 1).password, NEW_PASSWORD)[0]
+
+
+def test_a_wrong_current_password_is_reported_before_a_weak_new_one(app, monkeypatch):
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().post("/api/profile/password", json={
+            "currentPassword": "not-it", "newPassword": "abc",
+        })
+
+    assert response.status_code == 401
+
+
+def test_a_new_password_must_differ_from_the_current_one(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(password=NEW_PASSWORD)
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().post("/api/profile/password", json={
+            "currentPassword": NEW_PASSWORD, "newPassword": NEW_PASSWORD,
         })
 
     assert response.status_code == 400

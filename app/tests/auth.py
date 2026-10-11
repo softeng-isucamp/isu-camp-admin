@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import time
 
 from flask import Flask
+import pytest
 
 import auth as auth_module
 from auth import auth_bp
@@ -141,7 +142,7 @@ def test_password_reset_endpoint_is_rate_limited(monkeypatch):
     auth_module.rate_limit_buckets.clear()
     client = auth_app().test_client()
 
-    responses = [client.post("/api/reset-password", json={"username": "admin01", "code": "000000", "password": "password123"}) for _ in range(6)]
+    responses = [client.post("/api/reset-password", json={"username": "admin01", "code": "000000", "password": "Passw0rd!123"}) for _ in range(6)]
 
     assert [response.status_code for response in responses[:5]] == [400] * 5
     assert responses[5].status_code == 429
@@ -221,7 +222,7 @@ def test_final_reset_remains_authoritative_after_non_consuming_verification(monk
 
     verified = client.post("/api/reset/verify", json={"username": "admin01", "code": "123456"})
     wrong_final = client.post("/api/reset-password", json={
-        "username": "admin01", "code": "000000", "password": "password123",
+        "username": "admin01", "code": "000000", "password": "Passw0rd!123",
     })
 
     assert verified.status_code == 200
@@ -230,14 +231,71 @@ def test_final_reset_remains_authoritative_after_non_consuming_verification(monk
     assert auth_module.reset_otps["admin01"]["otp"] == "123456"
 
     correct_final = client.post("/api/reset-password", json={
-        "username": "admin01", "code": "123456", "password": "password123",
+        "username": "admin01", "code": "123456", "password": "Passw0rd!123",
     })
     assert correct_final.status_code == 200
     # Stored as a hash now, not as the password itself, so the assertion is
     # that the new password verifies rather than that it is readable.
-    assert admin.password != "password123"
-    assert verify_password(admin.password, "password123")[0]
+    assert admin.password != "Passw0rd!123"
+    assert verify_password(admin.password, "Passw0rd!123")[0]
     assert "admin01" not in auth_module.reset_otps
+
+
+@pytest.mark.parametrize(
+    "password,message",
+    [
+        ("Abcde1!", "Password must be at least 8 characters."),
+        ("abcdefg1!", "Password must include an uppercase letter."),
+        ("ABCDEFG1!", "Password must include a lowercase letter."),
+        ("Abcdefgh!", "Password must include a number."),
+        ("Abcdefg12", "Password must include a symbol."),
+    ],
+)
+def test_final_reset_enforces_the_shared_password_rules(monkeypatch, password, message):
+    auth_module.rate_limit_buckets.clear()
+    auth_module.reset_otps.clear()
+    admin = type("AdminRecord", (), {"username": "admin01", "password": "old-password"})()
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(
+            lambda **values: type("Result", (), {"first": lambda self: admin})()
+        )})()
+    }))
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
+    auth_module.reset_otps["admin01"] = {
+        "otp": "123456",
+        "expires_at": datetime.utcnow() + timedelta(minutes=1),
+    }
+
+    response = auth_app().test_client().post("/api/reset-password", json={
+        "username": "admin01", "code": "123456", "password": password,
+    })
+
+    assert response.status_code == 400
+    assert response.json["message"] == message
+    assert admin.password == "old-password"
+    # The code is not spent by a refused password, so the user can pick another.
+    assert "admin01" in auth_module.reset_otps
+
+
+def test_an_account_with_a_weak_stored_password_still_signs_in(monkeypatch):
+    """The shared rules constrain new passwords only; nothing is re-checked at sign-in."""
+
+    auth_module.rate_limit_buckets.clear()
+    admin = type("AdminRecord", (), {
+        "id": 3, "username": "admin01", "password": "password123", "is_active": True,
+        "to_profile": lambda self: {"id": 3},
+    })()
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(
+            lambda **values: type("Result", (), {"first": lambda self: admin})()
+        )})()
+    }))
+    monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
+
+    response = auth_app().test_client().post("/api/login", json={"username": "admin01", "password": "password123"})
+
+    assert response.status_code == 200
 
 
 # ==========================================
@@ -366,3 +424,32 @@ def test_reauth_expires_after_its_window(monkeypatch):
     # The stale stamp is cleared so it cannot be reused.
     with probe.session_transaction() as flask_session:
         assert "reauth_at" not in flask_session
+
+
+def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
+    auth_module.rate_limit_buckets.clear()
+    signed_in_client(monkeypatch)
+    app = auth_app()
+
+    @app.route("/api/_default_probe", methods=["DELETE"])
+    def default_probe():
+        _, error = auth_module.reauth_required()
+        return error
+
+    @app.route("/api/_custom_probe", methods=["PUT"])
+    def custom_probe():
+        _, error = auth_module.reauth_required("Confirm your password to do the thing.")
+        return error
+
+    probe = app.test_client()
+    with probe.session_transaction() as flask_session:
+        flask_session["admin_id"] = 7
+        flask_session["admin_username"] = "admin01"
+
+    default = probe.delete("/api/_default_probe")
+    custom = probe.put("/api/_custom_probe")
+
+    assert default.json["message"] == "Confirm your password to delete this record."
+    assert custom.json["message"] == "Confirm your password to do the thing."
+    # The code is what the frontend reads, so wording never changes it.
+    assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE

@@ -1,4 +1,4 @@
-/** Categorical slots in fixed order (reference dataviz palette). Student/Teacher/Visitor match lib/accountType. */
+/** Categorical slots in fixed order (reference dataviz palette). Student/Staff/Visitor match lib/accountType. */
 export const SERIES = {
   blue: "#2a78d6",
   orange: "#eb6834",

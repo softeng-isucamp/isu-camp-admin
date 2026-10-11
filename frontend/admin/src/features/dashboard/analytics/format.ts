@@ -12,5 +12,6 @@ export const formatBucket = (date: string, range: DashboardRange) =>
 export const formatNumber = (value: number) => value.toLocaleString();
 export const formatPercent = (ratio: number, digits = 0) => `${(ratio * 100).toFixed(digits)}%`;
 
-export const rangeNoun = (range: DashboardRange) =>
-  range === "week" ? "last 7 days" : range === "month" ? "last 30 days" : "last 12 weeks";
+/** Phrase completing "Activity ...", e.g. "over the last 7 days" or "across all time". */
+export const rangePhrase = (range: DashboardRange) =>
+  range === "week" ? "over the last 7 days" : range === "month" ? "over the last 30 days" : "across all time";

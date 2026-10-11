@@ -14,7 +14,8 @@ from model.pathway import Pathway  # noqa: F401 - the summary route imports it
 from model.pathway_allowed_mode import PathwayAllowedMode  # noqa: F401 - registers Pathway.allowed_modes
 from model.route_node import RouteNode  # noqa: F401 - Pathway's foreign keys target it
 from model.user_history import UserHistory
-from services.dashboard_analytics import MANILA, manila_day, summarize_dashboard_analytics
+from services.dashboard_analytics import MANILA, RANGE_DAYS, manila_day, summarize_dashboard_analytics
+from services.search_analytics import summarize_user_searches
 
 # A fixed "now" so bucket boundaries are assertable. 2026-10-09 18:00 UTC is
 # 2026-10-10 02:00 in Manila, which is the point of choosing it: the Manila day
@@ -73,6 +74,13 @@ def add_location(identifier, name, type_id=1, **columns):
         updated_at=columns.pop("updated_at", NOW),
         **columns,
     ))
+
+
+def add_account(identifier, created_at, user_type):
+    """An app account with its registration details, as the summary counts one."""
+
+    db.session.add(UserInfo(id=identifier, created_at=created_at, user_type=user_type))
+    db.session.add(AppUser(id=identifier, username=f"user{identifier}", info_id=identifier))
 
 
 def add_search(identifier, day_offset, user_id=None, building_id=None, location_id=None):
@@ -280,16 +288,56 @@ def test_a_search_for_a_deleted_destination_is_counted_but_not_ranked(app):
 
 
 # ==========================================
+# OVERVIEW AND ANALYTICS AGREE
+# ==========================================
+
+@pytest.mark.parametrize("range_key, days", [("week", 7), ("month", 30)])
+def test_overview_and_analytics_count_the_same_searches(app, range_key, days):
+    midnight = datetime(
+        TODAY_MANILA.year, TODAY_MANILA.month, TODAY_MANILA.day, tzinfo=MANILA
+    )
+    with app.app_context():
+        add_building(1, "Library")
+        add_building(2, "Gym")
+        add_building(3, "Demolished")
+        add_location(1, "Room 1", building_id=1)
+        db.session.flush()
+        add_search(1, 0, building_id=1)
+        add_search(2, 0, building_id=1, location_id=1)
+        add_search(3, 0, building_id=2)
+        # Exactly the window's first and the day before it.
+        add_search(4, -(days - 1), building_id=2)
+        add_search(5, -days, building_id=1)
+        # 23:30 Manila yesterday is out of today but in the window; 00:30 today too.
+        db.session.add(UserHistory(id=6, building_id=1, created_at=midnight - timedelta(minutes=30)))
+        db.session.add(UserHistory(id=7, building_id=2, created_at=midnight + timedelta(minutes=30)))
+        # A Search whose Building has since been deleted is counted, not ranked.
+        add_search(8, 0, building_id=3)
+        db.session.flush()
+        db.session.delete(db.session.get(Building, 3))
+        db.session.commit()
+
+        analytics = summarize_dashboard_analytics(range_key, now=NOW)
+        summary = summarize_user_searches(RANGE_DAYS[range_key], now=NOW)
+
+    assert summary["searches"] == analytics["current"]["searches"] == 7
+    assert [(r["locationId"], r["searches"]) for r in summary["topSearched"]] == [
+        (r["locationId"], r["searches"]) for r in analytics["topDestinations"]
+    ]
+    assert [(r["name"], r["searches"]) for r in summary["topSearched"]] == [
+        ("Gym", 3), ("Library", 2), ("Room 1", 1),
+    ]
+
+
+# ==========================================
 # REGISTRATIONS
 # ==========================================
 
 def test_registrations_split_by_account_type_per_bucket(app):
     with app.app_context():
-        db.session.add_all([
-            UserInfo(id=1, created_at=manila_noon(0), user_type="Student"),
-            UserInfo(id=2, created_at=manila_noon(0), user_type="Staff"),
-            UserInfo(id=3, created_at=manila_noon(-1), user_type="Visitor"),
-        ])
+        add_account(1, manila_noon(0), "Student")
+        add_account(2, manila_noon(0), "Staff")
+        add_account(3, manila_noon(-1), "Visitor")
         db.session.commit()
 
         result = summarize_dashboard_analytics("week", now=NOW)
@@ -304,13 +352,23 @@ def test_registrations_split_by_account_type_per_bucket(app):
     assert yesterday["visitor"] == 1
 
 
+def test_a_user_info_row_without_an_account_is_not_a_registration(app):
+    with app.app_context():
+        add_account(1, manila_noon(0), "Student")
+        db.session.add(UserInfo(id=2, created_at=manila_noon(0), user_type="Student"))
+        db.session.commit()
+
+        result = summarize_dashboard_analytics("all", now=NOW)
+
+    assert sum(row["student"] for row in result["registrations"]) == 1
+    assert AppUser.query.count() == 1
+
+
 def test_an_unrecognized_account_type_is_left_out_rather_than_guessed(app):
     with app.app_context():
-        db.session.add_all([
-            UserInfo(id=1, created_at=manila_noon(0), user_type="Alumni"),
-            UserInfo(id=2, created_at=manila_noon(0), user_type=None),
-            UserInfo(id=3, created_at=manila_noon(0), user_type="Student"),
-        ])
+        add_account(1, manila_noon(0), "Alumni")
+        add_account(2, manila_noon(0), None)
+        add_account(3, manila_noon(0), "Student")
         db.session.commit()
 
         result = summarize_dashboard_analytics("week", now=NOW)

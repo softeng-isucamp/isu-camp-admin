@@ -2,7 +2,7 @@ import type { UserAccountType } from "../types";
 
 export const accountTypes: { key: UserAccountType; label: string; color: string }[] = [
   { key: "student", label: "Student", color: "#2a78d6" },
-  { key: "teacher", label: "Teacher", color: "#eb6834" },
+  { key: "teacher", label: "Staff", color: "#eb6834" },
   { key: "visitor", label: "Visitor", color: "#1baf7a" },
 ];
 

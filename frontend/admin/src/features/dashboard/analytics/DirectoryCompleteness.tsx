@@ -40,7 +40,7 @@ export function DirectoryCompleteness({ data }: { data: DashboardAnalytics | und
                   transform="rotate(-90 72 72)"
                 />
                 <text x={72} y={74} textAnchor="middle" fontSize={28} fontWeight={700} fill="#151a17">{Math.round(overall * 100)}%</text>
-                <text x={72} y={94} textAnchor="middle" fontSize={11} fill="#64716a">{formatNumber(d.completenessTotal)} locations</text>
+                <text x={72} y={94} textAnchor="middle" fontSize={11} fill="#64716a">{formatNumber(d.completenessTotal)} active locations</text>
               </svg>
             </div>
             <ul className="completeness-bars">

@@ -1,5 +1,5 @@
 import { render, screen, act } from '@testing-library/react';
-import { expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 import { services } from '../../services/api';
 import type { Session } from '../../types';
@@ -15,4 +15,96 @@ it('ignores a profile response from a session that has signed out', async () => 
   await act(async () => { await auth.logout(); });
   act(() => staleUpdate({ id: '1', username: 'stale' } as Session));
   expect(screen.getByText('Signed out')).toBeInTheDocument();
+});
+
+function mountConsumer() {
+  const handle = {} as { auth: ReturnType<typeof useAuth> };
+  function Consumer() {
+    handle.auth = useAuth();
+    return <p>{handle.auth.loading ? 'Loading' : handle.auth.session ? `${handle.auth.session.username}:${handle.auth.session.role ?? 'none'}` : 'Signed out'}</p>;
+  }
+  render(<AuthProvider><Consumer /></AuthProvider>);
+  return handle;
+}
+describe('refreshSession', () => {
+  it('reads the session again and shows the role the server now reports', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    me.mockResolvedValueOnce({ id: '1', username: 'justine', role: 'admin' });
+    await act(async () => { await handle.auth.refreshSession(); });
+
+    expect(screen.getByText('justine:admin')).toBeInTheDocument();
+    expect(me).toHaveBeenCalledTimes(2);
+  });
+  it('signs out when the session no longer exists', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'admin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:admin');
+
+    me.mockResolvedValueOnce(null);
+    await act(async () => { await handle.auth.refreshSession(); });
+
+    expect(screen.getByText('Signed out')).toBeInTheDocument();
+  });
+  it('keeps the current session when the refresh fails', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    me.mockRejectedValueOnce(new Error('Network down'));
+    await act(async () => { await handle.auth.refreshSession(); });
+
+    expect(screen.getByText('justine:superadmin')).toBeInTheDocument();
+  });
+  it('does not bring back a session that signed out while the refresh was in flight', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'admin' });
+    vi.spyOn(services.auth, 'logout').mockResolvedValue(undefined);
+    const handle = mountConsumer();
+    await screen.findByText('justine:admin');
+
+    let release!: (value: Session) => void;
+    me.mockReturnValueOnce(new Promise<Session>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    await act(async () => { await handle.auth.logout(); });
+    await act(async () => { release({ id: '1', username: 'justine', role: 'superadmin' }); await pending; });
+
+    expect(screen.getByText('Signed out')).toBeInTheDocument();
+  });
+  it('does not sign out an account that signed in after the refresh began', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    vi.spyOn(services.auth, 'logout').mockResolvedValue(undefined);
+    vi.spyOn(services.auth, 'login').mockResolvedValue({ id: '2', username: 'registrar', role: 'admin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    let release!: (value: null) => void;
+    me.mockReturnValueOnce(new Promise<null>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    await act(async () => { await handle.auth.logout(); });
+    await act(async () => { await handle.auth.login('registrar', 'password123'); });
+    await act(async () => { release(null); await pending; });
+
+    expect(screen.getByText('registrar:admin')).toBeInTheDocument();
+  });
+  it('does not sign out the same account that signed in again after the refresh began', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
+    vi.spyOn(services.auth, 'logout').mockResolvedValue(undefined);
+    vi.spyOn(services.auth, 'login').mockResolvedValue({ id: '1', username: 'justine', role: 'superadmin' });
+    const handle = mountConsumer();
+    await screen.findByText('justine:superadmin');
+
+    let release!: (value: null) => void;
+    me.mockReturnValueOnce(new Promise<null>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    await act(async () => { await handle.auth.logout(); });
+    await act(async () => { await handle.auth.login('justine', 'password123'); });
+    await act(async () => { release(null); await pending; });
+
+    expect(screen.getByText('justine:superadmin')).toBeInTheDocument();
+  });
 });

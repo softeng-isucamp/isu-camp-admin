@@ -111,7 +111,7 @@ describe("Dashboard backend boundary", () => {
     vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
     renderDashboard();
 
-    const teacher = await screen.findByRole("button", { name: "View Teacher accounts" });
+    const teacher = await screen.findByRole("button", { name: "View Staff accounts" });
     expect(within(teacher).getByText("20%")).toBeInTheDocument();
     expect(within(teacher).getByText("11")).toBeInTheDocument();
     const student = screen.getByRole("button", { name: "View Student accounts" });
@@ -121,7 +121,7 @@ describe("Dashboard backend boundary", () => {
     expect(screen.getByRole("img", { name: "Registered users by account type" })).toBeInTheDocument();
     expect(screen.getByText("Visitor: 5 (9%)")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByText("Teacher: 11 (20%)"));
+    await userEvent.click(screen.getByText("Staff: 11 (20%)"));
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=teacher");
   });
 
@@ -147,14 +147,45 @@ describe("Dashboard backend boundary", () => {
       expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
+    expect(screen.getByText(/^[\d,]+ active locations$/)).toBeInTheDocument();
   });
 
-  it("explains that analytics are unavailable when the endpoint fails", async () => {
+  it("explains that analytics failed to load and retries on request", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
     renderDashboard();
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Analytics are not available from the backend yet.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+    const failedCalls = request.mock.calls.length;
+
+    request.mockResolvedValue(analytics());
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    expect(request.mock.calls.length).toBeGreaterThan(failedCalls);
+  });
+
+  it("keeps the cards and warns when a later refresh fails", async () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    const request = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+    renderDashboard();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByText("Active users")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "month");
+    await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
+
+    // Back to the cached week: its numbers stay up while the refetch fails.
+    request.mockRejectedValue(new Error("Gateway timeout"));
+    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "week");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/latest refresh of analytics failed/i);
+    expect(alert).toHaveTextContent(/may be out of date/i);
+    expect(screen.getByText("Active users")).toBeInTheDocument();
+
+    request.mockImplementation(async (range) => analytics(range));
+    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 });
