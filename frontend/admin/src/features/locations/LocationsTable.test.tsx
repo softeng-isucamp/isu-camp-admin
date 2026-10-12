@@ -828,7 +828,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.change(screen.getByLabelText(/upload location photo/i), {
       target: { files: [new File(["image"], "campus.jpg", { type: "image/jpeg" })] },
     });
-    expect(screen.getByText("campus.jpg")).toBeInTheDocument();
+    // The picker prepares a file before adding it, so the name lands a tick later.
+    expect(await screen.findByText("campus.jpg")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: /add location/i }));
     expect(screen.queryByText("campus.jpg")).not.toBeInTheDocument();
