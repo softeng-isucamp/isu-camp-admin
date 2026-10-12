@@ -1,11 +1,12 @@
 import { Marker, Polyline, Tooltip } from "react-leaflet";
 import type L from "leaflet";
-import type { Pathway, RouteNode } from "../../../types";
+import { normalizePathwayWayType, type Pathway, type RouteNode } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
 import type { EditorMode } from "../types";
 import { createPointIcon, splitIcon } from "../mapIcons";
 import type { usePathwayEditing } from "./usePathwayEditing";
 import { segmentMidpoints } from "./pathwayTopology";
+import { pathwayStroke } from "./pathwayStyle";
 
 interface PathwaysLayerProps {
   pathway: ReturnType<typeof usePathwayEditing>;
@@ -44,6 +45,12 @@ export function PathwaysLayer({
             : pathPoints
           : path.pathPoints;
         const isSelected = selectedPathId === path.id || isEditingThisPath;
+        // `path` already carries the pathway tool's unsaved Way type for the Pathway it is editing.
+        const wayType = normalizePathwayWayType(path.type) === "Road" ? "Road" : "Walkway";
+        const outsideBoundary = !source || !destination || !geometryOnCampus(
+          [[source.lat, source.lng], ...currentPoints, [destination.lat, destination.lng]],
+          campusBoundary,
+        );
 
         const pathOpacity =
           mode === "place" || mode === "area"
@@ -63,13 +70,7 @@ export function PathwaysLayer({
             ]}
             pathOptions={{
               className: "map-pathway",
-              color: !geometryOnCampus([
-                ...(source ? [[source.lat, source.lng] as [number, number]] : []),
-                ...currentPoints,
-                ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
-              ], campusBoundary) ? "#b42318" : isSelected ? "#e67e22" : "#005931",
-              weight: isSelected ? 6 : isOverviewZoom ? 2 : mode === "path" ? 5 : 4,
-              dashArray: isSelected || isOverviewZoom ? undefined : "7 6",
+              ...pathwayStroke({ type: wayType, selected: isSelected, outsideBoundary, isOverviewZoom, pathTool: mode === "path" }),
               opacity: pathOpacity,
             }}
             eventHandlers={{
@@ -82,12 +83,8 @@ export function PathwaysLayer({
           >
             {!isOverviewZoom && <Tooltip sticky direction="top" className="map-label">
               <div className="font-bold text-xs">{path.name || "Campus Pathway"}</div>
-              <div className="text-[10px] text-gray-500 font-normal">Shade: {path.shade} · {path.direction}</div>
-              {!geometryOnCampus([
-                ...(source ? [[source.lat, source.lng] as [number, number]] : []),
-                ...currentPoints,
-                ...(destination ? [[destination.lat, destination.lng] as [number, number]] : []),
-              ], campusBoundary) && (
+              <div className="text-[10px] text-gray-500 font-normal">{wayType} · Shade: {path.shade} · {path.direction}</div>
+              {outsideBoundary && (
                 <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
               )}
             </Tooltip>}
