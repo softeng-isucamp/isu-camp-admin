@@ -37,6 +37,8 @@ from routes.dashboard import dashboard_bp
 from routes.profile import profile_bp
 from routes.backups import backups_bp
 
+from services.backup_schedule import start_scheduler
+
 
 # ==========================================
 # Load Environment Variables
@@ -243,6 +245,18 @@ app.register_blueprint(logs_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(profile_bp)
 app.register_blueprint(backups_bp)
+
+
+# ==========================================
+# Automatic Backups
+# ==========================================
+
+# Started on import rather than from the __main__ block below, because a
+# gunicorn worker only imports this module and would otherwise never get a
+# timer. Off unless BACKUP_SCHEDULE_ENABLED is set, and safe to reach from more
+# than one process - the dev reloader runs this file twice - because each run is
+# claimed by a marker file. See services/backup_schedule.py.
+start_scheduler(app)
 
 
 # ==========================================

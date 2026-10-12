@@ -19,6 +19,7 @@ database or a shared cache.
 """
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -46,6 +47,13 @@ _SEARCH_DIRECTORIES = (
 
 JOB_KINDS = ("backup", "restore")
 TERMINAL_STATUSES = ("succeeded", "failed")
+
+# An archive is written under this name while pg_dump is still filling it, and
+# only becomes a ``.dump`` once the tool has exited cleanly. list_backups()
+# globs ``*.dump``, so an unfinished file is never offered as a backup.
+WORKING_SUFFIX = ".partial"
+
+logger = logging.getLogger(__name__)
 
 _jobs = {}
 _jobs_lock = threading.Lock()
@@ -237,6 +245,58 @@ def find_archive(backup_id):
 
 
 # ==========================================
+# Housekeeping
+# ==========================================
+
+def sweep_unfinished():
+    """Deletes what a dump that never finished left behind. Returns how many.
+
+    A partial file is not an archive, but it still costs disk, and a process
+    killed mid-dump is the one case where nothing cleans up after itself.
+    """
+
+    removed = 0
+    for leftover in backup_directory().glob(f"*.dump{WORKING_SUFFIX}"):
+        try:
+            leftover.unlink()
+        except OSError:
+            logger.warning("Could not remove the unfinished archive %s", leftover.name)
+            continue
+        removed += 1
+    return removed
+
+
+def prune_archives(keep):
+    """Keeps the newest ``keep`` archives, deletes the rest, returns their ids.
+
+    Ordered by filename rather than by sidecar, because the name is the
+    timestamp and a missing or hand-edited sidecar must not decide what gets
+    deleted.
+
+    Retention counts every archive in the directory, not only the automatic
+    ones: a daily dump of this database is about 75 MB, so the directory grows
+    by 2 GB a month whoever pressed the button.
+    """
+
+    keep = max(1, int(keep))
+    archives = sorted(backup_directory().glob("*.dump"), reverse=True)
+
+    removed = []
+    for archive in archives[keep:]:
+        try:
+            archive.unlink()
+        except OSError:
+            logger.warning("Could not remove the expired archive %s", archive.name)
+            continue
+        try:
+            _metadata_path(archive).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Removed %s but not its metadata", archive.name)
+        removed.append(archive.stem)
+    return removed
+
+
+# ==========================================
 # Jobs
 # ==========================================
 
@@ -275,8 +335,24 @@ def _finish(job_id, status, message=None):
             job["message"] = message
 
 
-def _run(job_id, command, environment, on_success=None):
-    """Runs one client tool to completion and records how it went."""
+def _run(job_id, command, environment, on_success=None, on_failure=None):
+    """Runs one client tool to completion and records how it went.
+
+    ``on_failure`` is for whatever the tool left on disk. pg_dump creates its
+    output file at once and fills it as it reads, so a dump that dies part way
+    through - a dropped pooler connection, mid ``building_photo``, has happened
+    here - has already written a truncated file. An automatic backup has nobody
+    watching it, so clearing that away belongs with the run rather than with a
+    caller who may never look.
+    """
+
+    def failed(message):
+        if on_failure:
+            try:
+                on_failure()
+            except Exception:
+                logger.exception("Could not clean up after a failed %s", command[0])
+        _finish(job_id, "failed", message)
 
     with _jobs_lock:
         if job_id in _jobs:
@@ -291,24 +367,24 @@ def _run(job_id, command, environment, on_success=None):
             timeout=600,
         )
     except subprocess.TimeoutExpired:
-        _finish(job_id, "failed", "The operation timed out after 10 minutes.")
+        failed("The operation timed out after 10 minutes.")
         return
     except Exception as error:
-        _finish(job_id, "failed", f"The operation could not be started: {error}")
+        failed(f"The operation could not be started: {error}")
         return
 
     if completed.returncode != 0:
         # The tool's own last line says far more than a generic failure, and it
         # does not contain the password, which was passed in the environment.
         detail = (completed.stderr or "").strip().splitlines()
-        _finish(job_id, "failed", detail[-1][:300] if detail else "The operation failed.")
+        failed(detail[-1][:300] if detail else "The operation failed.")
         return
 
     if on_success:
         try:
             on_success()
         except Exception as error:
-            _finish(job_id, "failed", f"The archive could not be recorded: {error}")
+            failed(f"The archive could not be recorded: {error}")
             return
 
     _finish(job_id, "succeeded")
@@ -339,6 +415,7 @@ def start_backup(actor):
     directory = backup_directory()
     stamp = datetime.now(timezone.utc)
     archive = directory / f"{stamp.strftime('%Y%m%d-%H%M%S')}Z.dump"
+    working = directory / f"{archive.name}{WORKING_SUFFIX}"
 
     command = [
         tool,
@@ -349,10 +426,13 @@ def start_backup(actor):
         "--no-acl",
         "--format=custom",
         "--compress=6",
-        "--file", str(archive),
+        "--file", str(working),
     ]
 
     def record():
+        # The rename is what publishes the archive, and it is the last thing to
+        # happen, so the panel never lists a dump that is still being written.
+        working.replace(archive)
         _write_metadata(
             archive,
             createdAt=iso_utc(stamp),
@@ -361,8 +441,11 @@ def start_backup(actor):
             status="ready",
         )
 
+    def discard():
+        working.unlink(missing_ok=True)
+
     def worker(job_id):
-        _run(job_id, command, environment, on_success=record)
+        _run(job_id, command, environment, on_success=record, on_failure=discard)
 
     return _start("backup", worker)
 

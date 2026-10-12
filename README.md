@@ -101,9 +101,28 @@ Backup & Recovery on My Profile takes real `pg_dump` archives. Four routes back 
 | `POST /api/backups/<id>/restore` | Restore an archive; needs the caller's password |
 | `GET /api/jobs/<id>` | Poll one operation until it is terminal |
 
-The archive is `pg_dump`'s custom format, so `pg_restore` can list it, pull one table out of it, or restore all of it with no code from this repository involved. That is the reason for preferring it to an application-level export. Measured against this project: **24 MB in about 1 minute 45 seconds**, covering all 17 tables of the `public` schema.
+The archive is `pg_dump`'s custom format, so `pg_restore` can list it, pull one table out of it, or restore all of it with no code from this repository involved. That is the reason for preferring it to an application-level export. Measured against this project: **75 MB in about a minute**, covering all 17 tables of the `public` schema. It was 24 MB in 1 minute 45 seconds when this was written; the growth is `building_photo` and `location_photo`, which store image bytes in the database, so size retention against a fresh measurement rather than against this sentence.
 
 These are jobs rather than plain responses because of that runtime. The API runs `gunicorn --timeout 120`, so a synchronous dump would be killed before finishing. `POST /api/backups` returns `202` with `{id, kind, status}` and the panel polls `GET /api/jobs/<id>` every 1.5 seconds.
+
+### Automatic backups
+
+One dump a day, taken by a thread inside the API process (`app/services/backup_schedule.py`). It calls the same `start_backup` as the panel's button, so an automatic archive differs from a hand-made one only in its `createdBy`, lands in the same list, and is restored the same way. There is no scheduler library and no cron entry to keep in step with the code.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `BACKUP_SCHEDULE_ENABLED` | off | Must be `true`, `1` or `yes` before anything runs |
+| `BACKUP_SCHEDULE_AT` | `18:30` | Daily run time, in **UTC**. 18:30 UTC is 02:30 Philippine time |
+| `BACKUP_KEEP` | `14` | Archives kept; the rest are deleted after each automatic run |
+
+Four things to know before switching it on:
+
+- **Retention deletes archives that people took by hand.** It keeps the newest `BACKUP_KEEP` files in the directory whoever made them, because the limit is about disk rather than about authorship. At today's ~75 MB a dump, the default is a little over 1 GB.
+- **A missed night is picked up at startup.** If the newest archive is more than a day old, a backup runs two minutes after the process starts instead of waiting for the next scheduled minute, because a development machine is rarely awake at 02:30. A restart an hour after a successful run does not take another.
+- **Starting it in two processes is safe.** Each run is claimed by creating a `.claimed-<time>` marker in the backup directory with `O_EXCL`, so `flask --debug` (which runs the app twice) or a second gunicorn worker still produces one dump rather than two writing the same file. Because the marker outlives the process, a restart does not re-take a night that was already taken.
+- **Every run reaches the audit log** as a `System` row with actor `scheduler` — `backup`, `backup failed`, or `backup skipped` when somebody's own job was already running. The Logs page shows these under All.
+
+An unfinished dump is no longer mistaken for a backup. `pg_dump` creates its output file immediately and fills it as it reads, so a run that died part way through — a dropped pooler connection mid `building_photo` has happened here — used to leave a truncated file that the panel listed as ready to restore from. A dump now writes `<id>.dump.partial` and is renamed to `<id>.dump` only once the tool has exited cleanly, and leftovers are swept before each automatic run.
 
 ### What a deployment needs
 
@@ -111,6 +130,8 @@ Two things that are **not** in place today:
 
 1. **`pg_dump` and `pg_restore` must be on the server.** The API image (`python:3.12-slim-bookworm`) does not include them, so a deployed backup fails with a clear `503` rather than a crash. Debian bookworm's `postgresql-client` is version 15, and **a 15 client refuses to dump a 17 server** — Supabase runs 17.6, so the client must be 17 or newer. Installing that needs the PostgreSQL APT repository, which would add an unpinned source to an image that otherwise pins its base by digest and its Python packages by hash. That trade is a deliberate decision, so it has not been made here. Set `PG_DUMP_PATH` and `PG_RESTORE_PATH` to point at specific binaries.
 2. **The archive directory must outlive the container.** Archives are written to `BACKUP_DIR` (default `backups/`, gitignored). `deploy/compose.yaml` mounts no volume, so in a container they would disappear on the next deployment. Mount a volume at the configured path, or move storage to object storage.
+
+Both are also why the schedule is off by default. On today's image an automatic run would fail with that `503` every night, and any archive it did manage to write would go with the container on the next deployment — so `BACKUP_SCHEDULE_ENABLED` is something to switch on after fixing both, not before.
 
 Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
 

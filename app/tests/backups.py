@@ -299,6 +299,29 @@ def test_a_failing_dump_reports_the_tool_s_own_reason(app, monkeypatch):
     assert "version mismatch" in job["message"]
 
 
+def test_a_failed_dump_is_not_left_where_a_restore_could_find_it(app, monkeypatch, tmp_path):
+    """pg_dump fills its file as it reads, so a dump that died has written one."""
+
+    def fake_run(command, env=None, **kwargs):
+        target = command[command.index("--file") + 1]
+        with open(target, "wb") as handle:
+            handle.write(b"PGDMP-half")
+        return FakeCompleted(returncode=1, stderr="pg_dump: error: connection lost")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post("/api/backups").get_json()
+        job = wait_for_terminal(body["id"])
+        items = app.test_client().get("/api/backups").get_json()["items"]
+
+    assert job["status"] == "failed"
+    assert items == []
+    assert list(tmp_path.glob("*.dump*")) == []
+
+
 def test_a_missing_pg_dump_is_reported_as_unavailable(app, monkeypatch):
     monkeypatch.setattr(backup_jobs, "find_tool", lambda name: None)
 
