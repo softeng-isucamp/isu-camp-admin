@@ -9,7 +9,7 @@ export const PATHWAY_COLORS = {
 } as const;
 
 interface PathwayStrokeInput {
-  /** The Pathway's Way type; anything other than Road is drawn as a Walkway. */
+  /** The Pathway's Way type, read through the app's vocabulary; anything that is not a Road is drawn as a Walkway. */
   type: string | undefined;
   selected: boolean;
   outsideBoundary: boolean;

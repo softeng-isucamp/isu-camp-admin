@@ -190,6 +190,30 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("complementary", { name: "Renamed Active Walk object details" })).toBeInTheDocument();
   });
 
+  it("colours Pathways by Way type and shows an unsaved Way type in the tooltip", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "walk", name: "Active Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", allowedModes: ["Walking"], pathPoints: [] },
+      { id: "road", name: "Ring Road", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Road", direction: "Two-way", status: "Active", allowedModes: ["Walking", "Vehicle"], pathPoints: [[16.7207, 121.6897]] },
+    ]);
+    renderEditor();
+
+    const geometry = (name: string) => screen.getAllByTestId("path-geometry").find((line) => line.textContent?.includes(name))!;
+    await waitFor(() => expect(screen.getAllByTestId("path-geometry")).toHaveLength(2));
+    expect(geometry("Active Walk")).toHaveAttribute("data-color", "#005931");
+    expect(geometry("Active Walk")).toHaveTextContent("Walkway · Shade: Unknown");
+    expect(geometry("Ring Road")).toHaveAttribute("data-color", "#1d4ed8");
+    expect(geometry("Ring Road")).toHaveTextContent("Road · Shade: Unknown");
+
+    await chooseWalkingNetworkBrowser();
+    fireEvent.change(screen.getByPlaceholderText("Search Pathways"), { target: { value: "Active Walk" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Active Walk/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Walking Network browser" }));
+    fireEvent.change(screen.getByLabelText("Pathway type"), { target: { value: "Road" } });
+
+    expect(geometry("Active Walk")).toHaveAttribute("data-color", "#e67e22");
+    expect(geometry("Active Walk")).toHaveTextContent("Road · Shade: Unknown");
+  });
+
   it("adjusts a selected Path Point with coordinates", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
       { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Mostly Shaded", type: "Walkway", direction: "Two-way", status: "Open", pathPoints: [[16.7207, 121.6897]] },

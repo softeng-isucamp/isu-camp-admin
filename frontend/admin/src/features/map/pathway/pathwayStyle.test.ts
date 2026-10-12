@@ -14,8 +14,10 @@ describe("pathwayStroke", () => {
     expect(stroke({ type: "Road", pathTool: true }).weight).toBe(stroke({ pathTool: true }).weight + 1);
   });
 
-  it("reads the Way type whatever its casing and treats anything else as a Walkway", () => {
+  it("follows the app's Way type vocabulary for historical labels and draws anything unknown as a Walkway", () => {
     expect(stroke({ type: " road " }).color).toBe(PATHWAY_COLORS.road);
+    expect(stroke({ type: "Service road" })).toEqual(stroke({ type: "Road" }));
+    expect(stroke({ type: "Pedestrian path" })).toEqual(stroke());
     expect(stroke({ type: "Service lane" })).toEqual(stroke());
     expect(stroke({ type: undefined })).toEqual(stroke());
   });

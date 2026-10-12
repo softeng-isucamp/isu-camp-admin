@@ -30,7 +30,7 @@ export function PathwaysLayer({
   isOverviewZoom,
   onSelectPathway,
 }: PathwaysLayerProps) {
-  const { editingPathId, pathPoints, pathPointDragPreview } = pathway;
+  const { editingPathId, pathPoints, pathPointDragPreview, pathwayDraft } = pathway;
   return (
     <>
       {filteredPathways.map((path) => {
@@ -45,8 +45,9 @@ export function PathwaysLayer({
             : pathPoints
           : path.pathPoints;
         const isSelected = selectedPathId === path.id || isEditingThisPath;
-        // `path` already carries the pathway tool's unsaved Way type for the Pathway it is editing.
-        const wayType = normalizePathwayWayType(path.type) === "Road" ? "Road" : "Walkway";
+        // An unsaved Way type shows at once, whether it was changed in the pathway tool or the inspector.
+        const draftType = pathwayDraft?.id === path.id ? pathwayDraft.type : path.type;
+        const wayType = normalizePathwayWayType(draftType) === "Road" ? "Road" : "Walkway";
         const outsideBoundary = !source || !destination || !geometryOnCampus(
           [[source.lat, source.lng], ...currentPoints, [destination.lat, destination.lng]],
           campusBoundary,
