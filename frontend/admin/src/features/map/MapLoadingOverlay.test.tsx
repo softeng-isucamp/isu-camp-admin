@@ -101,14 +101,29 @@ describe("MapLoadingOverlay", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("holds at 100%, fades and then unmounts when loading finishes", () => {
+  it("keeps naming the stage the bar is passing until the bar has filled", () => {
     matchMedia(false);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "performance"] });
     const { rerender, root } = renderOverlay(loading());
 
     rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Route Nodes");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Map ready");
+
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(root()).not.toHaveClass("pointer-events-none");
+  });
+
+  it("holds at 100%, fades and then unmounts once the bar has filled", () => {
+    matchMedia(false);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame", "performance"] });
+    const { rerender, root } = renderOverlay(loading());
+
+    rerender(<MapLoadingOverlay load={loading({ stages: stages("done", "done", "done", "done", "done"), progress: 1, loaded: true })} />);
+    act(() => { vi.advanceTimersByTime(1000); });
     expect(root()).not.toHaveClass("pointer-events-none");
     expect(screen.getByRole("status")).toHaveTextContent("Map ready");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
 
     act(() => { vi.advanceTimersByTime(450); });
     expect(root()).toHaveClass("opacity-0", "pointer-events-none");

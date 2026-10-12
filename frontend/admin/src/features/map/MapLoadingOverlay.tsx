@@ -14,16 +14,17 @@ const prefersReducedMotion = () =>
 type Phase = "loading" | "holding" | "fading" | "done";
 
 /**
- * Keeps the overlay up through the first load, rests at 100%, then fades it out.
- * Mounting with the data already loaded (a return visit) never shows it.
+ * Keeps the overlay up through the first load, rests once the bar has filled, then fades it
+ * out. Mounting with the data already loaded (a return visit) never shows it.
  */
-function useOverlayPhase(loaded: boolean, reduced: boolean): Phase {
+function useOverlayPhase(loaded: boolean, filled: boolean, reduced: boolean): Phase {
   const [phase, setPhase] = useState<Phase>(loaded ? "done" : "loading");
   useEffect(() => {
     if (!loaded) {
       setPhase("loading");
       return undefined;
     }
+    if (!filled) return undefined;
     if (reduced) {
       setPhase("done");
       return undefined;
@@ -35,7 +36,7 @@ function useOverlayPhase(loaded: boolean, reduced: boolean): Phase {
       window.clearTimeout(fade);
       window.clearTimeout(finish);
     };
-  }, [loaded, reduced]);
+  }, [loaded, filled, reduced]);
   return phase;
 }
 
@@ -47,19 +48,22 @@ function useOverlayPhase(loaded: boolean, reduced: boolean): Phase {
 export function MapLoadingOverlay({ load }: { load: MapLoadState }) {
   const { stages, loaded, error } = load;
   const [reduced] = useState(prefersReducedMotion);
-  const phase = useOverlayPhase(loaded, reduced);
   const shown = useSmoothedProgress({
     target: loaded ? 1 : load.progress,
     stageSize: 1 / Math.max(1, stages.length),
     frozen: Boolean(error),
     reduced,
   });
+  const phase = useOverlayPhase(loaded, shown >= 1, reduced);
   if (phase === "done") return null;
 
   const percent = Math.round(Math.min(1, Math.max(0, shown)) * 100);
-  const current = stages.find((stage) => stage.status === "error")
+  const inFlight = stages.find((stage) => stage.status === "error")
     ?? stages.find((stage) => stage.status === "loading")
     ?? stages.find((stage) => stage.status === "pending");
+  // The chip names the stage the bar is passing through, so it never runs ahead of the bar.
+  const reached = shown < 1 ? stages[Math.floor(Math.max(0, shown) * stages.length)] : undefined;
+  const current = inFlight && reached && stages.indexOf(reached) > stages.indexOf(inFlight) ? inFlight : reached ?? inFlight;
   const fading = phase === "fading";
 
   return (
@@ -101,7 +105,7 @@ export function MapLoadingOverlay({ load }: { load: MapLoadState }) {
             <Spinner size={14} className="text-[#005931]" />
             <div role="status" aria-live="polite" className="min-w-0 flex-1 truncate font-extrabold text-[#191c1d]">
               {current ? `${current.label}…` : "Map ready"}
-              {current?.detail && <span className="ml-1 font-semibold text-[#3f4941]">· {current.detail}</span>}
+              {current === inFlight && current?.detail && <span className="ml-1 font-semibold text-[#3f4941]">· {current.detail}</span>}
             </div>
             <span className="shrink-0 font-extrabold tabular-nums text-[#005931]">{percent}%</span>
           </div>
