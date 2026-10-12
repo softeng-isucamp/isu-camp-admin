@@ -1,0 +1,359 @@
+"""The automatic backup: when it runs, what it keeps, and what it cleans up."""
+
+import json
+import subprocess
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from flask import Flask
+
+from extensions import db
+from services import backup_jobs, backup_schedule
+
+
+@pytest.fixture
+def app(monkeypatch, tmp_path):
+    app = Flask(__name__)
+    app.config.update(
+        SQLALCHEMY_DATABASE_URI="sqlite://",
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        TESTING=True,
+        SECRET_KEY="test-secret",
+    )
+    db.init_app(app)
+
+    # Archives go to a temp directory, never the real backups/ folder.
+    monkeypatch.setenv("BACKUP_DIR", str(tmp_path))
+    monkeypatch.setenv("SUPABASE_DATABASE_URL",
+                       "postgresql+psycopg2://u:p@db.example.com:5432/postgres")
+    # Settings are read from the environment on every call, so a test that does
+    # not set one must not inherit the developer's.
+    for name in ("BACKUP_SCHEDULE_ENABLED", "BACKUP_SCHEDULE_AT", "BACKUP_KEEP"):
+        monkeypatch.delenv(name, raising=False)
+    # A real dump is minutes long; the tests poll a fake one.
+    monkeypatch.setattr(backup_schedule, "POLL_SECONDS", 0.01)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+    backup_jobs._jobs.clear()
+
+    yield app
+
+    backup_schedule.stop_scheduler()
+    backup_jobs._jobs.clear()
+
+
+@pytest.fixture
+def recorded(monkeypatch):
+    """Captures the audit rows an automatic run writes."""
+
+    rows = []
+    monkeypatch.setattr(
+        backup_schedule, "log_audit",
+        lambda *arguments, **keywords: rows.append(arguments),
+    )
+    return rows
+
+
+class FakeCompleted:
+    def __init__(self, returncode=0, stderr=""):
+        self.returncode = returncode
+        self.stderr = stderr
+        self.stdout = ""
+
+
+def fake_dump(monkeypatch, returncode=0, stderr="", before_return=None):
+    """Stands in for pg_dump, writing the file the real tool would write."""
+
+    captured = {}
+
+    def run(command, env=None, **keywords):
+        captured["command"] = command
+        target = command[command.index("--file") + 1]
+        with open(target, "wb") as handle:
+            handle.write(b"PGDMP-fake")
+        if before_return:
+            before_return(captured)
+        return FakeCompleted(returncode=returncode, stderr=stderr)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return captured
+
+
+def store_archive(directory, name, created_at):
+    (directory / f"{name}.dump").write_bytes(b"PGDMP")
+    (directory / f"{name}.json").write_text(json.dumps({
+        "createdAt": created_at,
+        "createdBy": "admin01",
+        "scope": "public schema",
+        "status": "ready",
+    }), encoding="utf-8")
+
+
+# ==========================================
+# SETTINGS
+# ==========================================
+
+def test_the_timer_is_off_unless_it_is_switched_on(app):
+    """A deployment with no pg_dump would otherwise fail quietly every night."""
+
+    assert backup_schedule.start_scheduler(app) is None
+
+
+def test_switching_it_on_starts_one_timer_however_often_it_is_asked(app, monkeypatch):
+    """The module is imported once per process, but the dev reloader has two."""
+
+    monkeypatch.setenv("BACKUP_SCHEDULE_ENABLED", "true")
+
+    first = backup_schedule.start_scheduler(app)
+    second = backup_schedule.start_scheduler(app)
+
+    assert first is not None
+    assert second is first
+
+
+@pytest.mark.parametrize("value, expected", (
+    (None, (18, 30)),
+    ("", (18, 30)),
+    ("02:15", (2, 15)),
+    ("00:00", (0, 0)),
+    ("23:59", (23, 59)),
+    # Unreadable settings fall back rather than stopping the backups.
+    ("half past two", (18, 30)),
+    ("25:00", (18, 30)),
+    ("18:75", (18, 30)),
+    ("18", (18, 30)),
+))
+def test_the_run_time_is_read_from_the_environment_in_utc(app, monkeypatch, value, expected):
+    if value is not None:
+        monkeypatch.setenv("BACKUP_SCHEDULE_AT", value)
+
+    assert backup_schedule.schedule_time() == expected
+
+
+@pytest.mark.parametrize("value, expected", (
+    (None, 14),
+    ("7", 7),
+    ("1", 1),
+    # Keeping nothing would delete the archive the run just took.
+    ("0", 1),
+    ("-3", 1),
+    ("lots", 14),
+))
+def test_retention_is_read_from_the_environment(app, monkeypatch, value, expected):
+    if value is not None:
+        monkeypatch.setenv("BACKUP_KEEP", value)
+
+    assert backup_schedule.keep_count() == expected
+
+
+def test_the_next_run_is_today_while_the_time_is_still_ahead(app, monkeypatch):
+    monkeypatch.setenv("BACKUP_SCHEDULE_AT", "18:30")
+
+    due = backup_schedule.next_run_after(datetime(2026, 10, 12, 9, 0, tzinfo=timezone.utc))
+
+    assert due == datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+
+
+def test_the_next_run_is_tomorrow_once_the_time_has_passed(app, monkeypatch):
+    monkeypatch.setenv("BACKUP_SCHEDULE_AT", "18:30")
+
+    due = backup_schedule.next_run_after(datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc))
+
+    assert due == datetime(2026, 10, 13, 18, 30, tzinfo=timezone.utc)
+
+
+# ==========================================
+# CLAIMING A RUN
+# ==========================================
+
+def test_only_one_process_takes_a_given_run(app):
+    """Two processes reach the same minute; one dump comes out of it."""
+
+    due = datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+
+    assert backup_schedule.claim(due) is True
+    assert backup_schedule.claim(due) is False
+    # A different night is a different claim.
+    assert backup_schedule.claim(due + timedelta(days=1)) is True
+
+
+def test_a_claim_outlives_the_process_that_made_it(app, tmp_path):
+    """So a restart does not re-dump a night that has already been taken."""
+
+    due = datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+    backup_schedule.claim(due)
+
+    assert list(tmp_path.glob(".claimed-*"))
+    # Claims are hidden files, so they are not mistaken for archives.
+    assert backup_jobs.list_backups() == []
+
+
+# ==========================================
+# WHEN A RUN IS OWED
+# ==========================================
+
+def test_a_backup_is_owed_when_there_is_no_archive_at_all(app):
+    assert backup_schedule.is_overdue() is True
+
+
+def test_nothing_is_owed_right_after_a_backup(app, tmp_path):
+    store_archive(tmp_path, "20261012-120000Z",
+                  backup_jobs.iso_utc(datetime.now(timezone.utc)))
+
+    assert backup_schedule.is_overdue() is False
+
+
+def test_a_backup_is_owed_once_a_day_has_gone_by(app, tmp_path):
+    stale = datetime.now(timezone.utc) - timedelta(days=1, minutes=1)
+    store_archive(tmp_path, "20261011-120000Z", backup_jobs.iso_utc(stale))
+
+    assert backup_schedule.is_overdue() is True
+
+
+# ==========================================
+# ONE RUN
+# ==========================================
+
+def test_a_run_takes_the_same_dump_the_panel_takes(app, monkeypatch, tmp_path, recorded):
+    captured = fake_dump(monkeypatch)
+
+    with app.app_context():
+        job = backup_schedule.run_backup_now(app)
+
+    assert job["status"] == "succeeded", job
+    items = backup_jobs.list_backups()
+    assert len(items) == 1
+    # Distinguishable from a button press only by this.
+    assert items[0]["createdBy"] == "scheduled"
+    assert items[0]["scope"] == "public schema"
+    assert "--format=custom" in captured["command"]
+    assert "--schema=public" in captured["command"]
+
+
+def test_an_archive_is_invisible_until_the_dump_has_finished(app, monkeypatch, tmp_path):
+    """A truncated file must never be offered as a backup to restore from."""
+
+    seen = {}
+
+    def while_dumping(captured):
+        seen["listed"] = backup_jobs.list_backups()
+        seen["target"] = captured["command"][captured["command"].index("--file") + 1]
+
+    fake_dump(monkeypatch, before_return=while_dumping)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+
+    assert seen["target"].endswith(".dump.partial")
+    assert seen["listed"] == []
+    assert len(backup_jobs.list_backups()) == 1
+
+
+def test_a_failed_dump_leaves_nothing_behind(app, monkeypatch, tmp_path, recorded):
+    """The failure yesterday was a dropped connection mid building_photo."""
+
+    fake_dump(monkeypatch, returncode=1, stderr=(
+        "pg_dump: error: Dumping the contents of table \"building_photo\" failed\n"
+        "pg_dump: detail: SSL connection has been closed unexpectedly"
+    ))
+
+    with app.app_context():
+        job = backup_schedule.run_backup_now(app)
+
+    assert job["status"] == "failed"
+    assert "SSL connection" in job["message"]
+    assert backup_jobs.list_backups() == []
+    assert list(tmp_path.glob("*.dump")) == []
+    assert list(tmp_path.glob("*.dump.partial")) == []
+    assert [row[2] for row in recorded] == ["backup failed"]
+
+
+def test_leftovers_from_an_earlier_crash_are_swept_before_a_run(app, monkeypatch, tmp_path):
+    abandoned = tmp_path / "20261011-075702Z.dump.partial"
+    abandoned.write_bytes(b"PGDMP-half")
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+
+    assert not abandoned.exists()
+    assert len(backup_jobs.list_backups()) == 1
+
+
+def test_retention_keeps_the_newest_and_takes_the_sidecars_with_it(app, monkeypatch, tmp_path):
+    monkeypatch.setenv("BACKUP_KEEP", "2")
+    for day in (9, 10, 11):
+        store_archive(tmp_path, f"202610{day:02d}-120000Z",
+                      f"2026-10-{day:02d}T12:00:00Z")
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+
+    kept = sorted(path.stem for path in tmp_path.glob("*.dump"))
+    assert len(kept) == 2
+    assert "20261011-120000Z" in kept
+    # The two oldest are gone, and so are their sidecars.
+    assert not (tmp_path / "20261009-120000Z.json").exists()
+    assert not (tmp_path / "20261010-120000Z.json").exists()
+    assert (tmp_path / "20261011-120000Z.json").exists()
+
+
+def test_a_run_stands_aside_for_a_job_that_is_already_going(app, monkeypatch, recorded):
+    """Somebody is restoring, or dumping by hand; their job is the backup."""
+
+    def refuse(actor):
+        raise backup_jobs.BackupError("Another backup or restore is already running.", status=409)
+
+    monkeypatch.setattr(backup_schedule, "start_backup", refuse)
+
+    with app.app_context():
+        assert backup_schedule.run_backup_now(app) is None
+
+    assert [row[2] for row in recorded] == ["backup skipped"]
+
+
+# ==========================================
+# WHAT THE LOGS PAGE SEES
+# ==========================================
+
+def test_a_completed_run_is_recorded_as_a_system_event(app, monkeypatch, recorded):
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+
+    assert len(recorded) == 1
+    category, actor, action, target, archive_id, detail = recorded[0]
+    # "System" is a category the logs route already accepts and the frontend
+    # already normalizes; the actor is not a person.
+    assert (category, actor, action, target) == ("System", "scheduler", "backup", "Database")
+    assert archive_id == backup_jobs.list_backups()[0]["id"]
+    assert "completed" in detail
+
+
+def test_retention_is_named_in_the_record(app, monkeypatch, tmp_path, recorded):
+    monkeypatch.setenv("BACKUP_KEEP", "1")
+    store_archive(tmp_path, "20261009-120000Z", "2026-10-09T12:00:00Z")
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+
+    assert "removed 1 archive(s) past the 1 kept" in recorded[0][5]
+
+
+def test_a_broken_audit_write_does_not_lose_the_backup(app, monkeypatch):
+    """The dump is the point; the history of it is not worth a thread for."""
+
+    fake_dump(monkeypatch)
+
+    def explode(*arguments, **keywords):
+        raise RuntimeError("audit_log is missing")
+
+    monkeypatch.setattr(backup_schedule, "log_audit", explode)
+
+    with app.app_context():
+        job = backup_schedule.run_backup_now(app)
+
+    assert job["status"] == "succeeded"
+    assert len(backup_jobs.list_backups()) == 1
