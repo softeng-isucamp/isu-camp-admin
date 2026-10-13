@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { campusCenter } from "../../services/mockData";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { polygonFeatureAnchor } from "./mapEditing";
+import type { PathwayCrossing } from "./pathway/pathwayTopology";
 import { ToolInterruptionDialog, ToolRailDock } from "./ToolRailDock";
 import { WorkingSessionManager } from "./WorkingSessionManager";
 import { InspectorCardHUD } from "./InspectorCardHUD";
@@ -18,7 +19,8 @@ import { selectedBuildingViewFor } from "./building/selectedBuilding";
 import { RouteNodeMovePanel } from "./routeNode/RouteNodeMovePanel";
 import { NetworkBrowser, type NetworkBrowserSelection } from "./NetworkBrowser";
 import { MapLegend } from "./MapLegend";
-import { MapIssuesTray, type MapIssue } from "./MapIssuesTray";
+import { MapIssuesTray } from "./MapIssuesTray";
+import { MapLoadingOverlay } from "./MapLoadingOverlay";
 import type { EditorMode, ToolType } from "./types";
 import { paddedCampusBounds, pointOnCampus } from "./campusBoundary";
 import { createRouteNodeWorkflow } from "./routeNode/RouteNodeWorkflow";
@@ -26,7 +28,8 @@ import { useRouteNodePointTool } from "./routeNode/useRouteNodePointTool";
 import { useRouteNodeFrame } from "./routeNode/useRouteNodeFrame";
 import { usePathwayEditing } from "./pathway/usePathwayEditing";
 import { useBuildingFootprintEditing } from "./building/useBuildingFootprintEditing";
-import { useOutsideBoundaryCount, usePointSnapTargets } from "./session/mapDerivedData";
+import { usePointSnapTargets } from "./session/mapDerivedData";
+import { useMapIssues } from "./session/mapIssues";
 import { useMapRouteIntents, type MapRouteIntent } from "./session/useMapRouteIntents";
 import { useMapData } from "./session/useMapData";
 import { useMapOverlay } from "./session/useMapOverlay";
@@ -81,6 +84,7 @@ export function MapEditor() {
     directoryNodes,
     directoryPathways,
     campusBoundary,
+    load,
   } = useMapData();
 
   const overlay = useMapOverlay(data?.buildings);
@@ -165,7 +169,6 @@ export function MapEditor() {
     context: {
       sessionBuildings,
       locations: currentLocations,
-      nodes: currentNodes,
       campusBoundary,
     },
     drawing: mode === "area",
@@ -185,8 +188,6 @@ export function MapEditor() {
     setPoints,
     polygonInteraction,
     polygonClosed,
-    nonRoutableBuildingId,
-    setNonRoutableBuildingId,
     currentBuildings,
   } = buildingEditor;
   const pointTool = useRouteNodePointTool({
@@ -221,10 +222,6 @@ export function MapEditor() {
     const bounds = paddedCampusBounds(campusBoundary);
     return [[bounds.south, bounds.west], [bounds.north, bounds.east]] as [[number, number], [number, number]];
   }, [campusBoundary]);
-  const outsideBoundaryCount = useOutsideBoundaryCount(
-    { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways },
-    campusBoundary,
-  );
 
   const visible = useVisibleMapObjects(
     { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways },
@@ -430,9 +427,6 @@ export function MapEditor() {
   const handleSavePlacedNode = async () => {
     const placed = await pointTool.savePlacedNode();
     if (!placed) return;
-    if (placed.draft.nodeType === "Entrance" && placed.draft.associatedPlaceId === nonRoutableBuildingId) {
-      setNonRoutableBuildingId(null);
-    }
     feedback.reportSuccess(`${placed.node.name || "Route Node"} was added successfully.`);
     setMode("select");
     nodeFrame.load(placed.node);
@@ -486,12 +480,12 @@ export function MapEditor() {
     setMode("path");
   };
 
-  const createJunctionAtCrossing = () => pathway.createJunctionAtCrossing((junction) => {
+  const createJunctionAtCrossing = (crossing: PathwayCrossing) => pathway.createJunctionAtCrossing((junction) => {
     feedback.reportSuccess(`${junction.name || "Junction"} was added successfully and the Pathway was split.`);
     nodeFrame.load(junction);
     setSelected({ type: "node", id: junction.id });
     finishPathwayTool();
-  });
+  }, crossing);
 
   const reshapePathway = (path: Pathway) => {
     setEditingPathId(path.id);
@@ -531,13 +525,6 @@ export function MapEditor() {
   ) => {
     buildingEditor.initializeFootprintEdit(building, interaction);
     setMode("area");
-  };
-
-  const startGuidedEntranceDraft = () => {
-    const building = currentBuildings.find((candidate) => candidate.id === nonRoutableBuildingId);
-    if (!building) return;
-    pointTool.beginEntrancePlacement(`${building.name} Entrance`, building.id);
-    setMode("place");
   };
 
   const selectTool = (toolType: ToolType) => {
@@ -651,6 +638,20 @@ export function MapEditor() {
     },
   });
 
+  const mapIssues = useMapIssues(
+    { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways, pathwayCrossings },
+    campusBoundary,
+    createJunctionAtCrossing,
+    {
+      mode,
+      hasActiveDraft: Boolean(workingSessionState.activeDraft),
+      setMode,
+      selectObject,
+      flyTo,
+      showInspector: () => setNetworkBrowserOpen(false),
+    },
+  );
+
   return (
     <div className="flex flex-col gap-4 h-[calc(100vh-100px)] min-h-[580px] p-2">
       <MapPageHeader />
@@ -658,183 +659,160 @@ export function MapEditor() {
       <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
 
       <div className="relative flex-1 rounded-[28px] overflow-hidden border border-[#e1e3e4] shadow-sm bg-[#dce8e2] min-h-[500px]">
-        <MapContainer
-          center={campusCenter}
-          zoom={18}
-          minZoom={15}
-          maxZoom={22}
-          maxBounds={navigationBounds}
-          maxBoundsViscosity={0.7}
-          zoomControl={false}
-          className="w-full h-full"
-        >
-          <BasemapTileLayer basemap={basemap} displaysOsmOverlays={displaysOsmOverlays} />
-          <MapController
-            onMapClick={onMapClick}
-            flyTarget={flyTarget}
-            flyTargetZoom={flyTargetZoom}
-            frameBounds={frameBounds}
-            navigationBounds={navigationBounds}
-            onViewportChange={handleViewportChange}
+        {/* The overlay blocks the pointer; inert keeps the chrome out of keyboard reach until the data is in. */}
+        <div className="contents" inert={!load.loaded}>
+          <MapContainer
+            center={campusCenter}
+            zoom={18}
+            minZoom={15}
+            maxZoom={22}
+            maxBounds={navigationBounds}
+            maxBoundsViscosity={0.7}
+            zoomControl={false}
+            className="w-full h-full"
+          >
+            <BasemapTileLayer basemap={basemap} displaysOsmOverlays={displaysOsmOverlays} />
+            <MapController
+              onMapClick={onMapClick}
+              flyTarget={flyTarget}
+              flyTargetZoom={flyTargetZoom}
+              frameBounds={frameBounds}
+              navigationBounds={navigationBounds}
+              onViewportChange={handleViewportChange}
+            />
+
+            <MapLayers
+              view={{ mode, selected, isOverviewZoom, campusBoundary }}
+              visible={visible}
+              current={{
+                buildings: currentBuildings,
+                nodes: currentNodes,
+                contentLocations: buildingContentLocations,
+                visibleIndoorLocations,
+              }}
+              editors={{ pathway, buildingEditor, pointTool, indoor }}
+              move={{ snapTargets: pointSnapTargets, outsideBoundary: movingOutsideBoundary, distanceMeters: moveDistanceMeters }}
+              actions={{
+                onSelectCanvasObject: selectCanvasObject,
+                onSelectObject: selectObject,
+                onSelectIndoorLocation: (location) => {
+                  clearSelectionPopover();
+                  setSelected(locationSelection(location));
+                },
+                onClickNode: handleRouteNodeClick,
+                onSelect: setSelected,
+                onError: setError,
+              }}
+            />
+          </MapContainer>
+
+          {indoorPlacement && (
+            <IndoorLocationPlacementPanel
+              indoor={indoor}
+              contentLocations={buildingContentLocations}
+              buildings={currentBuildings}
+              zoom={currentMapZoom}
+              error={error}
+              onSave={() => { void saveIndoorLocationPosition(); }}
+            />
+          )}
+
+          {isOverviewZoom && mode !== "select" && <OverviewZoomNotice />}
+
+          {networkBrowserOpen && (
+            <NetworkBrowser
+              pathways={currentPathways}
+              nodes={currentNodes}
+              buildings={allSessionBuildings}
+              selected={networkBrowserSelection}
+              onSelect={handleNetworkBrowserSelection}
+              onDismiss={() => setNetworkBrowserOpen(false)}
+              className=""
+            />
+          )}
+
+          {selectionPopover && (
+            <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} viewportBounds={currentMapBounds} onSelect={selectCandidate} />
+          )}
+
+          <BasemapToggle basemap={basemap} onChange={setBasemap} />
+
+          <ToolRailDock
+            activeTool={activeTool}
+            onSelectTool={selectTool}
+            onBrowseWalkingNetwork={browseWalkingNetwork}
+            suspendedDrafts={workingSessionState.suspendedDrafts}
+            onResumeDraft={toolSession.requestDraftResume}
           />
 
-          <MapLayers
-            view={{ mode, selected, isOverviewZoom, campusBoundary }}
-            visible={visible}
-            current={{
-              buildings: currentBuildings,
-              nodes: currentNodes,
-              contentLocations: buildingContentLocations,
-              visibleIndoorLocations,
-            }}
-            editors={{ pathway, buildingEditor, pointTool, indoor }}
-            move={{ snapTargets: pointSnapTargets, outsideBoundary: movingOutsideBoundary, distanceMeters: moveDistanceMeters }}
-            actions={{
-              onSelectCanvasObject: selectCanvasObject,
-              onSelectObject: selectObject,
-              onSelectIndoorLocation: (location) => {
-                clearSelectionPopover();
-                setSelected(locationSelection(location));
-              },
-              onClickNode: handleRouteNodeClick,
-              onSelect: setSelected,
-              onError: setError,
-            }}
-          />
-        </MapContainer>
+          {toolSession.pendingToolRequest && workingSessionState.activeDraft && (
+            <ToolInterruptionDialog
+              currentTool={workingSessionState.activeDraft.toolType}
+              requestedTool={toolSession.pendingToolRequest.toolType}
+              onSuspend={() => toolSession.finishInterruption("keep_draft")}
+              onContinue={toolSession.cancelInterruption}
+              onDiscard={() => toolSession.finishInterruption("discard_geometry")}
+            />
+          )}
 
-        {indoorPlacement && (
-          <IndoorLocationPlacementPanel
-            indoor={indoor}
-            contentLocations={buildingContentLocations}
-            buildings={currentBuildings}
-            zoom={currentMapZoom}
-            error={error}
-            onSave={() => { void saveIndoorLocationPosition(); }}
-          />
-        )}
+          <MapSearchBox search={search} results={results} onSearchChange={setSearch} onSelectResult={handleSearchResultClick} />
 
-        {isOverviewZoom && mode !== "select" && <OverviewZoomNotice />}
-
-        {networkBrowserOpen && (
-          <NetworkBrowser
-            pathways={currentPathways}
-            nodes={currentNodes}
-            buildings={allSessionBuildings}
-            selected={networkBrowserSelection}
-            onSelect={handleNetworkBrowserSelection}
-            onDismiss={() => setNetworkBrowserOpen(false)}
-            className=""
-          />
-        )}
-
-        {selectionPopover && (
-          <SelectionPopover popover={selectionPopover} navigationBounds={navigationBounds} viewportBounds={currentMapBounds} onSelect={selectCandidate} />
-        )}
-
-        <BasemapToggle basemap={basemap} onChange={setBasemap} />
-
-        <ToolRailDock
-          activeTool={activeTool}
-          onSelectTool={selectTool}
-          onBrowseWalkingNetwork={browseWalkingNetwork}
-          suspendedDrafts={workingSessionState.suspendedDrafts}
-          onResumeDraft={toolSession.requestDraftResume}
-        />
-
-        {toolSession.pendingToolRequest && workingSessionState.activeDraft && (
-          <ToolInterruptionDialog
-            currentTool={workingSessionState.activeDraft.toolType}
-            requestedTool={toolSession.pendingToolRequest.toolType}
-            onSuspend={() => toolSession.finishInterruption("keep_draft")}
-            onContinue={toolSession.cancelInterruption}
-            onDiscard={() => toolSession.finishInterruption("discard_geometry")}
-          />
-        )}
-
-        <MapSearchBox search={search} results={results} onSearchChange={setSearch} onSelectResult={handleSearchResultClick} />
-
-        <RouteNodeMovePanel
-          pointTool={pointTool}
-          mode={mode}
-          movingObjectName={movingObjectName}
-          movingOutsideBoundary={movingOutsideBoundary}
-          moveDistanceMeters={moveDistanceMeters}
-          savingAction={savingAction}
-          onCancel={handleCancelMove}
-          onSave={handleSavePosition}
-        />
-
-        {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
-          && !networkBrowserOpen && (
-          <ToolPanel
+          <RouteNodeMovePanel
+            pointTool={pointTool}
             mode={mode}
-            error={error}
+            movingObjectName={movingObjectName}
+            movingOutsideBoundary={movingOutsideBoundary}
+            moveDistanceMeters={moveDistanceMeters}
             savingAction={savingAction}
-            editors={{ buildingEditor, pointTool, pathway }}
-            data={{
-              nodes: currentNodes,
-              buildingAssociationOptions,
-              directoryPathways,
-              overlayPathways: overlay.pathways,
-            }}
-            actions={{
-              onSaveBuilding: handleSaveBuilding,
-              onOpenBuildingDetails: (buildingId) => {
-                setSelected({ type: "building", id: buildingId });
-                setOwnerModal("location");
-              },
-              onSavePlacedNode: handleSavePlacedNode,
-              onCancelTool: () => selectTool("select"),
-              onNewPathway: startNewPathway,
-              onBrowseNetwork: () => { setMode("select"); setNetworkBrowserOpen(true); },
-              onSavePathShape: handleSavePathShape,
-            }}
+            onCancel={handleCancelMove}
+            onSave={handleSavePosition}
           />
-        )}
 
-        {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
-          <>
-            {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
-            <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
-          </>
-        )}
+          {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
+            && !networkBrowserOpen && (
+            <ToolPanel
+              mode={mode}
+              error={error}
+              savingAction={savingAction}
+              editors={{ buildingEditor, pointTool, pathway }}
+              data={{
+                nodes: currentNodes,
+                buildingAssociationOptions,
+                directoryPathways,
+                overlayPathways: overlay.pathways,
+              }}
+              actions={{
+                onSaveBuilding: handleSaveBuilding,
+                onOpenBuildingDetails: (buildingId) => {
+                  setSelected({ type: "building", id: buildingId });
+                  setOwnerModal("location");
+                },
+                onSavePlacedNode: handleSavePlacedNode,
+                onCancelTool: () => selectTool("select"),
+                onNewPathway: startNewPathway,
+                onBrowseNetwork: () => { setMode("select"); setNetworkBrowserOpen(true); },
+                onSavePathShape: handleSavePathShape,
+              }}
+            />
+          )}
 
-        <div className="pointer-events-none absolute bottom-4 left-4 z-[900] flex items-end gap-2">
-          <MapLegend />
-          <MapIssuesTray
-            issues={[
-              ...(outsideBoundaryCount > 0
-                ? [{
-                    id: "outside-boundary",
-                    severity: "info",
-                    title: `${outsideBoundaryCount} existing editable campus feature${outsideBoundaryCount === 1 ? "" : "s"} outside campus boundary.`,
-                    body: "Legacy data is retained. Move or edit it back inside the boundary before saving changes.",
-                  } satisfies MapIssue]
-                : []),
-              ...(pathwayCrossings[0]
-                ? [{
-                    id: "pathway-crossing",
-                    severity: "alert",
-                    ariaLabel: "Non-routable pathway crossing",
-                    title: "Pathways cross without a Junction",
-                    body: "This visual crossing is not routable until a shared Junction Route Node is created.",
-                    action: { label: "Create Junction & Split Pathway", onClick: createJunctionAtCrossing },
-                  } satisfies MapIssue]
-                : []),
-              ...(nonRoutableBuildingId && mode === "select"
-                ? [{
-                    id: "non-routable-building",
-                    severity: "alert",
-                    ariaLabel: "Building is not routable",
-                    title: "Building is not routable",
-                    body: "This Building has 0 active Entrance Route Nodes.",
-                    action: { label: "🚪 Add Entrance Route Node Now", onClick: startGuidedEntranceDraft },
-                  } satisfies MapIssue]
-                : []),
-            ]}
-          />
+          {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
+            <>
+              {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
+              <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
+            </>
+          )}
+
+          {/* Left edge, below the tool rail: the issues tray fills the height above the legend and pill row. */}
+          <div className="pointer-events-none absolute bottom-4 left-4 top-36 z-[900] grid w-[22rem] grid-cols-[auto_auto_1fr] grid-rows-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
+            <div className="col-start-1 row-start-2 self-end">
+              <MapLegend />
+            </div>
+            <MapIssuesTray issues={mapIssues.issues} activeIssueId={mapIssues.activeIssueId} onFocusIssue={mapIssues.focusIssue} />
+          </div>
         </div>
+
+        <MapLoadingOverlay load={load} />
       </div>
 
       <MapModals

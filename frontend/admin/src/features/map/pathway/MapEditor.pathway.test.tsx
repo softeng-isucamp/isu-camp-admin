@@ -445,15 +445,16 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
-    expect(await screen.findByRole("alert", { name: "Non-routable pathway crossing" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway" }));
+    expect(await screen.findByRole("button", { name: /Crossing without junction/ })).toHaveTextContent("1");
+    expect(screen.getByRole("button", { name: "A–B × C–D, Not routable" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create Junction & Split Pathway: A–B × C–D" }));
     await waitFor(() => expect(services.map.createRouteNode).toHaveBeenCalledWith(expect.objectContaining({
       name: expect.stringContaining("Junction"),
       nodeType: "Junction",
       lat: expect.any(Number),
       lng: expect.any(Number),
     })));
-    await waitFor(() => expect(screen.queryByRole("alert", { name: "Non-routable pathway crossing" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Crossing without junction/ })).not.toBeInTheDocument());
 
     fireEvent.change(await screen.findByLabelText("Route Node name"), { target: { value: "Central Crossing" } });
     fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Access Point" } });

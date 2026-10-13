@@ -409,7 +409,11 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
     fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "🚪 Add Entrance Route Node Now" }));
+    const tray = await screen.findByRole("region", { name: "Map issues" });
+    expect(within(tray).getByRole("button", { name: /No entrance/ })).toHaveTextContent("1");
+    fireEvent.click(within(tray).getByRole("button", { name: "Science Annex, 0 entrance nodes" }));
+    expect(within(tray).queryByRole("button", { name: /Add Entrance/ })).not.toBeInTheDocument();
+    fireEvent.click(within(await screen.findByRole("complementary", { name: "Science Annex object details" })).getByRole("button", { name: "＋ Add entrance" }));
 
     expect(screen.getByRole("button", { name: "Route Node" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Route Node type")).toHaveValue("Entrance");

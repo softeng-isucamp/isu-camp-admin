@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { services } from "../../../services/api";
-import type { Building, Location, RouteNode } from "../../../types";
+import type { Building, Location } from "../../../types";
 import { geometryOnCampus, type MapPoint } from "../campusBoundary";
 import { polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, translatePolygon } from "../mapEditing";
 import type { MapOverlay } from "../session/useMapOverlay";
@@ -26,7 +26,6 @@ const blankBuildingForm = (): BuildingIdentityInput => ({
 export interface BuildingEditingContext {
   sessionBuildings: Building[];
   locations: Location[];
-  nodes: RouteNode[];
   campusBoundary: MapPoint[];
 }
 
@@ -64,7 +63,6 @@ export function useBuildingFootprintEditing({
   const {
     sessionBuildings,
     locations: currentLocations,
-    nodes: currentNodes,
     campusBoundary,
   } = context;
   const { beginSaving, endSaving } = saving;
@@ -88,7 +86,6 @@ export function useBuildingFootprintEditing({
   const [polygonClosed, setPolygonClosed] = useState(false);
   const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
   const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
-  const [nonRoutableBuildingId, setNonRoutableBuildingId] = useState<string | null>(null);
   const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>(blankBuildingForm);
   const buildingName = buildingForm.name;
   const buildingCode = buildingForm.code;
@@ -251,12 +248,6 @@ export function useBuildingFootprintEditing({
     resetBuildingForm();
     setPolygonClosed(false);
     setPolygonInteraction("draw");
-    const hasActiveEntrance = currentNodes.some((node) =>
-      node.nodeType === "Entrance"
-      && node.associatedPlaceId === result.building.id
-      && node.status !== "Inactive",
-    );
-    setNonRoutableBuildingId(hasActiveEntrance ? null : result.building.id);
     onFinished({ kind: "placed", buildingId: result.building.id });
   };
 
@@ -402,8 +393,6 @@ export function useBuildingFootprintEditing({
     setBuildingDetailsModalOpen,
     buildingClassification,
     setBuildingClassification,
-    nonRoutableBuildingId,
-    setNonRoutableBuildingId,
     buildingForm,
     setBuildingForm,
     buildingName,
