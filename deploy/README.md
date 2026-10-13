@@ -52,7 +52,7 @@ Choose an unused loopback port and a unique project name so the active release s
 
 ### Persistent backup storage
 
-The admin API writes archives to `/srv/backups`. Compose mounts the external Docker volume `kumpas-admin-backups` there, so a new release project keeps the same backup history. Create the volume once before the first deployment that uses this recipe. Before replacing any older API containers, inventory them for archive files and copy any files that need to be retained into this volume.
+The admin API image includes PostgreSQL 17 client tools (`pg_dump` and `pg_restore`) from the official PostgreSQL APT repository. The API writes archives to `/srv/backups`. Compose mounts the external Docker volume `kumpas-admin-backups` there, so a new release project keeps the same backup history. Create the volume once before the first deployment that uses this recipe. Before replacing any older API containers, inventory them for archive files and copy any files that need to be retained into this volume.
 
 After loading the release image, initialize volume ownership explicitly; do not rely on Docker's one-time empty-volume copy-up behavior:
 
