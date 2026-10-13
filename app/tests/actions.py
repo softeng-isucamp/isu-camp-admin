@@ -217,6 +217,14 @@ def test_actions_delete_requires_a_confirmed_password(monkeypatch):
     assert response.json["code"] == "password_confirmation_required"
 
 
+def _record_purges(monkeypatch):
+    """Both purges clear dependents the schema will not cascade for us."""
+    purges = []
+    monkeypatch.setattr(actions_module, "purge_building", lambda record_id: purges.append(("building", record_id)))
+    monkeypatch.setattr(actions_module, "purge_location", lambda record_id: purges.append(("location", record_id)))
+    return purges
+
+
 def test_actions_can_delete_a_building(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
@@ -225,15 +233,14 @@ def test_actions_can_delete_a_building(monkeypatch):
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("Location", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
-    monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
-    monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
+    purges = _record_purges(monkeypatch)
     # The audit helper uses the same db singleton as the route.
     monkeypatch.setattr(actions_module.db, "session", session)
 
     response = app.test_client().delete("/api/actions/locations/42")
 
     assert response.status_code == 200
-    assert session.deleted is building
+    assert purges == [("building", 42)]
 
 
 def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeypatch):
@@ -245,15 +252,38 @@ def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeyp
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
-    monkeypatch.setattr(actions_module, "LocationPhoto", type("LocationPhotoModel", (), {"query": FakeQuery(None)}))
-    monkeypatch.setattr(actions_module, "BuildingPhoto", type("BuildingPhotoModel", (), {"query": FakeQuery(None)}))
+    purges = _record_purges(monkeypatch)
     # The audit helper uses the same db singleton as the route.
     monkeypatch.setattr(actions_module.db, "session", session)
 
     response = app.test_client().delete("/api/actions/locations/42?type=Room")
 
     assert response.status_code == 200
-    assert session.deleted is location
+    assert purges == [("location", 42)]
+
+
+def test_actions_delete_rolls_a_failed_building_purge_back(monkeypatch):
+    """A Building whose Floors or saved history block the delete must not
+    leave the Building half-removed."""
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    session = FakeSession()
+    building = type("Building", (), {"building_id": 42})()
+
+    def purge(record_id):
+        raise RuntimeError("violates foreign key constraint")
+
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "Location", type("Location", (), {"query": FakeQuery(None)}))
+    monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
+    monkeypatch.setattr(actions_module, "purge_building", purge)
+    monkeypatch.setattr(actions_module.db, "session", session)
+
+    response = app.test_client().delete("/api/actions/locations/42")
+
+    assert response.status_code == 500
+    assert response.json["message"] == "Failed to delete location."
+    assert session.rollbacks == 1
 
 
 def test_actions_can_edit_a_building(monkeypatch):

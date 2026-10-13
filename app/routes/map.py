@@ -10,8 +10,6 @@ from model.floor import Floor
 from model.location import Location
 from model.location import LOCATION_TYPE_NAMES
 from model.record_status import status_label as _status_label
-from model.building_photo import BuildingPhoto
-from model.location_photo import LocationPhoto
 from model.route_node import RouteNode
 from model.pathway import Pathway
 from services.audit import log_audit
@@ -19,6 +17,7 @@ from services.floor_lookup import floor_label as _floor_label
 from services.geometry import polygon_error as _polygon_error
 from services.geometry import polygon_feature_anchor as _polygon_feature_anchor
 from services.geometry import point_in_polygon as _point_in_polygon
+from services.record_deletion import purge_building
 
 map_bp = Blueprint("map", __name__, url_prefix="/api/map")
 
@@ -78,50 +77,6 @@ def _building_dto(building):
     }
 
 
-def _delete_building_photos(building_id):
-    """Purge gallery photos owned by a Building and its Indoor Locations.
-
-    ``public.building_photo`` cascades on its own owner, but the Indoor
-    Locations under a Building are reached through ``location.building_id``,
-    which is not a database foreign key.  The rows are removed before their
-    owners are staged so the blobs cannot outlive the records they belong to
-    (see the same purge in ``routes.actions.delete_location``).
-    """
-    location_ids = [row.location_id for row in Location.query.filter_by(building_id=building_id).all()]
-    if location_ids:
-        LocationPhoto.query.filter(
-            LocationPhoto.location_id.in_(location_ids),
-        ).delete(synchronize_session=False)
-    BuildingPhoto.query.filter_by(building_id=building_id).delete(synchronize_session=False)
-
-
-def _delete_building_locations(building_id):
-    """Stage every Indoor Location owned by a Building in this transaction.
-
-    The legacy ``location.building_id`` column is not declared as a database
-    foreign key, so relying on a database cascade would leave orphaned
-    directory records.  Staging these deletes explicitly keeps the hard-delete
-    contract true while the Building and audit row still share one commit.
-    """
-    locations = Location.query.filter_by(building_id=building_id).all()
-    for location in locations:
-        db.session.delete(location)
-    return locations
-
-
-def _delete_building_floors(building_id):
-    """Stage every Floor owned by a Building in this transaction.
-
-    Locations referencing these floors must already be staged for deletion
-    (see ``_delete_building_locations``) before this runs, since
-    ``location.floor_id`` is a foreign key into ``public.floor``.
-    """
-    floors = Floor.query.filter_by(building_id=building_id).all()
-    for floor in floors:
-        db.session.delete(floor)
-    return floors
-
-
 # ==========================================
 # GET MAP BUILDINGS
 # ==========================================
@@ -155,11 +110,9 @@ def delete_map_building(building_id):
         if not building:
             return jsonify({"success": False, "message": "Building not found."}), 404
 
-        _delete_building_photos(building_id)
-        _delete_building_locations(building_id)
-        _delete_building_floors(building_id)
-        db.session.delete(building)
-        log_audit("Admin", None, "delete", "Building", building_id, building.building_name)
+        building_name = building.building_name
+        purge_building(building_id)
+        log_audit("Admin", None, "delete", "Building", building_id, building_name)
         db.session.commit()
         return jsonify({
             "success": True,

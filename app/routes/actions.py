@@ -7,8 +7,6 @@ from extensions import db
 from model.building import Building
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
-from model.building_photo import BuildingPhoto
-from model.location_photo import LocationPhoto
 from model.record_status import normalized_status as _normalized_status
 from services.audit import log_audit
 from services.floor_lookup import floor_label as _floor_label
@@ -16,6 +14,7 @@ from services.floor_lookup import floor_number_from_label as _floor_number_from_
 from services.floor_lookup import resolve_floor as _resolve_floor
 from services.location_listing import list_location_page
 from services.location_photos import apply_gallery, find_cover, find_photo, list_photos, read_photo_change
+from services.record_deletion import purge_building, purge_location
 
 actions_bp = Blueprint(
     "actions",
@@ -521,17 +520,13 @@ def delete_location(location_id):
                 "message": "Location not found."
             }), 404
 
-        # public.building_photo and public.location_photo both cascade on their
-        # owner, but the indoor Locations under a Building are reached through
-        # ``location.building_id``, which is not a database foreign key. Their
-        # photos are cleared here so no blob outlives its record.
+        # Floors, waypoints and saved user history all hold NO ACTION keys to
+        # these records, so the dependents are cleared in order rather than
+        # left to the database (see services.record_deletion).
         if building is not None:
-            for child in Location.query.filter_by(building_id=location_id).all() or []:
-                LocationPhoto.query.filter_by(location_id=child.location_id).delete()
-            BuildingPhoto.query.filter_by(building_id=location_id).delete()
+            purge_building(location_id)
         else:
-            LocationPhoto.query.filter_by(location_id=location_id).delete()
-        db.session.delete(building or location)
+            purge_location(location_id)
         log_audit("Admin", None, "delete", "Building" if building else "Location", location_id)
         db.session.commit()
 
