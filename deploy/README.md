@@ -50,6 +50,25 @@ docker compose --project-name admin-stage-20261003 \
 
 Choose an unused loopback port and a unique project name so the active release stays available for rollback. Compose requires the runtime database URL and session secret; its image IDs are bound into the generated release file with pulling disabled. Shell and runtime-file image variables cannot override them. Backend credentials are injected at runtime, rather than included in images or build arguments.
 
+### Persistent backup storage
+
+The admin API writes archives to `/srv/backups`. Compose mounts the external Docker volume `kumpas-admin-backups` there, so a new release project keeps the same backup history. Create the volume once before the first deployment that uses this recipe. Before replacing any older API containers, inventory them for archive files and copy any files that need to be retained into this volume.
+
+After loading the release image, initialize volume ownership explicitly; do not rely on Docker's one-time empty-volume copy-up behavior:
+
+```bash
+docker volume create kumpas-admin-backups
+set -a
+. /absolute/path/release/release.env
+set +a
+docker run --rm --user 0:0 \
+  --mount type=volume,source=kumpas-admin-backups,target=/srv/backups \
+  --entrypoint /bin/sh "$ADMIN_API_IMAGE" \
+  -c 'chown 10001:10001 /srv/backups && chmod 0750 /srv/backups'
+```
+
+The volume is external so Compose will fail clearly if it is missing and release-specific project names cannot create separate histories. It protects archives from container replacement, not host or disk loss; maintain an off-host copy. Verify a write as UID 10001 before starting the staged API.
+
 Nginx listens on port 8080, preserves `/api` when proxying to `admin-api:5000`, provides SPA fallback, and allows a 64 MiB request body for ten 5 MiB photos plus multipart overhead. Gunicorn uses one sync worker because OTPs and rate-limit buckets are process-local.
 
 The default network is `<compose-project-name>_network`. For Cloudflare Tunnel, explicitly attach the authorized connector to this release network, persist the attachment in its maintained Compose configuration, and route to this project's web service. Use the DevOps skill's staging, login verification, traffic-switching, and rollback procedure. This recipe does not switch production traffic.

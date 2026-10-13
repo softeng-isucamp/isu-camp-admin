@@ -5,7 +5,10 @@ COPY deploy/requirements.lock /srv/requirements.lock
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY app/ /srv/app/
 ARG SOURCE_COMMIT
-RUN test -n "$SOURCE_COMMIT" && useradd --uid 10001 --create-home adminapi
+RUN test -n "$SOURCE_COMMIT" \
+    && groupadd --gid 10001 adminapi \
+    && useradd --uid 10001 --gid 10001 --create-home adminapi \
+    && install -d -o 10001 -g 10001 -m 0750 /srv/backups
 LABEL org.opencontainers.image.revision="$SOURCE_COMMIT"
 USER adminapi
 WORKDIR /srv/app/services
