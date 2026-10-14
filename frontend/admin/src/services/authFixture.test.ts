@@ -5,6 +5,75 @@ import { createLocalAdapter } from "./localAdapter";
 const USERNAME = "admin_justine";
 const PASSWORD = "password123";
 
+describe("fixture remembered sessions", () => {
+  const SESSION_KEY = "isucamp_local_session";
+  const setup = () => createLocalAdapter({ locations: [] }, sessionStorage);
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it("does not restore an unchecked login after browser session storage is cleared", async () => {
+    await setup().auth.login(USERNAME, PASSWORD, false);
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+    sessionStorage.clear();
+    expect(await setup().auth.me()).toBeNull();
+  });
+
+  it("restores a remembered login after browser session storage is cleared", async () => {
+    await setup().auth.login(USERNAME, PASSWORD, true);
+    expect(sessionStorage.getItem(SESSION_KEY)).toBeNull();
+    sessionStorage.clear();
+    expect(await setup().auth.me()).toMatchObject({ username: USERNAME });
+  });
+
+  it("keeps remembered profile changes across a browser restart and subsequent edits", async () => {
+    const first = setup();
+    await first.auth.login(USERNAME, PASSWORD, true);
+    await first.auth.updateProfile({ username: "renamed", email: "new@example.com" });
+    sessionStorage.clear();
+    const restored = setup();
+    expect(await restored.auth.me()).toMatchObject({ username: "renamed", email: "new@example.com" });
+
+    await restored.auth.updateProfile({ username: "renamed_again", email: "again@example.com" });
+    sessionStorage.clear();
+    expect(await setup().auth.me()).toMatchObject({ username: "renamed_again", email: "again@example.com" });
+  });
+
+  it("keeps unchecked profile edits transient", async () => {
+    const adapter = setup();
+    await adapter.auth.login(USERNAME, PASSWORD, false);
+    await adapter.auth.updateProfile({ username: "renamed", email: "new@example.com" });
+    expect(await setup().auth.me()).toMatchObject({ username: "renamed" });
+    sessionStorage.clear();
+    expect(await setup().auth.me()).toBeNull();
+  });
+
+  it("removes an older remembered login when the next login is unchecked", async () => {
+    const adapter = setup();
+    await adapter.auth.login(USERNAME, PASSWORD, true);
+    await adapter.auth.login("admin_registrar", PASSWORD, false);
+    expect(await setup().auth.me()).toMatchObject({ username: "admin_registrar" });
+    sessionStorage.clear();
+    expect(await setup().auth.me()).toBeNull();
+  });
+
+  it("clears a remembered session when logging out after restoration", async () => {
+    await setup().auth.login(USERNAME, PASSWORD, true);
+    sessionStorage.clear();
+    await setup().auth.logout();
+    expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+    expect(sessionStorage.getItem(SESSION_KEY)).toBeNull();
+    expect(await setup().auth.me()).toBeNull();
+  });
+});
+
 const failedLogin = (adapter: ReturnType<typeof createLocalAdapter>) =>
   adapter.auth.login(USERNAME, "wrong").then(
     () => { throw new Error("expected the sign-in to fail"); },

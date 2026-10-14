@@ -16,6 +16,7 @@ import type { Location } from "../types";
 describe("mock service contracts", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("authenticates the seeded administrator", async () => {
@@ -49,10 +50,30 @@ describe("mock service contracts", () => {
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ username: "admin_justine", password: "password123" }),
+        body: JSON.stringify({ username: "admin_justine", password: "password123", remember: false }),
       }),
     );
     vi.unstubAllEnvs();
+  });
+
+  it.each([false, true])("forwards remember=%s through the HTTP login request", async (remember) => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ admin: { id: "1", username: "admin01" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await httpServices.auth.login("admin01", "password123", remember);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/login", expect.objectContaining({
+      method: "POST",
+      credentials: "include",
+      body: JSON.stringify({ username: "admin01", password: "password123", remember }),
+    }));
   });
 
   it("normalizes the documented backend page and rejects malformed responses", () => {
