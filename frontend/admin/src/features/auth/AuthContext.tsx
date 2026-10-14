@@ -11,7 +11,7 @@ import type { Session } from "../../types";
 import { services } from "../../services/api";
 interface AuthValue {
   session: Session | null;
-  login: (u: string, p: string) => Promise<void>;
+  login: (u: string, p: string, remember?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
   updateSession: (profile: Session) => void;
@@ -40,8 +40,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       mounted = false;
     };
   }, []);
-  const login = async (u: string, p: string) => {
-    const s = await services.auth.login(u, p);
+  const login = async (u: string, p: string, remember?: boolean) => {
+    const s = await services.auth.login(u, p, remember);
     sessionEpoch.current += 1;
     setSession(s);
   };

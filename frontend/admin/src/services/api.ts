@@ -609,7 +609,8 @@ export interface Services {
      */
     login(
       username: string,
-      password: string
+      password: string,
+      remember?: boolean
     ): Promise<Session>;
 
     logout(): Promise<unknown>;
@@ -925,11 +926,12 @@ export const services: Services = {
 
     login: async (
       username,
-      password
+      password,
+      remember
     ) => {
 
       if (!USE_HTTP_API) {
-        return localAdapter.auth.login(username, password);
+        return localAdapter.auth.login(username, password, remember);
       }
 
       const response = await fetch(
@@ -946,6 +948,7 @@ export const services: Services = {
           body: JSON.stringify({
             username,
             password,
+            remember: Boolean(remember),
           }),
         }
       );

@@ -50,13 +50,16 @@ type LocalMapData = {
 };
 
 const parseSession = (storage: Storage | null): Session | null => {
-  if (!storage) return null;
-  try {
-    const value = JSON.parse(storage.getItem(LOCAL_SESSION_KEY) ?? "null");
-    return value && typeof value.id === "string" && typeof value.username === "string" ? value : null;
-  } catch {
-    return null;
-  }
+  const read = (s: Storage | null) => {
+    if (!s) return null;
+    try {
+      const value = JSON.parse(s.getItem(LOCAL_SESSION_KEY) ?? "null");
+      return value && typeof value.id === "string" && typeof value.username === "string" ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  return read(storage) ?? (typeof localStorage !== "undefined" ? read(localStorage) : null);
 };
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
@@ -68,6 +71,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   if (session && !restored) {
     session = null;
     storage?.removeItem(LOCAL_SESSION_KEY);
+    if (typeof localStorage !== "undefined") localStorage.removeItem(LOCAL_SESSION_KEY);
   }
   // The account the session belongs to, or the demo superadmin while signed out.
   // The stored session carries only profile edits; the role is the directory's.
@@ -82,6 +86,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
     session = null;
     confirmedAt = 0;
     storage?.removeItem(LOCAL_SESSION_KEY);
+    if (typeof localStorage !== "undefined") localStorage.removeItem(LOCAL_SESSION_KEY);
   };
   // The server reads the account row on every request, so one deactivated while
   // signed in is refused on its next request and signed out.
@@ -124,7 +129,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
 
   return {
     auth: {
-      login: async (username: string, password: string): Promise<Session> => {
+      login: async (username: string, password: string, _remember?: boolean): Promise<Session> => {
         const lockedForMs = lockedUntil - Date.now();
         if (lockedForMs > 0) throw new RateLimitError(Math.ceil(lockedForMs / 1000));
         if (lockedUntil) {
@@ -147,7 +152,13 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         account = candidate;
         confirmedAt = 0;
         session = profileOf(account);
-        storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+        if (_remember && typeof localStorage !== "undefined") {
+          localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+          storage?.removeItem(LOCAL_SESSION_KEY);
+        } else {
+          storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+          if (typeof localStorage !== "undefined") localStorage.removeItem(LOCAL_SESSION_KEY);
+        }
         return session;
       },
       logout: async (): Promise<void> => endSession(),

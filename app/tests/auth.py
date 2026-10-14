@@ -298,6 +298,37 @@ def test_an_account_with_a_weak_stored_password_still_signs_in(monkeypatch):
     assert response.status_code == 200
 
 
+def test_login_remember_me_sets_permanent_session(monkeypatch):
+    """Remember Me marks the session permanent so Flask attaches an expiry."""
+
+    auth_module.rate_limit_buckets.clear()
+    admin = type("AdminRecord", (), {
+        "id": 3, "username": "admin01", "password": "password123", "is_active": True,
+        "to_profile": lambda self: {"id": 3},
+    })()
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(
+            lambda **values: type("Result", (), {"first": lambda self: admin})()
+        )})()
+    }))
+    monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
+
+    client = auth_app().test_client()
+
+    # When remember is true, session becomes permanent
+    resp1 = client.post("/api/login", json={"username": "admin01", "password": "password123", "remember": True})
+    assert resp1.status_code == 200
+    with client.session_transaction() as flask_session:
+        assert flask_session.permanent is True
+
+    # When remember is omitted or false, session stays transient
+    resp2 = client.post("/api/login", json={"username": "admin01", "password": "password123"})
+    assert resp2.status_code == 200
+    with client.session_transaction() as flask_session:
+        assert flask_session.permanent is False
+
+
 # ==========================================
 # PASSWORD CONFIRMATION FOR DESTRUCTIVE ACTIONS
 # ==========================================

@@ -1310,6 +1310,38 @@ td small {
 .forgot-username {
   justify-content: flex-end;
 }
+.forgot-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.remember-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.remember-me input[type="checkbox"] {
+  accent-color: var(--green);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  margin: 0;
+}
+.remember-me input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.remember-me input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.remember-me span {
+  font-size: 13px;
+  color: #3f4941;
+  font-weight: 500;
+}
 .caps-lock-warning {
   color: #8a5a00;
   font-size: 12px;

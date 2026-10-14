@@ -40,7 +40,7 @@ export function Login() {
     setFocus,
     formState: { errors },
   } = useForm({
-    defaultValues: { username: prefilledUsername, password: "" },
+    defaultValues: { username: prefilledUsername, password: "", remember: false },
   });
   // A recovery flow handed over the username, so the password is all that is left to type.
   useEffect(() => {
@@ -54,10 +54,11 @@ export function Login() {
   };
   const usernameField = register("username", { onChange: () => clearInvalid("username") });
   const passwordField = register("password", { onChange: () => clearInvalid("password") });
+  const rememberField = register("remember");
   const fieldErrorProps = (field: "username" | "password") =>
     invalidField === field ? { "aria-invalid": true, "aria-describedby": alertId } : {};
   const lockedOut = loginCountdown > 0;
-  const submit = async (values: { username: string; password: string }) => {
+  const submit = async (values: { username: string; password: string; remember?: boolean }) => {
     if (loginInFlight.current || lockedOut) return;
     setError("");
     setAttemptsRemaining(undefined);
@@ -72,7 +73,7 @@ export function Login() {
     loginInFlight.current = true;
     setLoginPending(true);
     try {
-      await login(values.username, values.password);
+      await login(values.username, values.password, values.remember);
       navigate("/dashboard");
     } catch (err) {
       if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
@@ -141,8 +142,18 @@ export function Login() {
             </div>
           </label>
           <div className="forgot">
-            <CapsLockWarning visible={capsLock.capsLockOn && !lockedOut} />
-            <Link to="/forgot-password">Forgot password?</Link>
+            <label className="remember-me">
+              <input
+                type="checkbox"
+                {...rememberField}
+                disabled={lockedOut}
+              />
+              <span>Remember me</span>
+            </label>
+            <div className="forgot-links">
+              <CapsLockWarning visible={capsLock.capsLockOn && !lockedOut} />
+              <Link to="/forgot-password">Forgot password?</Link>
+            </div>
           </div>
           {(error || errors.username || errors.password) && (
             <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} urgent={lockedOut}>
