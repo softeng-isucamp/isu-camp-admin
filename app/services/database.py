@@ -13,6 +13,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 
+from datetime import timedelta
 from urllib.parse import urlsplit, urlunsplit
 
 from flask import Flask, jsonify, request
@@ -62,6 +63,10 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv(
     "SECRET_KEY",
     "dev-secret-key"
+)
+
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+    days=int(os.getenv("PERMANENT_SESSION_LIFETIME_DAYS", 30))
 )
 
 

@@ -25,9 +25,36 @@ describe("login screen", () => {
     expect(screen.getByPlaceholderText("Enter your username")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /login/i })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /remember me/i })).not.toBeChecked();
     expect(
       screen.getByRole("link", { name: /forgot password/i }),
     ).toHaveAttribute("href", "/forgot-password");
+  });
+
+  it("submits with remember option when the checkbox is checked", async () => {
+    const loginSpy = vi.spyOn(services.auth, "login").mockResolvedValue({
+      id: "1",
+      username: "admin_justine",
+      email: "admin@isu.edu.ph",
+      role: "admin",
+    });
+
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <Login />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Enter your username"), { target: { value: "admin_justine" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /remember me/i }));
+    fireEvent.click(screen.getByRole("button", { name: /login/i }));
+
+    await waitFor(() => {
+      expect(loginSpy).toHaveBeenCalledWith("admin_justine", "password123", true);
+    });
   });
 
   it("pre-fills the username a recovery flow hands over in navigation state", async () => {

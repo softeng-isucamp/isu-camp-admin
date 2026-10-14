@@ -253,6 +253,7 @@ def login():
 
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
+        session.permanent = bool(data.get("remember", False))
         log_audit("System", admin, "login", "Admin", admin.id, "Admin login successful")
         db.session.commit()
 

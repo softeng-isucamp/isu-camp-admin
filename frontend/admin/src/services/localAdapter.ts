@@ -61,13 +61,30 @@ const parseSession = (storage: Storage | null): Session | null => {
 
 export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | null) => {
   const accounts = seedAccounts();
+  const rememberedStorage = typeof localStorage !== "undefined" ? localStorage : null;
+  let sessionStore = storage;
   let session = parseSession(storage);
+  if (!session) {
+    session = parseSession(rememberedStorage);
+    if (session) sessionStore = rememberedStorage;
+  }
+  const clearStoredSession = () => {
+    storage?.removeItem(LOCAL_SESSION_KEY);
+    rememberedStorage?.removeItem(LOCAL_SESSION_KEY);
+  };
+  // Profile edits keep the persistence selected at login, even after restoration.
+  const persistSession = () => {
+    if (!session) return;
+    sessionStore?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+    if (sessionStore !== storage) storage?.removeItem(LOCAL_SESSION_KEY);
+    if (sessionStore !== rememberedStorage) rememberedStorage?.removeItem(LOCAL_SESSION_KEY);
+  };
   const restored = accounts.find((record) => record.id === session?.id);
   // Accounts added in an earlier page load are gone, so a session for one of
   // them has nobody to be: signed out, never another account's identity or role.
   if (session && !restored) {
     session = null;
-    storage?.removeItem(LOCAL_SESSION_KEY);
+    clearStoredSession();
   }
   // The account the session belongs to, or the demo superadmin while signed out.
   // The stored session carries only profile edits; the role is the directory's.
@@ -81,7 +98,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   const endSession = () => {
     session = null;
     confirmedAt = 0;
-    storage?.removeItem(LOCAL_SESSION_KEY);
+    clearStoredSession();
   };
   // The server reads the account row on every request, so one deactivated while
   // signed in is refused on its next request and signed out.
@@ -124,7 +141,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
 
   return {
     auth: {
-      login: async (username: string, password: string): Promise<Session> => {
+      login: async (username: string, password: string, remember?: boolean): Promise<Session> => {
         const lockedForMs = lockedUntil - Date.now();
         if (lockedForMs > 0) throw new RateLimitError(Math.ceil(lockedForMs / 1000));
         if (lockedUntil) {
@@ -147,7 +164,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         account = candidate;
         confirmedAt = 0;
         session = profileOf(account);
-        storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+        sessionStore = remember ? rememberedStorage ?? storage : storage;
+        persistSession();
         return session;
       },
       logout: async (): Promise<void> => endSession(),
@@ -170,7 +188,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         account.username = changes.username.trim();
         account.email = changes.email.trim();
         session = profileOf(account);
-        storage?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+        persistSession();
         return profileOf(account);
       },
       changePassword: async (changes: PasswordChange): Promise<void> => {

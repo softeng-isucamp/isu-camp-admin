@@ -15,6 +15,7 @@ const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed", "Unkn
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required."),
   password: z.string().min(1, "Password is required."),
+  remember: z.boolean().optional(),
 });
 export const recoveryEmailSchema = z.string().trim().email("Enter a valid email address.");
 /** Every unmet rule is reported, in checklist order. */
