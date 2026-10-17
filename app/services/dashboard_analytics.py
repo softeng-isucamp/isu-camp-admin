@@ -21,9 +21,12 @@ module is the only place that has to change.
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
+
 from extensions import db
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
-from model.building import Building
+from model.building import LEGACY_CLASSIFICATION, Building
+from model.building_type import BuildingType
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.user_history import UserHistory
 
@@ -221,9 +224,14 @@ def _destination_names():
 
     buildings = {
         building.building_id: building
+        # The classification name comes from building_type; a Place with no
+        # type is legacy and reads as "Building". Outer-joined because the 53
+        # legacy rows have no type row to join to.
         for building in db.session.query(
-            Building.building_id, Building.building_name, Building.classification
-        ).all()
+            Building.building_id,
+            Building.building_name,
+            func.coalesce(BuildingType.type_name, LEGACY_CLASSIFICATION).label("classification"),
+        ).outerjoin(BuildingType, BuildingType.type_id == Building.type_id).all()
     }
     locations = {
         location.location_id: location
@@ -239,7 +247,8 @@ def _destination_of(row, buildings, locations):
 
     The identity key matches the frontend's own ``Type:id`` convention, which
     is why a Building's key uses its classification: the directory treats
-    Building and Facility as distinct subtypes of the same table.
+    each Place classification as a distinct subtype of the same table. The
+    admin frontend normalizes any Place prefix itself.
     """
 
     _, _, building_id, location_id = row
@@ -259,7 +268,7 @@ def _destination_of(row, buildings, locations):
         building = buildings.get(building_id)
         if building is None:
             return None
-        classification = building.classification or "Building"
+        classification = building.classification
         return (
             f"{classification}:{building_id}",
             building.building_name,

@@ -81,6 +81,8 @@ def test_map_buildings_returns_polygon_points(monkeypatch):
         "BuildingRecord",
         (),
         {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
             "building_id": 4,
             "building_name": "Engineering Hall",
             "building_code": "ENG-01",
@@ -111,6 +113,8 @@ def test_map_buildings_returns_polygon_points(monkeypatch):
 def test_indoor_location_position_persists_marker_inside_building(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "building_name": "Engineering Hall",
         "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
@@ -152,6 +156,8 @@ def test_indoor_location_position_persists_marker_inside_building(monkeypatch):
 
 def test_indoor_location_position_accepts_polygon_boundary(monkeypatch):
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "building_name": "Engineering Hall",
         "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
@@ -175,6 +181,8 @@ def test_indoor_location_position_accepts_polygon_boundary(monkeypatch):
 def test_indoor_location_position_can_be_cleared(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4, "building_name": "Engineering Hall",
         "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
     })()
@@ -210,6 +218,8 @@ def test_indoor_location_position_can_be_cleared(monkeypatch):
 )
 def test_indoor_location_position_rejects_invalid_marker(monkeypatch, payload, message):
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
     })()
@@ -231,6 +241,8 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
     session = FakeSession()
     audits = []
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "building_name": "Engineering Hall",
         "latitude": None,
@@ -263,6 +275,8 @@ def test_map_save_persists_complete_valid_building_polygon(monkeypatch):
 def test_map_save_persists_an_internal_anchor_for_a_closed_concave_polygon(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "building_name": "Engineering Hall",
         "latitude": 16.7,
@@ -294,6 +308,8 @@ def test_map_save_persists_an_internal_anchor_for_a_closed_concave_polygon(monke
 def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "latitude": None,
         "longitude": None,
@@ -317,6 +333,8 @@ def test_map_save_rejects_invalid_geometry_without_mutating_the_building(monkeyp
 def test_map_save_rejects_self_touching_footprint_without_mutating_the_building(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "latitude": None,
         "longitude": None,
@@ -343,6 +361,8 @@ def test_map_save_rejects_self_touching_footprint_without_mutating_the_building(
 def test_map_save_rejects_malformed_building_payload_before_mutating(monkeypatch):
     session = FakeSession()
     building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building",
         "building_id": 4,
         "latitude": None,
         "longitude": None,
@@ -395,7 +415,9 @@ def test_delete_map_building_requires_a_confirmed_password(monkeypatch):
 
 def test_delete_map_building_purges_its_dependents_and_audits_in_one_transaction(monkeypatch):
     session = FakeSession()
-    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building","building_id": 4, "building_name": "Engineering Hall"})()
     audits = []
     purged = []
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
@@ -416,7 +438,9 @@ def test_delete_map_building_purges_its_dependents_and_audits_in_one_transaction
 def test_delete_map_building_names_the_building_in_the_audit_row(monkeypatch):
     """The name is read before the purge, which leaves no row to read it from."""
     session = FakeSession()
-    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building","building_id": 4, "building_name": "Engineering Hall"})()
     audits = []
 
     def purge(building_id):
@@ -438,7 +462,9 @@ def test_delete_map_building_names_the_building_in_the_audit_row(monkeypatch):
 def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
     session = FakeSession()
     session.fail_commit = True
-    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building","building_id": 4, "building_name": "Engineering Hall"})()
     audits = []
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
@@ -456,7 +482,9 @@ def test_delete_map_building_rolls_back_delete_and_audit_together(monkeypatch):
 def test_delete_map_building_reports_a_failed_purge_as_a_server_error(monkeypatch):
     """A foreign key the purge misses must not leave a half-applied delete."""
     session = FakeSession()
-    building = type("BuildingRecord", (), {"building_id": 4, "building_name": "Engineering Hall"})()
+    building = type("BuildingRecord", (), {
+            # Legacy Place: type_id IS NULL reads as "Building".
+            "place_classification": "Building","building_id": 4, "building_name": "Engineering Hall"})()
 
     def purge(building_id):
         raise RuntimeError("violates foreign key constraint")

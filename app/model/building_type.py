@@ -1,15 +1,18 @@
-"""What a Building is, as a controlled vocabulary.
+"""What a Place is, as a controlled vocabulary.
 
-The counterpart to ``public.location_type`` for Buildings.
-``public.building.classification`` holds free text and only ever says
-"Building" or "Facility", which does not distinguish a canteen from a car
-park from a college, so the directory gains a real type.
+The counterpart to ``public.location_type`` for Places - rows in
+``public.building``. ``classification`` held free text that only ever said
+"Building" or "Facility", which does not separate a canteen from a car park
+from a college, so the User App has nothing real to filter on.
 
-Unlike ``model.location``, the names are not hardcoded here. Location types
-are pinned to their ids because ``Location.type_id`` is written from a fixed
-set the form offers; building types are read from the table, so a type can be
-added by seeding a row rather than by editing and redeploying this module.
-``classification`` is untouched and still drives the Building DTO's ``type``.
+``building.type_id`` is the source of truth. ``NULL`` means legacy: a Place
+that predates the vocabulary, reported as "Building", editable but never
+created. Phase 3 makes the column NOT NULL and drops ``classification``.
+
+The names are read from the table rather than hardcoded here, so a type can
+be added by seeding a row. ``model.building`` still names them in
+``PLACE_CLASSIFICATIONS`` for the paths that have only a DTO's type string
+and no session to query with; the table is what a write is validated against.
 """
 
 from extensions import db
@@ -25,35 +28,40 @@ class BuildingType(db.Model):
     type_name = db.Column(db.String, nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
 
+    # Whether Places of this type may hold indoor Locations, so the rule is
+    # data rather than a set in the code. False for Food, Parking and
+    # Facility; true for College and Campus Services.
+    can_contain_locations = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+    )
+
     def to_dict(self):
         return {
-            "id": str(self.type_id),
             "name": self.type_name,
             "description": self.description,
+            "canContainLocations": bool(self.can_contain_locations),
         }
 
 
 def all_types():
-    """Every building type, in the order the directory lists them."""
+    """Every Place type, in the order the directory lists them."""
 
     return BuildingType.query.order_by(BuildingType.type_id).all()
 
 
-def type_id_for(name):
-    """The id of the type called ``name``, or None.
+def find_type(name):
+    """The type row called ``name``, or None when the vocabulary has no such name.
 
-    Matched without regard to case or surrounding space, so a client sending
-    "campus services" reaches the same row as "Campus Services". An unknown
-    name is None rather than an error; the caller decides whether that is a
-    rejection or simply no type.
+    Matched exactly apart from surrounding space. The strings are
+    case-sensitive on purpose: "Campus Services" is the value the User App
+    filters on, and quietly accepting "campus services" would let two
+    spellings of one classification into the directory.
     """
 
     cleaned = " ".join(str(name or "").split())
     if not cleaned:
         return None
 
-    record = BuildingType.query.filter(
-        db.func.lower(BuildingType.type_name) == cleaned.lower()
-    ).first()
-
-    return record.type_id if record else None
+    return BuildingType.query.filter_by(type_name=cleaned).first()

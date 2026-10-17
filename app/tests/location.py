@@ -7,6 +7,7 @@ import location as location_module
 from location import location_bp
 from model.record_status import status_label
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
+from services import place_classification
 
 
 class FakeRecord:
@@ -70,6 +71,34 @@ class FakeFloor:
         self.floor_number = number
 
 
+# The seeded Place vocabulary, so a write can resolve a classification name
+# without a database. Mirrors public.building_type, including which types may
+# hold indoor Locations.
+PLACE_TYPES = {
+    name: type("PlaceType", (), {
+        "type_id": index,
+        "type_name": name,
+        "can_contain_locations": name in ("College", "Campus Services"),
+        "description": None,
+    })()
+    for index, name in enumerate(
+        ("College", "Campus Services", "Food", "Parking", "Facility"), start=1
+    )
+}
+
+
+def stub_place_vocabulary(monkeypatch):
+    """Resolve classification names from PLACE_TYPES instead of the table."""
+
+    monkeypatch.setattr(place_classification, "find_type", PLACE_TYPES.get)
+    monkeypatch.setattr(
+        place_classification, "find_type_by_id",
+        lambda type_id: next(
+            (row for row in PLACE_TYPES.values() if row.type_id == type_id), None
+        ),
+    )
+
+
 class FakeBuilding:
     def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None, keywords=None, status="active"):
         self.building_id = identifier
@@ -83,13 +112,26 @@ class FakeBuilding:
         self.classification = classification
         self.polygon_coordinates = polygon_coordinates
         self.gallery = []
+        self.type_id = None if classification == "Building" else 1
+        self.building_type = None if classification == "Building" else type(
+            "T", (), {"type_name": classification,
+                      "can_contain_locations": classification in ("College", "Campus Services")},
+        )()
+
+    @property
+    def place_classification(self):
+        return self.building_type.type_name if self.building_type else "Building"
+
+    @property
+    def can_contain_locations(self):
+        return self.building_type.can_contain_locations if self.building_type else True
 
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
         lng = float(self.longitude) if self.longitude is not None else None
         dto = {
             "id": str(self.building_id), "name": self.building_name,
-            "code": self.building_code, "type": self.classification, "parentId": None,
+            "code": self.building_code, "type": self.place_classification, "parentId": None,
             "building": None, "floor": None, "function": self.description,
             "keywords": self.keywords, "status": status_label(self.status), "lat": lat, "lng": lng,
             "positioned": lat is not None and lng is not None,
@@ -105,6 +147,7 @@ def make_client(monkeypatch):
     app.secret_key = "test"
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
+    stub_place_vocabulary(monkeypatch)
     building = FakeBuilding(1)
     room = FakeRecord(2, "Room 204", "ENG-204", 1, building_id=1)
     room.floor_id = 2
@@ -193,7 +236,7 @@ def test_create_location_requires_administrator(monkeypatch):
 
     response = app.test_client().post(
         "/api/locations",
-        json={"name": "Library", "code": "LIB", "type": "Building"},
+        json={"name": "Library", "code": "LIB", "type": "Campus Services"},
     )
 
     assert response.status_code == 401
@@ -413,6 +456,7 @@ def make_mutation_client(monkeypatch):
     app.secret_key = "test"
     app.register_blueprint(location_bp)
     monkeypatch.setattr(location_module, "admin_required", lambda: (object(), None))
+    stub_place_vocabulary(monkeypatch)
     records = []
     buildings = []
     floors = []
@@ -453,6 +497,12 @@ def make_mutation_client(monkeypatch):
             )
             self.latitude = values.get("latitude")
             self.longitude = values.get("longitude")
+            # Written from the resolved classification, as the real model is.
+            self.type_id = values.get("type_id")
+            self.building_type = next(
+                (row for row in PLACE_TYPES.values() if row.type_id == self.type_id),
+                None,
+            )
 
     monkeypatch.setattr(location_module, "Building", MutationBuilding)
 
@@ -481,8 +531,8 @@ def make_mutation_client(monkeypatch):
 
 def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch):
     client, records, _ = make_mutation_client(monkeypatch)
-    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
-    wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Building"})
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Campus Services"})
+    wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Campus Services"})
     floor = FakeFloor(20, int(wrong_building.json["id"]), 2)
     monkeypatch.setattr(location_module, "Floor", type("FakeFloorModel", (), {
         "query": FakeQuery([floor]), "floor_id": FakeColumn(),
@@ -499,7 +549,7 @@ def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch
 
 def test_mutations_validate_relationship_floor_and_duplicate_without_partial_write(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)
-    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Campus Services"})
     assert building.status_code == 201
     listed = client.get("/api/locations")
     assert listed.status_code == 200
@@ -507,7 +557,7 @@ def test_mutations_validate_relationship_floor_and_duplicate_without_partial_wri
         "id": building.json["id"],
         "name": "Engineering Hall",
         "code": "ENG",
-        "type": "Building",
+        "type": "Campus Services",
         "parentId": None,
         "building": None,
         "floor": None,
@@ -537,7 +587,7 @@ def test_create_restroom_persists_canonical_type_and_projects_dto(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)
     building = client.post(
         "/api/locations",
-        json={"name": "Engineering Hall", "code": "ENG", "type": "Building"},
+        json={"name": "Engineering Hall", "code": "ENG", "type": "Campus Services"},
     )
 
     response = client.post(
@@ -564,7 +614,7 @@ def test_create_restroom_persists_canonical_type_and_projects_dto(monkeypatch):
 def test_create_rolls_back_when_persistence_fails(monkeypatch):
     client, records, session = make_mutation_client(monkeypatch)
     session.fail_commit = True
-    response = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+    response = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Campus Services"})
     assert response.status_code == 500
     assert records == []
     assert session.rollbacks == 1
@@ -597,7 +647,7 @@ def test_create_rejects_invalid_footprint_before_writing(monkeypatch):
 
     response = client.post(
         "/api/locations",
-        json={"name": "Bad Footprint", "code": "BAD", "type": "Building", "polygonCoordinates": [[16.72, 121.69], [16.72, 121.69], [16.721, 121.691]]},
+        json={"name": "Bad Footprint", "code": "BAD", "type": "Campus Services", "polygonCoordinates": [[16.72, 121.69], [16.72, 121.69], [16.721, 121.691]]},
     )
 
     assert response.status_code == 400
@@ -624,7 +674,7 @@ def test_building_and_facility_photo_uploads_are_persisted(monkeypatch):
     client, _, _ = make_mutation_client(monkeypatch)
     building = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"png-bytes"), "library.png", "image/png")},
+        data={"name": "Library", "code": "LIB", "type": "Campus Services", "photo": (io.BytesIO(b"png-bytes"), "library.png", "image/png")},
         content_type="multipart/form-data",
     )
     facility = client.post(
@@ -642,7 +692,7 @@ def test_building_photo_upload_records_the_uploaded_mime_type(monkeypatch):
     client, _, session = make_mutation_client(monkeypatch)
     response = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"webp-bytes"), "library.webp", "image/webp")},
+        data={"name": "Library", "code": "LIB", "type": "Campus Services", "photo": (io.BytesIO(b"webp-bytes"), "library.webp", "image/webp")},
         content_type="multipart/form-data",
     )
 
@@ -656,7 +706,7 @@ def test_building_photo_upload_records_the_uploaded_mime_type(monkeypatch):
 
 def test_building_created_without_a_photo_reports_no_photo(monkeypatch):
     client, _, _ = make_mutation_client(monkeypatch)
-    response = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+    response = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Campus Services"})
 
     assert response.status_code == 201
     assert response.json["hasPhoto"] is False
@@ -667,7 +717,7 @@ def test_building_search_keywords_are_persisted_and_projected(monkeypatch):
     client, _, session = make_mutation_client(monkeypatch)
     response = client.post(
         "/api/locations",
-        json={"name": "Library", "code": "LIB", "type": "Building", "keywords": "books, study"},
+        json={"name": "Library", "code": "LIB", "type": "Campus Services", "keywords": "books, study"},
     )
 
     assert response.status_code == 201
@@ -689,7 +739,7 @@ def test_building_lifecycle_status_is_persisted_and_projected(monkeypatch):
     client, _, session = make_mutation_client(monkeypatch)
     response = client.post(
         "/api/locations",
-        json={"name": "Old Hall", "code": "OLD", "type": "Building", "status": "Inactive"},
+        json={"name": "Old Hall", "code": "OLD", "type": "Campus Services", "status": "Inactive"},
     )
 
     assert response.status_code == 201
@@ -709,7 +759,7 @@ def test_status_defaults_to_active_and_rejects_an_unsupported_value(monkeypatch)
     """
 
     client, _, session = make_mutation_client(monkeypatch)
-    default = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Building"})
+    default = client.post("/api/locations", json={"name": "Library", "code": "LIB", "type": "Campus Services"})
 
     assert default.status_code == 201
     assert session.buildings[-1].status == "active"
@@ -717,7 +767,7 @@ def test_status_defaults_to_active_and_rejects_an_unsupported_value(monkeypatch)
 
     rejected = client.post(
         "/api/locations",
-        json={"name": "Annex", "code": "ANX", "type": "Building", "status": "Unknown"},
+        json={"name": "Annex", "code": "ANX", "type": "Campus Services", "status": "Unknown"},
     )
 
     assert rejected.status_code == 400
@@ -733,7 +783,7 @@ def test_indoor_location_lifecycle_status_is_persisted_and_projected(monkeypatch
     """
 
     client, records, _ = make_mutation_client(monkeypatch)
-    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Campus Services"})
     response = client.post(
         "/api/locations",
         json={
@@ -758,16 +808,98 @@ def test_photo_upload_rejects_invalid_and_oversized_files_without_writes(monkeyp
     client, records, session = make_mutation_client(monkeypatch)
     invalid = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"no"), "library.txt")},
+        data={"name": "Library", "code": "LIB", "type": "Campus Services", "photo": (io.BytesIO(b"no"), "library.txt")},
         content_type="multipart/form-data",
     )
     assert invalid.status_code == 400
     assert records == []
     oversized = client.post(
         "/api/locations",
-        data={"name": "Library", "code": "LIB", "type": "Building", "photo": (io.BytesIO(b"x" * (5 * 1024 * 1024 + 1)), "library.png")},
+        data={"name": "Library", "code": "LIB", "type": "Campus Services", "photo": (io.BytesIO(b"x" * (5 * 1024 * 1024 + 1)), "library.png")},
         content_type="multipart/form-data",
     )
     assert oversized.status_code == 400
     assert records == []
     assert session.commits == 0
+
+
+# ==========================================
+# PLACE CLASSIFICATIONS (issue #121)
+# ==========================================
+
+@pytest.mark.parametrize("classification", (
+    "College", "Campus Services", "Food", "Parking", "Facility",
+))
+def test_every_classification_can_be_created_and_comes_back_unchanged(monkeypatch, classification):
+    client, _, session = make_mutation_client(monkeypatch)
+
+    response = client.post("/api/locations", json={
+        "name": f"{classification} Place", "code": f"C-{classification[:4]}",
+        "type": classification,
+    })
+
+    assert response.status_code == 201
+    assert response.json["type"] == classification
+    assert session.buildings[0].type_id == PLACE_TYPES[classification].type_id
+
+
+def test_a_new_place_may_not_be_created_as_legacy(monkeypatch):
+    """type_id IS NULL is what Phase 2 clears; Phase 1 stops new ones."""
+
+    client, _, session = make_mutation_client(monkeypatch)
+
+    response = client.post("/api/locations", json={
+        "name": "Old Hall", "code": "OLD", "type": "Building",
+    })
+
+    assert response.status_code == 400
+    assert response.json["fields"]["type"] == "Select a supported Location type."
+    assert session.buildings == []
+
+
+def test_an_unknown_classification_is_rejected(monkeypatch):
+    client, _, session = make_mutation_client(monkeypatch)
+
+    response = client.post("/api/locations", json={
+        "name": "Gym", "code": "GYM", "type": "Gymnasium",
+    })
+
+    assert response.status_code == 400
+    assert session.buildings == []
+
+
+@pytest.mark.parametrize("classification", ("Food", "Parking", "Facility"))
+def test_an_indoor_location_is_refused_under_a_place_that_holds_none(monkeypatch, classification):
+    client, records, session = make_mutation_client(monkeypatch)
+    client.post("/api/locations", json={
+        "name": "Standalone", "code": f"S-{classification[:4]}", "type": classification,
+    })
+    parent_id = str(session.buildings[0].building_id)
+
+    response = client.post("/api/locations", json={
+        "name": "Room 1", "code": f"R-{classification[:4]}", "type": "Room",
+        "parentId": parent_id, "floor": "Ground Floor",
+    })
+
+    assert response.status_code == 400
+    assert response.json["relationships"]["parentId"] == (
+        "Indoor Locations can only belong to a College or Campus Services Place."
+    )
+    assert records == []
+
+
+@pytest.mark.parametrize("classification", ("College", "Campus Services"))
+def test_an_indoor_location_is_accepted_under_a_place_that_holds_them(monkeypatch, classification):
+    client, records, session = make_mutation_client(monkeypatch)
+    client.post("/api/locations", json={
+        "name": "Holder", "code": f"H-{classification[:4]}", "type": classification,
+    })
+    parent_id = str(session.buildings[0].building_id)
+
+    response = client.post("/api/locations", json={
+        "name": "Room 1", "code": f"R-{classification[:4]}", "type": "Room",
+        "parentId": parent_id, "floor": "Ground Floor",
+    })
+
+    assert response.status_code == 201
+    assert len(records) == 1

@@ -6,6 +6,51 @@ from actions import actions_bp
 from services.location_photos import GalleryChange
 import location as location_module
 from location import location_bp
+from model.building import PLACE_CLASSIFICATIONS
+from services import place_classification
+
+
+# The seeded Place vocabulary, so a write can resolve a classification name
+# without a database. Mirrors public.building_type, including which types may
+# hold indoor Locations.
+PLACE_TYPES = {
+    name: type("PlaceType", (), {
+        "type_id": index,
+        "type_name": name,
+        "can_contain_locations": name in ("College", "Campus Services"),
+        "description": None,
+    })()
+    for index, name in enumerate(
+        ("College", "Campus Services", "Food", "Parking", "Facility"), start=1
+    )
+}
+
+
+@pytest.fixture(autouse=True)
+def place_vocabulary(monkeypatch):
+    """Every test in this module resolves classifications without a database.
+
+    Several of them replace db.session with a double, and Model.query goes
+    through it, so a real vocabulary lookup would fail on an unrelated fake
+    rather than on anything the test is about.
+    """
+
+    stub_place_vocabulary(monkeypatch)
+
+
+def stub_place_vocabulary(monkeypatch):
+    """Resolve classification names from PLACE_TYPES instead of the table."""
+
+    monkeypatch.setattr(place_classification, "find_type", PLACE_TYPES.get)
+    monkeypatch.setattr(
+        place_classification, "find_type_by_id",
+        lambda type_id: next(
+            (row for row in PLACE_TYPES.values() if row.type_id == type_id), None
+        ),
+    )
+
+
+
 
 
 @pytest.fixture(autouse=True)
@@ -196,9 +241,14 @@ def test_locations_endpoints_have_identical_list_results(monkeypatch):
 
 
 def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
-    assert actions_module.CREATABLE_TYPES == {
-        "Room", "Laboratory", "Office", "Restroom", "Building", "Facility"
-    }
+    # The indoor vocabulary plus every Place classification, legacy included.
+    # Asserted against the shared constant rather than a second copy of the
+    # list, which is how the two drifted apart before.
+    assert actions_module.CREATABLE_TYPES == (
+        set(LOCATION_TYPE_IDS) | PLACE_CLASSIFICATIONS
+    )
+    assert "College" in actions_module.CREATABLE_TYPES
+    assert "Campus Services" in actions_module.CREATABLE_TYPES
     assert actions_module.TYPE_IDS == LOCATION_TYPE_IDS
     assert LOCATION_TYPE_NAMES[LOCATION_TYPE_IDS["Restroom"]] == "Restroom"
 
@@ -229,7 +279,10 @@ def test_actions_can_delete_a_building(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     session = FakeSession()
-    building = type("Building", (), {"building_id": 42})()
+    building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,"building_id": 42})()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("Location", (), {"query": FakeQuery(None)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
@@ -248,7 +301,10 @@ def test_actions_delete_uses_type_when_location_and_building_ids_overlap(monkeyp
     app.register_blueprint(actions_bp)
     session = FakeSession()
     location = type("Location", (), {"location_id": 42})()
-    building = type("Building", (), {"building_id": 42})()
+    building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,"building_id": 42})()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "Location", type("LocationModel", (), {"query": FakeQuery(location)}))
     monkeypatch.setattr(actions_module, "Building", type("BuildingModel", (), {"query": FakeQuery(building)}))
@@ -268,7 +324,10 @@ def test_actions_delete_rolls_a_failed_building_purge_back(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     session = FakeSession()
-    building = type("Building", (), {"building_id": 42})()
+    building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,"building_id": 42})()
 
     def purge(record_id):
         raise RuntimeError("violates foreign key constraint")
@@ -290,6 +349,9 @@ def test_actions_can_edit_a_building(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
@@ -317,6 +379,9 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,
         "building_id": 42,
         "building_code": "ENG",
         "building_name": "Engineering Hall",
@@ -352,6 +417,9 @@ def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
@@ -420,6 +488,9 @@ def _edit_building_app(monkeypatch, has_photo, photo_change, applied):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
+        # Legacy Place, as these rows are: type_id IS NULL.
+        "type_id": None,
+        "building_type": None,
         "building_id": 42,
         "building_code": "ENG",
         "building_name": "Engineering Hall",
@@ -519,3 +590,124 @@ def test_photo_request_for_an_unknown_id_is_not_found(monkeypatch):
     response = client.get("/api/actions/locations/42/photo")
 
     assert response.status_code == 404
+
+
+# ==========================================
+# RECLASSIFYING A PLACE (issue #121)
+# ==========================================
+
+def place_edit_app(monkeypatch, classification="Building", type_id=None, indoor_locations=()):
+    """A PUT-ready app whose Place carries the given type and children."""
+
+    app = Flask(__name__)
+    app.register_blueprint(actions_bp)
+    building = type("Place", (), {
+        "type_id": type_id,
+        "building_type": next(
+            (row for row in PLACE_TYPES.values() if row.type_id == type_id), None
+        ),
+        "building_id": 42,
+        "building_code": "OLD",
+        "building_name": "Old Hall",
+        "classification": classification,
+        "description": None,
+        "keywords": None,
+        "status": "active",
+        "to_location_dto": lambda self: {
+            "id": "42", "name": self.building_name,
+            "code": self.building_code, "type": self.classification,
+        },
+    })()
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
+    monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
+    monkeypatch.setattr(actions_module, "_validation_index", lambda: (list(indoor_locations), [building]))
+    monkeypatch.setattr(actions_module, "_photo_change", lambda: (None, False, None))
+    monkeypatch.setattr(actions_module, "log_audit", lambda *args: None)
+    monkeypatch.setattr(actions_module.db, "session", FakeSession())
+    return app, building
+
+
+def indoor_child(building_id=42, location_id=7):
+    return type("Child", (), {
+        "location_id": location_id, "building_id": building_id,
+        "location_code": "R-1", "location_name": "Room 1",
+    })()
+
+
+def test_reclassifying_a_place_that_holds_locations_to_parking_is_refused(monkeypatch):
+    """The Locations would be stranded somewhere no user could reach them."""
+
+    app, building = place_edit_app(monkeypatch, indoor_locations=[indoor_child()])
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Old Hall", "code": "OLD", "type": "Parking",
+    })
+
+    assert response.status_code == 400
+    assert response.json["fields"]["type"] == (
+        "Move or remove this Place's indoor Locations before classifying it as "
+        "Food, Parking, or Facility."
+    )
+    assert building.classification == "Building", "nothing was written"
+
+
+def test_the_same_place_may_become_a_college(monkeypatch):
+    app, building = place_edit_app(monkeypatch, indoor_locations=[indoor_child()])
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Old Hall", "code": "OLD", "type": "College",
+    })
+
+    assert response.status_code == 200
+    assert building.type_id == PLACE_TYPES["College"].type_id
+
+
+def test_an_empty_place_may_become_parking(monkeypatch):
+    app, building = place_edit_app(monkeypatch)
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Old Hall", "code": "OLD", "type": "Parking",
+    })
+
+    assert response.status_code == 200
+    assert building.type_id == PLACE_TYPES["Parking"].type_id
+
+
+def test_reclassifying_a_legacy_place_sets_its_type_id(monkeypatch):
+    app, building = place_edit_app(monkeypatch)
+    assert building.type_id is None
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Old Hall", "code": "OLD", "type": "Campus Services",
+    })
+
+    assert response.status_code == 200
+    assert building.type_id == PLACE_TYPES["Campus Services"].type_id
+    assert building.classification == "Campus Services"
+
+
+def test_a_legacy_place_can_still_be_edited_without_reclassifying_it(monkeypatch):
+    """Otherwise none of the legacy rows could be renamed before Phase 2."""
+
+    app, building = place_edit_app(monkeypatch)
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Renamed Hall", "code": "OLD", "type": "Building",
+    })
+
+    assert response.status_code == 200
+    assert building.building_name == "Renamed Hall"
+    assert building.type_id is None, "it stays legacy"
+
+
+def test_a_classified_place_cannot_be_sent_back_to_legacy(monkeypatch):
+    app, building = place_edit_app(
+        monkeypatch, classification="Parking", type_id=PLACE_TYPES["Parking"].type_id
+    )
+
+    response = app.test_client().put("/api/actions/locations/42", json={
+        "name": "Old Hall", "code": "OLD", "type": "Building",
+    })
+
+    assert response.status_code == 400
+    assert building.type_id == PLACE_TYPES["Parking"].type_id

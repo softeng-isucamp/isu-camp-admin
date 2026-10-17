@@ -9,6 +9,7 @@ from extensions import db
 from model.audit_log import AuditLog
 from model.app_user import AppUser, UserInfo
 from model.building import Building
+from model.building_type import BuildingType
 from model.location import Location
 from model.path_point import PathPoint  # noqa: F401 - registers Pathway.path_points relationship
 from model.pathway import Pathway
@@ -32,6 +33,16 @@ def app(monkeypatch):
     with app.app_context():
         db.session.execute(db.text("ATTACH DATABASE ':memory:' AS public"))
         db.metadata.create_all(db.engine)
+        # The vocabulary the migration seeds. Without it every Place reads
+        # as legacy, because its classification lives in type_id now.
+        db.session.add_all([
+            BuildingType(type_id=index, type_name=name,
+                         can_contain_locations=name in ("College", "Campus Services"))
+            for index, name in enumerate(
+                ("College", "Campus Services", "Food", "Parking", "Facility"), start=1
+            )
+        ])
+        db.session.commit()
         yield app
         db.session.remove()
         db.drop_all()
@@ -41,8 +52,8 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
     now = datetime.now(timezone.utc)
     with app.app_context():
         db.session.add_all([
-            Building(building_id=1, building_code="ENG", building_name="Engineering Hall"),
-            Building(building_id=2, building_code="LIB", building_name="Library"),
+            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", classification="Building"),
+            Building(building_id=2, building_code="LIB", building_name="Library", classification="Building"),
             AppUser(id=1, username="student01"),
             Location(location_id=1, building_id=1, type_id=3, location_code="ENG-201", location_name="Dean's Office"),
             Location(location_id=2, building_id=1, type_id=1, location_code="ENG-202", location_name="Room 202"),
@@ -77,8 +88,8 @@ def test_dashboard_ranks_selected_indoor_locations_without_double_counting_their
     with app.app_context():
         db.session.add_all([
             AppUser(id=1, username="student01"),
-            Building(building_id=1, building_code="ENG", building_name="Engineering Hall"),
-            Building(building_id=2, building_code="LIB", building_name="Library"),
+            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", classification="Building"),
+            Building(building_id=2, building_code="LIB", building_name="Library", classification="Building"),
             Location(location_id=1, building_id=2, type_id=1, location_code="ENG-201", location_name="Room 201"),
             UserHistory(id=1, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=2)),
             UserHistory(id=2, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=1)),
@@ -125,6 +136,7 @@ def test_dashboard_filters_searches_by_range_and_limits_tied_results_determinist
                 building_id=identifier,
                 building_code=f"B{identifier}",
                 building_name=name,
+                classification="Building",
             ))
             db.session.add(UserHistory(
                 id=identifier,

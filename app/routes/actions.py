@@ -4,12 +4,23 @@ from flask import Blueprint, Response, jsonify, request
 
 from auth import admin_required, reauth_required
 from extensions import db
-from model.building import Building
-from model.building_type import type_id_for as _building_type_id_for
+from model.building import (
+    CAN_CONTAIN_LOCATIONS,
+    LEGACY_CLASSIFICATION,
+    PARENT_MUST_HOLD_LOCATIONS,
+    PLACE_CLASSIFICATIONS,
+    RECLASSIFY_WOULD_STRAND_LOCATIONS,
+    UNSUPPORTED_CLASSIFICATION,
+    Building,
+)
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.record_status import normalized_status as _normalized_status
 from services.audit import log_audit
+from services.place_classification import (
+    reclassification_error as _reclassification_error,
+    resolve_place_type as _resolve_place_type,
+)
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
@@ -25,7 +36,7 @@ actions_bp = Blueprint(
 
 TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
-CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
+CREATABLE_TYPES = set(TYPE_IDS) | PLACE_CLASSIFICATIONS
 PHOTO_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 logger = logging.getLogger(__name__)
 
@@ -89,7 +100,7 @@ def _edit_target(location_id, requested_type):
     missing id a 404 rather than a validation error.
     """
     location = building = None
-    if requested_type not in {"Building", "Facility"}:
+    if requested_type not in PLACE_CLASSIFICATIONS:
         location = db.session.get(Location, location_id)
     if requested_type not in INDOOR_TYPES:
         building = db.session.get(Building, location_id)
@@ -169,7 +180,20 @@ def _validation_error(fields=None, relationships=None):
     return jsonify({"success": False, "message": "Location validation failed.", "fields": fields or {}, "relationships": relationships or {}}), 400
 
 
-def _validate(data, records, buildings, current_status=None):
+def _has_indoor_locations(place, records):
+    """Whether any indoor Location still sits under this Place.
+
+    Counted from the rows the caller already loaded rather than with another
+    query. ``records`` excludes the record being edited, which is correct
+    here: a Place is never its own child.
+    """
+
+    if place is None:
+        return False
+    return any(record.building_id == place.building_id for record in records)
+
+
+def _validate(data, records, buildings, current_status=None, current_place=None):
     fields, relationships = {}, {}
     name, code = str(data.get("name", "")).strip(), str(data.get("code", "")).strip()
     location_type, parent_id = data.get("type"), data.get("parentId")
@@ -177,10 +201,15 @@ def _validate(data, records, buildings, current_status=None):
     floor_number = _floor_number_from_label(floor_level)
     if not name: fields["name"] = "Location name is required."
     if not code: fields["code"] = "Location code is required."
-    if location_type not in CREATABLE_TYPES: fields["type"] = "Select a supported Location type."
+    if location_type not in CREATABLE_TYPES: fields["type"] = UNSUPPORTED_CLASSIFICATION
     building = None
-    if location_type == "Building":
+    # Every Place classification, not only the legacy spelling of it.
+    if location_type in PLACE_CLASSIFICATIONS:
         building = None
+        # Shadows the trailing branch below, so the rule is repeated here to
+        # cover every classification rather than only those that fell through.
+        if parent_id not in (None, ""):
+            fields["parentId"] = "Only Indoor Locations can belong to a Building."
     elif location_type in INDOOR_TYPES:
         if parent_id in (None, ""):
             fields["parentId"] = "A Building is required for an Indoor Location."
@@ -189,6 +218,11 @@ def _validate(data, records, buildings, current_status=None):
             except (TypeError, ValueError): building = None
             if building is None:
                 relationships["parentId"] = "The selected Building does not exist."
+            elif not building.can_contain_locations:
+                # Food, Parking and Facility are places you go to, not places
+                # with rooms in them. Legacy Places still accept Locations
+                # until Phase 3.
+                relationships["parentId"] = PARENT_MUST_HOLD_LOCATIONS
         if not floor_level or floor_level == "Unspecified Floor":
             fields["floor"] = "A specific Floor Level is required for a new Indoor Location."
         elif floor_number is None:
@@ -201,13 +235,30 @@ def _validate(data, records, buildings, current_status=None):
     status = _normalized_status(data.get("status"), default=current_status or "active")
     if status is None:
         fields["status"] = "Select either Active or Inactive."
+
+    # A Place's classification travels as a name and is stored as an id.
+    # Resolved only once the type is known to be a Place at all, so an indoor
+    # Location is not refused for a classification it never had.
+    place_type_id = None
+    if location_type in PLACE_CLASSIFICATIONS and "type" not in fields:
+        place_type_id, classification_error = _resolve_place_type(location_type, current_place)
+        if classification_error:
+            fields["type"] = classification_error
+        else:
+            stranded = _reclassification_error(
+                current_place,
+                place_type_id,
+                _has_indoor_locations(current_place, records),
+            )
+            if stranded:
+                fields["type"] = stranded
     duplicate = next((item for item in records if item.location_code.lower() == code.lower()), None)
     if duplicate is None:
         duplicate = next((item for item in buildings if item.building_code.lower() == code.lower()), None)
     if duplicate:
         return None, (jsonify({"success": False, "message": "Location code already exists.", "fields": {"code": "Location code must be unique."}}), 409)
     if fields or relationships: return None, _validation_error(fields, relationships)
-    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords"), "status": status, "building_type_id": _building_type_id_for(data.get("buildingType"))}, None
+    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords"), "status": status, "building_type_id": place_type_id}, None
 
 
 @actions_bp.route("/locations", methods=["GET"])
@@ -337,6 +388,7 @@ def edit_location(location_id):
         [item for item in records if item.location_id != location_id],
         validation_buildings,
         current_status=getattr(building if building is not None else location, "status", None),
+        current_place=building,
     )
     if error: return error
 
@@ -420,7 +472,7 @@ def view_location_photo(location_id):
     try:
         record = None
 
-        if requested_type in {"Building", "Facility"}:
+        if requested_type in PLACE_CLASSIFICATIONS:
             record = Building.query.filter_by(building_id=location_id).first()
         elif requested_type in INDOOR_TYPES:
             record = Location.query.filter_by(location_id=location_id).first()
@@ -456,7 +508,7 @@ def view_location_photo(location_id):
 
 def _gallery_owner(location_id):
     requested_type = request.args.get("type")
-    if requested_type in {"Building", "Facility"}:
+    if requested_type in PLACE_CLASSIFICATIONS:
         return Building.query.filter_by(building_id=location_id).first()
     if requested_type in INDOOR_TYPES:
         return Location.query.filter_by(location_id=location_id).first()
@@ -508,7 +560,7 @@ def delete_location(location_id):
         requested_type = request.args.get("type")
         if requested_type in INDOOR_TYPES:
             building = None
-        elif requested_type in {"Building", "Facility"}:
+        elif requested_type in PLACE_CLASSIFICATIONS:
             location = None
         elif location is not None and building is not None:
             return jsonify({

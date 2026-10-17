@@ -5,12 +5,20 @@ from flask import Blueprint, jsonify, request
 from auth import admin_required
 from extensions import db
 from model.audit_log import AuditLog
-from model.building import Building
-from model.building_type import type_id_for as _building_type_id_for
+from model.building import (
+    CAN_CONTAIN_LOCATIONS,
+    LEGACY_CLASSIFICATION,
+    PARENT_MUST_HOLD_LOCATIONS,
+    PLACE_CLASSIFICATIONS,
+    RECLASSIFY_WOULD_STRAND_LOCATIONS,
+    UNSUPPORTED_CLASSIFICATION,
+    Building,
+)
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.record_status import normalized_status as _normalized_status
 from services.audit import log_audit
+from services.place_classification import resolve_place_type as _resolve_place_type
 from services.floor_lookup import floor_label as _floor_label
 from services.floor_lookup import floor_number_from_label as _floor_number_from_label
 from services.floor_lookup import resolve_floor as _resolve_floor
@@ -25,7 +33,7 @@ TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
 # Facility is a Building classification, never a public.location type.  It
 # remains accepted here so the API can create a classified Building record.
-CREATABLE_TYPES = set(TYPE_IDS) | {"Building", "Facility"}
+CREATABLE_TYPES = set(TYPE_IDS) | PLACE_CLASSIFICATIONS
 logger = logging.getLogger(__name__)
 
 
@@ -151,13 +159,22 @@ def _validate(data, records, buildings):
         fields["code"] = "Location code is required."
 
     if location_type not in CREATABLE_TYPES:
-        fields["type"] = "Select a supported Location type."
+        fields["type"] = UNSUPPORTED_CLASSIFICATION
 
     building = None
 
-    # Building
-    if location_type == "Building":
+    # Place: everything outdoors on the map, whatever it is classified as.
+    if location_type in PLACE_CLASSIFICATIONS:
         building = None
+
+        # A Place stands on the map in its own right. Checked here rather
+        # than in the trailing branch below, which this one now shadows, so
+        # the rule covers every classification instead of only the ones that
+        # used to fall through.
+        if parent_id not in (None, ""):
+            fields["parentId"] = (
+                "Only Indoor Locations can belong to a Building."
+            )
 
     # Indoor Location
     elif location_type in INDOOR_TYPES:
@@ -185,6 +202,11 @@ def _validate(data, records, buildings):
                 relationships["parentId"] = (
                     "The selected Building does not exist."
                 )
+            elif not building.can_contain_locations:
+                # Food, Parking and Facility are places you go to, not places
+                # with rooms in them. Legacy Places still accept Locations
+                # until Phase 3.
+                relationships["parentId"] = PARENT_MUST_HOLD_LOCATIONS
 
         if not floor_level or floor_level == "Unspecified Floor":
             fields["floor"] = (
@@ -198,7 +220,7 @@ def _validate(data, records, buildings):
             "Only Indoor Locations can belong to a Building."
         )
 
-    if location_type in {"Building", "Facility"} and floor_level:
+    if location_type in PLACE_CLASSIFICATIONS and floor_level:
         fields["floor"] = (
             "Building classifications cannot have a Floor Level."
         )
@@ -206,6 +228,15 @@ def _validate(data, records, buildings):
     # Both tables carry the column now, so every type persists its own
     # status. A caller that omits the field gets the default a new row would
     # have had anyway.
+    # A Place's classification travels as a name and is stored as an id.
+    # There is no current Place on a create, so "Building" is always refused
+    # here: legacy is something only existing rows may be.
+    place_type_id = None
+    if location_type in PLACE_CLASSIFICATIONS and "type" not in fields:
+        place_type_id, classification_error = _resolve_place_type(location_type)
+        if classification_error:
+            fields["type"] = classification_error
+
     status = _normalized_status(data.get("status"))
 
     if status is None:
@@ -278,10 +309,8 @@ def _validate(data, records, buildings):
         "keywords": data.get("keywords"),
         "status": status,
 
-        # The new Building vocabulary, resolved from its name. Absent or
-        # unknown leaves the Building untyped rather than failing the save:
-        # every row starts that way, and the form is still being filled in.
-        "building_type_id": _building_type_id_for(data.get("buildingType")),
+        # Resolved from the classification name above.
+        "building_type_id": place_type_id,
 
         # NEW:
         "polygon_coordinates": polygon_coordinates,
@@ -352,7 +381,7 @@ def location_history(location_id):
         requested_type = request.args.get("type")
         if requested_type in INDOOR_TYPES:
             building = None
-        elif requested_type in {"Building", "Facility"}:
+        elif requested_type in PLACE_CLASSIFICATIONS:
             location = None
         elif location is not None:
             building = None
@@ -423,7 +452,7 @@ def create_location():
         # BUILDING CREATION
         # ==================================================
 
-        if values.get("type") in {"Building", "Facility"}:
+        if values.get("type") in PLACE_CLASSIFICATIONS:
 
             latitude = longitude = None
             if values["polygon_coordinates"] is not None:
