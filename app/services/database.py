@@ -19,6 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
 from extensions import db, mail
@@ -60,14 +61,101 @@ app = Flask(__name__)
 # Flask Configuration
 # ==========================================
 
-app.config["SECRET_KEY"] = os.getenv(
-    "SECRET_KEY",
-    "dev-secret-key"
+# No default, deliberately. The session is a signed cookie and this key is the
+# only thing that signs it, so a fallback value is a published master key: with
+# it anyone can mint a cookie naming any admin_id and sign in as a superadmin
+# without a password. Missing is therefore a startup failure, the same as a
+# missing database URL below, rather than a quiet downgrade. Generate one with
+# ``python -c "import secrets; print(secrets.token_hex(32))"``.
+secret_key = os.getenv("SECRET_KEY")
+
+if not secret_key:
+    raise RuntimeError(
+        "SECRET_KEY is missing from .env"
+    )
+
+app.config["SECRET_KEY"] = secret_key
+
+
+# ==========================================
+# Session Cookie
+# ==========================================
+
+# The session is a signed cookie rather than a server-side record, so these
+# flags are the whole of its transport security.
+
+# Keeps the cookie off plaintext HTTP. Nginx serves the portal on plain :8080
+# and expects TLS to be terminated in front of it; a deployment with no
+# terminator yet must set SESSION_COOKIE_SECURE=false until it has one, or the
+# browser withholds the cookie and every sign-in looks like it succeeded and
+# then immediately failed. Dev over http://127.0.0.1 is unaffected - browsers
+# exempt loopback from this rule.
+app.config["SESSION_COOKIE_SECURE"] = os.getenv(
+    "SESSION_COOKIE_SECURE",
+    "True"
+).lower() in ("true", "1", "yes")
+
+# Strict rather than Lax. Nothing outside the portal links into it, and in
+# production the frontend and the API are the same origin behind the Nginx
+# proxy, so the cookie never needs to ride a cross-site request. That same
+# sameness is why the CORS allowlist protects nothing there, which leaves this
+# as the only thing standing between a destructive route and a cross-site POST.
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+
+# Flask's default already, set here so all four live together and none can be
+# lost to a change made somewhere else.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+# A signed cookie carries no expiry of its own, so without a lifetime a copy of
+# one works for ever. Flask stamps a lifetime only onto a session marked
+# permanent, which login() now does, and re-issues the cookie on each request
+# (SESSION_REFRESH_EACH_REQUEST, on by default), making this an idle timeout
+# rather than a hard one.
+#
+# This bounds a stolen cookie; it does not make a session revocable. Signing
+# out, changing a password and demoting an account still cannot invalidate a
+# cookie already in someone else's hands - that needs a server-side session
+# record, which is a larger change than this one.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+    hours=int(os.getenv("SESSION_LIFETIME_HOURS") or 12)
 )
 
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
     days=int(os.getenv("PERMANENT_SESSION_LIFETIME_DAYS", 30))
 )
+
+
+# ==========================================
+# Proxy Headers
+# ==========================================
+
+# Nginx proxies every request, so left alone request.remote_addr is the proxy's
+# own address on all of them and every per-IP limit in services.auth collapses
+# into one bucket shared by the whole deployment - which turns the
+# five-sign-ins-a-minute limit into a lockout any single client can trigger for
+# everybody, and leaves a real attacker no more limited than anyone else.
+#
+# Off unless the deployment says how many proxies sit in front, because
+# X-Forwarded-For is written by the caller: trusting it on a server that can be
+# reached directly would let a client state its own address and defeat the
+# limits outright. deploy/compose.yaml sets this to 1 for the Nginx in front of
+# the API, where admin-api is only reachable on the internal network; a bare
+# ``python database.py`` has no proxy and leaves it at 0.
+#
+# Only x_for is trusted. The other forwarded headers are left alone because
+# deploy/nginx.conf does not set them, and a header nothing writes is a header
+# anyone can.
+TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT") or 0)
+
+if TRUSTED_PROXY_COUNT > 0:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=TRUSTED_PROXY_COUNT,
+        x_proto=0,
+        x_host=0,
+        x_port=0,
+        x_prefix=0
+    )
 
 
 # ==========================================
