@@ -283,6 +283,7 @@ def test_an_account_with_a_weak_stored_password_still_signs_in(monkeypatch):
     auth_module.rate_limit_buckets.clear()
     admin = type("AdminRecord", (), {
         "id": 3, "username": "admin01", "password": "password123", "is_active": True,
+        "is_superadmin": False,
         "to_profile": lambda self: {"id": 3},
     })()
     monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
@@ -453,3 +454,68 @@ def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
     assert custom.json["message"] == "Confirm your password to do the thing."
     # The code is what the frontend reads, so wording never changes it.
     assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE
+
+
+@pytest.mark.parametrize("role, expected", (("superadmin", "superadmin"), ("admin", "admin")))
+def test_login_records_the_role_in_the_session(monkeypatch, role, expected):
+    """The job-status route authorizes from this, so sign-in has to write it.
+
+    Without it that route falls back to reading public.admin, which is the
+    table a restore locks - see session_admin_identity.
+    """
+
+    auth_module.rate_limit_buckets.clear()
+    admin = type("AdminRecord", (), {
+        "id": 3, "username": "admin01", "password": "password123",
+        "is_active": True, "is_superadmin": role == "superadmin",
+        "to_profile": lambda self: {"id": "3", "username": "admin01",
+                                    "email": "", "role": role},
+    })()
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(
+            lambda **values: type("Result", (), {"first": lambda self: admin})()
+        )})()
+    }))
+    monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
+    client = auth_app().test_client()
+
+    response = client.post("/api/login", json={"username": "admin01", "password": "password123"})
+
+    assert response.status_code == 200
+    with client.session_transaction() as flask_session:
+        assert flask_session["admin_role"] == expected
+
+
+def test_session_admin_identity_reads_nothing_from_the_database(monkeypatch):
+    """It is the one guard that may not touch the row, so prove it does not."""
+
+    def explode(*args, **kwargs):
+        raise AssertionError("session_admin_identity must not read the database")
+
+    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {
+        "get": explode, "commit": explode,
+    })())
+    app = auth_app()
+
+    with app.test_request_context("/"):
+        auth_module.session["admin_id"] = 4
+        auth_module.session["admin_username"] = "admin01"
+        auth_module.session["admin_role"] = "superadmin"
+        identity = auth_module.session_admin_identity()
+
+    assert identity == {"id": 4, "username": "admin01", "role": "superadmin"}
+
+
+def test_session_admin_identity_declines_a_session_without_a_recorded_role():
+    """So the caller falls back to the database guard rather than guessing."""
+
+    app = auth_app()
+
+    with app.test_request_context("/"):
+        auth_module.session["admin_id"] = 4
+        auth_module.session["admin_username"] = "admin01"
+        assert auth_module.session_admin_identity() is None
+
+    with app.test_request_context("/"):
+        assert auth_module.session_admin_identity() is None

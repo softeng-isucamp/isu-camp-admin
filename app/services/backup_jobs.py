@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from services import log_preservation
+
 # Only the schema this application owns. Supabase keeps its own machinery in
 # auth, storage and extensions schemas, which are not ours to dump or restore.
 DUMP_SCHEMA = "public"
@@ -335,7 +337,8 @@ def _finish(job_id, status, message=None):
             job["message"] = message
 
 
-def _run(job_id, command, environment, on_success=None, on_failure=None):
+def _run(job_id, command, environment, on_success=None, on_failure=None,
+         on_success_error="The archive could not be recorded"):
     """Runs one client tool to completion and records how it went.
 
     ``on_failure`` is for whatever the tool left on disk. pg_dump creates its
@@ -344,6 +347,11 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
     here - has already written a truncated file. An automatic backup has nobody
     watching it, so clearing that away belongs with the run rather than with a
     caller who may never look.
+
+    Whatever ``on_success`` returns becomes the job's message, so a step that
+    ran after the tool can say what it did. ``on_success_error`` names that
+    step in the failure, because by then the tool itself has already succeeded
+    and reporting it as a failed dump would send the reader the wrong way.
     """
 
     def failed(message):
@@ -380,14 +388,16 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
         failed(detail[-1][:300] if detail else "The operation failed.")
         return
 
+    message = None
+
     if on_success:
         try:
-            on_success()
+            message = on_success()
         except Exception as error:
-            failed(f"The archive could not be recorded: {error}")
+            failed(f"{on_success_error}: {error}")
             return
 
-    _finish(job_id, "succeeded")
+    _finish(job_id, "succeeded", message)
 
 
 def _start(kind, worker):
@@ -493,6 +503,28 @@ def start_restore(backup_id, actor):
     ]
 
     def worker(job_id):
-        _run(job_id, command, environment)
+        # Read on this thread, immediately before the restore, so the window
+        # between reading the logs and replacing them is as small as it can be.
+        # A failure here stops the job before pg_restore has touched anything.
+        try:
+            preserved = log_preservation.capture(environment)
+        except Exception as error:
+            logger.exception("Could not read the logs before restoring")
+            _finish(job_id, "failed",
+                    f"The logs could not be read, so nothing was restored: {error}")
+            return
+
+        _run(
+            job_id,
+            command,
+            environment,
+            on_success=lambda: log_preservation.write_back(environment, preserved),
+            # The restore itself has already committed by the time this can
+            # fail, so the archive is live and only the logs are the snapshot's.
+            on_success_error=(
+                "The backup was restored, but the logs from before it could not"
+                " be put back, so the Logs page now shows the backup's"
+            ),
+        )
 
     return _start("restore", worker)

@@ -17,7 +17,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required, rate_limited
+from auth import admin_required, rate_limited, session_admin_identity
 from extensions import db
 from services.audit import log_audit
 from services.backup_jobs import (
@@ -170,11 +170,42 @@ def restore_backup(backup_id):
     return jsonify(job), 202
 
 
+def _superadmin_without_a_database_read():
+    """Authorize a superadmin from the session alone, falling back to the row.
+
+    This route is polled every 1.5 seconds throughout a restore, and a restore
+    locks public.admin against readers until it commits, so the usual guard
+    does not refuse here - it blocks, and the panel sees a 500 where it
+    expected progress. Job state is already in memory; the database read was
+    only ever the authorization.
+
+    A session that predates the role being recorded at sign-in gets the old
+    guard, so nothing silently changes for one already open.
+    """
+
+    identity = session_admin_identity()
+
+    if identity is None:
+        admin, error = _superadmin_required()
+        return admin, error
+
+    if identity["role"] != "superadmin":
+        return None, _error(
+            "Backup and restore is limited to superadministrators.", status=403
+        )
+
+    return identity, None
+
+
 @backups_bp.get("/jobs/<job_id>")
 def read_job(job_id):
-    """The state of one backup or restore, polled by the panel until terminal."""
+    """The state of one backup or restore, polled by the panel until terminal.
 
-    _, error = _superadmin_required()
+    Answers from memory without touching the database, so that it keeps
+    answering while a restore holds the schema. See the helper above.
+    """
+
+    _, error = _superadmin_without_a_database_read()
     if error:
         return error
 

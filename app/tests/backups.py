@@ -75,6 +75,36 @@ class FakeCompleted:
         self.stdout = ""
 
 
+class FakeLogPreservation:
+    """Stands in for the real module, which would open a database connection.
+
+    Records the order of its calls, because a restore has to read the logs
+    before pg_restore replaces them and write them back only after it has.
+    """
+
+    def __init__(self, capture_error=None, message="Kept the current logs."):
+        self.calls = []
+        self.capture_error = capture_error
+        self.message = message
+
+    def capture(self, _environment):
+        self.calls.append("capture")
+        if self.capture_error:
+            raise self.capture_error
+        return {"audit_log": {"columns": ["id"], "rows": [(1,)]}}
+
+    def write_back(self, _environment, captured):
+        self.calls.append("write_back")
+        assert captured, "the restore must write back what it captured"
+        return self.message
+
+
+def fake_log_preservation(monkeypatch, **kwargs):
+    stub = FakeLogPreservation(**kwargs)
+    monkeypatch.setattr(backup_jobs, "log_preservation", stub)
+    return stub
+
+
 # ==========================================
 # AUTHORIZATION
 # ==========================================
@@ -434,6 +464,7 @@ def test_restore_runs_pg_restore_over_the_schema(app, monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+    fake_log_preservation(monkeypatch)
 
     with app.app_context():
         sign_in(monkeypatch)
@@ -452,6 +483,171 @@ def test_restore_runs_pg_restore_over_the_schema(app, monkeypatch, tmp_path):
     assert "--clean" in captured["command"]
     assert "--if-exists" in captured["command"]
     assert "--schema=public" in captured["command"]
+
+
+# ==========================================
+# POLLING A JOB WHILE THE RESTORE HOLDS THE SCHEMA
+# ==========================================
+
+def test_job_status_answers_without_reading_the_admin_row(app, monkeypatch):
+    """The route the panel polls must not need a table the restore has locked.
+
+    A restore holds ACCESS EXCLUSIVE on public.admin until it commits, so a
+    guard that reads the row blocks rather than refuses, and the panel is
+    handed a 500 in place of the progress it is polling for. Proven here by
+    making any database-backed guard fail outright: the route must still
+    answer.
+    """
+
+    def exploding_guard():
+        raise AssertionError("the job route must not read the admin row")
+
+    monkeypatch.setattr(backups_route, "admin_required", exploding_guard)
+
+    with app.app_context():
+        backup_jobs._jobs["job-1"] = {
+            "id": "job-1", "kind": "restore", "status": "running", "message": None,
+        }
+        client = app.test_client()
+        with client.session_transaction() as browser:
+            browser["admin_id"] = 1
+            browser["admin_username"] = "admin01"
+            browser["admin_role"] = "superadmin"
+
+        response = client.get("/api/jobs/job-1")
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "running"
+
+
+def test_job_status_still_refuses_an_administrator_who_is_not_a_superadmin(app, monkeypatch):
+    monkeypatch.setattr(
+        backups_route, "admin_required",
+        lambda: (_ for _ in ()).throw(AssertionError("should not be reached")),
+    )
+
+    with app.app_context():
+        backup_jobs._jobs["job-2"] = {
+            "id": "job-2", "kind": "backup", "status": "running", "message": None,
+        }
+        client = app.test_client()
+        with client.session_transaction() as browser:
+            browser["admin_id"] = 2
+            browser["admin_role"] = "admin"
+
+        response = client.get("/api/jobs/job-2")
+
+    assert response.status_code == 403
+
+
+def test_a_session_predating_the_recorded_role_keeps_the_old_guard(app, monkeypatch):
+    """Nothing changes for a session that is already open; one sign-in moves
+    it onto the database-free path."""
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        backup_jobs._jobs["job-3"] = {
+            "id": "job-3", "kind": "backup", "status": "succeeded", "message": None,
+        }
+        client = app.test_client()
+        with client.session_transaction() as browser:
+            browser["admin_id"] = 1
+            browser["admin_username"] = "admin01"
+            # No admin_role: this session was minted before it was recorded.
+
+        response = client.get("/api/jobs/job-3")
+
+    assert response.status_code == 200, "the database-backed guard still authorizes it"
+
+
+# ==========================================
+# LOGS ACROSS A RESTORE
+# ==========================================
+
+def test_a_restore_keeps_the_current_logs_rather_than_the_backup_s(app, monkeypatch, tmp_path):
+    """The archive still holds the snapshot's logs; the Logs page must not.
+
+    Read before pg_restore replaces the schema, written back after it has, and
+    the job says so, because an administrator who restores needs to know the
+    trail of what happened since the backup is still there.
+    """
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "yes")
+    (tmp_path / "20261009-000000Z.dump").write_bytes(b"PGDMP")
+    order = []
+
+    def fake_run(command, env=None, **kwargs):
+        order.append("pg_restore")
+        return FakeCompleted()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+    logs = fake_log_preservation(monkeypatch, message="Kept the current logs: 3 audit log entries.")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post(
+            "/api/backups/20261009-000000Z/restore",
+            json={"currentPassword": PASSWORD},
+        ).get_json()
+        job = wait_for_terminal(body["id"])
+
+    assert job["status"] == "succeeded"
+    assert logs.calls == ["capture", "write_back"]
+    assert order == ["pg_restore"]
+    assert job["message"] == "Kept the current logs: 3 audit log entries."
+
+
+def test_logs_are_read_before_pg_restore_so_a_failure_there_changes_nothing(app, monkeypatch, tmp_path):
+    """If the logs cannot be read, the restore must not start at all -
+    otherwise the schema is replaced and the entries are gone for good."""
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "yes")
+    (tmp_path / "20261009-000000Z.dump").write_bytes(b"PGDMP")
+    ran = []
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *args, **kwargs: ran.append("pg_restore") or FakeCompleted())
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+    fake_log_preservation(monkeypatch, capture_error=RuntimeError("connection refused"))
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post(
+            "/api/backups/20261009-000000Z/restore",
+            json={"currentPassword": PASSWORD},
+        ).get_json()
+        job = wait_for_terminal(body["id"])
+
+    assert job["status"] == "failed"
+    assert ran == [], "pg_restore must not run once the logs cannot be read"
+    assert "nothing was restored" in job["message"]
+
+
+def test_a_failed_write_back_is_not_reported_as_a_failed_dump(app, monkeypatch, tmp_path):
+    """By then the restore has committed, so the message has to say the data
+    is live and only the logs are the backup's."""
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "yes")
+    (tmp_path / "20261009-000000Z.dump").write_bytes(b"PGDMP")
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: FakeCompleted())
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    logs = fake_log_preservation(monkeypatch)
+    logs.write_back = lambda _environment, _captured: (_ for _ in ()).throw(RuntimeError("gone"))
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().post(
+            "/api/backups/20261009-000000Z/restore",
+            json={"currentPassword": PASSWORD},
+        ).get_json()
+        job = wait_for_terminal(body["id"])
+
+    assert job["status"] == "failed"
+    assert "The backup was restored" in job["message"]
+    assert "archive could not be recorded" not in job["message"]
 
 
 def test_restoring_a_missing_archive_is_not_found(app, monkeypatch):

@@ -253,6 +253,10 @@ def login():
 
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
+        # Recorded so the job-status route can authorize without reading the
+        # admin row. See session_admin_identity; every other guard still reads
+        # it, so this is the only place the role is taken on trust.
+        session["admin_role"] = "superadmin" if admin.is_superadmin else "admin"
         log_audit("System", admin, "login", "Admin", admin.id, "Admin login successful")
         db.session.commit()
 
@@ -383,6 +387,48 @@ def admin_required():
         )
 
     return admin, None
+
+
+def session_admin_identity():
+    """Who the session says is calling, with no database read. None if nobody.
+
+    Every other guard here re-reads the admin row, which is what makes a
+    deactivation or a demotion take effect on the caller's next request. This
+    one deliberately does not, and has exactly one caller: the job-status
+    route in routes/backups.py.
+
+    That route has to answer *during* a restore, and a restore is
+    ``pg_restore --clean --single-transaction``, which holds ACCESS EXCLUSIVE
+    on every table in public - public.admin included - until it commits. A
+    guard that reads the row there does not fail, it blocks, until the worker
+    times out and the panel gets a 500 instead of the progress it is polling
+    for. The one endpoint whose job is to report on the restore was the one
+    endpoint the restore locked out.
+
+    The cost is that this route alone cannot see a demotion or a deactivation
+    until the session ends. Weigh it against what the route returns: a job's
+    id, kind, status and message, for a job id the caller must already hold -
+    a uuid4 handed out when the job was started.
+
+    ``admin_role`` is absent from a session minted before it was recorded at
+    sign-in. The caller treats that as "ask the database", so an older session
+    keeps the old behaviour exactly, and signing out and in once is what moves
+    it onto this path.
+    """
+
+    admin_id = session.get("admin_id")
+    if not admin_id:
+        return None
+
+    role = session.get("admin_role")
+    if role is None:
+        return None
+
+    return {
+        "id": admin_id,
+        "username": session.get("admin_username") or "",
+        "role": role,
+    }
 
 
 # The frontend recognises this code, not the message text, to tell a missing

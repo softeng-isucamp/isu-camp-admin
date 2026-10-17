@@ -23,16 +23,22 @@ GENERIC_MESSAGE = "If an account exists for this email, a code has been sent."
 
 
 class FakeAdmin:
-    def __init__(self, id, username, gmail, status="active", password="old-password"):
+    def __init__(self, id, username, gmail, status="active", password="old-password",
+                 role="admin"):
         self.id = id
         self.username = username
         self.gmail = gmail
         self.status = status
         self.password = password
+        self.role = role
 
     @property
     def is_active(self):
         return self.status == "active"
+
+    @property
+    def is_superadmin(self):
+        return (self.role or "admin") == "superadmin"
 
 
 class Harness:
