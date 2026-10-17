@@ -13,7 +13,7 @@ describe("Map Editor preview", () => {
 
   it("omits parent building and spatial source from indoor location cards", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "room-113", name: "Room 113", code: "ADM-113", type: "Room", parentId: "admin-building", building: "Administration Building", floor: "1st Floor", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Classroom" },
+      { id: "room-113", name: "Room 113", code: "ADM-113", type: "Room", parentId: "admin-building", building: "Administration Building", floor: "Ground Floor", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Classroom" },
     ]);
     renderEditor();
 
@@ -21,7 +21,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Room 113 Location/ }));
 
     const locationCard = screen.getByRole("complementary", { name: "Room 113 object details" });
-    expect(locationCard).toHaveTextContent("1st Floor");
+    expect(locationCard).toHaveTextContent("Ground Floor");
     expect(locationCard).toHaveTextContent("Classroom");
     expect(locationCard).not.toHaveTextContent("Parent building");
     expect(locationCard).not.toHaveTextContent("Spatial source");

@@ -3,8 +3,12 @@ import type { Location, LocationDraft, LocationType } from "../types";
 export type LocationKind = "outdoor" | "floor" | "indoor";
 
 export const indoorLocationTypes = ["Room", "Office", "Laboratory", "Restroom"] as const;
+// "1st Floor" is deliberately absent: it and "Ground Floor" named the same
+// storey, so the directory keeps one of them. The backend stores it as floor
+// number 1 and renders that as "Ground Floor", which is why nothing here
+// needs to change when an older record comes back.
 export const standardFloorLevels = [
-  "Ground Floor", "1st Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement",
+  "Ground Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement",
 ] as const;
 
 export const isIndoorLocationType = (type: LocationType) =>

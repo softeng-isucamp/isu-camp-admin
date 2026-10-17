@@ -1213,7 +1213,14 @@ export function Locations() {
                           setDraft({ ...draft, floor: custom ? "" : event.target.value || undefined });
                         }}
                       >
-                        <option value="">None</option>
+                        {/* Not a choice. The field is required, so picking
+                            "None" only ever produced a validation error. It
+                            stays as a hidden placeholder rather than being
+                            deleted, because a record saved before the Floor
+                            Level was required still has none, and an empty
+                            value with no option to render would show that
+                            record standing on the Ground Floor. */}
+                        <option value="" disabled hidden>Select a floor level</option>
                         {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
                         {dialog === "edit" && customFloorMode && <option value="__custom__">Custom Floor Level</option>}
                       </SelectField>
