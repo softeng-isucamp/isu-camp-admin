@@ -5,6 +5,7 @@ from flask import Blueprint, Response, jsonify, request
 from auth import admin_required, reauth_required
 from extensions import db
 from model.building import Building
+from model.building_type import type_id_for as _building_type_id_for
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.record_status import normalized_status as _normalized_status
@@ -206,7 +207,7 @@ def _validate(data, records, buildings, current_status=None):
     if duplicate:
         return None, (jsonify({"success": False, "message": "Location code already exists.", "fields": {"code": "Location code must be unique."}}), 409)
     if fields or relationships: return None, _validation_error(fields, relationships)
-    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords"), "status": status}, None
+    return {"name": name, "code": code, "type": location_type, "type_id": TYPE_IDS.get(location_type), "building_id": building.building_id if building else None, "floor_number": floor_number, "description": data.get("function", data.get("description")), "keywords": data.get("keywords"), "status": status, "building_type_id": _building_type_id_for(data.get("buildingType"))}, None
 
 
 @actions_bp.route("/locations", methods=["GET"])
@@ -347,6 +348,7 @@ def edit_location(location_id):
             building.building_code = values["code"]
             building.building_name = values["name"]
             building.classification = values["type"]
+            building.type_id = values["building_type_id"]
             building.status = values["status"]
             building.description = values["description"]
             building.keywords = values["keywords"]

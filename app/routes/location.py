@@ -6,6 +6,7 @@ from auth import admin_required
 from extensions import db
 from model.audit_log import AuditLog
 from model.building import Building
+from model.building_type import type_id_for as _building_type_id_for
 from model.floor import Floor
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.record_status import normalized_status as _normalized_status
@@ -277,6 +278,11 @@ def _validate(data, records, buildings):
         "keywords": data.get("keywords"),
         "status": status,
 
+        # The new Building vocabulary, resolved from its name. Absent or
+        # unknown leaves the Building untyped rather than failing the save:
+        # every row starts that way, and the form is still being filled in.
+        "building_type_id": _building_type_id_for(data.get("buildingType")),
+
         # NEW:
         "polygon_coordinates": polygon_coordinates,
     }, None
@@ -431,6 +437,7 @@ def create_location():
                 description=values["description"],
                 keywords=values["keywords"],
                 classification=values["type"],
+                type_id=values["building_type_id"],
                 status=values["status"],
                 latitude=latitude,
                 longitude=longitude,

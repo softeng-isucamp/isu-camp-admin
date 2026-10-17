@@ -11,7 +11,27 @@ class Building(db.Model):
     building_id = db.Column(db.BigInteger, primary_key=True)
     building_code = db.Column(db.String, nullable=False)
     building_name = db.Column(db.String, nullable=False)
+
+    # Free text, and in practice only ever "Building" or "Facility". Still
+    # the source of the DTO's "type", of the Dashboard's analytics keys and
+    # of the map's object kinds, so it stays until every row has been given a
+    # building_type and those readers have been moved across.
     classification = db.Column(db.String, nullable=False, default="Building")
+
+    # What this Building actually is - College, Campus Services, Food,
+    # Parking, Facility - from public.building_type. Null until somebody
+    # assigns one: 'Building' said nothing worth migrating, so no row was
+    # given a type automatically.
+    type_id = db.Column(
+        db.BigInteger,
+        db.ForeignKey("public.building_type.type_id"),
+        nullable=True,
+    )
+
+    # Loaded with the Building rather than per row, because the DTO names the
+    # type on every record a listing returns.
+    building_type = db.relationship("BuildingType", lazy="joined")
+
     description = db.Column(db.Text, nullable=True)
 
     # Free-text search keywords for the building, mirroring
@@ -46,7 +66,13 @@ class Building(db.Model):
             "id": str(self.building_id),
             "name": self.building_name,
             "code": self.building_code,
+            # Still the classification. "buildingType" is the new vocabulary
+            # and is reported beside it rather than in its place, so nothing
+            # reading "type" changes while the directory is being edited.
             "type": self.classification or "Building",
+
+            # None until this Building has been given a type.
+            "buildingType": self.building_type.type_name if self.building_type else None,
             "parentId": None,
             "building": None,
             "floor": None,
