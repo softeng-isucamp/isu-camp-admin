@@ -7,9 +7,13 @@ a "veterinary medicine laboratory" that is actually called "VetMed Laboratory".
 Generating it instead means the dataset says what the directory says, and
 saying it again after the directory changes costs one command.
 
-Surface forms come from each destination's own name and its ``keywords``
-column, which is where the directory already records what people call a place.
-Nothing is invented here.
+Every destination, and every way of naming one, is read from the directory:
+a row's name, its ``keywords`` - which is where the directory already records
+what people call a place - its type, and the building holding it. Nothing
+about the campus is written here. Phrasings are authored, because a query has
+to be worded somehow, but what they are worded about comes only from the
+database, and a query is never emitted for a place the directory does not
+hold.
 
 Usage:
     python scripts/generate_vetmed_queries.py [output.csv]
@@ -37,55 +41,38 @@ DEFAULT_OUTPUT = ROOT / ".claude" / "vetmed_queries.csv"
 SUBJECT = re.compile(r"\bvet\b|vetmed|veterinar", re.I)
 
 # What someone types into a search box, which is all this dataset has to
-# answer. A subset of the phrasings in the hand-written file this replaces -
-# every one here appeared there, so nothing new is being invented.
-#
-# The bare name comes first because it is the common case: people type
+# answer. The bare name comes first because it is the common case: people type
 # "surgery room", not a sentence.
+#
+# Proximity phrasings are deliberately absent. "Where is the nearest Surgery
+# Room?" asks the search to rank a list of one - every destination here is a
+# single named place - so it teaches a comparison that never happens.
 TEMPLATES = (
     "{name}",
+    "{name} location",
     "Where is the {name}?",
+    "Where is {name}?",
     "Find the {name}.",
+    "Find {name}.",
     "How can I find the {name}?",
+    "Where can I find the {name}?",
     "Show me the {name} on the map.",
+    "Show me the {name}.",
+    "How do I get to the {name}?",
+    "Directions to the {name}.",
+    "Take me to the {name}.",
+    "Go to the {name}.",
+    "Locate the {name}.",
 )
 
-# Deliberately not generated, and why:
-#
-# The proximity phrasings - "Where is the nearest {name}?", "Find the closest
-# {name}.", "Which {name} is closest to me?", "Locate the nearest {name} from
-# here.", "I need the closest {name}.", "Show the nearest {name} to my current
-# location." - ask a question the directory cannot have. Every destination
-# here is a single named place: there is one Surgery Room, one Pharmacy. A
-# "nearest" that ranks one candidate teaches a comparison that never happens,
-# and it is the phrasing that made the old hand-written file look larger than
-# it was.
-#
-# The conversational ones - "I am looking for the {name}.", "Help me locate
-# the {name}.", "Can you point me to the {name}?", "I need directions to the
-# {name}." - are assistant phrasings, not search input. They inflate the row
-# count with restatements of "Where is the {name}?" and teach nothing the
-# first three templates do not already carry.
-
-# Questions that name a VetMed destination but are not asking to be taken
-# there. They are the dataset's only hand-written rows, because nothing in a
-# campus directory can imply them, and without them every mention of a clinic
-# is read as a request for directions.
-OUT_OF_SCOPE = (
-    "Who is the dean of the School of Veterinary Medicine?",
-    "What courses does the School of Veterinary Medicine offer?",
-    "Is the Veterinary Medicine Clinic open right now?",
-    "What are the clinic hours of the Veterinary Medicine Clinic?",
-    "How much does a dog vaccination cost?",
-    "Can I bring my cat for a check-up?",
-    "Who is the veterinarian on duty?",
-    "What is the contact number of the Veterinary Medicine Clinic?",
-    "Do you treat large animals like carabao?",
-    "How do I enroll in the School of Veterinary Medicine?",
-    "Is there a class in the anatomy laboratory today?",
-    "What time does the Veterinary Medicine Clinic open?",
-    "Do I need an appointment at the vet clinic?",
-    "What are the requirements for the DVM program?",
+# How an indoor place is named together with the building holding it. The bare
+# join is first because it is what a search box receives - "pharmacy vet
+# clinic" - and the prepositions are the same thing written out.
+CONTAINER_JOINS = (
+    "{inner} {outer}",
+    "{inner} of {outer}",
+    "{inner} in {outer}",
+    "{inner} at {outer}",
 )
 
 
@@ -113,20 +100,71 @@ def slug(value):
     return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", value.lower())).strip("_")
 
 
-def surface_forms(name, keywords):
-    """What a place can be called: its name, plus the keywords already recorded.
-
-    Deduplicated case-insensitively, keeping the first spelling seen, because
-    the templates read better with the directory's own capitalisation.
-    """
+def clean(values):
+    """Tidy, de-duplicated text, keeping the directory's own capitalisation."""
 
     seen = {}
-    for value in [name, *(keywords or "").split(",")]:
-        text = " ".join(value.split())
+    for value in values:
+        text = " ".join((value or "").split())
         if len(text) < 2:
             continue
         seen.setdefault(text.lower(), text)
     return list(seen.values())
+
+
+# How directly a phrasing names a place. A form is awarded to the destination
+# that names it most directly, and is only ambiguous when two destinations tie.
+#
+# Without this, a form derived for one place can take a name away from
+# another: the clinic lists "School of Veterinary Medicine" as a keyword, and
+# suffixing its classification turns that into "School of Veterinary Medicine
+# Building", which is the School's actual name. Ranking stops a derived
+# phrasing from outranking a real one.
+NAME, KEYWORD, DERIVED = 0, 1, 2
+
+
+def own_forms(name, keywords):
+    """What a place is called by itself: its name and its recorded keywords."""
+
+    forms = {}
+    for text in clean([name]):
+        forms[text] = NAME
+    for text in clean((keywords or "").split(",")):
+        forms.setdefault(text, KEYWORD)
+    return forms
+
+
+def derive(forms, make):
+    """New phrasings built from existing ones, never outranking them."""
+
+    derived = dict(forms)
+    for text in clean(make(form) for form in forms):
+        derived.setdefault(text, DERIVED)
+    return derived
+
+
+def resolve_ownership(entries):
+    """For each phrasing, the destinations that name it most directly.
+
+    More than one slug means the phrasing is contested and belongs to nobody.
+    """
+
+    best = {}
+    for entry in entries:
+        for form, rank in entry["forms"].items():
+            key = form.lower()
+            if key not in best or rank < best[key][0]:
+                best[key] = (rank, {entry["slug"]})
+            elif rank == best[key][0]:
+                best[key][1].add(entry["slug"])
+    return best
+
+
+def unambiguous_forms(entry, ownership):
+    """The phrasings this entry alone names."""
+
+    return [form for form in entry["forms"]
+            if ownership[form.lower()][1] == {entry["slug"]}]
 
 
 def read_destinations(cursor):
@@ -138,68 +176,103 @@ def read_destinations(cursor):
 
     cursor.execute(
         """
-        select building_id, building_name, coalesce(keywords, '')
+        select building_id, building_name, coalesce(keywords, ''),
+               coalesce(classification, '')
         from public.building
         where status = 'active'
         order by building_name
         """
     )
-    buildings = [
-        {"slug": slug(name), "name": name, "forms": surface_forms(name, keywords)}
-        for _id, name, keywords in cursor.fetchall()
-        if SUBJECT.search(f"{name} {keywords}")
-    ]
-    covered = {entry["slug"] for entry in buildings}
+
+    buildings = {}
+    for building_id, name, keywords, classification in cursor.fetchall():
+        if not SUBJECT.search(f"{name} {keywords}"):
+            continue
+        forms = own_forms(name, keywords)
+        # "Veterinary Medicine Clinic building", from the row's own
+        # classification, for names that do not already end that way.
+        if classification:
+            forms = derive(forms, lambda form: (
+                "" if form.lower().endswith(classification.lower())
+                else f"{form} {classification}"
+            ))
+        buildings[building_id] = {"slug": slug(name), "forms": forms}
 
     cursor.execute(
         """
-        select l.location_name, coalesce(l.keywords, ''), b.building_name
+        select l.building_id, l.location_name, coalesce(l.keywords, ''),
+               coalesce(t.type_name, ''), b.building_name
         from public.location l
         join public.building b on b.building_id = l.building_id
+        left join public.location_type t on t.type_id = l.type_id
         where l.status = 'active' and b.status = 'active'
         order by b.building_name, l.location_name
         """
     )
+
+    # Which phrasings each building alone names, settled before any room is
+    # described as being inside one. The clinic lists "School of Veterinary
+    # Medicine" among its keywords, and that phrase is the School's name, so
+    # joining a room to it would place the room in the wrong building -
+    # "Pharmacy of School of Veterinary Medicine" for a pharmacy that is in
+    # the clinic. A contested phrasing names no building, so no room is put
+    # inside it.
+    building_ownership = resolve_ownership(buildings.values())
+    for building in buildings.values():
+        building["container_forms"] = unambiguous_forms(building, building_ownership)
+
     locations = []
-    for name, keywords, building in cursor.fetchall():
-        if slug(building) not in covered and not SUBJECT.search(f"{name} {keywords}"):
+    for building_id, name, keywords, type_name, building_name in cursor.fetchall():
+        holder = buildings.get(building_id)
+        if holder is None and not SUBJECT.search(f"{name} {keywords}"):
             continue
-        # Qualified by its building: two buildings may each hold a "Storage
-        # Room", and a bare slug would train both onto one label.
+
+        inner = own_forms(name, keywords)
+        # The room's type is another way to ask for it - "laboratory of the
+        # vet clinic". Where a building holds more than one of a type the
+        # phrasing names several destinations, and build_rows drops it.
+        if type_name:
+            inner.setdefault(type_name, DERIVED)
+
+        forms = dict(inner)
+        for outer in (holder or {}).get("container_forms", []):
+            for join in CONTAINER_JOINS:
+                for form in inner:
+                    forms.setdefault(join.format(inner=form, outer=outer), DERIVED)
+
         locations.append({
-            "slug": f"{slug(building)}__{slug(name)}",
-            "name": name,
-            # The building is part of how an indoor place is asked for, so it
-            # is a surface form of its own rather than only a disambiguator.
-            "forms": surface_forms(name, keywords) + [f"{name} of {building}"],
+            # Qualified by its building: two buildings may each hold a
+            # "Storage Room", and a bare slug would train both onto one label.
+            "slug": f"{slug(building_name)}__{slug(name)}",
+            "forms": forms,
         })
 
-    return buildings + locations
+    return list(buildings.values()) + locations
 
 
 def build_rows(destinations):
     """Query/target pairs, with every ambiguous phrasing dropped.
 
     Buildings 21 and 36 share keywords in the live directory - "VetMed" and
-    "veterinary medicine" name both - so a form claimed by more than one
-    destination would emit the same query under two labels and teach the
-    classifier that the question has no answer. Dropping it is the honest
-    outcome, and the dropped forms are reported so the directory can be fixed
-    where the overlap was not intended.
+    "veterinary medicine" name both - and a type names every room of that type
+    in its building. A form claimed by more than one destination would emit the
+    same query under two labels and teach the classifier that the question has
+    no answer. Dropping it is the honest outcome, and the dropped forms are
+    reported so the directory can be fixed where the overlap was not intended.
     """
 
-    claimed = defaultdict(set)
-    for destination in destinations:
-        for form in destination["forms"]:
-            claimed[form.lower()].add(destination["slug"])
+    best = resolve_ownership(destinations)
 
-    ambiguous = {form for form, owners in claimed.items() if len(owners) > 1}
+    ambiguous = {form for form, (_rank, owners) in best.items() if len(owners) > 1}
 
     rows = []
     seen = set()
     for destination in destinations:
         for form in destination["forms"]:
-            if form.lower() in ambiguous:
+            key = form.lower()
+            # Dropped if it is contested, and skipped if another destination
+            # names it more directly than this one does.
+            if key in ambiguous or destination["slug"] not in best[key][1]:
                 continue
             for template in TEMPLATES:
                 query = template.format(name=form)
@@ -207,11 +280,6 @@ def build_rows(destinations):
                     continue
                 seen.add(query.lower())
                 rows.append((query, destination["slug"]))
-
-    for question in OUT_OF_SCOPE:
-        if question.lower() not in seen:
-            seen.add(question.lower())
-            rows.append((question, "none"))
 
     return rows, sorted(ambiguous)
 
@@ -237,11 +305,11 @@ def main():
 
     print(f"{output}: {len(rows)} rows across {len(per_target)} targets")
     for target in sorted(per_target, key=lambda key: (-per_target[key], key)):
-        print(f"  {per_target[target]:4}  {target}")
+        print(f"  {per_target[target]:5}  {target}")
 
     if ambiguous:
         print(f"\n{len(ambiguous)} phrasing(s) name more than one destination and were dropped.")
-        print("Fix the overlap in the directory's keywords if that was not intended:")
+        print("Fix the overlap in the directory where it was not intended:")
         for form in ambiguous:
             print(f"  - {form}")
 
