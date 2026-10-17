@@ -345,7 +345,7 @@ describe("mock service contracts", () => {
   it("rejects positioned child locations", async () => {
     await expect(services.locations.save({
       id: "positioned-child", name: "Positioned", code: "POS", type: "Office", parentId: "building",
-      floor: "1st Floor", status: "Active", lat: 16.72, lng: 121.69, positioned: true,
+      floor: "Ground Floor", status: "Active", lat: 16.72, lng: 121.69, positioned: true,
     })).rejects.toThrow();
   });
 

@@ -477,16 +477,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.focus(parentBuilding);
     expect(within(screen.getByRole("listbox")).getByRole("option", { name: new RegExp(building.name) })).toBeInTheDocument();
     fireEvent.keyDown(parentBuilding, { key: "Escape" });
-    expect(Array.from((floorLevel as HTMLSelectElement).options).map((option) => option.text)).toEqual([
-      "None",
+    // Every floor a user can actually pick. "1st Floor" is gone because it
+    // and "Ground Floor" named the same storey, and the empty option is a
+    // placeholder rather than a choice, so neither appears here.
+    expect(Array.from((floorLevel as HTMLSelectElement).options)
+      .filter((option) => !option.disabled)
+      .map((option) => option.text)).toEqual([
       "Ground Floor",
-      "1st Floor",
       "2nd Floor",
       "3rd Floor",
       "4th Floor",
       "5th Floor",
       "Basement",
     ]);
+    const placeholder = Array.from((floorLevel as HTMLSelectElement).options).find((option) => option.value === "");
+    expect(placeholder?.disabled).toBe(true);
+    expect(placeholder?.hidden).toBe(true);
     fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Hierarchy Test Room" } });
     fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "HIER-ROOM" } });
     chooseParentBuilding(building.name);

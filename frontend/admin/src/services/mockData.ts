@@ -8,10 +8,10 @@ const seededIndoorLocations: Location[] = [
   [
     ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
     ["osm-location-a79c2a5f1065583f", "Science Building", "2nd Floor"],
-    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "1st Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "Ground Floor"],
   ],
   [
-    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "1st Floor"],
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
     ["osm-location-a79c2a5f1065583f", "Science Building", "Ground Floor"],
     ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "2nd Floor"],
   ],
@@ -23,10 +23,10 @@ const seededIndoorLocations: Location[] = [
   [
     ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
     ["osm-location-a79c2a5f1065583f", "Science Building", "2nd Floor"],
-    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "1st Floor"],
+    ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "Ground Floor"],
   ],
   [
-    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "1st Floor"],
+    ["osm-location-c5fb7a267a8ca63d", "Administration Building", "Ground Floor"],
     ["osm-location-a79c2a5f1065583f", "Science Building", "Ground Floor"],
     ["osm-location-0bc24aef21c7e767", "College of Information Communication Technology", "2nd Floor"],
   ],
