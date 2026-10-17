@@ -251,6 +251,12 @@ def login():
                            "Ask another administrator to reactivate it."
             }), 403
 
+        # Permanent is what makes Flask stamp PERMANENT_SESSION_LIFETIME onto
+        # the cookie. Without it the cookie dies when the browser closes but
+        # carries no expiry of its own, so a copy taken off the wire or off
+        # disk stays valid indefinitely. See the session block in
+        # services/database.py.
+        session.permanent = True
         session["admin_id"] = admin.id
         session["admin_username"] = admin.username
         log_audit("System", admin, "login", "Admin", admin.id, "Admin login successful")

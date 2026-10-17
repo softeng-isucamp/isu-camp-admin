@@ -7,6 +7,12 @@ services:
     environment:
       SUPABASE_DATABASE_URL: ${SUPABASE_DATABASE_URL:?Backend database URL is required}
       SECRET_KEY: ${SECRET_KEY:?A production session secret is required}
+      # One proxy in front: admin-web's Nginx. Set here rather than in the env
+      # file because it describes this compose topology, not the deployment's
+      # secrets, and because admin-api publishes no ports - it is reachable
+      # only through that Nginx, which is what makes its X-Forwarded-For
+      # trustworthy. See the proxy block in app/services/database.py.
+      TRUSTED_PROXY_COUNT: "${TRUSTED_PROXY_COUNT:-1}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]

@@ -188,6 +188,8 @@ def _sequence_conflict(pathway_id, sequence_no, current=None):
 
 @route_node_bp.route("/route-nodes", methods=["GET"])
 def get_route_nodes():
+    if error := _guard():
+        return error
     try:
         records = RouteNode.query.order_by(RouteNode.node_id.asc()).all()
         return jsonify(
@@ -205,6 +207,8 @@ def get_route_nodes():
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["GET"])
 def get_route_node(node_id):
+    if error := _guard():
+        return error
     try:
         record = RouteNode.query.get(node_id)
         if not record:
@@ -354,6 +358,8 @@ def delete_route_node(node_id):
 
 @route_node_bp.route("/pathways", methods=["GET"])
 def get_pathways():
+    if error := _guard():
+        return error
     try:
         records = Pathway.query.order_by(Pathway.pathway_id.asc()).all()
         return jsonify(
@@ -371,6 +377,8 @@ def get_pathways():
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["GET"])
 def get_pathway(pathway_id):
+    if error := _guard():
+        return error
     try:
         record = Pathway.query.get(pathway_id)
         if not record:
@@ -647,6 +655,8 @@ def delete_pathway(pathway_id):
 
 @route_node_bp.route("/path-points", methods=["GET"])
 def get_path_points():
+    if error := _guard():
+        return error
     try:
         records = PathPoint.query.order_by(PathPoint.pathway_id.asc(), PathPoint.sequence_no.asc()).all()
         return jsonify(
@@ -664,6 +674,8 @@ def get_path_points():
 
 @route_node_bp.route("/path-points/<int:point_id>", methods=["GET"])
 def get_path_point(point_id):
+    if error := _guard():
+        return error
     try:
         record = PathPoint.query.get(point_id)
         if not record:
