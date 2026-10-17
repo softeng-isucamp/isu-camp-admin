@@ -1,11 +1,13 @@
+/** Labels a Place; the backend still speaks these strings. New values are added here and in locationPolicy. */
+export const PLACE_CLASSIFICATIONS = ["Building", "Facility"] as const;
+export type PlaceClassification = typeof PLACE_CLASSIFICATIONS[number];
 export type LocationType =
-  | "Building"
+  | "Place"
   | "Floor"
   | "Room"
   | "Office"
   | "Laboratory"
-  | "Restroom"
-  | "Facility";
+  | "Restroom";
 export type RecordStatus = "Active" | "Inactive" | "Open" | "Closed" | "Unknown";
 export type Shade =
   "Fully Shaded" | "Mostly Shaded" | "Partial Shade" | "Unshaded" | "Unknown";
@@ -39,7 +41,7 @@ export interface Building {
   id: string;
   name: string;
   code: string;
-  type?: "Building" | "Facility";
+  classification?: PlaceClassification;
   points: [number, number][];
   status?: RecordStatus;
   source?: SourceProvenance;
@@ -49,6 +51,8 @@ export interface Location {
   name: string;
   code: string;
   type: LocationType;
+  /** Present when `type` is "Place"; absent for every other type. */
+  classification?: PlaceClassification;
   parentId: string | null;
   building?: string;
   floor?: string;

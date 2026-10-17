@@ -1,4 +1,4 @@
-import { locationIdentityKey } from "../../lib/locationPolicy";
+import { locationIdentityKey, placeClassificationOf } from "../../lib/locationPolicy";
 import type {
   AnalyticsDestination,
   AnalyticsTotals,
@@ -72,7 +72,7 @@ const buildDestinations = (locations: Location[]): Destination[] => {
   const active = locations.filter((location) => location.status === "Active");
   const seenNames = new Set<string>();
   const buildings = active
-    .filter((location) => location.type === "Building" || location.type === "Facility")
+    .filter((location) => location.type === "Place")
     .filter((location) => (seenNames.has(location.name) ? false : (seenNames.add(location.name), true)))
     .map((location) => ({ location, order: rand() }))
     .sort((a, b) => a.order - b.order)
@@ -85,7 +85,7 @@ const buildDestinations = (locations: Location[]): Destination[] => {
   const destinations: Destination[] = buildings.map((location, index) => ({
     id: locationIdentityKey(location),
     name: location.name,
-    context: location.type === "Facility" ? "Facility" : "Building",
+    context: placeClassificationOf(location),
     type: "Building",
     weight: (1 - INDOOR_TRAFFIC_SHARE) * (zipf[index] / zipfTotal),
     arrival: 0.85 + (rand() - 0.5) * 0.12,
@@ -214,7 +214,7 @@ const buildCompleteness = (locations: Location[], buildings: Building[]): { chec
   const scope = locations.filter(
     (location) =>
       location.status === "Active" &&
-      ["Building", "Facility", ...INDOOR_TYPES].includes(location.type),
+      ["Place", ...INDOOR_TYPES].includes(location.type),
   );
   const footprints = new Map(buildings.map((building) => [building.id, building.points]));
   const counts = { photo: 0, description: 0, keywords: 0, mapPin: 0 };
@@ -223,7 +223,7 @@ const buildCompleteness = (locations: Location[], buildings: Building[]): { chec
     if (location.function?.trim()) counts.description += 1;
     if (location.keywords?.trim()) counts.keywords += 1;
     const hasPin = location.lat != null && location.lng != null;
-    const hasPolygon = (location.type === "Building" || location.type === "Facility") && ((location.polygonCoordinates ?? footprints.get(location.id))?.length ?? 0) >= 3;
+    const hasPolygon = location.type === "Place" && ((location.polygonCoordinates ?? footprints.get(location.id))?.length ?? 0) >= 3;
     if (hasPin || hasPolygon) counts.mapPin += 1;
   }
   const total = scope.length;

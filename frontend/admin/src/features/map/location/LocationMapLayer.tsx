@@ -1,3 +1,4 @@
+import { backendLocationType } from "../../../lib/locationPolicy";
 import { Marker, Popup, Tooltip } from "react-leaflet";
 import type { Location } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
@@ -37,7 +38,7 @@ export function LocationMapLayer({
           >
             {!isOverviewZoom && <Tooltip direction="top" offset={[0, -28]} className="map-label">
               <div className="font-bold text-xs">{loc.name}</div>
-              <div className="text-[10px] text-gray-500 font-normal">{loc.type} · {loc.code}</div>
+              <div className="text-[10px] text-gray-500 font-normal">{backendLocationType(loc)} · {loc.code}</div>
               {!pointOnCampus([loc.lat, loc.lng], campusBoundary) && (
                 <div className="text-[10px] text-red-600 font-semibold mt-0.5">Outside campus boundary</div>
               )}
@@ -45,7 +46,7 @@ export function LocationMapLayer({
             <Popup>
               <strong>{loc.name}</strong>
               <br />
-              <small>{loc.type} · {loc.code}</small>
+              <small>{backendLocationType(loc)} · {loc.code}</small>
             </Popup>
           </Marker>
         );

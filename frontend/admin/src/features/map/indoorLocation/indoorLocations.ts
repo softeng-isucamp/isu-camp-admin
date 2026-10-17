@@ -1,3 +1,4 @@
+import { isLocationContainer } from "../../../lib/locationPolicy";
 import type { Building, Location } from "../../../types";
 
 export const isIndoorLocation = (location: Location) =>
@@ -11,11 +12,12 @@ export const isPositionedLocation = (location: Location): location is Location &
 
 /** The parent Building Location an indoor Location is added under, derived from the Building when it has no Location record. */
 export const indoorLocationParent = (building: Building, locations: Location[]): Location =>
-  locations.find((location) => location.id === building.id && location.type === "Building") ?? {
+  locations.find((location) => location.id === building.id && isLocationContainer(location)) ?? {
     id: building.id,
     name: building.name,
     code: building.code,
-    type: "Building" as const,
+    type: "Place" as const,
+    classification: "Building" as const,
     parentId: null,
     status: building.status ?? "Active",
     lat: null,

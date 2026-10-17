@@ -134,7 +134,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
         id: buildingId,
         name: `Pagination Family ${index}`,
         code: `PAG-${index}`,
-        type: "Building",
+        type: "Place", classification: "Building",
         parentId: null,
         status: "Active",
         lat: null,
@@ -168,8 +168,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("uses building IDs to isolate duplicate building names", async () => {
-    await services.locations.save({ id: "duplicate-building-a", name: "Duplicate Building", code: "DUP-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "duplicate-building-b", name: "Duplicate Building", code: "DUP-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-building-a", name: "Duplicate Building", code: "DUP-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-building-b", name: "Duplicate Building", code: "DUP-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "duplicate-room-a", name: "Room in duplicate A", code: "DUP-ROOM-A", type: "Room", parentId: "duplicate-building-a", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "duplicate-room-b", name: "Room in duplicate B", code: "DUP-ROOM-B", type: "Room", parentId: "duplicate-building-b", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
@@ -184,7 +184,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("resets stale Building and Floor selections after the selected Building is deleted", async () => {
-    const building = await services.locations.save({ id: "stale-filter-building", name: "Stale Filter Building", code: "STALE-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "stale-filter-building", name: "Stale Filter Building", code: "STALE-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "stale-filter-room", name: "Stale Filter Room", code: "STALE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations();
@@ -208,7 +208,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("returns to the last hierarchy page after a mutation shrinks the result", async () => {
     for (let index = 1; index <= 11; index += 1) {
-      await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     }
     renderLocations(["/locations?q=Shrink%20Page"]);
     expect(await screen.findByText("Shrink Page 11")).toBeInTheDocument();
@@ -228,8 +228,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("does not attach a normal child with a duplicate legacy building name to both roots", async () => {
-    await services.locations.save({ id: "legacy-name-building-a", name: "Same Name Root", code: "SAME-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "legacy-name-building-b", name: "Same Name Root", code: "SAME-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "legacy-name-building-a", name: "Same Name Root", code: "SAME-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "legacy-name-building-b", name: "Same Name Root", code: "SAME-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "authoritative-child", name: "Authoritative Child", code: "AUTH-CHILD", type: "Room", parentId: "legacy-name-building-b", building: "Same Name Root", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations(["/locations?q=Authoritative%20Child"]);
@@ -237,10 +237,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getAllByRole("row", { name: /Same Name Root/ })).toHaveLength(1);
   });
 
+  it.each(["Building%3A", "Facility%3A", "Place%3A"])("opens an old %s deep link at the matching Place", async (prefix) => {
+    const records = [
+      { id: "deep-1", name: "Deep Linked Hall", code: "DEEP-1", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "deep-2", name: "Other Hall", code: "DEEP-2", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations([`/locations?locationKey=${prefix}deep-1`]);
+    expect(await screen.findByRole("row", { name: /Deep Linked Hall/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Other Hall/ })).not.toBeInTheDocument();
+  });
+
   it("renders an orphaned duplicate-name record as an ungrouped row", async () => {
     const records = [
-      { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
-      { id: "orphan-building-b", name: "Orphan Duplicate Building", code: "ORPHAN-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-building-b", name: "Orphan Duplicate Building", code: "ORPHAN-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
       { id: "orphan-room", name: "Orphan Room", code: "ORPHAN-ROOM", type: "Room" as const, parentId: null, building: "Orphan Duplicate Building", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
     ];
     vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
@@ -252,7 +264,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("filters same-named floors by their distinct record IDs", async () => {
-    const seed = async (id: string, name: string, type: "Building" | "Floor" | "Room", parentId: string | null) => services.locations.save({ id, name, code: id.toUpperCase(), type, parentId, status: "Active", lat: null, lng: null, positioned: false });
+    const seed = async (id: string, name: string, type: "Building" | "Floor" | "Room", parentId: string | null) => services.locations.save({ id, name, code: id.toUpperCase(), ...(type === "Building" ? { type: "Place" as const, classification: "Building" as const } : { type }), parentId, status: "Active", lat: null, lng: null, positioned: false });
     await seed("floor-building-a", "Floor building A", "Building", null);
     await seed("floor-building-b", "Floor building B", "Building", null);
     await seed("floor-a", "Level One", "Floor", "floor-building-a");
@@ -300,7 +312,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("uses the same neutral symbol treatment for an unpositioned location", async () => {
-    await services.locations.save({ id: "unpositioned-icon-test", name: "Unpositioned icon test", code: "ICON-TEST", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "unpositioned-icon-test", name: "Unpositioned icon test", code: "ICON-TEST", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=Unpositioned%20icon%20test"]);
     const row = await screen.findByRole("row", { name: /Unpositioned icon test/ });
     const icon = row.querySelector(".location-type-symbol");
@@ -364,7 +376,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("expands nested matches by default when searching", async () => {
-    const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "search-room", name: "Searchable Nested Room", code: "SRCH-R", type: "Room", parentId: building.id, building: building.name, floor: "Search Floor", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
@@ -416,7 +428,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       id: "handoff-building",
       name: "Handoff Building",
       code: "HANDOFF",
-      type: "Building",
+      type: "Place", classification: "Building",
       parentId: null,
       status: "Active",
       lat: null,
@@ -440,7 +452,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       id: "pending-map-building",
       name: "Pending Map Building",
       code: "PENDING-MAP",
-      type: "Building" as const,
+      type: "Place" as const, classification: "Building" as const,
       parentId: null,
       status: "Active" as const,
       lat: null,
@@ -464,7 +476,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
 
   it("creates a child location with a parent building and standard floor level", async () => {
-    const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual([
@@ -515,8 +527,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("lists the matching parent Buildings while the name or code is typed", async () => {
-    const searched = await services.locations.save({ id: "search-parent-a", name: "Searchable Annex", code: "SRCH-ANX", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const other = await services.locations.save({ id: "search-parent-b", name: "Unrelated Pavilion", code: "UNREL-PAV", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const searched = await services.locations.save({ id: "search-parent-a", name: "Searchable Annex", code: "SRCH-ANX", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const other = await services.locations.save({ id: "search-parent-b", name: "Unrelated Pavilion", code: "UNREL-PAV", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
@@ -557,7 +569,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("chooses a parent Building from the keyboard without submitting the dialog", async () => {
-    const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
@@ -583,7 +595,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("offers no parent Building search when the Building is locked by a quick-add handoff", async () => {
-    const building = { id: "locked-search-building", name: "Locked Search Building", code: "LCK-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const building = { id: "locked-search-building", name: "Locked Search Building", code: "LCK-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
     await services.locations.save(building);
     renderLocations([{ pathname: "/locations", search: "?add=indoor&parentId=locked-search-building", state: { indoorLocationParent: building } }]);
     const combobox = await screen.findByLabelText("PARENT BUILDING");
@@ -593,7 +605,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("populates the parent building and floor level when editing a child location", async () => {
-    const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Child Room" } });
@@ -605,7 +617,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("keeps Pick on map labelled and disabled while indoor metadata is saving", async () => {
-    const building = { id: "saving-building", name: "Saving Building", code: "SAVE-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const building = { id: "saving-building", name: "Saving Building", code: "SAVE-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
     const room = { id: "saving-room", name: "Saving Room", code: "SAVE-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", status: "Active" as const, lat: null, lng: null, positioned: false };
     vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 50 });
     let completeSave!: () => void;
@@ -629,7 +641,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("opens Map Editor directly from an existing indoor location without saving its modal draft", async () => {
-    const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Building" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
+    const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
     const room = { id: "fast-pick-room", name: "Fast Pick Room", code: "FP-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", keywords: "class", status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
     const page = { items: [building, room], total: 2, page: 1, pageSize: 50 };
     vi.spyOn(services.locations, "list").mockResolvedValue(page);
@@ -650,9 +662,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("offers only Building and Facility when editing a Building and excludes Facility for indoor locations", async () => {
-    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Building", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Place", classification: "Building", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-room", name: "Edit Type Room", code: "EDIT-TYPE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations();
 
@@ -673,7 +685,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     expect(await screen.findByText("Location updated")).toBeInTheDocument();
     const updatedBuilding = (await services.locations.list(building.name)).items.find((item) => item.id === building.id);
-    expect(updatedBuilding?.type).toBe("Facility");
+    expect(updatedBuilding?.classification).toBe("Facility");
 
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Room" } });
@@ -736,7 +748,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("refuses to delete until the admin password is confirmed", async () => {
-    const record = await services.locations.save({ id: "password-guard-test", name: "Password guard test", code: "PWD-GUARD", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const record = await services.locations.save({ id: "password-guard-test", name: "Password guard test", code: "PWD-GUARD", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const remove = vi.spyOn(services.locations, "remove");
     renderLocations(["/locations?q=Password%20guard%20test"]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
@@ -757,12 +769,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     // The admin's own password releases it.
     confirmDeletePassword();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(remove).toHaveBeenCalledWith(record.id, record.type));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(record.id, record.classification));
     expect(await screen.findByText(`${record.name} was deleted successfully.`)).toBeInTheDocument();
   });
 
   it("re-prompts when the backend reports the password confirmation expired", async () => {
-    const record = await services.locations.save({ id: "expired-confirmation", name: "Expired confirmation", code: "EXPIRED-CONF", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const record = await services.locations.save({ id: "expired-confirmation", name: "Expired confirmation", code: "EXPIRED-CONF", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     vi.spyOn(services.locations, "remove").mockRejectedValueOnce(new PasswordConfirmationRequiredError());
     renderLocations(["/locations?q=Expired%20confirmation"]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
@@ -777,7 +789,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("shows a delete failure alert and leaves the record visible", async () => {
-    const record = await services.locations.save({ id: "delete-error-test", name: "Delete error test", code: "DELETE-ERROR", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const record = await services.locations.save({ id: "delete-error-test", name: "Delete error test", code: "DELETE-ERROR", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     setMockFailure("locationRemove", true);
     renderLocations(["/locations?q=Delete%20error%20test"]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${record.name}` }));
@@ -790,7 +802,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("warns about connected children and permanently deletes the building hierarchy", async () => {
-    const building = await services.locations.save({ id: "ui-deleted-building", name: "UI Deleted Building", code: "UI-DELETED-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "ui-deleted-building", name: "UI Deleted Building", code: "UI-DELETED-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "ui-deleted-room", name: "UI Deleted Room", code: "UI-DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations([`/locations?q=${encodeURIComponent(building.name)}`]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
@@ -806,7 +818,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("renders a selected location's real history entry", async () => {
-    const record = await services.locations.save({ id: "history-test", name: "History test", code: "HISTORY", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const record = await services.locations.save({ id: "history-test", name: "History test", code: "HISTORY", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const historySpy = vi.spyOn(services.logs, "forLocation").mockResolvedValue({
       items: [{ id: "history-1", actor: "admin01", action: "Updated Location", target: record.name, targetId: record.id, detail: "Name changed", createdAt: "Just now", category: "Admin" }],
       total: 1,
@@ -818,7 +830,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /view history/i }));
     expect(await screen.findByRole("heading", { name: "Audit History" })).toBeInTheDocument();
     expect(await screen.findByText("Updated Location")).toBeInTheDocument();
-    expect(historySpy).toHaveBeenCalledWith(record.id, record.name, record.type);
+    expect(historySpy).toHaveBeenCalledWith(record.id, record.name, record.classification);
   });
 
   it("keeps description and keywords independent and reflects a selected photo", async () => {
@@ -862,7 +874,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("parks focus on the directory when the deleted row takes the opener with it", async () => {
-    const record = await services.locations.save({ id: "focus-after-delete", name: "Focus after delete", code: "FOCUS-DEL", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const record = await services.locations.save({ id: "focus-after-delete", name: "Focus after delete", code: "FOCUS-DEL", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations(["/locations?q=Focus%20after%20delete"]);
     const opener = await screen.findByRole("button", { name: `Actions for ${record.name}` });
     opener.focus();

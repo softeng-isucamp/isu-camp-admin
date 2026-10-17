@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Location, LocationDraft, LocationType } from "../types";
 import { generatedMapFixture } from "../services/generatedMapFixture";
 import { locations as curatedLocations } from "../services/mockData";
-import { locationIdentityKey, locationPolicy } from "./locationPolicy";
+import { canContainLocations, classificationFromBackend, isLocationContainer, locationIdentityKey, locationPolicy, normalizeLocationKey, withLocationTypeOption, type BackendLocationType } from "./locationPolicy";
 
 const draft = (overrides: Partial<LocationDraft> = {}): LocationDraft => ({
   name: "Computer Laboratory",
@@ -20,7 +20,7 @@ const building: Location = {
   id: "building-1",
   name: "Science Building",
   code: "SCI",
-  type: "Building",
+  type: "Place", classification: "Building",
   parentId: null,
   status: "Active",
   lat: 16.72,
@@ -33,7 +33,7 @@ const facility: Location = {
   id: "facility-1",
   name: "Outdoor Pavilion",
   code: "PAV",
-  type: "Facility",
+  type: "Place", classification: "Facility",
 };
 
 const secondBuilding: Location = {
@@ -51,11 +51,11 @@ const locationTypes = [
   "Office",
   "Laboratory",
   "Restroom",
-] satisfies LocationType[];
+] satisfies BackendLocationType[];
 
 describe("Location policy", () => {
   it("scopes a Location identity to its record type", () => {
-    expect(locationIdentityKey({ id: "6", type: "Building" })).toBe("Building:6");
+    expect(locationIdentityKey({ id: "6", type: "Place" })).toBe("Place:6");
     expect(locationIdentityKey({ id: "6", type: "Room" })).toBe("Room:6");
   });
   it("requires floor metadata for new indoor records while accepting legacy records without it", () => {
@@ -93,17 +93,17 @@ describe("Location policy", () => {
     ]);
   });
 
-  it.each(locationTypes.map((type) => [
-    type,
-    type === "Building" || type === "Facility"
+  it.each(locationTypes.map((option) => [
+    option,
+    option === "Building" || option === "Facility"
       ? "outdoor"
-      : type === "Floor"
+      : option === "Floor"
         ? "floor"
         : "indoor",
-  ] satisfies [LocationType, "outdoor" | "floor" | "indoor"]))(
+  ] satisfies [BackendLocationType, "outdoor" | "floor" | "indoor"]))(
     "classifies %s Locations as %s",
-    (type, kind) => {
-      expect(locationPolicy.classify(type)).toEqual({
+    (option, kind) => {
+      expect(locationPolicy.classify(withLocationTypeOption(draft(), option).type)).toEqual({
         kind,
         requiresBuildingParent: kind !== "outdoor",
         allowsOutdoorPosition: kind === "outdoor",
@@ -133,7 +133,7 @@ describe("Location policy", () => {
 
   it("normalizes an outdoor Location from its coordinate pair", () => {
     const input = draft({
-      type: "Facility",
+      type: "Place", classification: "Facility",
       parentId: building.id,
       building: building.name,
       floor: "Ground Floor",
@@ -146,7 +146,7 @@ describe("Location policy", () => {
       directory: [building],
       previous: input,
     })).toEqual(draft({
-      type: "Facility",
+      type: "Place", classification: "Facility",
       lat: 16.721,
       lng: 121.691,
       positioned: true,
@@ -154,7 +154,7 @@ describe("Location policy", () => {
   });
 
   it("distinguishes record validity from map readiness", () => {
-    const unpositionedFacility = draft({ type: "Facility" });
+    const unpositionedFacility = draft({ type: "Place", classification: "Facility" });
 
     expect(locationPolicy.evaluate(unpositionedFacility, {
       context: "record",
@@ -175,13 +175,13 @@ describe("Location policy", () => {
   });
 
   it.each([
-    [draft({ type: "Facility", lat: 16.72 }), [["coordinate_pair_required", "lng"]]],
-    [draft({ type: "Facility", lat: 91, lng: 181, positioned: true }), [
+    [draft({ type: "Place", classification: "Facility", lat: 16.72 }), [["coordinate_pair_required", "lng"]]],
+    [draft({ type: "Place", classification: "Facility", lat: 91, lng: 181, positioned: true }), [
       ["latitude_out_of_range", "lat"],
       ["longitude_out_of_range", "lng"],
       ["placement_mismatch", "positioned"],
     ]],
-    [draft({ type: "Facility", lat: 16.72, lng: 121.69 }), [["placement_mismatch", "positioned"]]],
+    [draft({ type: "Place", classification: "Facility", lat: 16.72, lng: 121.69 }), [["placement_mismatch", "positioned"]]],
   ] satisfies Array<[LocationDraft, Array<[string, keyof LocationDraft]>]>)(
     "reports coordinate and placement issues for outdoor Locations",
     (location, expectedIssues) => {
@@ -197,7 +197,7 @@ describe("Location policy", () => {
 
   it("rejects non-finite outdoor coordinates", () => {
     const result = locationPolicy.evaluate(draft({
-      type: "Facility",
+      type: "Place", classification: "Facility",
       lat: Number.NaN,
       lng: Number.POSITIVE_INFINITY,
       positioned: false,
@@ -305,7 +305,7 @@ describe("Location policy", () => {
 
   it("rejects hierarchy metadata on outdoor Locations", () => {
     const result = locationPolicy.evaluate(draft({
-      type: "Facility",
+      type: "Place", classification: "Facility",
       parentId: building.id,
       building: building.name,
       floor: "Ground Floor",
@@ -328,10 +328,12 @@ describe("Location policy", () => {
     [type, "map-readiness" as const],
   ]))(
     "accepts a canonical %s Location in %s context",
-    (type, context) => {
-      const isOutdoor = type === "Building" || type === "Facility";
+    (option, context) => {
+      const isOutdoor = option === "Building" || option === "Facility";
+      const type = withLocationTypeOption(draft(), option).type;
       const location = draft(isOutdoor ? {
         type,
+        classification: option as "Building" | "Facility",
         lat: 16.72,
         lng: 121.69,
         positioned: true,
@@ -405,5 +407,66 @@ describe("Location policy", () => {
 
       expect(invalid).toEqual([]);
     }
+  });
+});
+
+describe("Place classification policy", () => {
+  it("lets only a Building classification contain Locations", () => {
+    expect(canContainLocations("Building")).toBe(true);
+    expect(canContainLocations("Facility")).toBe(false);
+  });
+
+  it("rejects a Facility as the parent of an indoor Location, with the original message", () => {
+    const result = locationPolicy.evaluate(
+      draft({ parentId: facility.id, building: facility.name, floor: "2nd Floor" }),
+      { context: "record", directory: [building, facility] },
+    );
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        code: "building_parent_wrong_type",
+        message: "The selected parent Location must be a Building.",
+      }),
+    ]);
+  });
+
+  it("accepts a Place that can contain Locations as a parent", () => {
+    const result = locationPolicy.evaluate(
+      draft({ parentId: building.id, building: building.name, floor: "2nd Floor" }),
+      { context: "record", directory: [building, facility] },
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it.each([
+    ["Building:12", "Place:12"],
+    ["Facility:12", "Place:12"],
+    ["Location:12", "Location:12"],
+    ["Unknown:12", "Unknown:12"],
+    ["Place:12", "Place:12"],
+    ["Room:12", "Room:12"],
+    ["Office:3", "Office:3"],
+    ["Laboratory:3", "Laboratory:3"],
+    ["Restroom:3", "Restroom:3"],
+    ["Floor:9", "Floor:9"],
+  ])("normalizes the location key %s to %s", (legacy, expected) => {
+    expect(normalizeLocationKey(legacy)).toBe(expected);
+  });
+});
+
+describe("classificationFromBackend", () => {
+  it("keeps known classifications and reads anything else as Building", () => {
+    expect(classificationFromBackend("Facility")).toBe("Facility");
+    expect(classificationFromBackend("Building")).toBe("Building");
+    for (const raw of [null, undefined, "", "Unknown", 4]) {
+      expect(classificationFromBackend(raw)).toBe("Building");
+    }
+  });
+});
+
+describe("isLocationContainer", () => {
+  it("treats a Place without a classification as a Building", () => {
+    expect(isLocationContainer({ type: "Place" })).toBe(true);
+    expect(isLocationContainer({ type: "Place", classification: "Facility" })).toBe(false);
+    expect(isLocationContainer({ type: "Room" })).toBe(false);
   });
 });

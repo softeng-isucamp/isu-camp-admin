@@ -26,7 +26,7 @@ describe("Map Editor preview", () => {
 
   it("edits Location details from the object card and records a Working Session operation", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services", keywords: "books, study", floor: "Ground Floor" },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Campus library services", keywords: "books, study", floor: "Ground Floor" },
     ]);
     renderEditor();
 

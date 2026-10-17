@@ -1,12 +1,13 @@
+import type { PlaceClassification } from "../../../types";
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
 import type { BuildingIdentityInput } from "./buildingFootprint";
 
 interface BuildingDetailsModalProps {
   draft: BuildingIdentityInput;
-  classification: "Building" | "Facility";
+  classification: PlaceClassification;
   error?: string;
   onChange: (draft: BuildingIdentityInput) => void;
-  onClassificationChange: (classification: "Building" | "Facility") => void;
+  onClassificationChange: (classification: PlaceClassification) => void;
   onClose: () => void;
   onSubmit: () => void;
   submitting?: boolean;
@@ -23,7 +24,7 @@ export function BuildingDetailsModal({ draft, classification, error, onChange, o
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <div className="form-grid-two">
-        <SelectField label="BUILDING CLASSIFICATION" required value={classification} onChange={(event) => onClassificationChange(event.target.value as "Building" | "Facility")} helper="Facilities use the same footprint workflow and do not contain Indoor Locations.">
+        <SelectField label="BUILDING CLASSIFICATION" required value={classification} onChange={(event) => onClassificationChange(event.target.value as PlaceClassification)} helper="Facilities use the same footprint workflow and do not contain Indoor Locations.">
           <option value="Building">Building</option>
           <option value="Facility">Facility</option>
         </SelectField>

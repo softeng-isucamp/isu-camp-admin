@@ -74,7 +74,7 @@ describe("findSelectionCandidates", () => {
       id: building.id,
       name: building.name,
       code: building.code,
-      type: "Building",
+      type: "Place", classification: "Building",
       parentId: null,
       status: "Active",
       lat: 16.72,

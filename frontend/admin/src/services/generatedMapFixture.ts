@@ -1,5 +1,6 @@
 import fixture from "./generated-map-fixture.json";
 import { normalizePathwayWayType } from "../types";
+import { placeFieldsFromBackendType } from "../lib/locationPolicy";
 import type { Building, Location, Pathway, RouteNode } from "../types";
 
 type GeneratedFixture = typeof fixture;
@@ -16,7 +17,7 @@ const asLocation = (value: GeneratedFixture["campus"]["locations"][number]): Loc
   id: value.id,
   name: value.name,
   code: value.code || `OSM ${value.source.sourceType} ${value.source.sourceId}`,
-  type: value.type as Location["type"],
+  ...placeFieldsFromBackendType(value.type),
   parentId: value.parentId,
   status: value.status as Location["status"],
   lat: value.lat,

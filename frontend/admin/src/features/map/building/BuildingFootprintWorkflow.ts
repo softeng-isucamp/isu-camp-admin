@@ -1,3 +1,4 @@
+import { placeClassificationOf } from "../../../lib/locationPolicy";
 import type { Building, Location, LocationDraft } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
 import {
@@ -80,7 +81,8 @@ export function createBuildingFootprintWorkflow(dependencies: {
           const location = await adapter.createBuilding({
             name: command.identity.name.trim(),
             code: command.identity.code.trim(),
-            type: command.identity.type ?? "Building",
+            type: "Place",
+            classification: command.identity.classification ?? "Building",
             parentId: null,
             function: command.identity.function?.trim() || undefined,
             keywords: command.identity.keywords?.trim() || undefined,
@@ -93,7 +95,7 @@ export function createBuildingFootprintWorkflow(dependencies: {
           const operation = workingSession.executeOperation(buildCreateBuildingOperation({
             name: location.name,
             code: location.code,
-            type: location.type === "Facility" ? "Facility" : "Building",
+            classification: placeClassificationOf(location),
             function: location.function,
             keywords: location.keywords,
             status: location.status,
@@ -104,7 +106,7 @@ export function createBuildingFootprintWorkflow(dependencies: {
               id: location.id,
               name: location.name,
               code: location.code,
-              type: location.type === "Facility" ? "Facility" : "Building",
+              classification: placeClassificationOf(location),
               status: location.status,
               points: [...command.points],
             },

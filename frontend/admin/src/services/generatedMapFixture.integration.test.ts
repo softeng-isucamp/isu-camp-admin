@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { backendLocationType } from "../lib/locationPolicy";
 
 describe("generated map fixture service mode", () => {
   it("loads generated OSM data through the map service boundary", async () => {
@@ -54,7 +55,7 @@ describe("generated map fixture service mode", () => {
     const created = await services.locations.save({
       name: "Fixture Delete Probe",
       code: "FIXTURE-DEL",
-      type: "Facility",
+      type: "Place", classification: "Facility",
       parentId: null,
       status: "Active",
       function: "Checks that fixture writes reach the directory",
@@ -67,7 +68,7 @@ describe("generated map fixture service mode", () => {
     const afterSave = await services.locations.list("Fixture Delete Probe");
     expect(afterSave.items.map((item) => item.id)).toContain(created.id);
 
-    await services.locations.remove(created.id, created.type);
+    await services.locations.remove(created.id, backendLocationType(created));
 
     const afterDelete = await services.locations.list("Fixture Delete Probe");
     expect(afterDelete.items.map((item) => item.id)).not.toContain(created.id);

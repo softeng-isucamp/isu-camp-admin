@@ -1,3 +1,4 @@
+import { backendLocationType } from "../../../lib/locationPolicy";
 import { useMemo, useRef, useState } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundary";
@@ -113,7 +114,7 @@ export function deriveMapIssues(
   };
   locations
     .filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary))
-    .forEach((item) => addOutside(`location:${item.type}:${item.id}`, item.name, item.type,
+    .forEach((item) => addOutside(`location:${item.type}:${item.id}`, item.name, backendLocationType(item),
       [item.lat as number, item.lng as number], locationSelection(item)));
   nodes
     .filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary))

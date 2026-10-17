@@ -1,4 +1,5 @@
-import type { Location, LocationDraft, LocationType } from "../types";
+import { PLACE_CLASSIFICATIONS } from "../types";
+import type { Location, LocationDraft, LocationType, PlaceClassification } from "../types";
 
 export type LocationKind = "outdoor" | "floor" | "indoor";
 
@@ -13,6 +14,71 @@ export const standardFloorLevels = [
 
 export const isIndoorLocationType = (type: LocationType) =>
   (indoorLocationTypes as readonly string[]).includes(type);
+
+/** Whether a Place with this classification can contain indoor Locations. New classifications add a row. */
+const classificationCanContain: Record<PlaceClassification, boolean> = {
+  Building: true,
+  Facility: false,
+};
+
+export const canContainLocations = (classification: PlaceClassification): boolean =>
+  classificationCanContain[classification] ?? false;
+
+export const isPlace = (location: Pick<Location, "type">): boolean => location.type === "Place";
+
+/** A Place that can be the parent of indoor Locations (today: Buildings). */
+export const isLocationContainer = (location: Pick<Location, "type" | "classification">): boolean =>
+  location.type === "Place" && canContainLocations(placeClassificationOf(location));
+
+/** Classification of a Place record; Places without one are treated as Buildings. */
+export const placeClassificationOf = (location: Pick<Location, "classification">): PlaceClassification =>
+  location.classification ?? "Building";
+
+/** What the backend calls a record's type: a Place's classification, otherwise its own type. */
+export type BackendLocationType = Exclude<LocationType, "Place"> | PlaceClassification;
+
+export const backendLocationType = (location: Pick<Location, "type" | "classification">): BackendLocationType =>
+  location.type === "Place" ? placeClassificationOf(location) : location.type;
+
+/** Sets a type-picker choice ("Building", "Facility", "Room", ...) on a draft: Places carry it as their classification. */
+export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option: BackendLocationType): T => {
+  const { classification: _classification, ...rest } = draft;
+  return isPlaceClassification(option)
+    ? { ...rest, type: "Place", classification: option } as T
+    : { ...rest, type: option } as T;
+};
+
+export const isPlaceClassification = (value: unknown): value is PlaceClassification =>
+  (PLACE_CLASSIFICATIONS as readonly unknown[]).includes(value);
+
+/** A backend classification string; null, missing, and unknown values read as Building. */
+export const classificationFromBackend = (raw: unknown): PlaceClassification =>
+  isPlaceClassification(raw) ? raw : "Building";
+
+/**
+ * Anything that is not an indoor type or "Floor" is a Place, classified by
+ * `classificationFromBackend`. Never throws.
+ */
+export const placeFieldsFromBackendType = (raw: unknown):
+  | { type: Exclude<LocationType, "Place"> }
+  | { type: "Place"; classification: PlaceClassification } => {
+  if (raw === "Floor" || (indoorLocationTypes as readonly unknown[]).includes(raw)) {
+    return { type: raw as Exclude<LocationType, "Place"> };
+  }
+  return { type: "Place", classification: classificationFromBackend(raw) };
+};
+
+/**
+ * Maps keys prefixed with a Place classification ("Building:12", "Facility:12")
+ * to "Place:12". Other prefixes, including the backend's "Location:" fallback
+ * for an unknown indoor type, are left alone: Place and Location ids collide.
+ */
+export const normalizeLocationKey = (key: string): string => {
+  const separator = key.indexOf(":");
+  if (separator < 0) return key;
+  const prefix = key.slice(0, separator);
+  return isPlaceClassification(prefix) ? `Place:${key.slice(separator + 1)}` : key;
+};
 
 export const locationIdentityKey = (location: Pick<Location, "id" | "type">) =>
   `${location.type}:${location.id}`;
@@ -86,7 +152,7 @@ export interface LocationPolicy {
 }
 
 const classify = (type: LocationType): LocationClassification => {
-  const kind: LocationKind = type === "Building" || type === "Facility"
+  const kind: LocationKind = type === "Place"
     ? "outdoor"
     : type === "Floor"
       ? "floor"
@@ -138,7 +204,7 @@ const normalize = (
   }
 
   const parent = options.directory.find(
-    (location) => location.id === draft.parentId && location.type === "Building",
+    (location) => location.id === draft.parentId && isLocationContainer(location),
   );
   const parentChanged = options.previous.parentId !== draft.parentId;
 
@@ -163,7 +229,7 @@ const evaluate = (
   if (classification.requiresBuildingParent) {
     const parentRecord = options.directory.find((location) => location.id === draft.parentId);
     const parent = options.directory.find(
-      (location) => location.id === draft.parentId && location.type === "Building",
+      (location) => location.id === draft.parentId && isLocationContainer(location),
     );
 
     if (!draft.parentId) {
@@ -195,7 +261,7 @@ const evaluate = (
     issues.push({
       code: "outdoor_hierarchy_forbidden",
       field: "parentId",
-      message: `${draft.type} Locations cannot belong to an indoor Building hierarchy.`,
+      message: `${backendLocationType(draft)} Locations cannot belong to an indoor Building hierarchy.`,
     });
   }
 
@@ -281,7 +347,7 @@ const evaluate = (
     issues.push({
       code: "outdoor_position_forbidden",
       field: "lat",
-      message: `${draft.type} Locations must remain unpositioned on the outdoor map.`,
+      message: `${backendLocationType(draft)} Locations must remain unpositioned on the outdoor map.`,
     });
   }
 

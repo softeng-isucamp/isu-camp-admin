@@ -18,11 +18,18 @@ import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/Pass
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { indoorLocationTypes, locationIdentityKey, locationPolicy, standardFloorLevels } from "../../lib/locationPolicy";
+import { backendLocationType, canContainLocations, indoorLocationTypes, isLocationContainer, isPlace, locationIdentityKey, locationPolicy, normalizeLocationKey, placeClassificationOf, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { PLACE_CLASSIFICATIONS } from "../../types";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { ParentBuildingField } from "./ParentBuildingField";
+
+/** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
+const keyParam = (params: URLSearchParams) => {
+  const key = params.get("locationKey");
+  return key === null ? null : normalizeLocationKey(key);
+};
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -60,12 +67,12 @@ export function Locations() {
   }, []);
 
   const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
-  const [targetKey, setTargetKey] = useState<string | null>(() => new URLSearchParams(routeLocation.search).get("locationKey"));
+  const [targetKey, setTargetKey] = useState<string | null>(() => keyParam(new URLSearchParams(routeLocation.search)));
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
     const q = params.get("q");
     setQuery(q ?? "");
-    setTargetKey(params.get("locationKey"));
+    setTargetKey(keyParam(params));
   }, [routeLocation.search]);
 
   const [type, setType] = useState("All Types");
@@ -226,7 +233,7 @@ export function Locations() {
 
   const { data: history } = useQuery({
     queryKey: ["logs", "location-history", selected ? locationIdentityKey(selected) : null],
-    queryFn: () => services.logs.forLocation(selected!.id, selected!.name, selected!.type),
+    queryFn: () => services.logs.forLocation(selected!.id, selected!.name, backendLocationType(selected!)),
     enabled: dialog === "history" && selected !== null,
   });
 
@@ -254,7 +261,7 @@ export function Locations() {
     const parentId = params.get("parentId") ?? params.get("buildingId");
     const handoffKey = `${parentId ?? ""}:${params.get("floor") ?? ""}`;
     if (processedIndoorHandoffRef.current === handoffKey) return;
-    const parent = parentId ? allLocations.find((item) => item.id === parentId && item.type === "Building") : undefined;
+    const parent = parentId ? allLocations.find((item) => item.id === parentId && isLocationContainer(item)) : undefined;
     if (!parent) {
       if (allLocations.length) setError("The selected Building is unavailable for an Indoor Location handoff.");
       return;
@@ -274,8 +281,8 @@ export function Locations() {
     setError("");
     openDialog("add");
   }, [allLocations, routeLocation.search]);
-  const buildingOptions = allLocations.filter((item) => item.type === "Building");
-  const buildingsById = new Map(allLocations.filter((item) => item.type === "Building").map((item) => [item.id, item]));
+  const buildingOptions = allLocations.filter(isLocationContainer);
+  const buildingsById = new Map(allLocations.filter(isLocationContainer).map((item) => [item.id, item]));
   const floors = useMemo(() => {
     const compatibilityFloors = allLocations.filter((item) => item.type === "Floor" && item.parentId && buildingsById.has(item.parentId));
     const derivedFloors = allLocations
@@ -297,7 +304,7 @@ export function Locations() {
     });
     return [...unique.values()];
   }, [allLocations, buildingsById]);
-  const selectedBuildingRecord = allLocations.find((item) => item.type === "Building" && item.id === buildingId);
+  const selectedBuildingRecord = allLocations.find((item) => isLocationContainer(item) && item.id === buildingId);
   const availableFloors = useMemo(() => {
     if (buildingId === "All Buildings" || !selectedBuildingRecord) return floors;
     return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
@@ -319,7 +326,7 @@ export function Locations() {
   const { data, isLoading, isFetching, error: listError } = useQuery({
     queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorRecord?.name],
     queryFn: () => services.locations.list(query, page, pageSize, {
-      type: type === "All Types" ? undefined : type as LocationType,
+      type: type === "All Types" ? undefined : type as BackendLocationType,
       status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
       buildingId: selectedBuildingRecord?.id,
       floor: selectedFloorRecord?.name,
@@ -331,9 +338,9 @@ export function Locations() {
     return rawItems.filter(
       (item) =>
         (!targetKey || locationIdentityKey(item) === targetKey) &&
-        (type === "All Types" || item.type === type) &&
+        (type === "All Types" || backendLocationType(item) === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
-        (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
+        (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
         (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
     );
   }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
@@ -344,11 +351,11 @@ export function Locations() {
     const normalizedQuery = query.trim().toLowerCase();
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
-      (!normalizedQuery || [item.name, item.code, item.type, item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
+      (!normalizedQuery || [item.name, item.code, backendLocationType(item), item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
         .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
-      (type === "All Types" || item.type === type) &&
+      (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
-      (buildingId === "All Buildings" || item.parentId === buildingId || ((item.type === "Building" || item.type === "Facility") && item.id === buildingId)) &&
+      (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
       (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
     );
   }, [allLocations, query, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
@@ -364,10 +371,10 @@ export function Locations() {
     const result: Array<Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }>> = [];
 
     // Find roots
-    const rootBuildings = allLocations.filter((loc) => loc.type === "Building" && (
+    const rootBuildings = allLocations.filter((loc) => isLocationContainer(loc) && (
       matchingKeys.has(locationIdentityKey(loc)) || allLocations.some((child) => matchingKeys.has(locationIdentityKey(child)) && child.parentId === loc.id)
     ));
-    const standalone = hierarchyItems.filter((loc) => loc.parentId === null && loc.type === "Facility");
+    const standalone = hierarchyItems.filter((loc) => loc.parentId === null && isPlace(loc) && !isLocationContainer(loc));
     // Rows nested under a Building, including ones hidden by a collapsed node.
     const nestedKeys = new Set<string>();
 
@@ -375,7 +382,7 @@ export function Locations() {
       const rootWasMatched = matchingKeys.has(locationIdentityKey(bldg));
       const bldgCollapsed = expandByDefault === toggledNodes.has(bldg.id);
       const childLocations = allLocations.filter((loc) =>
-        loc.type !== "Floor" && loc.type !== "Building" &&
+        loc.type !== "Floor" && !isLocationContainer(loc) &&
         loc.parentId === bldg.id &&
         (rootWasMatched || matchingKeys.has(locationIdentityKey(loc))),
       );
@@ -416,7 +423,7 @@ export function Locations() {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = expandByDefault === toggledNodes.has(flr.id);
           const childRooms = allLocations.filter(
-            (loc) => matchingKeys.has(locationIdentityKey(loc)) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && loc.type !== "Building"))
+            (loc) => matchingKeys.has(locationIdentityKey(loc)) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && !isLocationContainer(loc)))
           );
           family.push({
             item: flr,
@@ -589,7 +596,7 @@ export function Locations() {
     if (!await passwordConfirmation.confirm()) return;
     setDeleting(true);
     try {
-      await services.locations.remove(selected.id, selected.type);
+      await services.locations.remove(selected.id, backendLocationType(selected));
       await refresh();
       setDialog(null);
       passwordConfirmation.reset();
@@ -613,7 +620,7 @@ export function Locations() {
     setLockedParentId(null);
     openDialog("edit");
     const sequence = ++photoLoadSequence.current;
-    void services.locations.getPhotos(item.id, item.type).then((loaded) => {
+    void services.locations.getPhotos(item.id, backendLocationType(item)).then((loaded) => {
       if (sequence !== photoLoadSequence.current) {
         loaded.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
         return;
@@ -650,8 +657,8 @@ export function Locations() {
   };
 
   const isChildLocation = (item: Location) => isChildType(item.type);
-  const isBuilding = (item: Location) => item.type === "Building";
-  const selectedChildren = selected?.type === "Building"
+  const isBuilding = (item: Location) => isLocationContainer(item);
+  const selectedChildren = selected && isLocationContainer(selected)
     ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
     : [];
 
@@ -975,7 +982,7 @@ export function Locations() {
                         </button>
                       )}
                       <div className="location-type-symbol" aria-hidden="true" style={{ width: "34px", height: "34px", borderRadius: "10px", background: "#f3f4f6", display: "grid", placeItems: "center", marginRight: "12px", flexShrink: 0, opacity: 1 }}>
-                        <LocationTypeIcon type={item.type} />
+                        <LocationTypeIcon type={item.type} classification={item.classification} />
                       </div>
                       <div>
                         <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
@@ -993,7 +1000,7 @@ export function Locations() {
                   {item.type !== "Floor" && <>
                   <td style={{ padding: "16px 20px" }}>
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
-                      {item.type}
+                      {backendLocationType(item)}
                     </span>
                   </td>
                   <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
@@ -1040,8 +1047,8 @@ export function Locations() {
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
                             onClick={() => {
                               const parent = item.parentId
-                                ? allLocations.find((location) => location.id === item.parentId && location.type === "Building")
-                                  ?? allLocations.find((location) => location.name === item.building && location.type === "Building")
+                                ? allLocations.find((location) => location.id === item.parentId && isLocationContainer(location))
+                                  ?? allLocations.find((location) => location.name === item.building && isLocationContainer(location))
                                 : undefined;
                               if (isChildLocation(item) && !parent) {
                                 setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
@@ -1165,14 +1172,12 @@ export function Locations() {
                 draft={draft}
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
-                  : draft.type === "Building"
-                    ? ["Building", "Facility"]
-                    : draft.type === "Facility"
-                      ? ["Facility"]
+                  : draft.type === "Place"
+                    ? (canContainLocations(placeClassificationOf(draft)) ? [...PLACE_CLASSIFICATIONS] : [placeClassificationOf(draft)])
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 onChange={setDraft}
-                onTypeChange={(type) => setDraft(normalizeDraft({ ...draft, type }))}
+                onTypeChange={(type) => setDraft(normalizeDraft(withLocationTypeOption(draft, type)))}
               />
 
               <LocationCoordinatesFields

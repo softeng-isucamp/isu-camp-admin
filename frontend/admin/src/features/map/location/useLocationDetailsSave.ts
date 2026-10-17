@@ -1,3 +1,4 @@
+import { placeClassificationOf } from "../../../lib/locationPolicy";
 import { services } from "../../../services/api";
 import type { Building, Location } from "../../../types";
 import { isIndoorLocation } from "../indoorLocation/indoorLocations";
@@ -53,7 +54,7 @@ export function useLocationDetailsSave({ workingSession, overlay, refreshMapData
         ...selectedBuilding,
         name: savedLocation.name,
         code: savedLocation.code,
-        type: savedLocation.type === "Facility" ? "Facility" : "Building",
+        classification: placeClassificationOf(savedLocation),
         status: savedLocation.status,
       };
       overlay.putBuilding(updatedBuilding);
