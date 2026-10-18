@@ -411,9 +411,9 @@ describe("Location policy", () => {
 });
 
 describe("Place classification policy", () => {
-  it("lets only a Building classification contain Locations", () => {
-    expect(canContainLocations("Building")).toBe(true);
-    expect(canContainLocations("Facility")).toBe(false);
+  it("lets Building, College, and Campus Services contain Locations, but not Facility, Food, or Parking", () => {
+    for (const classification of ["Building", "College", "Campus Services"] as const) expect(canContainLocations(classification)).toBe(true);
+    for (const classification of ["Facility", "Food", "Parking"] as const) expect(canContainLocations(classification)).toBe(false);
   });
 
   it("rejects a Facility as the parent of an indoor Location, with the original message", () => {
@@ -440,6 +440,8 @@ describe("Place classification policy", () => {
   it.each([
     ["Building:12", "Place:12"],
     ["Facility:12", "Place:12"],
+    ["College:3", "Place:3"],
+    ["Campus Services:3", "Place:3"],
     ["Location:12", "Location:12"],
     ["Unknown:12", "Unknown:12"],
     ["Place:12", "Place:12"],
@@ -457,6 +459,8 @@ describe("classificationFromBackend", () => {
   it("keeps known classifications and reads anything else as Building", () => {
     expect(classificationFromBackend("Facility")).toBe("Facility");
     expect(classificationFromBackend("Building")).toBe("Building");
+    expect(classificationFromBackend("College")).toBe("College");
+    expect(classificationFromBackend("Dormitory")).toBe("Building");
     for (const raw of [null, undefined, "", "Unknown", 4]) {
       expect(classificationFromBackend(raw)).toBe("Building");
     }

@@ -18,8 +18,7 @@ import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/Pass
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { backendLocationType, canContainLocations, indoorLocationTypes, isLocationContainer, isPlace, locationIdentityKey, locationPolicy, normalizeLocationKey, placeClassificationOf, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
-import { PLACE_CLASSIFICATIONS } from "../../types";
+import { backendLocationType, canContainLocations, indoorLocationTypes, isLocationContainer, isPlace, locationIdentityKey, locationPolicy, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -1173,7 +1172,7 @@ export function Locations() {
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
                   : draft.type === "Place"
-                    ? (canContainLocations(placeClassificationOf(draft)) ? [...PLACE_CLASSIFICATIONS] : [placeClassificationOf(draft)])
+                    ? (canContainLocations(placeClassificationOf(draft)) ? placeClassificationOptions(placeClassificationOf(draft)) : [placeClassificationOf(draft)])
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 onChange={setDraft}

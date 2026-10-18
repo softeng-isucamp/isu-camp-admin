@@ -1,5 +1,7 @@
-/** Labels a Place; the backend still speaks these strings. New values are added here and in locationPolicy. */
-export const PLACE_CLASSIFICATIONS = ["Building", "Facility"] as const;
+/** Every classification a Place can hold or be read as; "Building" is the legacy value. New values are added here and in locationPolicy. */
+export const PLACE_CLASSIFICATIONS = ["Building", "Facility", "College", "Campus Services", "Food", "Parking"] as const;
+/** The classifications pickers offer today; a record holding any other known value keeps it as an extra option. */
+export const SELECTABLE_PLACE_CLASSIFICATIONS = ["Building", "Facility"] as const;
 export type PlaceClassification = typeof PLACE_CLASSIFICATIONS[number];
 export type LocationType =
   | "Place"

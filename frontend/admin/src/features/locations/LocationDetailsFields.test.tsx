@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { placeClassificationOptions, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import type { LocationDraft } from "../../types";
 import { LocationDetailsFields } from "./LocationDetailsModal";
 
@@ -46,5 +46,18 @@ describe("location details status field", () => {
 
     expect(screen.queryByText(/not saved yet/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/read-only/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("location type picker for a non-selectable classification", () => {
+  it("shows a College's current value as an extra option and keeps it", () => {
+    const draft = withLocationTypeOption({
+      name: "Old Hall", code: "OLD", type: "Room", parentId: null,
+      status: "Active", lat: null, lng: null, positioned: false,
+    } as LocationDraft, "College");
+    render(<LocationDetailsFields draft={draft} allowedTypes={placeClassificationOptions("College")} onChange={() => {}} />);
+    const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
+    expect(select.value).toBe("College");
+    expect([...select.options].map((option) => option.text)).toEqual(["Building", "Facility", "College"]);
   });
 });

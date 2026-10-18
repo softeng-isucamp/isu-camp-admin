@@ -1,4 +1,4 @@
-import { PLACE_CLASSIFICATIONS } from "../types";
+import { PLACE_CLASSIFICATIONS, SELECTABLE_PLACE_CLASSIFICATIONS } from "../types";
 import type { Location, LocationDraft, LocationType, PlaceClassification } from "../types";
 
 export type LocationKind = "outdoor" | "floor" | "indoor";
@@ -17,8 +17,12 @@ export const isIndoorLocationType = (type: LocationType) =>
 
 /** Whether a Place with this classification can contain indoor Locations. New classifications add a row. */
 const classificationCanContain: Record<PlaceClassification, boolean> = {
+  College: true,
+  "Campus Services": true,
   Building: true,
   Facility: false,
+  Food: false,
+  Parking: false,
 };
 
 export const canContainLocations = (classification: PlaceClassification): boolean =>
@@ -50,6 +54,12 @@ export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option
 
 export const isPlaceClassification = (value: unknown): value is PlaceClassification =>
   (PLACE_CLASSIFICATIONS as readonly unknown[]).includes(value);
+
+/** What a classification picker offers: the selectable set, plus the record's current value when that is not selectable. */
+export const placeClassificationOptions = (current?: PlaceClassification): PlaceClassification[] => {
+  const selectable: PlaceClassification[] = [...SELECTABLE_PLACE_CLASSIFICATIONS];
+  return current && !selectable.includes(current) ? [...selectable, current] : selectable;
+};
 
 /** A backend classification string; null, missing, and unknown values read as Building. */
 export const classificationFromBackend = (raw: unknown): PlaceClassification =>

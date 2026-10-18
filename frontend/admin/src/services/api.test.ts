@@ -153,8 +153,11 @@ describe("mock service contracts", () => {
 
     expect(normalize({ type: "Building" })).toMatchObject({ type: "Place", classification: "Building" });
     expect(normalize({ type: "Facility" })).toMatchObject({ type: "Place", classification: "Facility" });
-    for (const extra of [{ type: null }, {}, { type: "College" }, { type: "" }, { type_id: 4 }, { type_id: 6 }, { type_id: 8 }]) {
+    for (const extra of [{ type: null }, {}, { type: "Dormitory" }, { type: "" }, { type_id: 4 }, { type_id: 6 }, { type_id: 8 }]) {
       expect(normalize(extra)).toMatchObject({ type: "Place", classification: "Building" });
+    }
+    for (const classification of ["College", "Campus Services", "Food", "Parking"]) {
+      expect(normalize({ type: classification })).toMatchObject({ type: "Place", classification });
     }
     expect(normalize({ type: "Room" })).not.toHaveProperty("classification");
     expect(normalize({ type: "Floor" })).toMatchObject({ type: "Floor" });
@@ -165,7 +168,8 @@ describe("mock service contracts", () => {
       normalizeBackendMapBuilding({ id: "4", name: "Oval", code: "OVL", points: [], type } as Parameters<typeof normalizeBackendMapBuilding>[0]);
 
     expect(normalize("Facility")).toMatchObject({ classification: "Facility" });
-    for (const type of ["Building", null, undefined, "", "Unknown"]) {
+    expect(normalize("College")).toMatchObject({ classification: "College" });
+    for (const type of ["Building", null, undefined, "", "Unknown", "Dormitory"]) {
       expect(normalize(type)).toMatchObject({ classification: "Building" });
     }
   });
@@ -1184,6 +1188,30 @@ describe("real walking network service boundary", () => {
         path_points: [{ sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" }],
       }),
     }));
+  });
+
+  it("round-trips a College location and a Campus Services map building without reclassifying them", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const wireBuilding = { id: "5", name: "Student Hub", code: "HUB", type: "Campus Services", status: "Active", points: [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) =>
+      new Response(JSON.stringify(init?.method === "PUT" && String(_url).includes("/api/actions/locations")
+        ? { id: "3", name: "College of Arts", code: "CAS", type: "College", status: "Active" }
+        : init?.method === "PUT" || init?.method === "POST" ? { success: true } : [wireBuilding]), { status: 200 }));
+
+    const page = await httpServices.locations.save({ id: "3", name: "College of Arts", code: "CAS", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    expect(page).toMatchObject({ type: "Place", classification: "College" });
+    const saveCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/actions/locations/3"))!;
+    expect(String(saveCall[0])).toMatch(/\?type=College$/);
+    expect(JSON.parse(saveCall[1]!.body as string)).toMatchObject({ type: "College" });
+
+    const [building] = await httpServices.map.buildings();
+    expect(building.classification).toBe("Campus Services");
+    await httpServices.map.save({ buildings: [building] });
+    const sent = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT" || init?.method === "POST").map(([, init]) => String(init!.body));
+    expect(sent.some((body) => body.includes('"type":"Campus Services"'))).toBe(true);
+    expect(sent.some((body) => body.includes('"type":"Building"'))).toBe(false);
   });
 
   it("normalizes Building and Facility footprints and reads the committed result after deletion", async () => {

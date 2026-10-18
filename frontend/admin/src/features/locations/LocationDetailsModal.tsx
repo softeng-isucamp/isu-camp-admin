@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
-import { backendLocationType, locationPolicy, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, locationPolicy, placeClassificationOptions, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import type { Location, LocationDraft, LocationPhotoDraft } from "../../types";
-import { PLACE_CLASSIFICATIONS } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 interface LocationDetailsFieldsProps {
@@ -164,7 +163,7 @@ export function LocationDetailsModal({
   }, [location.id, location.type]);
   const effectiveAllowedTypes = allowedTypes ?? (
     location.type === "Place"
-      ? [...PLACE_CLASSIFICATIONS]
+      ? placeClassificationOptions(location.classification)
       : undefined
   );
 

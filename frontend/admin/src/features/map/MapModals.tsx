@@ -1,4 +1,4 @@
-import { PLACE_CLASSIFICATIONS } from "../../types";
+import { placeClassificationOptions } from "../../lib/locationPolicy";
 import type { Building, Location, RouteNode } from "../../types";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
 import { BuildingDetailsModal } from "./building/BuildingDetailsModal";
@@ -78,7 +78,7 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         <LocationDetailsModal
           location={locationModalEntity}
           directory={data.locations}
-          allowedTypes={selectedBuilding ? [...PLACE_CLASSIFICATIONS] : undefined}
+          allowedTypes={selectedBuilding ? placeClassificationOptions(locationModalEntity.classification) : undefined}
           onClose={actions.onCloseOwnerModal}
           onPickIndoorLocationOnMap={selectedLocation && isIndoorLocation(selectedLocation)
             ? () => actions.onPickIndoorLocationOnMap(selectedLocation)

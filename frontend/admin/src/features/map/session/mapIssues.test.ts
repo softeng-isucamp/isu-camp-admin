@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BackendLocationType } from "../../../lib/locationPolicy";
+import { isPlaceClassification, type BackendLocationType } from "../../../lib/locationPolicy";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { echagueCampusBoundary } from "../campusBoundary";
 import type { PathwayCrossing } from "../pathway/pathwayTopology";
@@ -28,7 +28,7 @@ const location = (id: string, option: BackendLocationType, overrides: Partial<Lo
   id,
   name: `${option} ${id}`,
   code: id,
-  ...(option === "Building" || option === "Facility" ? { type: "Place" as const, classification: option } : { type: option }),
+  ...(isPlaceClassification(option) ? { type: "Place" as const, classification: option } : { type: option }),
   parentId: null,
   status: "Active",
   lat: INSIDE[0],

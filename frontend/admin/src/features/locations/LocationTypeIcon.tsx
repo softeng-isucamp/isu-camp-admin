@@ -12,7 +12,9 @@ const iconContents: Partial<Record<BackendLocationType, string>> = {
 };
 
 export function locationTypeIconContents(type: LocationType, classification?: PlaceClassification): string {
-  return iconContents[backendLocationType({ type, classification })] ?? '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />';
+  const key = backendLocationType({ type, classification });
+  // Classifications without an icon yet read as Buildings.
+  return iconContents[key] ?? (type === "Place" ? iconContents.Building! : '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />');
 }
 
 export function LocationTypeIcon({
