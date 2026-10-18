@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
-import { canContainLocations, isLocationContainer, locationIdentityKey, placeClassificationOf } from "../../../lib/locationPolicy";
+import { canContainLocations, isLocationContainer, isPlace, locationIdentityKey, placeClassificationOf } from "../../../lib/locationPolicy";
 import { overlayChanges } from "../mapEditing";
 import type { MapOverlay } from "./useMapOverlay";
 
@@ -36,7 +36,7 @@ export function useSessionMapData(
   const allSessionBuildings = useMemo(() => {
     const buildingMap = new Map<string, Building>();
     for (const loc of currentLocations) {
-      if (loc.type === "Place") {
+      if (isPlace(loc)) {
         buildingMap.set(loc.id, {
           id: loc.id,
           name: loc.name,

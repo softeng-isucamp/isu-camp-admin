@@ -1,6 +1,6 @@
 import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
 import type { AccountStatus, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
-import { locationPolicy, placeClassificationOf } from "../lib/locationPolicy";
+import { canContainLocations, isPlace, locationPolicy, placeClassificationOf } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
 import { AuthError, RateLimitError, fieldError } from "./errors";
 import { firstPasswordIssue } from "./passwordRules";
@@ -265,7 +265,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       savePosition: (id: string, lat: number | null, lng: number | null): Location => {
         const location = mapData.locations.find((item) => item.id === id);
         if (!location) throw new Error("Location not found.");
-        if (location.type !== "Place" || location.classification !== "Facility" || location.parentId !== null) throw new Error("Only standalone legacy Facility records can own an outdoor position.");
+        if (!isPlace(location) || canContainLocations(placeClassificationOf(location)) || location.parentId !== null) throw new Error("Only standalone Food, Parking, and Facility records can own an outdoor position.");
         if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
         if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
         if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
@@ -290,7 +290,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         // Locations own a Building's identity, while the linked Building record
         // owns its footprint. Keep that one local source of map geometry in sync
         // with a Location save so the next Map Editor read sees the same polygon.
-        if (location.type === "Place" && location.polygonCoordinates) {
+        if (isPlace(location) && location.polygonCoordinates) {
           const building: Building = {
             id: location.id,
             name: location.name,

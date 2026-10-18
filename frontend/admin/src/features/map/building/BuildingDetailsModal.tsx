@@ -1,10 +1,13 @@
 import type { PlaceClassification } from "../../../types";
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
+import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../../types";
 import type { BuildingIdentityInput } from "./buildingFootprint";
 
 interface BuildingDetailsModalProps {
   draft: BuildingIdentityInput;
-  classification: PlaceClassification;
+  /** Empty until the admin chooses one: a new Place has no default Classification. */
+  classification: PlaceClassification | "";
+  classificationError?: string;
   error?: string;
   onChange: (draft: BuildingIdentityInput) => void;
   onClassificationChange: (classification: PlaceClassification) => void;
@@ -13,7 +16,7 @@ interface BuildingDetailsModalProps {
   submitting?: boolean;
 }
 
-export function BuildingDetailsModal({ draft, classification, error, onChange, onClassificationChange, onClose, onSubmit, submitting = false }: BuildingDetailsModalProps) {
+export function BuildingDetailsModal({ draft, classification, classificationError, error, onChange, onClassificationChange, onClose, onSubmit, submitting = false }: BuildingDetailsModalProps) {
   return (
     <Modal
       title="Add Building"
@@ -24,9 +27,9 @@ export function BuildingDetailsModal({ draft, classification, error, onChange, o
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
       <div className="form-grid-two">
-        <SelectField label="BUILDING CLASSIFICATION" required value={classification} onChange={(event) => onClassificationChange(event.target.value as PlaceClassification)} helper="Facilities use the same footprint workflow and do not contain Indoor Locations.">
-          <option value="Building">Building</option>
-          <option value="Facility">Facility</option>
+        <SelectField label="CLASSIFICATION" required value={classification} error={classificationError} onChange={(event) => onClassificationChange(event.target.value as PlaceClassification)} helper="College and Campus Services can contain indoor Locations; Food, Parking, and Facility cannot.">
+          <option value="">Select a classification</option>
+          {SELECTABLE_PLACE_CLASSIFICATIONS.map((value) => <option key={value} value={value}>{value}</option>)}
         </SelectField>
         <SelectField label="STATUS" required value={draft.status ?? "Active"} onChange={(event) => onChange({ ...draft, status: event.target.value as "Active" | "Inactive" })}>
           <option>Active</option><option>Inactive</option>

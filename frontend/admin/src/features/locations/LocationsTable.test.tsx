@@ -568,6 +568,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(combobox).toHaveValue("");
   });
 
+  it("lists only Places that can contain Locations as parents", async () => {
+    for (const [id, classification] of [["pp-college", "College"], ["pp-services", "Campus Services"], ["pp-legacy", "Building"], ["pp-food", "Food"], ["pp-parking", "Parking"], ["pp-facility", "Facility"]] as const) {
+      await services.locations.save({ id, name: `Pick ${classification}`, code: id.toUpperCase(), type: "Place", classification, parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    }
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+    const combobox = screen.getByLabelText("PARENT BUILDING");
+    fireEvent.focus(combobox);
+    fireEvent.change(combobox, { target: { value: "Pick " } });
+
+    const listed = within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent ?? "");
+    for (const name of ["Pick College", "Pick Campus Services", "Pick Building"]) expect(listed.some((option) => option.includes(name))).toBe(true);
+    for (const name of ["Pick Food", "Pick Parking", "Pick Facility"]) expect(listed.some((option) => option.includes(name))).toBe(false);
+  });
+
   it("chooses a parent Building from the keyboard without submitting the dialog", async () => {
     const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
@@ -661,7 +677,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("offers only Building and Facility when editing a Building and excludes Facility for indoor locations", async () => {
+  it("offers the selectable classifications plus Unclassified (legacy) when editing a legacy Place, and keeps indoor types separate", async () => {
     const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Place", classification: "Building", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-room", name: "Edit Type Room", code: "EDIT-TYPE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
@@ -673,19 +689,23 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
 
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
-    expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual([
-      "Building",
-      "Facility",
+    const typeSelect = screen.getByLabelText(/location type/i) as HTMLSelectElement;
+    expect(Array.from(typeSelect.options).map((option) => option.text)).toEqual([
+      "College", "Campus Services", "Food", "Parking", "Facility", "Unclassified (legacy)",
     ]);
+    expect(typeSelect).toHaveValue("Building");
     expect(screen.getByLabelText("Latitude")).toHaveValue("Not positioned");
-    expect(screen.getByLabelText("Longitude")).toHaveValue("Not positioned");
-    expect(screen.queryByText("Spatial position is managed in Map Editor.")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Facility" } });
+    // It holds an indoor Location, so the classifications that cannot contain one are disabled.
+    expect(Array.from(typeSelect.options).filter((option) => option.disabled).map((option) => option.text)).toEqual(["Food", "Parking", "Facility"]);
+    expect(screen.getByText("Move or delete its 1 indoor Location before classifying it as Food, Parking, or Facility.")).toBeInTheDocument();
+
+    // A legacy record can be saved unchanged, and moved between containers.
+    fireEvent.change(typeSelect, { target: { value: "Campus Services" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     expect(await screen.findByText("Location updated")).toBeInTheDocument();
     const updatedBuilding = (await services.locations.list(building.name)).items.find((item) => item.id === building.id);
-    expect(updatedBuilding?.classification).toBe("Facility");
+    expect(updatedBuilding?.classification).toBe("Campus Services");
 
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Room" } });
@@ -693,19 +713,99 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
 
     const indoorTypeOptions = Array.from((await screen.findByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text);
-    expect(indoorTypeOptions).not.toContain("Facility");
+    expect(indoorTypeOptions).toEqual(["Laboratory", "Room", "Office", "Restroom"]);
     expect(screen.getByLabelText("Latitude")).toHaveAttribute("readonly");
     expect(screen.getByLabelText("Longitude")).toHaveAttribute("readonly");
-    expect(screen.getByLabelText("Latitude")).toHaveAttribute("type", "text");
-    expect(screen.getByLabelText("Longitude")).toHaveAttribute("type", "text");
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Type Facility" } });
     fireEvent.click(await screen.findByRole("button", { name: "Actions for Edit Type Facility" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
 
+    // With no indoor Locations a Place can move to any classification.
     expect(await screen.findByLabelText(/location type/i)).toHaveValue("Facility");
-    expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual(["Facility"]);
+    const facilityOptions = Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options);
+    expect(facilityOptions.map((option) => option.text)).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
+    expect(facilityOptions.some((option) => option.disabled)).toBe(false);
+  });
+
+  it("refuses a forbidden classification for a Place with indoor Locations without saving, but allows it with only an empty Floor", async () => {
+    const withRoom = await services.locations.save({ id: "refuse-place", name: "Refuse Place", code: "REFUSE-P", type: "Place", classification: "College", parentId: null, function: "Hall", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "refuse-room", name: "Refuse Room", code: "REFUSE-R", type: "Room", parentId: withRoom.id, building: withRoom.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    const floorOnly = await services.locations.save({ id: "floor-only-place", name: "Floor Only Place", code: "FLOOR-P", type: "Place", classification: "College", parentId: null, function: "Hall", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "floor-only-floor", name: "Ground Floor", code: "FLOOR-F", type: "Floor", parentId: floorOnly.id, building: floorOnly.name, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+
+    const openEdit = async (name: string) => {
+      fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: name } });
+      fireEvent.click(await screen.findByRole("button", { name: `Actions for ${name}` }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+      await screen.findByRole("heading", { name: "Edit Location" });
+    };
+
+    await openEdit(withRoom.name);
+    const save = vi.spyOn(services.locations, "save");
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Parking" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveAttribute("aria-invalid", "true"));
+    expect(document.getElementById("select-location-type-error")).toHaveTextContent("Move or delete its 1 indoor Location before classifying it as Food, Parking, or Facility.");
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await openEdit(floorOnly.name);
+    const options = Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options);
+    expect(options.some((option) => option.disabled)).toBe(false);
+    fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Parking" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows a backend error on the classification field", async () => {
+    const place = await services.locations.save({ id: "type-error-place", name: "Type Error Place", code: "TYPE-ERR", type: "Place", classification: "Facility", parentId: null, function: "Open area", status: "Active", lat: null, lng: null, positioned: false });
+    const refusal = Object.assign(new Error("Invalid type."), { fieldErrors: { type: "Classification is not allowed." } });
+    renderLocations();
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: place.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${place.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    await screen.findByRole("heading", { name: "Edit Location" });
+
+    vi.spyOn(services.locations, "save").mockRejectedValueOnce(refusal);
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+
+    await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveAttribute("aria-invalid", "true"));
+    expect(document.getElementById("select-location-type-error")).toHaveTextContent("Classification is not allowed.");
+  });
+
+  it("groups the type filter into Places and Locations and sends each option's backend name", async () => {
+    const list = vi.spyOn(services.locations, "list");
+    renderLocations();
+    const filter = await screen.findByLabelText("TYPE") as HTMLSelectElement;
+
+    const groups = Array.from(filter.querySelectorAll("optgroup")).map((group) => ({
+      label: group.label,
+      options: Array.from(group.querySelectorAll("option")).map((option) => [option.text, option.value]),
+    }));
+    expect(groups).toEqual([
+      { label: "Places", options: [["College", "College"], ["Campus Services", "Campus Services"], ["Food", "Food"], ["Parking", "Parking"], ["Facility", "Facility"], ["Unclassified (legacy)", "Building"]] },
+      { label: "Locations", options: [["Room", "Room"], ["Office", "Office"], ["Laboratory", "Laboratory"], ["Restroom", "Restroom"]] },
+    ]);
+
+    for (const value of ["College", "Campus Services", "Food", "Parking", "Facility", "Building", "Room", "Restroom"]) {
+      fireEvent.change(filter, { target: { value } });
+      await waitFor(() => expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ type: value })));
+    }
+  });
+
+  it("badges only legacy Places as Unclassified", async () => {
+    await services.locations.save({ id: "badge-legacy", name: "Badge Legacy", code: "BADGE-L", type: "Place", classification: "Building", parentId: null, function: "Old", status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "badge-college", name: "Badge College", code: "BADGE-C", type: "Place", classification: "College", parentId: null, function: "New", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: "Badge " } });
+
+    const legacyRow = await screen.findByRole("row", { name: /Badge Legacy/ });
+    const collegeRow = screen.getByRole("row", { name: /Badge College/ });
+    expect(within(legacyRow).getByText("Unclassified")).toBeInTheDocument();
+    expect(within(collegeRow).queryByText("Unclassified")).not.toBeInTheDocument();
   });
 
   it("keeps row action options above neighboring table rows", async () => {

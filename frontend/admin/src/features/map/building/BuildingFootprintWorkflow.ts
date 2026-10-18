@@ -44,6 +44,8 @@ export type BuildingFootprintFinalizeResult =
       reason: "validation" | "persistence";
       message: string;
       issues?: BuildingValidationIssue[];
+      /** Field errors the backend attached to a refused save, keyed by its field names ("type" is the Classification). */
+      fieldErrors?: Record<string, string>;
     };
 
 export interface BuildingFootprintWriteAdapter {
@@ -82,7 +84,7 @@ export function createBuildingFootprintWorkflow(dependencies: {
             name: command.identity.name.trim(),
             code: command.identity.code.trim(),
             type: "Place",
-            classification: command.identity.classification ?? "Building",
+            classification: command.identity.classification!,
             parentId: null,
             function: command.identity.function?.trim() || undefined,
             keywords: command.identity.keywords?.trim() || undefined,
@@ -132,6 +134,7 @@ export function createBuildingFootprintWorkflow(dependencies: {
           ok: false,
           reason: "persistence",
           message: cause instanceof Error ? cause.message : "Building footprint could not be saved.",
+          fieldErrors: (cause as { fieldErrors?: Record<string, string> } | null)?.fieldErrors,
         };
       }
     },

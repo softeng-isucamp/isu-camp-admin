@@ -65,9 +65,10 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         <BuildingDetailsModal
           draft={buildingEditor.buildingForm}
           classification={buildingEditor.buildingClassification}
+          classificationError={buildingEditor.classificationError}
           error={error}
           onChange={buildingEditor.setBuildingForm}
-          onClassificationChange={buildingEditor.setBuildingClassification}
+          onClassificationChange={(value) => { buildingEditor.setClassificationError(""); buildingEditor.setBuildingClassification(value); }}
           onClose={buildingEditor.closeDetailsModal}
           onSubmit={buildingEditor.createBuilding}
           submitting={savingAction === "building"}

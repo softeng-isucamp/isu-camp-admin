@@ -3,7 +3,7 @@ import type { SpatialDomain, SpatialObjectType } from "./types";
 
 export interface InspectorSummaryItem {
   label: string;
-  value: string;
+  value: ReactNode;
 }
 
 export interface InspectorAction {

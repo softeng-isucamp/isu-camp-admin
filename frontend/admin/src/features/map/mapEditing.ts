@@ -1,6 +1,7 @@
 import type L from "leaflet";
 import { PATHWAY_ALLOWED_MODES, PATHWAY_WAY_TYPES, normalizePathwayWayType, type Building, type Location, type Pathway, type RouteNode } from "../../types";
 import { geometryOnCampus, pointInPolygon, pointOnCampus, type MapPoint } from "./campusBoundary";
+import { isPlace } from "../../lib/locationPolicy";
 
 export const polygonCentroid = (points: MapPoint[]): MapPoint => points.length
   ? [points.reduce((sum, [lat]) => sum + lat, 0) / points.length, points.reduce((sum, [, lng]) => sum + lng, 0) / points.length]
@@ -162,7 +163,7 @@ export function validateRouteNodeDraft(
     issues.push({ field: "association", message: "Only Entrance Route Nodes may have a Building association." });
   } else if (node.associatedPlaceId) {
     const buildingIds = new Set(input.buildings.map((building) => building.id));
-    input.locations?.filter((location) => location.type === "Place").forEach((location) => buildingIds.add(location.id));
+    input.locations?.filter(isPlace).forEach((location) => buildingIds.add(location.id));
     if (!buildingIds.has(node.associatedPlaceId)) {
       issues.push({ field: "association", message: "Associated Building does not exist." });
     }

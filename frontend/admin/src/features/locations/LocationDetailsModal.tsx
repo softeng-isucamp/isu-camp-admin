@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
-import { backendLocationType, locationPolicy, placeClassificationOptions, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isUnclassifiedPlace, isPlace, locationPolicy, locationTypeOptionLabel, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
@@ -9,12 +10,16 @@ interface LocationDetailsFieldsProps {
   draft: LocationDraft;
   /** Type-picker choices: a Place is chosen by its classification. */
   allowedTypes?: BackendLocationType[];
+  /** Choices shown but not selectable, with `typeHelper` saying why. */
+  disabledTypes?: BackendLocationType[];
+  typeHelper?: string;
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: BackendLocationType) => void;
 }
 
-const defaultLocationTypes: BackendLocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
+const defaultLocationTypes: BackendLocationType[] = [...indoorLocationTypes, ...SELECTABLE_PLACE_CLASSIFICATIONS];
+
 
 export function LocationCoordinatesFields({
   lat,
@@ -74,6 +79,8 @@ export function LocationCoordinatesFields({
 export function LocationDetailsFields({
   draft,
   allowedTypes = defaultLocationTypes,
+  disabledTypes = [],
+  typeHelper,
   errors = {},
   onChange,
   onTypeChange,
@@ -84,6 +91,9 @@ export function LocationDetailsFields({
         <SelectField
           label="LOCATION TYPE"
           required
+          error={errors.type}
+          helper={typeHelper}
+          badge={isUnclassifiedPlace(draft) ? "Unclassified" : undefined}
           value={backendLocationType(draft)}
           onChange={(event) => {
             const type = event.target.value as BackendLocationType;
@@ -91,7 +101,7 @@ export function LocationDetailsFields({
             else onChange(withLocationTypeOption(draft, type));
           }}
         >
-          {allowedTypes.map((type) => <option key={type} value={type}>{type === "Floor" ? "Floor (legacy records only)" : type}</option>)}
+          {allowedTypes.map((type) => <option key={type} value={type} disabled={disabledTypes.includes(type)}>{locationTypeOptionLabel(type)}</option>)}
         </SelectField>
         <SelectField
           label="STATUS"
@@ -105,8 +115,8 @@ export function LocationDetailsFields({
         </SelectField>
       </div>
       <div className="form-grid-two">
-        <Field aria-label={draft.type === "Place" && draft.classification === "Building" ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
-        <Field aria-label={draft.type === "Place" && draft.classification === "Building" ? "Building code" : "Location code"} label="LOCATION CODE / ID" required error={errors.code} value={draft.code} onChange={(event) => onChange({ ...draft, code: event.target.value })} />
+        <Field aria-label={isLocationContainer(draft) ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
+        <Field aria-label={isLocationContainer(draft) ? "Building code" : "Location code"} label="LOCATION CODE / ID" required error={errors.code} value={draft.code} onChange={(event) => onChange({ ...draft, code: event.target.value })} />
       </div>
       <Field aria-label="DESCRIPTION" label="DESCRIPTION" required error={errors.function} value={draft.function ?? ""} onChange={(event) => onChange({ ...draft, function: event.target.value })} />
       <Field aria-label="KEYWORDS / TAGS" label="KEYWORDS / TAGS" value={draft.keywords ?? ""} onChange={(event) => onChange({ ...draft, keywords: event.target.value })} />
@@ -134,6 +144,7 @@ export function LocationDetailsModal({
 }: LocationDetailsModalProps) {
   const [draft, setDraft] = useState<Location>({ ...location });
   const [error, setError] = useState("");
+  const [typeError, setTypeError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [photos, setPhotos] = useState<LocationPhotoDraft[]>([]);
   const photosRef = useRef<LocationPhotoDraft[]>(photos);
@@ -162,12 +173,16 @@ export function LocationDetailsModal({
   // Modal mounts for one selected Location and is unmounted on close.
   }, [location.id, location.type]);
   const effectiveAllowedTypes = allowedTypes ?? (
-    location.type === "Place"
+    isPlace(location)
       ? placeClassificationOptions(location.classification)
       : undefined
   );
 
+  const indoorCount = isPlace(location) ? indoorLocationsOf(location, directory).length : 0;
+  const disabledTypes = blockedReclassifications(indoorCount);
+
   const save = async (): Promise<boolean> => {
+    setTypeError("");
     const normalized = locationPolicy.normalize(draft, {
       directory,
       previous: location,
@@ -185,6 +200,10 @@ export function LocationDetailsModal({
       setError(evaluation.issues[0].message);
       return false;
     }
+    if (isPlace(normalized) && blockedReclassifications(indoorCount).includes(placeClassificationOf(normalized))) {
+      setTypeError(reclassificationBlockedMessage(indoorCount));
+      return false;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -197,6 +216,7 @@ export function LocationDetailsModal({
       }, loadingPhotos || photoLoadFailed ? undefined : photos);
       return true;
     } catch (cause) {
+      setTypeError((cause as { fieldErrors?: Record<string, string> } | null)?.fieldErrors?.type ?? "");
       setError(cause instanceof Error ? cause.message : "Unable to save location.");
       return false;
     } finally {
@@ -215,7 +235,7 @@ export function LocationDetailsModal({
       onClose={onClose}
     >
       {error && <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">{error}</div>}
-      <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} onChange={(next) => setDraft(next as Location)} />
+      <LocationDetailsFields draft={draft} allowedTypes={effectiveAllowedTypes} disabledTypes={disabledTypes} typeHelper={disabledTypes.length ? reclassificationBlockedMessage(indoorCount) : undefined} errors={{ type: typeError }} onChange={(next) => setDraft(next as Location)} />
       <LocationPhotoUpload
         photos={photos}
         onChange={setPhotos}

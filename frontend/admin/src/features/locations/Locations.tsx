@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_MODE, services, setMockFailure } from "../../services/api";
 import {
+  Badge,
   Button,
   Card,
   Empty,
@@ -15,10 +16,11 @@ import {
 } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
+import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { backendLocationType, canContainLocations, indoorLocationTypes, isLocationContainer, isPlace, locationIdentityKey, locationPolicy, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -29,6 +31,9 @@ const keyParam = (params: URLSearchParams) => {
   const key = params.get("locationKey");
   return key === null ? null : normalizeLocationKey(key);
 };
+
+/** Place options of the type filter. "Building" is the legacy value; it is sent to the backend as is and shown as unclassified. */
+const typeFilterPlaces: BackendLocationType[] = [...SELECTABLE_PLACE_CLASSIFICATIONS, "Building"];
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -515,6 +520,9 @@ export function Locations() {
     const validationIssues = [
       ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([field, message]) => ({ field: field as keyof LocationDraft, message })),
       ...(adding && normalized.type === "Floor" ? [{ field: "type" as keyof LocationDraft, message: "Floor records are read-only compatibility data and cannot be created here." }] : []),
+      ...(!adding && selected && isPlace(normalized) && blockedReclassifications(indoorLocationsOf(selected, allLocations).length).includes(placeClassificationOf(normalized))
+        ? [{ field: "type" as keyof LocationDraft, message: reclassificationBlockedMessage(indoorLocationsOf(selected, allLocations).length) }]
+        : []),
       ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
     ];
     if (validationIssues.length) {
@@ -660,6 +668,8 @@ export function Locations() {
   const selectedChildren = selected && isLocationContainer(selected)
     ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
     : [];
+  // Only an edit reclassifies; the add dialog's `selected` is the parent of a new indoor Location.
+  const reclassifyingChildren = dialog === "edit" && selected && isPlace(draft) ? indoorLocationsOf(selected, allLocations) : [];
 
   const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
 
@@ -759,16 +769,17 @@ export function Locations() {
               style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
             >
               <option>All Types</option>
-              {[
-                "Building",
-                "Laboratory",
-                "Room",
-                "Office",
-                "Restroom",
-                "Facility",
-              ].map((value) => (
-                <option key={value}>{value}</option>
-              ))}
+              {/* Option values are the names the backend filters on; the legacy "Building" value reads as unclassified. */}
+              <optgroup label="Places">
+                {typeFilterPlaces.map((value) => (
+                  <option key={value} value={value}>{locationTypeOptionLabel(value)}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Locations">
+                {indoorLocationTypes.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </optgroup>
             </SelectField>
             <SelectField
               label="BUILDING"
@@ -1001,6 +1012,7 @@ export function Locations() {
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
                       {backendLocationType(item)}
                     </span>
+                    {isUnclassifiedPlace(item) && <> <Badge tone="grey">Unclassified</Badge></>}
                   </td>
                   <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
                     {item.function || "—"}
@@ -1171,10 +1183,12 @@ export function Locations() {
                 draft={draft}
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
-                  : draft.type === "Place"
-                    ? (canContainLocations(placeClassificationOf(draft)) ? placeClassificationOptions(placeClassificationOf(draft)) : [placeClassificationOf(draft)])
+                  : isPlace(draft)
+                    ? placeClassificationOptions(placeClassificationOf(draft))
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
-                errors={{ name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
+                disabledTypes={blockedReclassifications(reclassifyingChildren.length)}
+                typeHelper={reclassifyingChildren.length ? reclassificationBlockedMessage(reclassifyingChildren.length) : undefined}
+                errors={{ type: errorFor("type"), name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 onChange={setDraft}
                 onTypeChange={(type) => setDraft(normalizeDraft(withLocationTypeOption(draft, type)))}
               />

@@ -99,7 +99,7 @@ describe("borrowed owner module forms", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("limits map-edited building classification to Building and Facility", () => {
+  it("limits map-edited Place classification to the selectable ones, never offering Building", () => {
     render(
       <LocationDetailsModal
         location={location}
@@ -109,9 +109,11 @@ describe("borrowed owner module forms", () => {
       />,
     );
 
-    expect(screen.getAllByRole("combobox")[0].querySelectorAll("option")).toHaveLength(2);
-    expect(screen.getByRole("option", { name: "Building" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Facility" })).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox")[0].querySelectorAll("option")).toHaveLength(5);
+    for (const name of ["College", "Campus Services", "Food", "Parking", "Facility"]) {
+      expect(screen.getByRole("option", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Building" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Room" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Laboratory" })).not.toBeInTheDocument();
   });
