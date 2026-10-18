@@ -31,6 +31,10 @@ Image IDs are the immutable local references returned by `docker image inspect`;
 
 The smoke check requires curl and Python 3 in addition to Docker Compose. It starts an isolated Compose project on a random loopback port with a disposable SQLite configuration. It verifies the SPA fallback, build provenance, unauthenticated JSON `401`, login validation JSON `400`, missing-asset `404`, and forwarding a 51 MiB request through the upload proxy. It also supplies conflicting shell/runtime image variables to confirm the release runs its bound image IDs. It removes only its own test containers and network afterward.
 
+## Healthchecks
+
+Both services probe every 30s (timeout 5s, 3 retries). `admin-api` uses the `curl` already installed in its image against `GET /` (a static JSON response, no database work); a Python-based probe was avoided because each run started a full interpreter and saturated the low-core production host. `admin-web` uses busybox `wget` against nginx's `/healthz`. During `start_period` they probe every `start_interval` (2s) so `up --wait` returns quickly; this requires Docker Engine 25+ (API 1.44) and Compose 2.20.2+. Compose 2.24+ rejects `start_interval` against an older Engine API, so the deploy fails before any probe runs; on such a host remove `start_interval` from `deploy/compose.yaml`. Production celeron runs Engine 29.9.1 (API 1.56) and Compose v5.6.0 (checked 2026-10-18). A failing service is marked unhealthy after roughly 90-100s (three checks, each followed by a 30s wait, plus up to 5s timeouts).
+
 These checks exercise the container/proxy contract without a production database, real accounts, or email delivery. Staged production checks must still confirm schema readiness and an invalid-account login returning JSON `401` against the intended database.
 
 ## Stage the saved images
