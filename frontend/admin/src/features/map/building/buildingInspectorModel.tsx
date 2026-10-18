@@ -1,3 +1,4 @@
+import { Badge } from "../../../components/UI";
 import { canContainLocations } from "../../../lib/locationPolicy";
 import type { Location, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
@@ -36,6 +37,8 @@ export function buildingInspectorModel({
     entrances: selectedBuildingEntrances,
     routable: selectedBuildingRoutable,
   } = view;
+  const classification = selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building";
+  const canContain = canContainLocations(classification);
   return {
     id: selectedBuilding.id,
     kind: "building",
@@ -44,6 +47,7 @@ export function buildingInspectorModel({
     status: selectedBuildingRoutable ? "Routable" : "Not routable",
     summary: [
       { label: "Code", value: selectedBuilding.code },
+      ...(classification === "Building" ? [{ label: "Classification", value: <Badge tone="grey">Unclassified</Badge> }] : []),
       { label: "Entrances", value: String(selectedBuildingEntrances.length) },
     ],
     details: (
@@ -51,7 +55,7 @@ export function buildingInspectorModel({
         <section aria-label="Building content" className="inspector-related-section">
           <div className="flex items-center justify-between gap-2">
             <h3>Building content</h3>
-            {canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
+            {canContain && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
           </div>
           <section aria-label="Building room directory">
             <div className="inspector-related-heading">
@@ -109,8 +113,8 @@ export function buildingInspectorModel({
     },
     overflowActions: [
       { label: "✎ Edit Details", onSelect: actions.onEditDetails },
-      ...(canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
-      ...(canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
+      ...(canContain ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
+      ...(canContain ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
       { label: "＋ Add entrance", onSelect: actions.onAddEntrance },
       { label: "↔ Link existing entrance", onSelect: actions.onLinkExistingEntrance },
       { label: "🗑 Delete Building", tone: "danger" as const, onSelect: actions.onDelete },

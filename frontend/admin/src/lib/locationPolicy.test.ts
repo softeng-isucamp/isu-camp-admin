@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Location, LocationDraft, LocationType } from "../types";
 import { generatedMapFixture } from "../services/generatedMapFixture";
 import { locations as curatedLocations } from "../services/mockData";
-import { canContainLocations, classificationFromBackend, isLocationContainer, locationIdentityKey, locationPolicy, normalizeLocationKey, withLocationTypeOption, type BackendLocationType } from "./locationPolicy";
+import { blockedReclassifications, canContainLocations, classificationFromBackend, isLocationContainer, isUnclassifiedPlace, locationIdentityKey, locationTypeOptionLabel, placeClassificationOptions, reclassificationBlockedMessage, locationPolicy, normalizeLocationKey, withLocationTypeOption, type BackendLocationType } from "./locationPolicy";
 
 const draft = (overrides: Partial<LocationDraft> = {}): LocationDraft => ({
   name: "Computer Laboratory",
@@ -472,5 +472,46 @@ describe("isLocationContainer", () => {
     expect(isLocationContainer({ type: "Place" })).toBe(true);
     expect(isLocationContainer({ type: "Place", classification: "Facility" })).toBe(false);
     expect(isLocationContainer({ type: "Room" })).toBe(false);
+  });
+});
+
+describe("Place classification choices", () => {
+  it("never offers Building, and offers it only as a record's current value", () => {
+    expect(placeClassificationOptions()).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
+    expect(placeClassificationOptions("Facility")).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
+    expect(placeClassificationOptions("Building")).toEqual(["College", "Campus Services", "Food", "Parking", "Facility", "Building"]);
+  });
+
+  it("labels the legacy value Unclassified (legacy) and flags only legacy Places", () => {
+    expect(locationTypeOptionLabel("Building")).toBe("Unclassified (legacy)");
+    expect(locationTypeOptionLabel("College")).toBe("College");
+    expect(isUnclassifiedPlace({ type: "Place", classification: "Building" })).toBe(true);
+    expect(isUnclassifiedPlace({ type: "Place" })).toBe(true);
+    expect(isUnclassifiedPlace({ type: "Place", classification: "College" })).toBe(false);
+    expect(isUnclassifiedPlace({ type: "Room" })).toBe(false);
+  });
+
+  it("blocks classifications that cannot contain Locations only while the Place holds some", () => {
+    expect(blockedReclassifications(0)).toEqual([]);
+    expect(blockedReclassifications(3)).toEqual(["Food", "Parking", "Facility"]);
+    expect(reclassificationBlockedMessage(3)).toBe("Move or delete its 3 indoor Locations before classifying it as Food, Parking, or Facility.");
+  });
+
+  it.each(["Food", "Parking", "Facility"] as const)("rejects a %s Place as the parent of an indoor Location", (classification) => {
+    const leaf: Location = { ...building, id: "leaf-1", name: "Leaf", code: "LEAF", classification };
+    const evaluation = locationPolicy.evaluate(
+      draft({ parentId: leaf.id, building: leaf.name, floor: "Ground Floor" }),
+      { context: "record", directory: [leaf] },
+    );
+    expect(evaluation.issues.map((issue) => issue.code)).toContain("building_parent_wrong_type");
+  });
+
+  it.each(["College", "Campus Services", "Building"] as const)("accepts a %s Place as the parent of an indoor Location", (classification) => {
+    const container: Location = { ...building, id: "container-1", name: "Container", code: "CON", classification };
+    const evaluation = locationPolicy.evaluate(
+      draft({ parentId: container.id, building: container.name, floor: "Ground Floor" }),
+      { context: "record", directory: [container] },
+    );
+    expect(evaluation.issues.map((issue) => issue.code)).not.toContain("building_parent_wrong_type");
   });
 });

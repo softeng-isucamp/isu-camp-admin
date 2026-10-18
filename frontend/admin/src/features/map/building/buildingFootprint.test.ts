@@ -183,6 +183,7 @@ describe("validateBuildingIdentityDetails", () => {
   const validIdentity: BuildingIdentityInput = {
     name: "Science Complex",
     code: "SCI-01",
+    classification: "College",
     function: "Academic and Research Laboratories",
     keywords: "science, biology, chem",
     status: "Active",
@@ -190,6 +191,13 @@ describe("validateBuildingIdentityDetails", () => {
 
   it("accepts complete identity details with unique code", () => {
     expect(validateBuildingIdentityDetails(validIdentity, existingLocations)).toEqual([]);
+  });
+
+  it("requires a Classification and never accepts the legacy Building value", () => {
+    const missing = validateBuildingIdentityDetails({ ...validIdentity, classification: undefined }, existingLocations);
+    expect(missing).toContainEqual({ field: "classification", message: "Choose a Classification." });
+    const legacy = validateBuildingIdentityDetails({ ...validIdentity, classification: "Building" }, existingLocations);
+    expect(legacy).toContainEqual({ field: "classification", message: "Choose a Classification." });
   });
 
   it("rejects empty name and empty code", () => {

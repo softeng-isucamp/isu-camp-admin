@@ -162,11 +162,13 @@ export function SelectField({
   className,
   required,
   id: customId,
+  "aria-describedby": describedBy,
   ...props
 }: PropsWithChildren<SelectFieldProps>) {
   const sub = subhelper || helper;
   const id = customId || (label ? `select-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}` : undefined);
   const errorId = error && id ? `${id}-error` : undefined;
+  const helperId = sub && id ? `${id}-helper` : undefined;
   return (
     <div className={cx("field-group", className)}>
       <div className="field-label-row">
@@ -177,7 +179,7 @@ export function SelectField({
         {badge && <span className="field-badge">{badge}</span>}
       </div>
       <div className="relative flex items-center">
-        <select id={id} className={cx("field-select pr-9 appearance-none", error ? "field-input-error" : "")} required={required} aria-invalid={error ? true : undefined} aria-describedby={[props["aria-describedby"], errorId].filter(Boolean).join(" ") || undefined} {...props}>
+        <select id={id} className={cx("field-select pr-9 appearance-none", error ? "field-input-error" : "")} required={required} aria-invalid={error ? true : undefined} {...props} aria-describedby={[describedBy, helperId, errorId].filter(Boolean).join(" ") || undefined}>
           {children}
         </select>
         <div className="pointer-events-none absolute right-3 text-[#5b716b]">
@@ -186,7 +188,7 @@ export function SelectField({
           </svg>
         </div>
       </div>
-      {sub && <span className="field-subhelper">{sub}</span>}
+      {sub && <span id={helperId} className="field-subhelper">{sub}</span>}
       {error && <span id={errorId} className="field-error-msg">{error}</span>}
     </div>
   );

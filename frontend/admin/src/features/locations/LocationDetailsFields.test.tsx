@@ -49,15 +49,36 @@ describe("location details status field", () => {
   });
 });
 
-describe("location type picker for a non-selectable classification", () => {
-  it("shows a College's current value as an extra option and keeps it", () => {
-    const draft = withLocationTypeOption({
-      name: "Old Hall", code: "OLD", type: "Room", parentId: null,
-      status: "Active", lat: null, lng: null, positioned: false,
-    } as LocationDraft, "College");
-    render(<LocationDetailsFields draft={draft} allowedTypes={placeClassificationOptions("College")} onChange={() => {}} />);
+describe("location type picker for a legacy classification", () => {
+  const legacyDraft = () => withLocationTypeOption({
+    name: "Old Hall", code: "OLD", type: "Room", parentId: null,
+    status: "Active", lat: null, lng: null, positioned: false,
+  } as LocationDraft, "Building");
+
+  it("shows the legacy value as Unclassified (legacy), keeps it, and badges the field", () => {
+    render(<LocationDetailsFields draft={legacyDraft()} allowedTypes={placeClassificationOptions("Building")} onChange={() => {}} />);
     const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
-    expect(select.value).toBe("College");
-    expect([...select.options].map((option) => option.text)).toEqual(["Building", "Facility", "College"]);
+    expect(select.value).toBe("Building");
+    expect([...select.options].map((option) => option.text)).toEqual([
+      "College", "Campus Services", "Food", "Parking", "Facility", "Unclassified (legacy)",
+    ]);
+    expect(screen.getByText("Unclassified")).toBeInTheDocument();
+  });
+
+  it("never offers Building by default, and shows no badge for a classified Place", () => {
+    const draft = withLocationTypeOption(legacyDraft(), "College");
+    render(<LocationDetailsFields draft={draft} onChange={() => {}} />);
+    const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
+    expect([...select.options].map((option) => option.value)).not.toContain("Building");
+    expect(screen.queryByText("Unclassified")).not.toBeInTheDocument();
+  });
+
+  it("disables the given types and shows a backend error on the field", () => {
+    const draft = withLocationTypeOption(legacyDraft(), "College");
+    render(<LocationDetailsFields draft={draft} disabledTypes={["Food"]} errors={{ type: "Not allowed." }} onChange={() => {}} />);
+    const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
+    expect([...select.options].find((option) => option.value === "Food")).toBeDisabled();
+    expect(select).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Not allowed.")).toBeInTheDocument();
   });
 });

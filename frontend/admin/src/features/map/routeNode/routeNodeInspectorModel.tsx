@@ -1,4 +1,5 @@
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
+import { isPlace } from "../../../lib/locationPolicy";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { MapPoint } from "../campusBoundary";
 import type { SaveAction } from "../session/useSavingAction";
@@ -47,7 +48,7 @@ export function routeNodeInspectorModel({
   const connectedPaths = connectedPathways.length;
   const associatedBuilding = node.associatedPlaceId
     ? currentBuildings.find((building) => building.id === node.associatedPlaceId)
-      ?? currentLocations.find((location) => location.id === node.associatedPlaceId && location.type === "Place")
+      ?? currentLocations.find((location) => location.id === node.associatedPlaceId && isPlace(location))
     : null;
   return {
     id: node.id,

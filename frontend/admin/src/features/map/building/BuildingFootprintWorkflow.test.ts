@@ -4,7 +4,7 @@ import { WorkingSessionManager } from "../WorkingSessionManager";
 import { createBuildingFootprintWorkflow } from "./BuildingFootprintWorkflow";
 
 const points: [number, number][] = [[0, 0], [0, 0.001], [0.001, 0]];
-const identity = { name: "Science Hall", code: "SCI", function: "Teaching" };
+const identity = { name: "Science Hall", code: "SCI", classification: "College" as const, function: "Teaching" };
 const location: Location = {
   id: "building-42", name: "Science Hall", code: "SCI", type: "Place", classification: "Building", parentId: null,
   status: "Active", lat: null, lng: null, positioned: false,
@@ -53,6 +53,28 @@ describe("BuildingFootprintWorkflow", () => {
     expect(result).toEqual({ ok: false, reason: "persistence", message: "Offline" });
     expect(workingSession.getActiveDraft()).toEqual(draft);
     expect(workingSession.getPastOperations()).toHaveLength(0);
+  });
+
+  it("refuses a new Place with no Classification before persistence", async () => {
+    const workingSession = new WorkingSessionManager();
+    const adapter = { createBuilding: vi.fn(), saveFootprint: vi.fn() };
+    const workflow = createBuildingFootprintWorkflow({ adapter, workingSession });
+
+    const result = await workflow.finalize({ kind: "create", identity: { ...identity, classification: undefined }, points, context });
+
+    expect(result).toMatchObject({ ok: false, reason: "validation", issues: [{ field: "classification" }] });
+    expect(adapter.createBuilding).not.toHaveBeenCalled();
+  });
+
+  it("returns the backend's field errors from a refused save", async () => {
+    const workingSession = new WorkingSessionManager();
+    const refusal = Object.assign(new Error("Invalid type."), { fieldErrors: { type: "Building cannot be created." } });
+    const adapter = { createBuilding: vi.fn().mockRejectedValue(refusal), saveFootprint: vi.fn() };
+    const workflow = createBuildingFootprintWorkflow({ adapter, workingSession });
+
+    const result = await workflow.finalize({ kind: "create", identity, points, context });
+
+    expect(result).toMatchObject({ ok: false, reason: "persistence", fieldErrors: { type: "Building cannot be created." } });
   });
 
   it("records a reshape as a geometry update", async () => {

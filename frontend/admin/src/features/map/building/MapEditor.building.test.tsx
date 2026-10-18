@@ -26,6 +26,7 @@ describe("Map Editor preview", () => {
     const generatedCode = screen.getByLabelText<HTMLInputElement>("Building code").value;
     expect(generatedCode).toMatch(/^BLDG-\d{4}$/);
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Auto Code Hall" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
@@ -270,6 +271,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
@@ -320,6 +322,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     expect(screen.getByRole("dialog", { name: "Add Building" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Draft Annex" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "DRAFT-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("button", { name: "Cancel" }));
@@ -351,13 +354,14 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Backend Hall" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "BACK-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.change(screen.getByLabelText(/^status/i), { target: { value: "Inactive" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Place", classification: "Building", status: "Inactive" });
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Place", classification: "College", status: "Inactive" });
     expect(save.mock.calls[0]?.[0].id).toBeUndefined();
     expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload building photo")).not.toBeInTheDocument();
@@ -373,6 +377,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Duplicate Hall" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "DUP-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
@@ -380,6 +385,49 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("dialog", { name: "Add Building" })).toBeInTheDocument();
     expect(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("alert")).toHaveTextContent("Location code already exists.");
+  });
+
+  async function openNewPlaceDetails() {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+  }
+
+  it("starts a new Place with no Classification, never offers Building, and blocks saving until one is chosen", async () => {
+    const save = vi.fn();
+    services.locations.save = save;
+    await openNewPlaceDetails();
+
+    const classification = screen.getByLabelText(/^classification/i) as HTMLSelectElement;
+    expect(classification).toBeRequired();
+    expect(classification).toHaveValue("");
+    expect([...classification.options].map((option) => option.text)).toEqual(["Select a classification", "College", "Campus Services", "Food", "Parking", "Facility"]);
+    const helper = screen.getByText(/College and Campus Services can contain indoor Locations/);
+    expect(classification.getAttribute("aria-describedby")?.split(" ")).toContain(helper.id);
+
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Unclassified Hall" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
+
+    expect(await screen.findByText("Choose a Classification.", { selector: ".field-error-msg" })).toBeInTheDocument();
+    expect(classification).toHaveAttribute("aria-invalid", "true");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("shows a backend error on the type field next to the Classification", async () => {
+    const refusal = Object.assign(new Error("Invalid type."), { fieldErrors: { type: "Classification is not allowed." } });
+    services.locations.save = vi.fn().mockRejectedValue(refusal);
+    await openNewPlaceDetails();
+    fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Refused Hall" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "Food" } });
+    fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Canteen" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
+
+    expect(await screen.findByText("Classification is not allowed.", { selector: ".field-error-msg" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^classification/i)).toHaveAttribute("aria-invalid", "true");
   });
 
   it("creates the feature, Building, and link together", async () => {
@@ -390,6 +438,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
@@ -405,6 +454,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
@@ -524,6 +574,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Hall" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Classrooms and Laboratories" } });
     fireEvent.change(screen.getByLabelText("Building keywords"), { target: { value: "engineering, labs" } });
@@ -562,6 +613,8 @@ describe("Map Editor preview", () => {
     expect(screen.getByText(/Advisory: Footprint overlaps with Existing Hall/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "New Overlapping Hall" } });
+
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "NOH-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Academic facility" } });
 
@@ -585,7 +638,7 @@ describe("Map Editor preview", () => {
       const saved: Location = {
         ...draft,
         id: "building-created",
-        type: "Place", classification: "Building",
+        type: "Place", classification: "College",
         status: "Active",
         lat: null,
         lng: null,
@@ -617,6 +670,7 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Complex" } });
+    fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-CMP" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Engineering Labs" } });
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
@@ -624,7 +678,7 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(saveLocation).toHaveBeenCalledWith(expect.objectContaining({
       name: "Engineering Complex",
       code: "ENG-CMP",
-      type: "Place", classification: "Building",
+      type: "Place", classification: "College",
       function: "Engineering Labs",
       lat: null,
       lng: null,
@@ -639,7 +693,7 @@ describe("Map Editor preview", () => {
     expect(createdBuilding).toBeDefined();
     expect(createdBuilding?.name).toBe("Engineering Complex");
     expect(createdBuilding?.type).toBe("Place");
-    expect(createdBuilding?.classification).toBe("Building");
+    expect(createdBuilding?.classification).toBe("College");
     expect(createdBuilding?.lat).toBeNull();
     expect(createdBuilding?.lng).toBeNull();
     expect(createdBuilding?.positioned).toBe(false);

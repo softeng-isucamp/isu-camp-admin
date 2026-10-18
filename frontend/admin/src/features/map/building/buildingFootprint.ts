@@ -1,3 +1,4 @@
+import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../../types";
 import type { Building, Location, PlaceClassification, RecordStatus } from "../../../types";
 import type { WorkingOperation } from "../types";
 import {
@@ -19,7 +20,7 @@ export interface BuildingIdentityInput {
   status?: RecordStatus;
 }
 
-export type BuildingValidationField = "geometry" | "name" | "code" | "function" | "status";
+export type BuildingValidationField = "geometry" | "classification" | "name" | "code" | "function" | "status";
 
 export interface BuildingValidationIssue {
   field: BuildingValidationField;
@@ -180,6 +181,10 @@ export function validateBuildingIdentityDetails(
 ): BuildingValidationIssue[] {
   const issues: BuildingValidationIssue[] = [];
 
+  // A new Place has no default Classification, and "Building" is never chosen.
+  if (!input.classification || !(SELECTABLE_PLACE_CLASSIFICATIONS as readonly string[]).includes(input.classification)) {
+    issues.push({ field: "classification", message: "Choose a Classification." });
+  }
   if (!input.name.trim()) {
     issues.push({ field: "name", message: "Building name is required." });
   }

@@ -30,9 +30,9 @@ export const canContainLocations = (classification: PlaceClassification): boolea
 
 export const isPlace = (location: Pick<Location, "type">): boolean => location.type === "Place";
 
-/** A Place that can be the parent of indoor Locations (today: Buildings). */
+/** A Place that can be the parent of indoor Locations (College, Campus Services, or an unclassified legacy Place). */
 export const isLocationContainer = (location: Pick<Location, "type" | "classification">): boolean =>
-  location.type === "Place" && canContainLocations(placeClassificationOf(location));
+  isPlace(location) && canContainLocations(placeClassificationOf(location));
 
 /** Classification of a Place record; Places without one are treated as Buildings. */
 export const placeClassificationOf = (location: Pick<Location, "classification">): PlaceClassification =>
@@ -44,7 +44,7 @@ export type BackendLocationType = Exclude<LocationType, "Place"> | PlaceClassifi
 export const backendLocationType = (location: Pick<Location, "type" | "classification">): BackendLocationType =>
   location.type === "Place" ? placeClassificationOf(location) : location.type;
 
-/** Sets a type-picker choice ("Building", "Facility", "Room", ...) on a draft: Places carry it as their classification. */
+/** Sets a type-picker choice ("Food", "Facility", "Room", ...) on a draft: Places carry it as their classification. */
 export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option: BackendLocationType): T => {
   const { classification: _classification, ...rest } = draft;
   return isPlaceClassification(option)
@@ -54,6 +54,27 @@ export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option
 
 export const isPlaceClassification = (value: unknown): value is PlaceClassification =>
   (PLACE_CLASSIFICATIONS as readonly unknown[]).includes(value);
+
+/** A legacy Place: recorded before Classifications existed, so the backend still calls it a Building. */
+export const isUnclassifiedPlace = (location: Pick<Location, "type" | "classification">): boolean =>
+  isPlace(location) && placeClassificationOf(location) === "Building";
+
+/** Option text for a type or classification: the legacy "Building" value is shown as unclassified. */
+export const locationTypeOptionLabel = (type: BackendLocationType): string =>
+  type === "Building" ? "Unclassified (legacy)" : type === "Floor" ? "Floor (legacy records only)" : type;
+
+/** The indoor Locations (Room, Office, Laboratory, Restroom) a Place holds; compatibility Floor records are not counted. */
+export const indoorLocationsOf = (place: Pick<Location, "id">, directory: readonly Location[]): Location[] =>
+  directory.filter((item) => item.parentId === place.id && isIndoorLocationType(item.type));
+
+/** Classifications a Place holding `indoorCount` indoor Locations cannot be moved to. */
+export const blockedReclassifications = (indoorCount: number): PlaceClassification[] =>
+  indoorCount > 0 ? SELECTABLE_PLACE_CLASSIFICATIONS.filter((value) => !canContainLocations(value)) : [];
+
+export const reclassificationBlockedMessage = (indoorCount: number): string => {
+  const names = blockedReclassifications(indoorCount);
+  return `Move or delete its ${indoorCount} indoor ${indoorCount === 1 ? "Location" : "Locations"} before classifying it as ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}.`;
+};
 
 /** What a classification picker offers: the selectable set, plus the record's current value when that is not selectable. */
 export const placeClassificationOptions = (current?: PlaceClassification): PlaceClassification[] => {

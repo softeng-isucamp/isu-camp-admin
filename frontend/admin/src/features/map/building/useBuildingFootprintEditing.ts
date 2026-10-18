@@ -86,16 +86,18 @@ export function useBuildingFootprintEditing({
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
   const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
-  const [buildingClassification, setBuildingClassification] = useState<PlaceClassification>("Building");
+  const [buildingClassification, setBuildingClassification] = useState<PlaceClassification | "">("");
   const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>(blankBuildingForm);
   const buildingName = buildingForm.name;
   const buildingCode = buildingForm.code;
   const buildingFunction = buildingForm.function ?? "";
   const buildingKeywords = buildingForm.keywords ?? "";
   const buildingStatus = buildingForm.status ?? "Active";
+  const [classificationError, setClassificationError] = useState("");
   const resetBuildingForm = () => {
     setBuildingForm(blankBuildingForm());
-    setBuildingClassification("Building");
+    setBuildingClassification("");
+    setClassificationError("");
   };
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
@@ -121,12 +123,12 @@ export function useBuildingFootprintEditing({
   const buildingIdentityIssues = useMemo(
     () => drawing && (polygonClosed || points.length >= 3)
       ? validateBuildingIdentityDetails(
-          { name: buildingName, code: buildingCode, function: buildingFunction, keywords: buildingKeywords, status: buildingStatus },
+          { name: buildingName, code: buildingCode, classification: buildingClassification || undefined, function: buildingFunction, keywords: buildingKeywords, status: buildingStatus },
           currentLocations,
           editingBuildingId,
         )
       : [],
-    [buildingCode, buildingFunction, buildingKeywords, buildingName, buildingStatus, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
+    [buildingClassification, buildingCode, buildingFunction, buildingKeywords, buildingName, buildingStatus, currentLocations, editingBuildingId, drawing, points.length, polygonClosed],
   );
   const canFinishFootprint = points.length >= 3 && footprintGeometryIssues.length === 0;
   const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
@@ -255,6 +257,7 @@ export function useBuildingFootprintEditing({
   const createBuilding = async () => {
     if (!canSaveBuilding) {
       setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
+      setClassificationError(buildingIdentityIssues.find((issue) => issue.field === "classification")?.message ?? "");
       return;
     }
     if (!beginSaving("building")) return;
@@ -263,7 +266,7 @@ export function useBuildingFootprintEditing({
       identity: {
         name: buildingName,
         code: buildingCode,
-        classification: buildingClassification,
+        classification: buildingClassification || undefined,
         function: buildingFunction,
         keywords: buildingKeywords,
         status: buildingStatus,
@@ -273,6 +276,7 @@ export function useBuildingFootprintEditing({
     });
     if (!result.ok) {
       setError(result.message);
+      setClassificationError(result.fieldErrors?.type ?? "");
       endSaving();
       return;
     }
@@ -371,7 +375,7 @@ export function useBuildingFootprintEditing({
         status: "Active",
       });
     }
-    setBuildingClassification(isPlaceClassification(records.buildingClassification) ? records.buildingClassification : "Building");
+    setBuildingClassification(isPlaceClassification(records.buildingClassification) ? records.buildingClassification : "");
     setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
     setPolygonClosed(records.polygonClosed === true);
     setBuildingDetailsModalOpen(records.buildingDetailsModalOpen === true);
@@ -394,6 +398,8 @@ export function useBuildingFootprintEditing({
     setBuildingDetailsModalOpen,
     buildingClassification,
     setBuildingClassification,
+    classificationError,
+    setClassificationError,
     buildingForm,
     setBuildingForm,
     buildingName,
