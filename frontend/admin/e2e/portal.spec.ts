@@ -128,14 +128,16 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByLabel("STATUS").selectOption("All Statuses");
-  await page.locator(".filters select").nth(1).selectOption("College of Information Communication Technology");
-  await page.locator(".filters select").nth(2).selectOption("2nd Floor");
+  await page.getByLabel("BUILDING").fill("College of Information Communication Technology");
+  await page.getByRole("option", { name: /^College of Information Communication Technology/ }).click();
+  await page.getByLabel("FLOOR").selectOption({ label: "2nd Floor" });
   await expect(page.getByRole("row").filter({ hasText: /Laboratory/ }).first()).toBeVisible();
   await expect(page).toHaveScreenshot("locations-building-floor-filter.png", {
     animations: "disabled",
   });
-  await page.locator(".filters select").nth(1).selectOption("All Buildings");
-  await page.locator(".filters select").nth(2).selectOption("All Floors");
+  await page.getByLabel("BUILDING").click();
+  await page.getByRole("option", { name: "All Buildings" }).click();
+  await page.getByLabel("FLOOR").selectOption("All Floors");
   await page
     .getByRole("button", { name: /Actions for/i })
     .first()

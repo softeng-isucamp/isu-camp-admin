@@ -55,7 +55,7 @@ import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
-import { backendLocationType, indoorLocationTypes, isLocationContainer, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
+import { backendLocationType, indoorLocationTypes, isLocationContainer, isPlace, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
 
@@ -1243,7 +1243,7 @@ export const services: Services = {
             )) &&
           (!filters.type || backendLocationType(location) === filters.type) &&
           (!filters.status || location.status === filters.status) &&
-          (!filters.buildingId || location.parentId === filters.buildingId) &&
+          (!filters.buildingId || location.parentId === filters.buildingId || (isPlace(location) && location.id === filters.buildingId)) &&
           (!filters.floor || location.floor === filters.floor)
         );
       const resolvedPageSize = pageSize ?? Math.max(filtered.length, 1);

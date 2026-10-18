@@ -24,6 +24,7 @@ import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoo
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
+import { FilterCombobox } from "./FilterCombobox";
 import { ParentBuildingField } from "./ParentBuildingField";
 
 /** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
@@ -31,6 +32,19 @@ const keyParam = (params: URLSearchParams) => {
   const key = params.get("locationKey");
   return key === null ? null : normalizeLocationKey(key);
 };
+
+/** Prefix of a FLOOR filter value that stands for a floor name across all Buildings, so it never collides with a floor record ID. */
+const floorNameValuePrefix = "floor-name:";
+
+/** Distinct floor names in storey order: the standard levels first, other names alphabetically, Unspecified Floor last. */
+function floorNamesInOrder(names: string[]): string[] {
+  const rank = (name: string) => {
+    if (name === "Unspecified Floor") return standardFloorLevels.length + 1;
+    const index = (standardFloorLevels as readonly string[]).indexOf(name);
+    return index === -1 ? standardFloorLevels.length : index;
+  };
+  return [...new Set(names)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
 
 /** Place options of the type filter. "Building" is the legacy value; it is sent to the backend as is and shown as unclassified. */
 const typeFilterPlaces: BackendLocationType[] = [...SELECTABLE_PLACE_CLASSIFICATIONS, "Building"];
@@ -309,10 +323,18 @@ export function Locations() {
     return [...unique.values()];
   }, [allLocations, buildingsById]);
   const selectedBuildingRecord = allLocations.find((item) => isLocationContainer(item) && item.id === buildingId);
-  const availableFloors = useMemo(() => {
-    if (buildingId === "All Buildings" || !selectedBuildingRecord) return floors;
-    return floors.filter((f) => f.parentId === selectedBuildingRecord.id);
-  }, [floors, buildingId, selectedBuildingRecord]);
+  // Floors are per-Building records. Across all Buildings the filter lists each
+  // floor name once and matches it in every Building; for one Building it lists
+  // that Building's floor records.
+  const floorOptions = useMemo(() => {
+    if (selectedBuildingRecord) {
+      return floors
+        .filter((floor) => floor.parentId === selectedBuildingRecord.id)
+        .map((floor) => ({ value: floor.id, label: floor.name }));
+    }
+    return floorNamesInOrder(floors.map((floor) => floor.name))
+      .map((name) => ({ value: `${floorNameValuePrefix}${name}`, label: name }));
+  }, [floors, selectedBuildingRecord]);
 
   useEffect(() => {
     const buildingIsValid = buildingId === "All Buildings" || buildingOptions.some((option) => option.id === buildingId);
@@ -321,19 +343,29 @@ export function Locations() {
       setFloorId("All Floors");
       return;
     }
-    if (floorId !== "All Floors" && !availableFloors.some((floor) => floor.id === floorId)) {
+    if (floorId !== "All Floors" && !floorOptions.some((option) => option.value === floorId)) {
       setFloorId("All Floors");
     }
-  }, [buildingId, buildingOptions, floorId, availableFloors]);
+  }, [buildingId, buildingOptions, floorId, floorOptions]);
 
-  const selectedFloorRecord = floorId === "All Floors" ? undefined : floors.find((floor) => floor.id === floorId);
+  const selectedFloorRecord = floorId === "All Floors" || floorId.startsWith(floorNameValuePrefix)
+    ? undefined
+    : floors.find((floor) => floor.id === floorId);
+  const selectedFloorName = floorId.startsWith(floorNameValuePrefix) ? floorId.slice(floorNameValuePrefix.length) : selectedFloorRecord?.name;
+  const matchesFloor = (item: Location) => {
+    if (floorId === "All Floors") return true;
+    if (selectedFloorRecord) {
+      return (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord.name && item.parentId === selectedFloorRecord.parentId);
+    }
+    return (item.type === "Floor" ? item.name : item.floor) === selectedFloorName;
+  };
   const { data, isLoading, isFetching, error: listError } = useQuery({
-    queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorRecord?.name],
+    queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorName],
     queryFn: () => services.locations.list(query, page, pageSize, {
       type: type === "All Types" ? undefined : type as BackendLocationType,
       status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
       buildingId: selectedBuildingRecord?.id,
-      floor: selectedFloorRecord?.name,
+      floor: selectedFloorName,
     }),
     placeholderData: (previous) => previous,
   });
@@ -345,9 +377,9 @@ export function Locations() {
         (type === "All Types" || backendLocationType(item) === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
-        (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId)),
+        matchesFloor(item),
     );
-  }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
+  }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
 
   useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
@@ -360,9 +392,9 @@ export function Locations() {
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
       (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
-      (floorId === "All Floors" || (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord?.name && item.parentId === selectedFloorRecord?.parentId))
+      matchesFloor(item)
     );
-  }, [allLocations, query, targetKey, type, status, buildingId, floorId, selectedFloorRecord]);
+  }, [allLocations, query, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
 
   const matchingKeys = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map(locationIdentityKey)), [hierarchyItems, items, viewMode]);
 
@@ -781,21 +813,17 @@ export function Locations() {
                 ))}
               </optgroup>
             </SelectField>
-            <SelectField
+            <FilterCombobox
               label="BUILDING"
-              aria-label="BUILDING"
-              value={buildingId}
-              onChange={(event) => {
-                setBuildingId(event.target.value);
+              noun="buildings"
+              allLabel="All Buildings"
+              options={buildingOptions}
+              value={buildingId === "All Buildings" ? null : buildingId}
+              onChange={(id) => {
+                setBuildingId(id ?? "All Buildings");
                 setFloorId("All Floors");
               }}
-              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "140px", height: "46px" }}
-            >
-              <option>All Buildings</option>
-              {buildingOptions.map((value) => (
-                <option key={value.id} value={value.id}>{value.name}</option>
-              ))}
-            </SelectField>
+            />
             <SelectField
               label="FLOOR"
               aria-label="FLOOR"
@@ -804,8 +832,8 @@ export function Locations() {
               style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
             >
               <option>All Floors</option>
-              {availableFloors.map((value) => (
-                <option key={value.id} value={value.id}>{value.name}</option>
+              {floorOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </SelectField>
             <SelectField

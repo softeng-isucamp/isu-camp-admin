@@ -44,6 +44,18 @@ function chooseParentBuilding(name: string) {
   fireEvent.click(option);
 }
 
+/** Drives the BUILDING filter combobox: open it, optionally type, then pick the option by exact name. */
+function chooseFilterBuilding(name: string, search = name) {
+  const combobox = screen.getByLabelText("BUILDING");
+  fireEvent.focus(combobox);
+  fireEvent.change(combobox, { target: { value: search } });
+  const option = within(screen.getByRole("listbox"))
+    .getAllByRole("option")
+    .find((candidate) => candidate.querySelector(".parent-building-option-name")?.textContent === name);
+  if (!option) throw new Error(`No BUILDING filter option named "${name}" is listed.`);
+  fireEvent.click(option);
+}
+
 describe("Locations screen table and hierarchy toggle validation", () => {
   afterEach(() => {
     cleanup();
@@ -162,7 +174,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(container.querySelectorAll("tbody tr").length).toBeGreaterThan(10);
 
     fireEvent.click(screen.getByRole("button", { name: "2" }));
-    expect(screen.getAllByText("Pagination Family 11").length).toBeGreaterThan(1);
+    expect(screen.getByText("Pagination Family 11")).toBeInTheDocument();
     expect(screen.getAllByText("Pagination Family Room 11").length).toBeGreaterThan(0);
     expect(screen.queryByRole("row", { name: /Pagination Family Room 10/ })).not.toBeInTheDocument();
   });
@@ -174,11 +186,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await services.locations.save({ id: "duplicate-room-b", name: "Room in duplicate B", code: "DUP-ROOM-B", type: "Room", parentId: "duplicate-building-b", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations();
-    const buildingSelect = await screen.findByLabelText("BUILDING");
-    const duplicateOptions = Array.from((buildingSelect as HTMLSelectElement).options).filter((option) => option.text === "Duplicate Building");
-    expect(duplicateOptions.map((option) => option.value)).toEqual(["duplicate-building-a", "duplicate-building-b"]);
+    const buildingCombobox = await screen.findByLabelText("BUILDING");
+    fireEvent.focus(buildingCombobox);
+    fireEvent.change(buildingCombobox, { target: { value: "Duplicate Building" } });
+    const duplicateOptions = within(screen.getByRole("listbox")).getAllByRole("option").filter((option) => option.textContent?.startsWith("Duplicate Building"));
+    expect(duplicateOptions.map((option) => option.querySelector(".parent-building-option-code")?.textContent)).toEqual(["DUP-A", "DUP-B"]);
 
-    fireEvent.change(buildingSelect, { target: { value: "duplicate-building-b" } });
+    fireEvent.click(duplicateOptions[1]);
     expect(await screen.findByText("Room in duplicate B")).toBeInTheDocument();
     expect(screen.queryByText("Room in duplicate A")).not.toBeInTheDocument();
   });
@@ -188,9 +202,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await services.locations.save({ id: "stale-filter-room", name: "Stale Filter Room", code: "STALE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations();
-    const buildingSelect = await screen.findByLabelText("BUILDING");
+    const buildingCombobox = await screen.findByLabelText("BUILDING");
     const floorSelect = screen.getByLabelText("FLOOR");
-    fireEvent.change(buildingSelect, { target: { value: building.id } });
+    await waitFor(() => chooseFilterBuilding(building.name));
     await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
     fireEvent.change(floorSelect, { target: { value: `${building.id}-floor-Ground Floor` } });
     expect(floorSelect).toHaveValue(`${building.id}-floor-Ground Floor`);
@@ -201,7 +215,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await waitFor(() => {
-      expect(buildingSelect).toHaveValue("All Buildings");
+      expect(buildingCombobox).toHaveValue("All Buildings");
       expect(floorSelect).toHaveValue("All Floors");
     });
   });
@@ -211,7 +225,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     }
     renderLocations(["/locations?q=Shrink%20Page"]);
-    expect(await screen.findByText("Shrink Page 11")).toBeInTheDocument();
+    expect(await screen.findByText("Shrink Page 10")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByRole("row", { name: /Shrink Page 11/ })).toBeInTheDocument();
 
@@ -272,19 +286,54 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await services.locations.save({ id: "floor-child-a", name: "Only floor A child", code: "FLOOR-CHILD-A", type: "Room", parentId: "floor-building-a", building: "Floor building A", floor: "Level One", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "floor-child-b", name: "Only floor B child", code: "FLOOR-CHILD-B", type: "Room", parentId: "floor-building-b", building: "Floor building B", floor: "Level One", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
-    const floorSelect = await screen.findByLabelText("FLOOR");
+    await screen.findByLabelText("BUILDING");
+    chooseFilterBuilding("Floor building A");
+    const floorSelect = screen.getByLabelText("FLOOR");
     const identicalNameOptions = Array.from((floorSelect as HTMLSelectElement).options).filter((option) => option.text === "Level One");
-    expect(identicalNameOptions.map((option) => option.value)).toEqual(expect.arrayContaining(["floor-a", "floor-b"]));
+    expect(identicalNameOptions.map((option) => option.value)).toEqual(["floor-a"]);
     fireEvent.change(floorSelect, { target: { value: "floor-a" } });
     expect(await screen.findByText("Only floor A child")).toBeInTheDocument();
     expect(screen.queryByText("Only floor B child")).not.toBeInTheDocument();
+  });
+
+  it("lists each floor name once across all Buildings and matches it in every Building", async () => {
+    const seed = (id: string, name: string, parentId: string | null, floor?: string) => services.locations.save({ id, name, code: id.toUpperCase(), ...(parentId ? { type: "Room" as const, floor } : { type: "Place" as const, classification: "College" as const }), parentId, status: "Active", lat: null, lng: null, positioned: false });
+    await seed("dedupe-building-a", "Dedupe building A", null);
+    await seed("dedupe-building-b", "Dedupe building B", null);
+    await seed("dedupe-room-a", "Dedupe room A", "dedupe-building-a", "Ground Floor");
+    await seed("dedupe-room-b", "Dedupe room B", "dedupe-building-b", "Ground Floor");
+    // The search keeps both rooms on the first page of the shared fixture directory.
+    renderLocations(["/locations?q=Dedupe"]);
+    const floorSelect = await screen.findByLabelText("FLOOR");
+    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
+    const texts = Array.from((floorSelect as HTMLSelectElement).options).map((option) => option.text);
+    expect(texts.filter((text) => text === "Ground Floor")).toHaveLength(1);
+    expect(new Set(texts).size).toBe(texts.length);
+
+    const groundFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "Ground Floor")!;
+    fireEvent.change(floorSelect, { target: { value: groundFloor.value } });
+    expect(await screen.findByText("Dedupe room A")).toBeInTheDocument();
+    expect(screen.getByText("Dedupe room B")).toBeInTheDocument();
+  });
+
+  it("keeps the selected Place itself in the results when filtering by Building", async () => {
+    await services.locations.save({ id: "self-filter-college", name: "Self Filter College", code: "SELF-COL", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "self-filter-room", name: "Self Filter Room", code: "SELF-ROOM", type: "Room", parentId: "self-filter-college", building: "Self Filter College", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.click(await screen.findByText("Switch to Flat View"));
+    await screen.findByLabelText("BUILDING");
+    chooseFilterBuilding("Self Filter College");
+    expect(await screen.findByText("Self Filter Room")).toBeInTheDocument();
+    expect(screen.getAllByText("Self Filter College").length).toBeGreaterThan(0);
+    expect(screen.getByRole("row", { name: /Self Filter College/ })).toBeInTheDocument();
   });
 
   it("keeps only matching indoor locations while retaining building and floor context in search", async () => {
     renderLocations(["/locations?q=Laboratory%20107"]);
 
     await screen.findByText("Administration Building 2nd Floor Laboratory 107");
-    expect((await screen.findAllByText("Administration Building")).length).toBeGreaterThan(1);
+    // The retained Building row and the matching Laboratory's row.
+    expect((await screen.findAllByRole("row", { name: /Administration Building/ })).length).toBeGreaterThan(1);
     expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
     expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
     expect(screen.getByText("1 locations")).toBeInTheDocument();
@@ -999,5 +1048,98 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
     expect(nameInput.getAttribute("aria-describedby")).toContain("field-location-name-error");
     expect(screen.getByRole("alert")).toHaveTextContent("Location name is required.");
+  });
+
+  describe("BUILDING filter combobox", () => {
+    const seedFilterBuildings = async () => {
+      const place = (id: string, name: string, code: string) => services.locations.save({ id, name, code, type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+      await place("combo-alpha", "Combo Alpha Hall", "COMBO-A");
+      await place("combo-beta", "Combo Beta Hall", "COMBO-B");
+      await services.locations.save({ id: "combo-alpha-room", name: "Combo Alpha Room", code: "COMBO-AR", type: "Room", parentId: "combo-alpha", building: "Combo Alpha Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: "combo-beta-room", name: "Combo Beta Room", code: "COMBO-BR", type: "Room", parentId: "combo-beta", building: "Combo Beta Hall", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+    };
+
+    it("lists options in a height-limited scrolling list with All Buildings first", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const combobox = await screen.findByLabelText("BUILDING");
+      fireEvent.focus(combobox);
+      const listbox = screen.getByRole("listbox");
+      expect(listbox).toHaveClass("filter-combobox-listbox");
+      expect(within(listbox).getAllByRole("option")[0]).toHaveTextContent("All Buildings");
+      expect(document.querySelector("select#select-building")).toBeNull();
+    });
+
+    it("narrows the list by name or code as it is typed", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const combobox = await screen.findByLabelText("BUILDING");
+      fireEvent.focus(combobox);
+      fireEvent.change(combobox, { target: { value: "combo-b" } });
+      const names = within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.querySelector(".parent-building-option-name")?.textContent);
+      expect(names).toEqual(["Combo Beta Hall"]);
+    });
+
+    it("sets the Building filter and resets FLOOR, then All Buildings clears it", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const floorSelect = await screen.findByLabelText("FLOOR");
+      await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
+      const secondFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "2nd Floor")!;
+      fireEvent.change(floorSelect, { target: { value: secondFloor.value } });
+      expect(await screen.findByText("Combo Alpha Room")).toBeInTheDocument();
+      expect(screen.queryByText("Combo Beta Room")).not.toBeInTheDocument();
+
+      chooseFilterBuilding("Combo Beta Hall");
+      expect(floorSelect).toHaveValue("All Floors");
+      expect(await screen.findByText("Combo Beta Room")).toBeInTheDocument();
+      expect(screen.queryByText("Combo Alpha Room")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("BUILDING")).toHaveValue("Combo Beta Hall");
+
+      const combobox = screen.getByLabelText("BUILDING");
+      fireEvent.focus(combobox);
+      fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "All Buildings" }));
+      expect(combobox).toHaveValue("All Buildings");
+      expect(await screen.findByText("Combo Alpha Room")).toBeInTheDocument();
+    });
+
+    it("chooses with the keyboard and closes on Escape or an outside click", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const combobox = await screen.findByLabelText("BUILDING");
+      fireEvent.change(combobox, { target: { value: "Combo" } });
+      fireEvent.keyDown(combobox, { key: "ArrowDown" });
+      fireEvent.keyDown(combobox, { key: "Enter" });
+      expect(combobox).toHaveValue("Combo Beta Hall");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(await screen.findByText("Combo Beta Room")).toBeInTheDocument();
+      expect(screen.queryByText("Combo Alpha Room")).not.toBeInTheDocument();
+
+      fireEvent.focus(combobox);
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+      fireEvent.keyDown(combobox, { key: "Escape" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(combobox).toHaveValue("Combo Beta Hall");
+
+      fireEvent.focus(combobox);
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("scrolls the selected option into view when opening", async () => {
+      await seedFilterBuildings();
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        renderLocations(["/locations?q=Combo"]);
+        await waitFor(() => chooseFilterBuilding("Combo Beta Hall"));
+        scrollIntoView.mockClear();
+        fireEvent.focus(screen.getByLabelText("BUILDING"));
+        expect(scrollIntoView).toHaveBeenCalled();
+        expect(within(screen.getByRole("listbox")).getByRole("option", { selected: true })).toHaveTextContent("Combo Beta Hall");
+      } finally {
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    });
   });
 });
