@@ -13,6 +13,9 @@ services:
       # only through that Nginx, which is what makes its X-Forwarded-For
       # trustworthy. See the proxy block in app/services/database.py.
       TRUSTED_PROXY_COUNT: "${TRUSTED_PROXY_COUNT:-1}"
+      BACKUP_DIR: /srv/backups
+    volumes:
+      - admin-backups:/srv/backups
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=5)"]
@@ -40,3 +43,8 @@ services:
 networks:
   default:
     name: ${COMPOSE_PROJECT_NAME:-isu-camp-admin}_network
+
+volumes:
+  admin-backups:
+    external: true
+    name: ${ADMIN_BACKUP_VOLUME_NAME:-kumpas-admin-backups}

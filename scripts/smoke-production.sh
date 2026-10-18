@@ -7,6 +7,7 @@ fi
 RELEASE="$(cd "$1" && pwd)"
 TEMPORARY="$(mktemp -d)"
 PROJECT="isu-build-smoke-$$"
+BACKUP_VOLUME="$PROJECT-backups"
 # Override inherited settings so this test can only use its disposable SQLite DB.
 # Deliberately conflicting image settings must not override the release IDs.
 export ADMIN_WEB_IMAGE=isu-camp/must-not-run:smoke
@@ -15,6 +16,7 @@ export ADMIN_RUNTIME_ENV="$TEMPORARY/runtime.env"
 export SUPABASE_DATABASE_URL=sqlite:////tmp/build-smoke.db
 export SECRET_KEY=disposable-build-smoke-session-secret
 export ADMIN_HTTP_PORT=0
+export ADMIN_BACKUP_VOLUME_NAME="$BACKUP_VOLUME"
 printf 'SUPABASE_DATABASE_URL=%s\nSECRET_KEY=%s\nADMIN_WEB_IMAGE=isu-camp/must-not-run:runtime\nADMIN_API_IMAGE=isu-camp/must-not-run:runtime\n' "$SUPABASE_DATABASE_URL" "$SECRET_KEY" > "$ADMIN_RUNTIME_ENV"
 chmod 600 "$ADMIN_RUNTIME_ENV"
 compose() {
@@ -22,11 +24,14 @@ compose() {
 }
 cleanup() {
     compose down --volumes >/dev/null 2>&1 || true
+    docker volume rm "$BACKUP_VOLUME" >/dev/null 2>&1 || true
     rm -rf "$TEMPORARY"
 }
 trap cleanup EXIT
+docker volume create "$BACKUP_VOLUME" >/dev/null
 docker load --input "$RELEASE/images.tar.gz" >/dev/null
 compose up -d --wait --wait-timeout 90
+compose exec -T admin-api python -c 'from pathlib import Path; p=Path("/srv/backups/.write-check"); p.write_text("ok"); p.unlink()'
 ADDRESS="$(compose port admin-web 8080)"
 BASE="http://$ADDRESS"
 curl --max-time 30 -fsS "$BASE/login" > "$TEMPORARY/login.html"
