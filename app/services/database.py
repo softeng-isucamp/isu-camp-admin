@@ -38,6 +38,7 @@ from routes.logs import logs_bp
 from routes.dashboard import dashboard_bp
 from routes.profile import profile_bp
 from routes.backups import backups_bp
+from routes.building_types import building_types_bp
 
 from services.backup_schedule import start_scheduler
 
@@ -338,6 +339,7 @@ app.register_blueprint(logs_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(profile_bp)
 app.register_blueprint(backups_bp)
+app.register_blueprint(building_types_bp)
 
 
 # ==========================================

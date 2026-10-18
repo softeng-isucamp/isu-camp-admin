@@ -73,7 +73,7 @@ def _building_dto(building):
         "code": building.building_code,
         "points": building.polygon_coordinates or [],
         "status": _status_label(building.status),
-        "type": getattr(building, "classification", None) or "Building",
+        "type": building.place_classification,
     }
 
 

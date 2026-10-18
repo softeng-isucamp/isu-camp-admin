@@ -1,5 +1,6 @@
 """Shared projection, filtering, ordering, and pagination for Locations lists."""
 
+from model.building import PLACE_CLASSIFICATIONS
 
 DEFAULT_PAGE = 1
 DEFAULT_PAGE_SIZE = 20
@@ -43,7 +44,7 @@ def _matches(dto, query, type_filter, status_filter, building_id_filter, floor_f
         return False
     if building_id_filter and building_id_filter not in {
         str(dto.get("parentId") or ""),
-        str(dto["id"]) if dto["type"] in {"Building", "Facility"} else "",
+        str(dto["id"]) if dto["type"] in PLACE_CLASSIFICATIONS else "",
     }:
         return False
     if floor_filter and str(dto.get("floor") or "").lower() != floor_filter:
@@ -56,7 +57,7 @@ def _ordering_key(dto):
 
     parent_id = dto.get("parentId")
     family_id = int(parent_id) if parent_id is not None else int(dto["id"])
-    is_parent = dto["type"] in {"Building", "Facility"} and parent_id is None
+    is_parent = dto["type"] in PLACE_CLASSIFICATIONS and parent_id is None
     return family_id, 0 if is_parent else 1, int(dto["id"])
 
 

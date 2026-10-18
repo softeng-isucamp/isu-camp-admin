@@ -8,6 +8,7 @@ from dashboard import dashboard_bp
 from extensions import db
 from model.app_user import AppUser, UserInfo  # noqa: F401 - AppUser registers public.user
 from model.building import Building
+from model.building_type import BuildingType
 from model.location import Location
 from model.path_point import PathPoint  # noqa: F401 - registers Pathway.path_points
 from model.pathway import Pathway  # noqa: F401 - the summary route imports it
@@ -40,6 +41,16 @@ def app(monkeypatch):
     with app.app_context():
         db.session.execute(db.text("ATTACH DATABASE ':memory:' AS public"))
         db.metadata.create_all(db.engine)
+        # The vocabulary the migration seeds. Without it every Place reads
+        # as legacy, because its classification lives in type_id now.
+        db.session.add_all([
+            BuildingType(type_id=index, type_name=name,
+                         can_contain_locations=name in ("College", "Campus Services"))
+            for index, name in enumerate(
+                ("College", "Campus Services", "Food", "Parking", "Facility"), start=1
+            )
+        ])
+        db.session.commit()
         yield app
         db.session.remove()
         db.drop_all()
@@ -53,11 +64,16 @@ def manila_noon(day_offset):
 
 
 def add_building(identifier, name, **columns):
+    """Seed a Place. "Building" means legacy, so it is stored as no type."""
+
+    classification = columns.pop("classification", "Building")
+    type_row = BuildingType.query.filter_by(type_name=classification).first()
     db.session.add(Building(
         building_id=identifier,
         building_code=f"B{identifier}",
         building_name=name,
-        classification=columns.pop("classification", "Building"),
+        classification=classification,
+        type_id=type_row.type_id if type_row else None,
         status=columns.pop("status", "active"),
         **columns,
     ))
