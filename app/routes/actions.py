@@ -406,6 +406,9 @@ def edit_location(location_id):
             building.keywords = values["keywords"]
 
             db.session.flush()
+            # building_type was joined-loaded with the row; changing type_id
+            # does not refresh it, so the DTO below would report the old type.
+            db.session.expire(building, ["building_type"])
             gallery_error = apply_gallery(building, gallery_change, cover_last_upload)
             if gallery_error:
                 db.session.rollback()

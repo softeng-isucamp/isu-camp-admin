@@ -174,6 +174,9 @@ class FakeSession:
     def flush(self):
         pass
 
+    def expire(self, record, attribute_names=None):
+        pass
+
     def commit(self):
         self.commits += 1
 
