@@ -3738,6 +3738,26 @@ td small {
   text-align: center;
 }
 
+/* Filter bar combobox: sized like the native filters, with a list that scrolls. */
+.filter-combobox {
+  min-width: 180px;
+}
+.filter-combobox-input {
+  height: 46px;
+  padding: 0 34px 0 14px;
+  border-radius: 18px;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.filter-combobox-popover {
+  min-width: 280px;
+}
+.filter-combobox-listbox {
+  max-height: 320px;
+}
+
 /* User Management: administrator accounts beside the read-only app users. */
 .user-directory-tabs {
   margin-bottom: 20px;
