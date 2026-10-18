@@ -162,7 +162,7 @@ export function validateRouteNodeDraft(
     issues.push({ field: "association", message: "Only Entrance Route Nodes may have a Building association." });
   } else if (node.associatedPlaceId) {
     const buildingIds = new Set(input.buildings.map((building) => building.id));
-    input.locations?.filter((location) => location.type === "Building" || location.type === "Facility").forEach((location) => buildingIds.add(location.id));
+    input.locations?.filter((location) => location.type === "Place").forEach((location) => buildingIds.add(location.id));
     if (!buildingIds.has(node.associatedPlaceId)) {
       issues.push({ field: "association", message: "Associated Building does not exist." });
     }

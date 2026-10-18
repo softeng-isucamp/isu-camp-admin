@@ -18,7 +18,7 @@ export function selectedBuildingViewFor(
 ): SelectedBuildingView | null {
   if (!selectedBuilding) return null;
   const location = locations.find((candidate) =>
-    (candidate.type === "Building" || candidate.type === "Facility")
+    candidate.type === "Place"
       && (candidate.id === selectedBuilding.id || candidate.name === selectedBuilding.name));
   const associationId = location?.id ?? selectedBuilding.id;
   const entrances = nodes.filter((node) => node.nodeType === "Entrance" && (node.associatedPlaceId === selectedBuilding.id || node.associatedPlaceId === associationId));

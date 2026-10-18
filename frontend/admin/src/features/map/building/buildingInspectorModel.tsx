@@ -1,3 +1,4 @@
+import { canContainLocations } from "../../../lib/locationPolicy";
 import type { Location, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { SelectedBuildingView } from "./selectedBuilding";
@@ -50,7 +51,7 @@ export function buildingInspectorModel({
         <section aria-label="Building content" className="inspector-related-section">
           <div className="flex items-center justify-between gap-2">
             <h3>Building content</h3>
-            {(selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
+            {canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
           </div>
           <section aria-label="Building room directory">
             <div className="inspector-related-heading">
@@ -108,8 +109,8 @@ export function buildingInspectorModel({
     },
     overflowActions: [
       { label: "✎ Edit Details", onSelect: actions.onEditDetails },
-      ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
-      ...((selectedBuilding.type ?? selectedBuildingLocation?.type ?? "Building") === "Building" ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
+      ...(canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
+      ...(canContainLocations(selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building") ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
       { label: "＋ Add entrance", onSelect: actions.onAddEntrance },
       { label: "↔ Link existing entrance", onSelect: actions.onLinkExistingEntrance },
       { label: "🗑 Delete Building", tone: "danger" as const, onSelect: actions.onDelete },

@@ -47,7 +47,7 @@ export function routeNodeInspectorModel({
   const connectedPaths = connectedPathways.length;
   const associatedBuilding = node.associatedPlaceId
     ? currentBuildings.find((building) => building.id === node.associatedPlaceId)
-      ?? currentLocations.find((location) => location.id === node.associatedPlaceId && (location.type === "Building" || location.type === "Facility"))
+      ?? currentLocations.find((location) => location.id === node.associatedPlaceId && location.type === "Place")
     : null;
   return {
     id: node.id,

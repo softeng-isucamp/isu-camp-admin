@@ -1,3 +1,4 @@
+import { backendLocationType } from "../../lib/locationPolicy";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { pointInPolygon, type MapPoint } from "./campusBoundary";
 
@@ -55,7 +56,7 @@ export function findSelectionCandidates(
           type: "location",
           locationType: location.type,
           label: location.name,
-          kindLabel: location.type,
+          kindLabel: backendLocationType(location),
           distance,
         });
       }
@@ -126,7 +127,7 @@ export function findSelectionCandidates(
   const uniqueCandidates = new Map<string, SelectionCandidate>();
   for (const candidate of candidates) {
     const canonicalBuilding = candidate.type === "building"
-      || (candidate.type === "location" && (candidate.kindLabel === "Building" || candidate.kindLabel === "Facility"));
+      || (candidate.type === "location" && candidate.locationType === "Place");
     const key = canonicalBuilding
       ? `building:${candidate.id}`
       : candidate.type === "location"

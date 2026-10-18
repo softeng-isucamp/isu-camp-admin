@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { isPlaceClassification, type BackendLocationType } from "../../../lib/locationPolicy";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { echagueCampusBoundary } from "../campusBoundary";
 import type { PathwayCrossing } from "../pathway/pathwayTopology";
@@ -23,11 +24,11 @@ const entrance = (id: string, placeId: string | null, overrides: Partial<RouteNo
   lng: INSIDE[1],
   ...overrides,
 });
-const location = (id: string, type: Location["type"], overrides: Partial<Location> = {}): Location => ({
+const location = (id: string, option: BackendLocationType, overrides: Partial<Location> = {}): Location => ({
   id,
-  name: `${type} ${id}`,
+  name: `${option} ${id}`,
   code: id,
-  type,
+  ...(isPlaceClassification(option) ? { type: "Place" as const, classification: option } : { type: option }),
   parentId: null,
   status: "Active",
   lat: INSIDE[0],
@@ -175,7 +176,7 @@ describe("deriveMapIssues", () => {
       ["Far Hall", "Building"],
     ]);
     expect(outside.map((issue) => issue.selection)).toEqual([
-      { type: "location", id: "l1", locationType: "Facility" },
+      { type: "location", id: "l1", locationType: "Place" },
       { type: "node", id: "far-node" },
       { type: "pathway", id: "far-path" },
       { type: "building", id: "far" },
@@ -201,7 +202,7 @@ describe("deriveMapIssues", () => {
     expect(issues).toHaveLength(2);
     expect(new Set(issues.map((issue) => issue.id)).size).toBe(2);
     expect(issues.map((issue) => issue.selection)).toEqual([
-      { type: "location", id: "same", locationType: "Building" },
+      { type: "location", id: "same", locationType: "Place" },
       { type: "location", id: "same", locationType: "Room" },
     ]);
   });

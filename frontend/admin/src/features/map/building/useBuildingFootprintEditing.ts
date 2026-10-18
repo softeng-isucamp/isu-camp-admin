@@ -1,6 +1,7 @@
+import { isPlaceClassification } from "../../../lib/locationPolicy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { services } from "../../../services/api";
-import type { Building, Location } from "../../../types";
+import type { Building, Location, PlaceClassification } from "../../../types";
 import { geometryOnCampus, type MapPoint } from "../campusBoundary";
 import { polygonFeatureAnchor, polygonIsNonDegenerate, polygonSelfIntersects, translatePolygon } from "../mapEditing";
 import type { MapOverlay } from "../session/useMapOverlay";
@@ -85,7 +86,7 @@ export function useBuildingFootprintEditing({
   const [polygonInteraction, setPolygonInteraction] = useState<"draw" | "reshape" | "move">("draw");
   const [polygonClosed, setPolygonClosed] = useState(false);
   const [buildingDetailsModalOpen, setBuildingDetailsModalOpen] = useState(false);
-  const [buildingClassification, setBuildingClassification] = useState<"Building" | "Facility">("Building");
+  const [buildingClassification, setBuildingClassification] = useState<PlaceClassification>("Building");
   const [buildingForm, setBuildingForm] = useState<BuildingIdentityInput>(blankBuildingForm);
   const buildingName = buildingForm.name;
   const buildingCode = buildingForm.code;
@@ -262,7 +263,7 @@ export function useBuildingFootprintEditing({
       identity: {
         name: buildingName,
         code: buildingCode,
-        type: buildingClassification,
+        classification: buildingClassification,
         function: buildingFunction,
         keywords: buildingKeywords,
         status: buildingStatus,
@@ -370,7 +371,7 @@ export function useBuildingFootprintEditing({
         status: "Active",
       });
     }
-    setBuildingClassification(records.buildingClassification === "Facility" ? "Facility" : "Building");
+    setBuildingClassification(isPlaceClassification(records.buildingClassification) ? records.buildingClassification : "Building");
     setEditingBuildingId(typeof records.editingBuildingId === "string" ? records.editingBuildingId : null);
     setPolygonClosed(records.polygonClosed === true);
     setBuildingDetailsModalOpen(records.buildingDetailsModalOpen === true);

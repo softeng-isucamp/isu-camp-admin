@@ -81,7 +81,7 @@ export const apiMock = () => ({
     map: {
       buildings: vi.fn(async () => []),
       locations: vi.fn(async () => [
-        { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+        { id: "loc-1", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
       ]),
       nodes: vi.fn(async () => [
         { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },
@@ -107,7 +107,7 @@ export const apiMock = () => ({
     locations: {
       list: vi.fn(async () => ({
         items: [
-          { id: "loc-1", name: "Library", code: "LIB", type: "Facility" as const, parentId: null, status: "Active" as const, lat: 16.7205, lng: 121.6895, positioned: true },
+          { id: "loc-1", name: "Library", code: "LIB", type: "Place" as const, classification: "Facility" as const, parentId: null, status: "Active" as const, lat: 16.7205, lng: 121.6895, positioned: true },
         ],
         total: 1,
         page: 1,

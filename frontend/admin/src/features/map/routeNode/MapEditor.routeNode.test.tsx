@@ -130,7 +130,7 @@ describe("Map Editor preview", () => {
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: "loc-1", lat: 16.7205, lng: 121.6895 },
     ]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Building", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Place", classification: "Building", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]);
     renderEditor();
 
@@ -179,7 +179,7 @@ describe("Map Editor preview", () => {
       { id: "map-only-building", name: "Unregistered Map Shape", code: "MAP-ONLY", points: [] },
     ]);
     vi.mocked(services.locations.list).mockResolvedValue({
-      items: [{ id: "building-42", name: "Engineering Hall", code: "ENG-01", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false }],
+      items: [{ id: "building-42", name: "Engineering Hall", code: "ENG-01", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false }],
       total: 1,
       page: 1,
       pageSize: 100,

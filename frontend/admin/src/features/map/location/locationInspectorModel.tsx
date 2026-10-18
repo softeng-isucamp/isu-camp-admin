@@ -1,3 +1,4 @@
+import { backendLocationType } from "../../../lib/locationPolicy";
 import type { Building, Location } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { isIndoorLocation } from "../indoorLocation/indoorLocations";
@@ -15,14 +16,14 @@ export function locationInspectorModel({
   locations: currentLocations,
   onEditDetails,
 }: LocationInspectorOptions) {
-  const isFootprintOwner = selectedLocation.type === "Building" || selectedLocation.type === "Facility";
+  const isFootprintOwner = selectedLocation.type === "Place";
   const parentBuilding = selectedLocation.parentId
     ? currentBuildings.find((building) => building.id === selectedLocation.parentId)
       ?? currentLocations.find((location) => location.id === selectedLocation.parentId)
     : null;
   const locationSummary: InspectorCardModel["summary"] = [
     { label: "Code", value: selectedLocation.code },
-    { label: "Type", value: selectedLocation.type },
+    { label: "Type", value: backendLocationType(selectedLocation) },
     ...(!isFootprintOwner && !isIndoorLocation(selectedLocation) ? [{ label: "Parent building", value: selectedLocation.building || parentBuilding?.name || "—" }] : []),
     ...(!isFootprintOwner ? [{ label: "Floor", value: selectedLocation.floor || "—" }] : []),
     ...(selectedLocation.function ? [{ label: "Function", value: selectedLocation.function }] : []),

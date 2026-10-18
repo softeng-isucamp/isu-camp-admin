@@ -1,6 +1,7 @@
-import type { LocationType } from "../../types";
+import { backendLocationType, type BackendLocationType } from "../../lib/locationPolicy";
+import type { LocationType, PlaceClassification } from "../../types";
 
-const iconContents: Partial<Record<LocationType, string>> = {
+const iconContents: Partial<Record<BackendLocationType, string>> = {
   Building: '<path d="M3 21h18M4 18h16M6 18V9M10 18V9M14 18V9M18 18V9M12 3l9 4.5H3L12 3z" />',
   Facility: '<path d="M3 21h18M5 21V10h5v11M14 21V4l5 3v14M7 13h1M7 16h1M16 10h1M16 14h1" />',
   Floor: '<polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" />',
@@ -10,16 +11,20 @@ const iconContents: Partial<Record<LocationType, string>> = {
   Restroom: '<circle cx="9" cy="4" r="2" /><path d="M6 9h6l-1 9H7L6 9z" /><circle cx="17" cy="4" r="2" /><path d="M15 9h4l1 9h-2l-.5-5-.5 5h-2z" />',
 };
 
-export function locationTypeIconContents(type: LocationType): string {
-  return iconContents[type] ?? '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />';
+export function locationTypeIconContents(type: LocationType, classification?: PlaceClassification): string {
+  const key = backendLocationType({ type, classification });
+  // Classifications without an icon yet read as Buildings.
+  return iconContents[key] ?? (type === "Place" ? iconContents.Building! : '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />');
 }
 
 export function LocationTypeIcon({
   type,
+  classification,
   size = 18,
   className,
 }: {
   type: LocationType;
+  classification?: PlaceClassification;
   size?: number;
   className?: string;
 }) {
@@ -35,7 +40,7 @@ export function LocationTypeIcon({
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      dangerouslySetInnerHTML={{ __html: locationTypeIconContents(type) }}
+      dangerouslySetInnerHTML={{ __html: locationTypeIconContents(type, classification) }}
     />
   );
 }

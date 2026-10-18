@@ -7,7 +7,7 @@ const location: Location = {
   id: "loc-1",
   name: "Library Plaza",
   code: "LIB-PLZ",
-  type: "Facility",
+  type: "Place", classification: "Facility",
   parentId: null,
   function: "Outdoor gathering space",
   keywords: "library, plaza",

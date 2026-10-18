@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
-import { locationPolicy } from "../../lib/locationPolicy";
-import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
+import { backendLocationType, locationPolicy, placeClassificationOptions, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import type { Location, LocationDraft, LocationPhotoDraft } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
 interface LocationDetailsFieldsProps {
   draft: LocationDraft;
-  allowedTypes?: LocationType[];
+  /** Type-picker choices: a Place is chosen by its classification. */
+  allowedTypes?: BackendLocationType[];
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
-  onTypeChange?: (type: LocationType) => void;
+  onTypeChange?: (type: BackendLocationType) => void;
 }
 
-const defaultLocationTypes: LocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
+const defaultLocationTypes: BackendLocationType[] = ["Laboratory", "Room", "Office", "Facility", "Building", "Restroom"];
 
 export function LocationCoordinatesFields({
   lat,
@@ -83,11 +84,11 @@ export function LocationDetailsFields({
         <SelectField
           label="LOCATION TYPE"
           required
-          value={draft.type}
+          value={backendLocationType(draft)}
           onChange={(event) => {
-            const type = event.target.value as LocationType;
+            const type = event.target.value as BackendLocationType;
             if (onTypeChange) onTypeChange(type);
-            else onChange({ ...draft, type });
+            else onChange(withLocationTypeOption(draft, type));
           }}
         >
           {allowedTypes.map((type) => <option key={type} value={type}>{type === "Floor" ? "Floor (legacy records only)" : type}</option>)}
@@ -104,8 +105,8 @@ export function LocationDetailsFields({
         </SelectField>
       </div>
       <div className="form-grid-two">
-        <Field aria-label={draft.type === "Building" ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
-        <Field aria-label={draft.type === "Building" ? "Building code" : "Location code"} label="LOCATION CODE / ID" required error={errors.code} value={draft.code} onChange={(event) => onChange({ ...draft, code: event.target.value })} />
+        <Field aria-label={draft.type === "Place" && draft.classification === "Building" ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
+        <Field aria-label={draft.type === "Place" && draft.classification === "Building" ? "Building code" : "Location code"} label="LOCATION CODE / ID" required error={errors.code} value={draft.code} onChange={(event) => onChange({ ...draft, code: event.target.value })} />
       </div>
       <Field aria-label="DESCRIPTION" label="DESCRIPTION" required error={errors.function} value={draft.function ?? ""} onChange={(event) => onChange({ ...draft, function: event.target.value })} />
       <Field aria-label="KEYWORDS / TAGS" label="KEYWORDS / TAGS" value={draft.keywords ?? ""} onChange={(event) => onChange({ ...draft, keywords: event.target.value })} />
@@ -116,7 +117,8 @@ export function LocationDetailsFields({
 interface LocationDetailsModalProps {
   location: Location;
   directory: Location[];
-  allowedTypes?: LocationType[];
+  /** Type-picker choices: a Place is chosen by its classification. */
+  allowedTypes?: BackendLocationType[];
   onClose: () => void;
   onSubmit: (location: Location, photos?: LocationPhotoDraft[]) => void | Promise<void>;
   onPickIndoorLocationOnMap?: () => void;
@@ -142,7 +144,7 @@ export function LocationDetailsModal({
 
   useEffect(() => {
     let active = true;
-    void services.locations.getPhotos(location.id, location.type).then((loaded) => {
+    void services.locations.getPhotos(location.id, backendLocationType(location)).then((loaded) => {
       if (active) setPhotos(loaded);
       else loaded.forEach((photo) => { if (photo.previewUrl.startsWith("blob:")) URL.revokeObjectURL(photo.previewUrl); });
     }).catch((cause) => {
@@ -160,8 +162,8 @@ export function LocationDetailsModal({
   // Modal mounts for one selected Location and is unmounted on close.
   }, [location.id, location.type]);
   const effectiveAllowedTypes = allowedTypes ?? (
-    location.type === "Building" || location.type === "Facility"
-      ? ["Building", "Facility"]
+    location.type === "Place"
+      ? placeClassificationOptions(location.classification)
       : undefined
   );
 

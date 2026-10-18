@@ -32,7 +32,7 @@ export const useMapEditorTestLifecycle = () => {
     vi.mocked(services.map.deletePathway).mockResolvedValue(undefined);
     vi.mocked(services.map.buildings).mockResolvedValue([]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]);
     vi.mocked(services.map.nodes).mockResolvedValue([
       { id: "node-a", name: "North Entrance", nodeType: "Entrance", associatedPlaceId: null, lat: 16.7205, lng: 121.6895 },

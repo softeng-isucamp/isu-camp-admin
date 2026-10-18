@@ -1,15 +1,16 @@
 import { z } from "zod";
+import { PLACE_CLASSIFICATIONS } from "../types";
 import { passwordRules } from "./passwordRules";
 
 const locationTypeSchema = z.enum([
-  "Building",
+  "Place",
   "Floor",
   "Room",
   "Office",
   "Laboratory",
   "Restroom",
-  "Facility",
 ]);
+const placeClassificationSchema = z.enum(PLACE_CLASSIFICATIONS);
 const recordStatusSchema = z.enum(["Active", "Inactive", "Open", "Closed", "Unknown"]);
 
 export const loginSchema = z.object({
@@ -41,6 +42,7 @@ const locationFields = z.object({
   name: z.string().min(1),
   code: z.string().min(1),
   type: locationTypeSchema,
+  classification: placeClassificationSchema.optional(),
   parentId: z.string().nullable(),
   building: z.string().optional(),
   floor: z.string().optional(),
@@ -56,4 +58,7 @@ export const locationSchema = locationFields.extend({
   positioned: z.boolean(),
   polygonCoordinates: z.array(z.tuple([z.number(), z.number()])).optional(),
   photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
+}).refine((location) => (location.type === "Place") === (location.classification !== undefined), {
+  message: "Only a Place carries a classification, and every Place must have one.",
+  path: ["classification"],
 });

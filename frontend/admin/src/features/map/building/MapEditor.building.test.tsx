@@ -87,10 +87,10 @@ describe("Map Editor preview", () => {
     } as Location));
     services.locations.save = saveLocation;
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Building", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", classification: "Building", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Building", parentId: null, function: "Academic building", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Place", classification: "Building", parentId: null, function: "Academic building", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]);
     renderEditor();
 
@@ -103,7 +103,7 @@ describe("Map Editor preview", () => {
 
     await waitFor(() => expect(saveLocation).toHaveBeenCalledWith(expect.objectContaining({
       id: "building-eng",
-      type: "Facility",
+      type: "Place", classification: "Facility",
     }), []));
     expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("ENG");
   });
@@ -175,7 +175,7 @@ describe("Map Editor preview", () => {
         id: "building-admin",
         name: "Administration Building",
         code: "ADMIN",
-        type: "Building",
+        type: "Place", classification: "Building",
         parentId: null,
         status: "Active",
         lat: 16.7205,
@@ -199,7 +199,7 @@ describe("Map Editor preview", () => {
         id: "facility-admin",
         name: "Campus Gym",
         code: "GYM",
-        type: "Facility",
+        classification: "Facility",
         points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]],
       },
     ]);
@@ -208,7 +208,7 @@ describe("Map Editor preview", () => {
         id: "facility-admin",
         name: "Campus Gym",
         code: "GYM",
-        type: "Facility",
+        type: "Place", classification: "Facility",
         parentId: null,
         status: "Active",
         lat: 16.7205,
@@ -228,7 +228,7 @@ describe("Map Editor preview", () => {
 
   it("frames and selects a polygon Building queried from a parent-location handoff", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "building-1", name: "Stale Building Point", code: "ENG", type: "Building", parentId: null, status: "Active", lat: 16.71, lng: 121.68, positioned: true },
+      { id: "building-1", name: "Stale Building Point", code: "ENG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: 16.71, lng: 121.68, positioned: true },
       { id: "room-1", name: "Room 101", code: "101", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
     ]);
     vi.mocked(services.map.buildings).mockResolvedValue([
@@ -336,7 +336,7 @@ describe("Map Editor preview", () => {
       id: "42",
       name: draft.name,
       code: draft.code,
-      type: "Building" as const,
+      type: "Place" as const, classification: "Building" as const,
       parentId: null,
       status: draft.status,
       lat: null,
@@ -357,7 +357,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Building" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Building", status: "Inactive" });
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Backend Hall", code: "BACK-01", type: "Place", classification: "Building", status: "Inactive" });
     expect(save.mock.calls[0]?.[0].id).toBeUndefined();
     expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Upload building photo")).not.toBeInTheDocument();
@@ -574,7 +574,7 @@ describe("Map Editor preview", () => {
 
   it("saves a created Building footprint through the canonical Locations service and refreshes the map", async () => {
     const mockLocationsList: Location[] = [
-      { id: "loc-1", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "loc-1", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ];
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -585,7 +585,7 @@ describe("Map Editor preview", () => {
       const saved: Location = {
         ...draft,
         id: "building-created",
-        type: "Building",
+        type: "Place", classification: "Building",
         status: "Active",
         lat: null,
         lng: null,
@@ -624,7 +624,7 @@ describe("Map Editor preview", () => {
     await waitFor(() => expect(saveLocation).toHaveBeenCalledWith(expect.objectContaining({
       name: "Engineering Complex",
       code: "ENG-CMP",
-      type: "Building",
+      type: "Place", classification: "Building",
       function: "Engineering Labs",
       lat: null,
       lng: null,
@@ -638,7 +638,8 @@ describe("Map Editor preview", () => {
     const createdBuilding = locationsAfterSave.items.find((loc: Location) => loc.code === "ENG-CMP");
     expect(createdBuilding).toBeDefined();
     expect(createdBuilding?.name).toBe("Engineering Complex");
-    expect(createdBuilding?.type).toBe("Building");
+    expect(createdBuilding?.type).toBe("Place");
+    expect(createdBuilding?.classification).toBe("Building");
     expect(createdBuilding?.lat).toBeNull();
     expect(createdBuilding?.lng).toBeNull();
     expect(createdBuilding?.positioned).toBe(false);
@@ -659,7 +660,7 @@ describe("Map Editor preview", () => {
         id: "bld-routable",
         name: "Routable Hall",
         code: "ROUT-01",
-        type: "Building",
+        type: "Place", classification: "Building",
         parentId: null,
         status: "Active",
         lat: null,

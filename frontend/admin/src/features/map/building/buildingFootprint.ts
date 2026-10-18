@@ -1,4 +1,4 @@
-import type { Building, Location, RecordStatus } from "../../../types";
+import type { Building, Location, PlaceClassification, RecordStatus } from "../../../types";
 import type { WorkingOperation } from "../types";
 import {
   geometryOnCampus,
@@ -13,7 +13,7 @@ import {
 export interface BuildingIdentityInput {
   name: string;
   code: string;
-  type?: "Building" | "Facility";
+  classification?: PlaceClassification;
   function?: string;
   keywords?: string;
   status?: RecordStatus;
@@ -215,7 +215,8 @@ export function buildCreateBuildingOperation(
     id: buildingId,
     name: input.name.trim(),
     code: input.code.trim(),
-    type: input.type ?? "Building",
+    type: "Place",
+    classification: input.classification ?? "Building",
     parentId: null,
     status: input.status ?? "Active",
     lat: null,

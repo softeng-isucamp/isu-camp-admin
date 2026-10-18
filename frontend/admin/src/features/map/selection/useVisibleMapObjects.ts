@@ -3,6 +3,7 @@ import type L from "leaflet";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { isIndoorLocation, isPositionedLocation } from "../indoorLocation/indoorLocations";
 import type { EditorMode } from "../types";
+import { isLocationContainer, isPlace } from "../../../lib/locationPolicy";
 import { isPointInBounds } from "../mapEditing";
 import type { MapSelection } from "./useMapSelection";
 
@@ -30,8 +31,8 @@ export function useVisibleMapObjects(
     if (mode === "area") return [];
     return positioned.filter(
       (loc) => !isIndoorLocation(loc)
-        && loc.type !== "Building"
-        && (loc.type !== "Facility" || !buildings.some((building) => building.id === loc.id))
+        && !isLocationContainer(loc)
+        && (!isPlace(loc) || !buildings.some((building) => building.id === loc.id))
         && (isPointInBounds(loc.lat, loc.lng, mapBounds) || (selected?.type === "location" && selected.id === loc.id && selected.locationType === loc.type))
     );
   }, [buildings, locations, mapBounds, mode, selected?.id, selected?.locationType, selected?.type]);

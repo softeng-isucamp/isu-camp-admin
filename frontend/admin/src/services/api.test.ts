@@ -3,7 +3,9 @@ import {
   normalizeBackendDashboardAnalytics,
   normalizeBackendDashboardSummary,
   normalizeBackendUser,
+  normalizeBackendLocation,
   normalizeBackendLocationPage,
+  normalizeBackendMapBuilding,
   services,
   setMockFailure,
 } from "./api";
@@ -83,7 +85,7 @@ describe("mock service contracts", () => {
           location_id: 42,
           location_name: "Backend Library",
           location_code: "LIB-01",
-          type_id: 4,
+          type: "Facility",
           building_id: null,
           floor_level: null,
           description: "A persisted facility",
@@ -100,7 +102,8 @@ describe("mock service contracts", () => {
         id: "42",
         name: "Backend Library",
         code: "LIB-01",
-        type: "Facility",
+        type: "Place",
+        classification: "Facility",
         parentId: null,
         status: "Active",
         lat: 16.7215,
@@ -125,12 +128,11 @@ describe("mock service contracts", () => {
     })).toThrow("Backend returned a malformed location record.");
   });
 
-  it("normalizes persisted location type IDs without inferring Building or Floor", () => {
+  it("normalizes persisted location type IDs without inferring Floor", () => {
     const persistedTypes = [
       [1, "Room"],
       [2, "Laboratory"],
       [3, "Office"],
-      [4, "Facility"],
       [5, "Restroom"],
     ] as const;
 
@@ -143,20 +145,32 @@ describe("mock service contracts", () => {
       }).items[0].type).toBe(type);
     }
 
-    expect(normalizeBackendLocationPage({
-      items: [{ id: "string-type", name: "String location", code: "STRING", type: "Building" }],
-      total: 1,
-      page: 1,
-      pageSize: 10,
-    }).items[0].type).toBe("Building");
+  });
 
-    for (const type_id of [6, 7, 8]) {
-      expect(() => normalizeBackendLocationPage({
-        items: [{ id: type_id, name: "Obsolete location", code: "OBSOLETE", type_id }],
-        total: 1,
-        page: 1,
-        pageSize: 10,
-      })).toThrow("Backend returned a malformed location record.");
+  it("reads any non-indoor backend type as a Place without throwing", () => {
+    const normalize = (extra: Record<string, unknown>) =>
+      normalizeBackendLocation({ id: "9", name: "Some place", code: "PLC", ...extra });
+
+    expect(normalize({ type: "Building" })).toMatchObject({ type: "Place", classification: "Building" });
+    expect(normalize({ type: "Facility" })).toMatchObject({ type: "Place", classification: "Facility" });
+    for (const extra of [{ type: null }, {}, { type: "Dormitory" }, { type: "" }, { type_id: 4 }, { type_id: 6 }, { type_id: 8 }]) {
+      expect(normalize(extra)).toMatchObject({ type: "Place", classification: "Building" });
+    }
+    for (const classification of ["College", "Campus Services", "Food", "Parking"]) {
+      expect(normalize({ type: classification })).toMatchObject({ type: "Place", classification });
+    }
+    expect(normalize({ type: "Room" })).not.toHaveProperty("classification");
+    expect(normalize({ type: "Floor" })).toMatchObject({ type: "Floor" });
+  });
+
+  it("reads a map building's classification without throwing on missing or unknown values", () => {
+    const normalize = (type: unknown) =>
+      normalizeBackendMapBuilding({ id: "4", name: "Oval", code: "OVL", points: [], type } as Parameters<typeof normalizeBackendMapBuilding>[0]);
+
+    expect(normalize("Facility")).toMatchObject({ classification: "Facility" });
+    expect(normalize("College")).toMatchObject({ classification: "College" });
+    for (const type of ["Building", null, undefined, "", "Unknown", "Dormitory"]) {
+      expect(normalize(type)).toMatchObject({ classification: "Building" });
     }
   });
 
@@ -215,6 +229,49 @@ describe("mock service contracts", () => {
       expect.objectContaining({ credentials: "include" }),
     );
     vi.unstubAllEnvs();
+  });
+
+  it("sends a Place's classification, never its Place type, to the backend", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const { backendLocationType } = await import("../lib/locationPolicy");
+    const place = { id: "12", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false } as const;
+    const wire = { ...place, type: "Facility" };
+    const historyPage = { items: [], total: 0, page: 1, pageSize: 20 };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(JSON.stringify({ location: wire, ...historyPage }), { status: 200 }));
+
+    await httpServices.logs.forLocation(place.id, place.name, backendLocationType(place));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/locations/12/history?type=Facility");
+
+    await httpServices.locations.save(place);
+    const [url, init] = fetchMock.mock.calls[1]!;
+    expect(url).toBe("/api/actions/locations/12?type=Facility");
+    expect(JSON.parse(init!.body as string)).toMatchObject({ type: "Facility" });
+    expect(JSON.parse(init!.body as string)).not.toHaveProperty("classification");
+
+    await httpServices.locations.remove(place.id, backendLocationType(place));
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/actions/locations/12?type=Facility");
+    vi.unstubAllEnvs();
+  });
+
+  it("normalizes legacy analytics location keys to Place identity keys", async () => {
+    const { normalizeBackendDashboardAnalytics } = await import("./api");
+    const row = (locationId: string) => ({ rank: "1", locationId, name: "X", context: "Building", searches: 1, visits: 0 });
+    const result = normalizeBackendDashboardAnalytics({
+      range: "month",
+      current: { activeUsers: 0, searches: 0, visits: 0, arrivalRate: 0 },
+      previous: null,
+      timeline: [],
+      visitsByAccountType: { student: 0, teacher: 0, visitor: 0 },
+      visitsByDestinationType: { Building: 0, Room: 0, Laboratory: 0, Office: 0, Restroom: 0 },
+      registrations: [],
+      topDestinations: [row("Building:1"), row("Facility:12"), row("Room:3")],
+      completeness: [],
+      completenessTotal: 0,
+    });
+    expect(result.topDestinations.map((entry) => entry.locationId)).toEqual(["Place:1", "Place:12", "Room:3"]);
   });
 
   it("filters locations through the service boundary", async () => {
@@ -288,7 +345,7 @@ describe("mock service contracts", () => {
       id: "local-footprint-building",
       name: "Local Footprint Building",
       code: "LOCAL-FOOTPRINT",
-      type: "Building",
+      type: "Place", classification: "Building",
       parentId: null,
       status: "Active",
       lat: null,
@@ -302,7 +359,7 @@ describe("mock service contracts", () => {
         id: saved.id,
         name: "Local Footprint Building",
         code: "LOCAL-FOOTPRINT",
-        type: "Building",
+        classification: "Building",
         points: polygon,
         status: "Active",
       });
@@ -320,7 +377,7 @@ describe("mock service contracts", () => {
 
   it("preserves hierarchical child locations and permanently deletes families", async () => {
     const building = await services.locations.save({
-      id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Building",
+      id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Place", classification: "Building",
       parentId: null, status: "Active", lat: 16.72, lng: 121.69, positioned: true,
     });
     const room = await services.locations.save({
@@ -411,7 +468,7 @@ describe("mock service contracts", () => {
         id: "building-1",
         name: "Building One",
         code: "BUILDING-ONE",
-        type: "Building",
+        type: "Place", classification: "Building",
         parentId: null,
         status: "Active",
         lat: null,
@@ -465,7 +522,7 @@ describe("mock service contracts", () => {
   });
 
   it("permanently deletes a building, its connected children, and audits each record", async () => {
-    const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "deleted-room", name: "Deleted Room", code: "DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     await services.locations.remove(building.id);
@@ -476,8 +533,8 @@ describe("mock service contracts", () => {
   });
 
   it("cascades only the Indoor Locations directly owned by the deleted Building", async () => {
-    const first = await services.locations.save({ id: "same-name-building-a", name: "Duplicate Name Building", code: "DUP-A", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const second = await services.locations.save({ id: "same-name-building-b", name: "Duplicate Name Building", code: "DUP-B", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const first = await services.locations.save({ id: "same-name-building-a", name: "Duplicate Name Building", code: "DUP-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const second = await services.locations.save({ id: "same-name-building-b", name: "Duplicate Name Building", code: "DUP-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const firstChild = await services.locations.save({ id: "same-name-room-a", name: "Room A", code: "DUP-A-ROOM", type: "Room", parentId: first.id, building: first.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     const secondChild = await services.locations.save({ id: "same-name-room-b", name: "Room B", code: "DUP-B-ROOM", type: "Room", parentId: second.id, building: second.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
@@ -489,8 +546,8 @@ describe("mock service contracts", () => {
   });
 
   it("associates save and position audits exactly while keeping targets readable", async () => {
-    const precise = await services.locations.save({ id: "audit-exact", name: "Exact Hall", code: "EXACT", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "audit-substring", name: "Exact Hall Annex", code: "ANNEX", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const precise = await services.locations.save({ id: "audit-exact", name: "Exact Hall", code: "EXACT", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "audit-substring", name: "Exact Hall Annex", code: "ANNEX", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.savePosition({ id: precise.id, lat: 16.72, lng: 121.69 });
     const history = await services.logs.forLocation(precise.id, precise.name);
     expect(history.items.map((entry) => entry.action)).toEqual(expect.arrayContaining(["Updated Location", "Positioned Location"]));
@@ -499,7 +556,7 @@ describe("mock service contracts", () => {
   });
 
   it("retains exact audit linkage through a rename", async () => {
-    const original = await services.locations.save({ id: "renamed-audit", name: "Original audit name", code: "RENAME", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const original = await services.locations.save({ id: "renamed-audit", name: "Original audit name", code: "RENAME", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ ...original, name: "Renamed audit name" });
     const history = await services.logs.forLocation(original.id, "Renamed audit name");
     expect(history.items).toHaveLength(2);
@@ -529,7 +586,7 @@ describe("mock service contracts", () => {
     const created = await services.locations.save({
       name: "Unpositioned Facility",
       code: "UNP-01",
-      type: "Facility",
+      type: "Place", classification: "Facility",
       parentId: null,
       status: "Active",
       lat: null,
@@ -554,7 +611,7 @@ describe("mock service contracts", () => {
     expect(nodes.some((n) => n.name === nodeName)).toBe(true);
 
     const locations = await services.map.locations();
-    const targetLoc = locations.find((location) => location.type === "Facility" && location.parentId === null)!;
+    const targetLoc = locations.find((location) => location.type === "Place" && location.classification === "Facility" && location.parentId === null)!;
     await services.map.save({
       movedLocation: {
         id: targetLoc.id,
@@ -741,7 +798,9 @@ describe("real locations service boundary", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }));
 
-    await expect(httpServices.locations.save({ ...saved, id: undefined })).resolves.toEqual(saved);
+    // The backend still speaks Building/Facility, so a Place is sent as its classification.
+    const place = { ...saved, type: "Place" as const, classification: "Building" as const };
+    await expect(httpServices.locations.save({ ...place, id: undefined })).resolves.toEqual(place);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/locations",
       expect.objectContaining({
@@ -838,7 +897,7 @@ describe("real locations service boundary", () => {
       .mockResolvedValueOnce(new Response(new Blob(["image"], { type: "image/png" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: false }), { status: 200 }));
     await httpServices.locations.getPhotos("42", "Building");
-    await httpServices.locations.save({ id: "42", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false }, []);
+    await httpServices.locations.save({ id: "42", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false }, []);
     const form = fetchMock.mock.calls[2]?.[1]?.body as FormData;
     expect(form.get("removePhotoIds")).toBe("[7]");
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: previousCreateObjectURL });
@@ -1131,6 +1190,30 @@ describe("real walking network service boundary", () => {
     }));
   });
 
+  it("round-trips a College location and a Campus Services map building without reclassifying them", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const wireBuilding = { id: "5", name: "Student Hub", code: "HUB", type: "Campus Services", status: "Active", points: [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) =>
+      new Response(JSON.stringify(init?.method === "PUT" && String(_url).includes("/api/actions/locations")
+        ? { id: "3", name: "College of Arts", code: "CAS", type: "College", status: "Active" }
+        : init?.method === "PUT" || init?.method === "POST" ? { success: true } : [wireBuilding]), { status: 200 }));
+
+    const page = await httpServices.locations.save({ id: "3", name: "College of Arts", code: "CAS", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    expect(page).toMatchObject({ type: "Place", classification: "College" });
+    const saveCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/api/actions/locations/3"))!;
+    expect(String(saveCall[0])).toMatch(/\?type=College$/);
+    expect(JSON.parse(saveCall[1]!.body as string)).toMatchObject({ type: "College" });
+
+    const [building] = await httpServices.map.buildings();
+    expect(building.classification).toBe("Campus Services");
+    await httpServices.map.save({ buildings: [building] });
+    const sent = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT" || init?.method === "POST").map(([, init]) => String(init!.body));
+    expect(sent.some((body) => body.includes('"type":"Campus Services"'))).toBe(true);
+    expect(sent.some((body) => body.includes('"type":"Building"'))).toBe(false);
+  });
+
   it("normalizes Building and Facility footprints and reads the committed result after deletion", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
@@ -1144,8 +1227,8 @@ describe("real walking network service boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
 
     await expect(httpServices.map.buildings()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "4", type: "Building" }),
-      expect.objectContaining({ id: "8", type: "Facility", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] }),
+      expect.objectContaining({ id: "4", classification: "Building" }),
+      expect.objectContaining({ id: "8", classification: "Facility", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] }),
     ]));
     await httpServices.map.removeBuilding("4");
     await expect(httpServices.map.buildings()).resolves.toEqual([]);
@@ -1248,7 +1331,10 @@ describe("dashboard analytics", () => {
       new Response(JSON.stringify({ success: true, data: served }), { status: 200 }),
     );
 
-    await expect(httpServices.dashboard.analytics("month")).resolves.toEqual(served);
+    await expect(httpServices.dashboard.analytics("month")).resolves.toEqual({
+      ...served,
+      topDestinations: [{ ...served.topDestinations[0], locationId: "Place:1" }],
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/dashboard/analytics?range=month",
       expect.objectContaining({ credentials: "include" }),
@@ -1261,7 +1347,7 @@ describe("dashboard analytics", () => {
 it("uses Manila dates and actual active directory metadata, including building footprints", () => {
   const now = Date.parse("2026-10-08T16:30:00Z"); // October 9 in Manila
   const directory: Location[] = [{
-    id: "42", name: "Library", code: "LIB", type: "Building", parentId: null,
+    id: "42", name: "Library", code: "LIB", type: "Place", classification: "Building", parentId: null,
     status: "Active", lat: null, lng: null, positioned: false,
     function: "Study space", keywords: "library", hasPhoto: true,
   }];

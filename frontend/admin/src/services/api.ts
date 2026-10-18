@@ -15,6 +15,7 @@ import type {
   LocationPosition,
   LocationType,
   MapSavePayload,
+  PlaceClassification,
   Page,
   Pathway,
   RouteNode,
@@ -54,7 +55,7 @@ import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
-import { indoorLocationTypes, LocationPolicyError, locationPolicy } from "../lib/locationPolicy";
+import { backendLocationType, indoorLocationTypes, isLocationContainer, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
 
@@ -68,7 +69,7 @@ import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, norma
 export type ApiMode = "local" | "mock" | "real";
 
 export type LocationListFilters = {
-  type?: Location["type"];
+  type?: BackendLocationType;
   status?: Location["status"];
   buildingId?: string;
   floor?: string;
@@ -120,6 +121,10 @@ const dashboardMetricsSchema = z.object({
   recent: z.array(z.unknown()),
 });
 
+/** Backend keys may still be "Building:12" or "Facility:12"; identity keys now say "Place:12". */
+const withNormalizedLocationKey = <T extends { locationId?: string }>(row: T): T =>
+  row.locationId === undefined ? row : { ...row, locationId: normalizeLocationKey(row.locationId) };
+
 export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary => {
   const value = raw && typeof raw === "object" && "data" in raw
     ? (raw as { data: unknown }).data
@@ -130,6 +135,7 @@ export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary
     return {
       ...parsed.data,
       usersByType: parsed.data.usersByType ?? null,
+      topSearched: parsed.data.topSearched.map(withNormalizedLocationKey),
       recent: parsed.data.recent.map((entry) => normalizeBackendAudit(entry as BackendAudit)),
     };
   } catch {
@@ -178,7 +184,7 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const parsed = dashboardAnalyticsSchema.safeParse(value);
   if (!parsed.success) throw new Error("Backend returned malformed dashboard analytics.");
-  return parsed.data;
+  return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
 };
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
@@ -187,12 +193,10 @@ const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, l
   return { items: page.items.map(normalize), total: page.total, page: page.page, pageSize: page.pageSize };
 };
 
-const locationTypes = ["Building", "Floor", "Room", "Office", "Laboratory", "Restroom", "Facility"] as const;
 const persistedLocationTypes: Partial<Record<number, Location["type"]>> = {
   1: "Room",
   2: "Laboratory",
   3: "Office",
-  4: "Facility",
   5: "Restroom",
 };
 const locationStatuses = ["Active", "Inactive", "Open", "Closed", "Unknown"] as const;
@@ -201,10 +205,11 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   const id = raw.id ?? raw.location_id;
   const name = raw.name ?? raw.location_name;
   const code = raw.code ?? raw.location_code;
-  const type = raw.type ?? (typeof raw.type_id === "number" ? persistedLocationTypes[raw.type_id] : undefined);
-  if (id === undefined || typeof name !== "string" || typeof code !== "string" || !locationTypes.includes(type as typeof locationTypes[number])) {
+  const rawType = raw.type ?? (typeof raw.type_id === "number" ? persistedLocationTypes[raw.type_id] : undefined);
+  if (id === undefined || typeof name !== "string" || typeof code !== "string") {
     throw new Error("Backend returned a malformed location record.");
   }
+  const typeFields = placeFieldsFromBackendType(rawType);
   const status = raw.status ?? "Active";
   if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
   const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
@@ -219,7 +224,7 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
     throw new Error("Backend returned inconsistent location position.");
   }
   const normalized: Location = {
-    id: String(id), name, code, type: type as Location["type"],
+    id: String(id), name, code, ...typeFields,
     parentId: raw.parentId === null || raw.parentId === undefined ? (raw.building_id == null ? null : String(raw.building_id)) : String(raw.parentId),
     status: status as Location["status"], lat, lng,
     positioned: hasPosition,
@@ -261,9 +266,14 @@ const fetchAllBackendLocations = async (): Promise<Location[]> => {
 };
 
 const locationWritePayload = (location: LocationDraft) => {
-  const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, ...payload } = location;
-  return payload;
+  const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, classification: _classification, ...payload } = location;
+  // The backend still speaks Building/Facility, so a Place is sent as its classification.
+  return { ...payload, type: backendLocationType(location) };
 };
+
+/** A map Building on the wire: `type` carries the classification string. */
+const buildingWritePayload = ({ classification, ...building }: Building) =>
+  classification ? { ...building, type: classification } : building;
 
 export const normalizeBackendLocationMutation = (raw: unknown): Location => {
   const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
@@ -381,12 +391,12 @@ const normalizeMapPoints = (raw: unknown, label: string): [number, number][] => 
   return raw.map(([lat, lng]) => [lat, lng]);
 };
 
-const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building => {
+export const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building => {
   const id = raw.id ?? raw.building_id;
   const name = raw.name ?? raw.building_name;
   const code = raw.code ?? raw.building_code;
-  const type = raw.type ?? "Building";
-  if (id === undefined || typeof name !== "string" || typeof code !== "string" || (type !== "Building" && type !== "Facility")) {
+  const classification: PlaceClassification = classificationFromBackend(raw.type);
+  if (id === undefined || typeof name !== "string" || typeof code !== "string") {
     throw new Error("Backend returned a malformed building record.");
   }
   const status = raw.status ?? "Active";
@@ -397,7 +407,7 @@ const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building => {
     id: String(id),
     name,
     code,
-    type,
+    classification,
     status: status as Building["status"],
     points: normalizeMapPoints(raw.points ?? raw.polygon_coordinates ?? [], "building"),
   };
@@ -477,8 +487,8 @@ const actionablePathPointError = (pathwayId: string, cause: unknown) => {
 };
 const canonicalNetwork = createCanonicalNetworkStore(
   generatedMapFixture
-    ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: { type: string; }) => location.type === "Building") }
-    : { buildings, nodes: routeNodes, pathways, locationBuildings: locations.filter((location) => location.type === "Building").map((location) => ({ id: location.id, name: location.name })) },
+    ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: Location) => isLocationContainer(location)) }
+    : { buildings, nodes: routeNodes, pathways, locationBuildings: locations.filter((location) => isLocationContainer(location)).map((location) => ({ id: location.id, name: location.name })) },
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
 
@@ -647,15 +657,15 @@ export interface Services {
 
     save(location: LocationDraft, photos?: LocationPhotoDraft[]): Promise<Location>;
 
-    getPhotos(id: string, type: LocationType): Promise<LocationPhotoDraft[]>;
+    getPhotos(id: string, type: BackendLocationType): Promise<LocationPhotoDraft[]>;
 
     savePosition(position: LocationPosition): Promise<Location>;
 
     saveIndoorPosition(position: LocationPosition & { buildingId: string }): Promise<Location>;
 
-    getPhoto(id: string, type?: LocationType): Promise<Blob>;
+    getPhoto(id: string, type?: BackendLocationType): Promise<Blob>;
 
-    remove(id: string, type?: LocationType): Promise<void>;
+    remove(id: string, type?: BackendLocationType): Promise<void>;
   };
 
   users: {
@@ -685,7 +695,7 @@ export interface Services {
       date?: string, page?: number, pageSize?: number
     ): Promise<Page<AuditEntry>>;
 
-    forLocation(id: string, name?: string, type?: LocationType): Promise<Page<AuditEntry>>;
+    forLocation(id: string, name?: string, type?: BackendLocationType): Promise<Page<AuditEntry>>;
   };
 
   map: {
@@ -837,7 +847,7 @@ const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
 };
 
 const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
-const photoGalleryKey = (id: string, type: LocationType) => `${type === "Building" || type === "Facility" ? "building" : "location"}:${id}`;
+const photoGalleryKey = (id: string, type: BackendLocationType) => `${isPlaceClassification(type) ? "building" : "location"}:${id}`;
 
 export const services: Services = {
 
@@ -1223,7 +1233,7 @@ export const services: Services = {
             [
               location.name,
               location.code,
-              location.type,
+              backendLocationType(location),
               location.function ?? "",
               location.keywords ?? "",
               location.building ?? "",
@@ -1231,7 +1241,7 @@ export const services: Services = {
             ].some((value) =>
               matches(value, q)
             )) &&
-          (!filters.type || location.type === filters.type) &&
+          (!filters.type || backendLocationType(location) === filters.type) &&
           (!filters.status || location.status === filters.status) &&
           (!filters.buildingId || location.parentId === filters.buildingId) &&
           (!filters.floor || location.floor === filters.floor)
@@ -1264,7 +1274,7 @@ export const services: Services = {
               });
               if (gallery !== undefined) {
                 const existingIds = new Set(gallery.filter((photo) => !photo.file).map((photo) => photo.id));
-                const original = photoGalleryCache.get(photoGalleryKey(location.id ?? "", location.type)) ?? [];
+                const original = photoGalleryCache.get(photoGalleryKey(location.id ?? "", backendLocationType(location))) ?? [];
                 form.append("removePhotoIds", JSON.stringify(original.filter((photo) => !existingIds.has(photo.id)).map((photo) => Number(photo.id)).filter(Number.isFinite)));
                 const coverIndex = gallery.findIndex((photo) => photo.isCover);
                 if (coverIndex >= 0) form.append("coverIndex", String(coverIndex));
@@ -1279,12 +1289,12 @@ export const services: Services = {
               return form;
             })()
           : JSON.stringify(locationWritePayload(location));
-        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}?type=${encodeURIComponent(location.type)}` : "/api/locations", {
+        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}?type=${encodeURIComponent(backendLocationType(location))}` : "/api/locations", {
           method: location.id ? "PUT" : "POST",
           body,
         });
         const saved = normalizeBackendLocationMutation(response);
-        if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, saved.type), gallery);
+        if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, backendLocationType(saved)), gallery);
         return saved;
       }
 
@@ -1309,7 +1319,7 @@ export const services: Services = {
       if (!evaluation.valid) throw new LocationPolicyError(evaluation.issues);
 
       const saved = localAdapter.locations.save(normalized);
-      if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, saved.type), gallery);
+      if (gallery !== undefined) photoGalleryCache.set(photoGalleryKey(saved.id, backendLocationType(saved)), gallery);
       addAudit("Updated Location", saved.name, "Admin", saved.id);
       return wait(clone(saved));
     },
@@ -1330,7 +1340,7 @@ export const services: Services = {
         ...photo,
         previewUrl: photo.file ? URL.createObjectURL?.(photo.file) ?? photo.previewUrl : photo.previewUrl,
       }));
-      const location = locations.find((item) => item.id === id && item.type === type);
+      const location = locations.find((item) => item.id === id && backendLocationType(item) === type);
       return location?.photo ? [{ id: "legacy", name: location.photo.name, type: location.photo.type, previewUrl: location.photo.dataUrl, isCover: true }] : [];
     },
 
@@ -1385,8 +1395,8 @@ export const services: Services = {
       failIfConfigured("locationRemove");
 
       const target = locations.find((location) => location.id === id);
-      if (target?.type === "Building") failIfConfigured("buildingRemove");
-      const children = target?.type === "Building"
+      if (target && isLocationContainer(target)) failIfConfigured("buildingRemove");
+      const children = target && isLocationContainer(target)
         ? locations.filter((location) => location.parentId === id)
         : [];
       const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
@@ -1802,7 +1812,7 @@ export const services: Services = {
         }
         await apiJson<unknown>("/api/map/save", {
           method: "POST",
-          body: JSON.stringify(edit ? { ...edit, selected: edit.selected?.type === "location" ? undefined : edit.selected, place: edit.selected?.type === "location" ? undefined : edit.place, movedLocation: undefined } : {}),
+          body: JSON.stringify(edit ? { ...edit, buildings: edit.buildings?.map(buildingWritePayload), selected: edit.selected?.type === "location" ? undefined : edit.selected, place: edit.selected?.type === "location" ? undefined : edit.place, movedLocation: undefined } : {}),
         });
         return;
       }

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
-import { locationIdentityKey } from "../../../lib/locationPolicy";
+import { canContainLocations, isLocationContainer, locationIdentityKey, placeClassificationOf } from "../../../lib/locationPolicy";
 import { overlayChanges } from "../mapEditing";
 import type { MapOverlay } from "./useMapOverlay";
 
@@ -36,12 +36,12 @@ export function useSessionMapData(
   const allSessionBuildings = useMemo(() => {
     const buildingMap = new Map<string, Building>();
     for (const loc of currentLocations) {
-      if (loc.type === "Building" || loc.type === "Facility") {
+      if (loc.type === "Place") {
         buildingMap.set(loc.id, {
           id: loc.id,
           name: loc.name,
           code: loc.code,
-          type: loc.type === "Facility" ? "Facility" : "Building",
+          classification: placeClassificationOf(loc),
           status: loc.status ?? "Active",
           points: [],
         });
@@ -59,20 +59,20 @@ export function useSessionMapData(
   const buildingAssociationOptions = useMemo(() => {
     const buildingMap = new Map<string, Building>();
     for (const location of locationDirectory ?? []) {
-      if (location.type !== "Building") continue;
+      if (!isLocationContainer(location)) continue;
       buildingMap.set(location.id, {
         id: location.id,
         name: location.name,
         code: location.code,
-        type: "Building",
+        classification: placeClassificationOf(location),
         status: location.status,
         points: [],
       });
     }
     for (const building of allSessionBuildings) {
-      if (building.type === "Facility") continue;
+      if (!canContainLocations(placeClassificationOf(building))) continue;
       const existing = buildingMap.get(building.id);
-      buildingMap.set(building.id, { ...existing, ...building, type: "Building" });
+      buildingMap.set(building.id, { ...existing, ...building, classification: placeClassificationOf(building) });
     }
     return Array.from(buildingMap.values()).sort((left, right) => left.name.localeCompare(right.name));
   }, [allSessionBuildings, locationDirectory]);

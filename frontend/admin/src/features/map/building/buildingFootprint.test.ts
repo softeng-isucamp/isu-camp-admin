@@ -31,7 +31,7 @@ const existingLocations: Location[] = [
     id: "bld-eng",
     name: "Engineering Hall",
     code: "ENG-01",
-    type: "Building",
+    type: "Place", classification: "Building",
     parentId: null,
     status: "Active",
     lat: null,
@@ -42,7 +42,7 @@ const existingLocations: Location[] = [
     id: "loc-gate",
     name: "Main Gate",
     code: "GATE-01",
-    type: "Facility",
+    type: "Place", classification: "Facility",
     parentId: null,
     status: "Active",
     lat: 16.720,
@@ -220,7 +220,8 @@ describe("buildCreateBuildingOperation", () => {
       id: "bld-test-123",
       name: "New Laboratory Building",
       code: "LAB-NEW",
-      type: "Building",
+      type: "Place",
+      classification: "Building",
       status: "Active",
       lat: null,
       lng: null,
@@ -232,12 +233,13 @@ describe("buildCreateBuildingOperation", () => {
 
   it("creates a footprint-backed Facility without copied outdoor coordinates", () => {
     const operation = buildCreateBuildingOperation(
-      { name: "Health Center", code: "HC-01", type: "Facility" },
+      { name: "Health Center", code: "HC-01", classification: "Facility" },
       validPoints,
       "facility-1",
     );
     expect(operation.after).toMatchObject({
-      type: "Facility",
+      type: "Place",
+      classification: "Facility",
       lat: null,
       lng: null,
       positioned: false,
