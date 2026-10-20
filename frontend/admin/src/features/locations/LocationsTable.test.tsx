@@ -879,6 +879,15 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       expect(listed.some((option) => option.includes("Unclassified Hall"))).toBe(false);
     });
 
+    it("still warns that deleting it removes its indoor Locations", async () => {
+      const records = [unclassified, child];
+      vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+      renderLocations();
+      fireEvent.click(await screen.findByRole("button", { name: `Actions for ${unclassified.name}` }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+      expect(await screen.findByText("This Building contains 1 associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.")).toBeInTheDocument();
+    });
+
     it("cannot be saved until the admin chooses a classification", async () => {
       const records = [unclassified];
       vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });

@@ -694,7 +694,8 @@ export function Locations() {
 
   const isChildLocation = (item: Location) => isChildType(item.type);
   const isBuilding = (item: Location) => isLocationContainer(item);
-  const selectedChildren = selected && isLocationContainer(selected)
+  // Any Place, classified or not: the backend deletes every Location under it, so the warning must list them.
+  const selectedChildren = selected && isPlace(selected)
     ? allLocations.filter((location) => isChildType(location.type) && location.parentId === selected.id)
     : [];
   // Only an edit reclassifies; the add dialog's `selected` is the parent of a new indoor Location.

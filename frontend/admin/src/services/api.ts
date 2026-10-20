@@ -849,7 +849,11 @@ const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
 const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
 /** Only a Place can lack a type, so a missing one keys the building gallery. */
 const photoGalleryKey = (id: string, type: BackendLocationType | undefined) => `${type === undefined || isPlaceClassification(type) ? "building" : "location"}:${id}`;
-/** The `?type=` query of a read: omitted for an unclassified Place, which the backend then finds by id. */
+/**
+ * The `?type=` query of a read: omitted for an unclassified Place. Without it the backend looks in the
+ * Location table first, so a Room sharing the id can answer instead (photos, history) or the request is
+ * refused as ambiguous (delete). Accepted while no Place is unclassified; a backend "Place" hint would fix it.
+ */
 const typeQuery = (type: BackendLocationType | undefined) => type ? `?type=${encodeURIComponent(type)}` : "";
 
 export const services: Services = {
@@ -1402,8 +1406,9 @@ export const services: Services = {
       failIfConfigured("locationRemove");
 
       const target = locations.find((location) => location.id === id);
-      if (target && isLocationContainer(target)) failIfConfigured("buildingRemove");
-      const children = target && isLocationContainer(target)
+      if (target && isPlace(target)) failIfConfigured("buildingRemove");
+      // Like the backend, deleting any Place takes its Locations with it, whether or not it is classified.
+      const children = target && isPlace(target)
         ? locations.filter((location) => location.parentId === id)
         : [];
       const affected = target ? [target, ...children.filter((child) => child.id !== target.id)] : [];
