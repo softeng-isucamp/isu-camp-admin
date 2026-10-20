@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { services } from "../../services/api";
-import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, SelectField, Spinner } from "../../components/UI";
+import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner } from "../../components/UI";
+import { FilterCombobox } from "../../components/FilterCombobox";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { formatDateTime } from "../../lib/format";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
@@ -10,7 +11,8 @@ import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
 import { AdministratorsPanel } from "./AdministratorsPanel";
 
-const ranges = [["all", "All time"], ["7d", "Last 7 days"], ["30d", "Last 30 days"], ["90d", "Last 90 days"]] as const;
+const rangeOptions = [{ id: "7d", name: "Last 7 days" }, { id: "30d", name: "Last 30 days" }, { id: "90d", name: "Last 90 days" }];
+const accountTypeOptions = accountTypes.map((type) => ({ id: type.key, name: type.label }));
 
 type DirectoryTab = "app" | "admins";
 
@@ -74,18 +76,24 @@ function AppUserDirectory() {
 
       <Card className="filters">
         <Field label="" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
-        <SelectField label="REGISTERED" value={createdRange} onChange={(e) => setCreatedRange(e.target.value)}>
-          {ranges.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </SelectField>
-        <SelectField
+        <FilterCombobox
+          label="REGISTERED"
+          noun="date ranges"
+          allLabel="All time"
+          searchable={false}
+          options={rangeOptions}
+          value={createdRange === "all" ? null : createdRange}
+          onChange={(id) => setCreatedRange(id ?? "all")}
+        />
+        <FilterCombobox
           label="ACCOUNT TYPE"
-          className="account-type-filter"
-          value={userType}
-          onChange={(e) => setUserType(e.target.value as UserAccountType | "all")}
-        >
-          <option value="all">All</option>
-          {accountTypes.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}
-        </SelectField>
+          noun="account types"
+          allLabel="All"
+          searchable={false}
+          options={accountTypeOptions}
+          value={userType === "all" ? null : userType}
+          onChange={(id) => setUserType(id === null ? "all" : (id as UserAccountType))}
+        />
       </Card>
 
       <Card className="table-card" style={{ overflow: "visible" }}>
