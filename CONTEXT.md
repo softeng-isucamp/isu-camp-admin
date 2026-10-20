@@ -27,7 +27,7 @@ Anything outdoors on the campus map, drawn as a footprint and given exactly one 
 _Avoid_: Building (only some Places are buildings), site, structure
 
 **Classification**:
-The kind of a Place, which also decides whether it can contain indoor Locations. One of College, Campus Services, Food, Parking, or Facility. Places recorded before these Classifications existed are **unclassified** (shown as the legacy value Building) until an admin classifies them; they can contain indoor Locations meanwhile.
+The kind of a Place, which also decides whether it can contain indoor Locations. One of College, Campus Services, Food, Parking, or Facility. Every Place has one. A Place that arrives without a known Classification is shown as **unclassified**: it cannot take new indoor Locations, and an admin must classify it before saving it. The legacy value Building is retired.
 _Avoid_: Building type, category
 
 **College**:
