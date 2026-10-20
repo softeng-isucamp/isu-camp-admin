@@ -1,8 +1,10 @@
 import { backendLocationType, type BackendLocationType } from "../../lib/locationPolicy";
 import type { LocationType, PlaceClassification } from "../../types";
 
+/** A Place with no classification (or a classification without an icon of its own). */
+const placeIcon = '<path d="M3 21h18M4 18h16M6 18V9M10 18V9M14 18V9M18 18V9M12 3l9 4.5H3L12 3z" />';
+
 const iconContents: Partial<Record<BackendLocationType, string>> = {
-  Building: '<path d="M3 21h18M4 18h16M6 18V9M10 18V9M14 18V9M18 18V9M12 3l9 4.5H3L12 3z" />',
   College: '<path d="M22 10 12 5 2 10l10 5 10-5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /><path d="M22 10v6" />',
   "Campus Services": '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18z" /><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" /><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" /><path d="M10 6h4M10 10h4M10 14h4M10 18h4" />',
   Food: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7" />',
@@ -17,8 +19,7 @@ const iconContents: Partial<Record<BackendLocationType, string>> = {
 
 export function locationTypeIconContents(type: LocationType, classification?: PlaceClassification): string {
   const key = backendLocationType({ type, classification });
-  // A classification without an icon reads as a Building.
-  return iconContents[key] ?? (type === "Place" ? iconContents.Building! : '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />');
+  return (key && iconContents[key]) || (type === "Place" ? placeIcon : '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />');
 }
 
 export function LocationTypeIcon({

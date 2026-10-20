@@ -24,7 +24,7 @@ export function locationInspectorModel({
     : null;
   const locationSummary: InspectorCardModel["summary"] = [
     { label: "Code", value: selectedLocation.code },
-    { label: "Type", value: isUnclassifiedPlace(selectedLocation) ? <>{backendLocationType(selectedLocation)} <Badge tone="grey">Unclassified</Badge></> : backendLocationType(selectedLocation) },
+    { label: "Type", value: isUnclassifiedPlace(selectedLocation) ? <Badge tone="grey">Unclassified</Badge> : backendLocationType(selectedLocation) },
     ...(!isFootprintOwner && !isIndoorLocation(selectedLocation) ? [{ label: "Parent building", value: selectedLocation.building || parentBuilding?.name || "—" }] : []),
     ...(!isFootprintOwner ? [{ label: "Floor", value: selectedLocation.floor || "—" }] : []),
     ...(selectedLocation.function ? [{ label: "Function", value: selectedLocation.function }] : []),

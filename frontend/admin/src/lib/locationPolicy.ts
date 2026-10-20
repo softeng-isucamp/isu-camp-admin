@@ -1,4 +1,4 @@
-import { PLACE_CLASSIFICATIONS, SELECTABLE_PLACE_CLASSIFICATIONS } from "../types";
+import { PLACE_CLASSIFICATIONS } from "../types";
 import type { Location, LocationDraft, LocationType, PlaceClassification } from "../types";
 
 export type LocationKind = "outdoor" | "floor" | "indoor";
@@ -19,29 +19,29 @@ export const isIndoorLocationType = (type: LocationType) =>
 const classificationCanContain: Record<PlaceClassification, boolean> = {
   College: true,
   "Campus Services": true,
-  Building: true,
   Facility: false,
   Food: false,
   Parking: false,
 };
 
-export const canContainLocations = (classification: PlaceClassification): boolean =>
-  classificationCanContain[classification] ?? false;
+/** An unclassified Place (no classification) cannot be verified to hold indoor Locations, so it cannot. */
+export const canContainLocations = (classification: PlaceClassification | undefined): boolean =>
+  classification ? classificationCanContain[classification] ?? false : false;
 
 export const isPlace = (location: Pick<Location, "type">): boolean => location.type === "Place";
 
-/** A Place that can be the parent of indoor Locations (College, Campus Services, or an unclassified legacy Place). */
+/** A Place that can be the parent of indoor Locations (College or Campus Services). */
 export const isLocationContainer = (location: Pick<Location, "type" | "classification">): boolean =>
   isPlace(location) && canContainLocations(placeClassificationOf(location));
 
-/** Classification of a Place record; Places without one are treated as Buildings. */
-export const placeClassificationOf = (location: Pick<Location, "classification">): PlaceClassification =>
-  location.classification ?? "Building";
+/** Classification of a Place record; undefined when it is unclassified. */
+export const placeClassificationOf = (location: Pick<Location, "classification">): PlaceClassification | undefined =>
+  location.classification;
 
-/** What the backend calls a record's type: a Place's classification, otherwise its own type. */
+/** What the backend calls a record's type: a Place's classification, otherwise its own type. Undefined only for an unclassified Place. */
 export type BackendLocationType = Exclude<LocationType, "Place"> | PlaceClassification;
 
-export const backendLocationType = (location: Pick<Location, "type" | "classification">): BackendLocationType =>
+export const backendLocationType = (location: Pick<Location, "type" | "classification">): BackendLocationType | undefined =>
   location.type === "Place" ? placeClassificationOf(location) : location.type;
 
 /** Sets a type-picker choice ("Food", "Facility", "Room", ...) on a draft: Places carry it as their classification. */
@@ -55,13 +55,13 @@ export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option
 export const isPlaceClassification = (value: unknown): value is PlaceClassification =>
   (PLACE_CLASSIFICATIONS as readonly unknown[]).includes(value);
 
-/** A legacy Place: recorded before Classifications existed, so the backend still calls it a Building. */
+/** A Place with no classification: the backend sent a null, missing, or unknown type. The one test every "Unclassified" badge uses. */
 export const isUnclassifiedPlace = (location: Pick<Location, "type" | "classification">): boolean =>
-  isPlace(location) && placeClassificationOf(location) === "Building";
+  isPlace(location) && placeClassificationOf(location) === undefined;
 
-/** Option text for a type or classification: the legacy "Building" value is shown as unclassified. */
+/** Option text for a type or classification. */
 export const locationTypeOptionLabel = (type: BackendLocationType): string =>
-  type === "Building" ? "Unclassified (legacy)" : type === "Floor" ? "Floor (legacy records only)" : type;
+  type === "Floor" ? "Floor (legacy records only)" : type;
 
 /** The indoor Locations (Room, Office, Laboratory, Restroom) a Place holds; compatibility Floor records are not counted. */
 export const indoorLocationsOf = (place: Pick<Location, "id">, directory: readonly Location[]): Location[] =>
@@ -69,22 +69,22 @@ export const indoorLocationsOf = (place: Pick<Location, "id">, directory: readon
 
 /** Classifications a Place holding `indoorCount` indoor Locations cannot be moved to. */
 export const blockedReclassifications = (indoorCount: number): PlaceClassification[] =>
-  indoorCount > 0 ? SELECTABLE_PLACE_CLASSIFICATIONS.filter((value) => !canContainLocations(value)) : [];
+  indoorCount > 0 ? PLACE_CLASSIFICATIONS.filter((value) => !canContainLocations(value)) : [];
+
+export const isBlockedReclassification = (indoorCount: number, classification: PlaceClassification | undefined): boolean =>
+  classification !== undefined && blockedReclassifications(indoorCount).includes(classification);
 
 export const reclassificationBlockedMessage = (indoorCount: number): string => {
   const names = blockedReclassifications(indoorCount);
   return `Move or delete its ${indoorCount} indoor ${indoorCount === 1 ? "Location" : "Locations"} before classifying it as ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}.`;
 };
 
-/** What a classification picker offers: the selectable set, plus the record's current value when that is not selectable. */
-export const placeClassificationOptions = (current?: PlaceClassification): PlaceClassification[] => {
-  const selectable: PlaceClassification[] = [...SELECTABLE_PLACE_CLASSIFICATIONS];
-  return current && !selectable.includes(current) ? [...selectable, current] : selectable;
-};
+/** What a classification picker offers. */
+export const placeClassificationOptions = (): PlaceClassification[] => [...PLACE_CLASSIFICATIONS];
 
-/** A backend classification string; null, missing, and unknown values read as Building. */
-export const classificationFromBackend = (raw: unknown): PlaceClassification =>
-  isPlaceClassification(raw) ? raw : "Building";
+/** A backend classification string; null, missing, and unknown values (including a stray "Building") read as unclassified. */
+export const classificationFromBackend = (raw: unknown): PlaceClassification | undefined =>
+  isPlaceClassification(raw) ? raw : undefined;
 
 /**
  * Anything that is not an indoor type or "Floor" is a Place, classified by
@@ -92,7 +92,7 @@ export const classificationFromBackend = (raw: unknown): PlaceClassification =>
  */
 export const placeFieldsFromBackendType = (raw: unknown):
   | { type: Exclude<LocationType, "Place"> }
-  | { type: "Place"; classification: PlaceClassification } => {
+  | { type: "Place"; classification: PlaceClassification | undefined } => {
   if (raw === "Floor" || (indoorLocationTypes as readonly unknown[]).includes(raw)) {
     return { type: raw as Exclude<LocationType, "Place"> };
   }
@@ -100,15 +100,16 @@ export const placeFieldsFromBackendType = (raw: unknown):
 };
 
 /**
- * Maps keys prefixed with a Place classification ("Building:12", "Facility:12")
- * to "Place:12". Other prefixes, including the backend's "Location:" fallback
+ * Maps keys prefixed with a Place classification ("Facility:12", or the retired
+ * "Building:12" that older bookmarks and analytics rows may still carry) to
+ * "Place:12". Other prefixes, including the backend's "Location:" fallback
  * for an unknown indoor type, are left alone: Place and Location ids collide.
  */
 export const normalizeLocationKey = (key: string): string => {
   const separator = key.indexOf(":");
   if (separator < 0) return key;
   const prefix = key.slice(0, separator);
-  return isPlaceClassification(prefix) ? `Place:${key.slice(separator + 1)}` : key;
+  return isPlaceClassification(prefix) || prefix === "Building" ? `Place:${key.slice(separator + 1)}` : key;
 };
 
 export const locationIdentityKey = (location: Pick<Location, "id" | "type">) =>
@@ -126,6 +127,7 @@ export type LocationPolicyIssueCode =
   | "building_parent_required"
   | "building_parent_not_found"
   | "building_parent_wrong_type"
+  | "classification_required"
   | "building_name_mismatch"
   | "outdoor_hierarchy_forbidden"
   | "coordinate_pair_required"
@@ -256,6 +258,14 @@ const evaluate = (
   const issues: LocationPolicyIssue[] = [];
   const classification = classify(draft.type);
   const coordinates = analyzeCoordinates(draft);
+
+  if (isUnclassifiedPlace(draft)) {
+    issues.push({
+      code: "classification_required",
+      field: "type",
+      message: "Select a classification.",
+    });
+  }
 
   if (classification.requiresBuildingParent) {
     const parentRecord = options.directory.find((location) => location.id === draft.parentId);

@@ -25,15 +25,20 @@ function renderModal(location: Location, directory: Location[], onSubmit = vi.fn
 }
 
 describe("LocationDetailsModal classification", () => {
-  it("keeps a legacy Place as Unclassified (legacy) through a save", async () => {
-    const { select, onSubmit } = renderModal(place("Building"), []);
+  it("shows a Place without a classification as Unclassified and refuses to save it until one is chosen", async () => {
+    const { select, onSubmit } = renderModal(place(undefined), []);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
-    expect(select).toHaveValue("Building");
-    expect([...select.options].at(-1)?.text).toBe("Unclassified (legacy)");
+    expect(select).toHaveValue("");
+    expect([...select.options].map((option) => option.text)).toEqual(["Select a classification", "College", "Campus Services", "Food", "Parking", "Facility"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
+    expect(await screen.findByText("Select a classification.", { selector: ".field-error-msg" })).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(select, { target: { value: "Food" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ type: "Place", classification: "Building" });
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ type: "Place", classification: "Food" });
   });
 
   it("blocks leaf classifications for a Place holding indoor Locations but allows College and Campus Services", async () => {

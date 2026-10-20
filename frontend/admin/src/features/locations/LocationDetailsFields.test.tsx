@@ -24,7 +24,7 @@ describe("location details status field", () => {
   // public.building.status and public.location.status both persist the choice
   // now, so no type needs a caller's permission to edit it and no option is
   // offered that neither column can hold.
-  it.each<BackendLocationType>(["Building", "Facility", "Room", "Laboratory", "Office", "Restroom"])(
+  it.each<BackendLocationType>(["College", "Facility", "Room", "Laboratory", "Office", "Restroom"])(
     "lets a %s be retired and offers only the two stored values",
     (type) => {
       render(<Fixture type={type} />);
@@ -49,24 +49,25 @@ describe("location details status field", () => {
   });
 });
 
-describe("location type picker for a legacy classification", () => {
+describe("location type picker for a Place", () => {
   const legacyDraft = () => withLocationTypeOption({
     name: "Old Hall", code: "OLD", type: "Room", parentId: null,
     status: "Active", lat: null, lng: null, positioned: false,
-  } as LocationDraft, "Building");
+  } as LocationDraft, "College");
 
-  it("shows the legacy value as Unclassified (legacy), keeps it, and badges the field", () => {
-    render(<LocationDetailsFields draft={legacyDraft()} allowedTypes={placeClassificationOptions("Building")} onChange={() => {}} />);
+  it("preselects nothing for an unclassified Place, badges the field, and offers only the five classifications", () => {
+    const { classification: _classification, ...unclassified } = legacyDraft();
+    render(<LocationDetailsFields draft={unclassified} allowedTypes={placeClassificationOptions()} onChange={() => {}} />);
     const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
-    expect(select.value).toBe("Building");
+    expect(select.value).toBe("");
     expect([...select.options].map((option) => option.text)).toEqual([
-      "College", "Campus Services", "Food", "Parking", "Facility", "Unclassified (legacy)",
+      "Select a classification", "College", "Campus Services", "Food", "Parking", "Facility",
     ]);
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
   });
 
   it("never offers Building by default, and shows no badge for a classified Place", () => {
-    const draft = withLocationTypeOption(legacyDraft(), "College");
+    const draft = legacyDraft();
     render(<LocationDetailsFields draft={draft} onChange={() => {}} />);
     const select = screen.getByLabelText(/^location type/i) as HTMLSelectElement;
     expect([...select.options].map((option) => option.value)).not.toContain("Building");

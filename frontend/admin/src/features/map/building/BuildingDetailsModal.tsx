@@ -1,6 +1,6 @@
 import type { PlaceClassification } from "../../../types";
 import { Button, Field, Modal, SelectField } from "../../../components/UI";
-import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../../types";
+import { PLACE_CLASSIFICATIONS } from "../../../types";
 import type { BuildingIdentityInput } from "./buildingFootprint";
 
 interface BuildingDetailsModalProps {
@@ -29,7 +29,7 @@ export function BuildingDetailsModal({ draft, classification, classificationErro
       <div className="form-grid-two">
         <SelectField label="CLASSIFICATION" required value={classification} error={classificationError} onChange={(event) => onClassificationChange(event.target.value as PlaceClassification)} helper="College and Campus Services can contain indoor Locations; Food, Parking, and Facility cannot.">
           <option value="">Select a classification</option>
-          {SELECTABLE_PLACE_CLASSIFICATIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+          {PLACE_CLASSIFICATIONS.map((value) => <option key={value} value={value}>{value}</option>)}
         </SelectField>
         <SelectField label="STATUS" required value={draft.status ?? "Active"} onChange={(event) => onChange({ ...draft, status: event.target.value as "Active" | "Inactive" })}>
           <option>Active</option><option>Inactive</option>

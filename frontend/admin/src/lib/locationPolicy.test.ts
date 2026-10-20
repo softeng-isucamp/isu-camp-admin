@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Location, LocationDraft, LocationType } from "../types";
 import { generatedMapFixture } from "../services/generatedMapFixture";
 import { locations as curatedLocations } from "../services/mockData";
-import { blockedReclassifications, canContainLocations, classificationFromBackend, isLocationContainer, isUnclassifiedPlace, locationIdentityKey, locationTypeOptionLabel, placeClassificationOptions, reclassificationBlockedMessage, locationPolicy, normalizeLocationKey, withLocationTypeOption, type BackendLocationType } from "./locationPolicy";
+import { blockedReclassifications, canContainLocations, backendLocationType, classificationFromBackend, isLocationContainer, isUnclassifiedPlace, locationIdentityKey, locationTypeOptionLabel, placeClassificationOptions, reclassificationBlockedMessage, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, withLocationTypeOption, type BackendLocationType } from "./locationPolicy";
 
 const draft = (overrides: Partial<LocationDraft> = {}): LocationDraft => ({
   name: "Computer Laboratory",
@@ -20,7 +20,7 @@ const building: Location = {
   id: "building-1",
   name: "Science Building",
   code: "SCI",
-  type: "Place", classification: "Building",
+  type: "Place", classification: "College",
   parentId: null,
   status: "Active",
   lat: 16.72,
@@ -44,7 +44,7 @@ const secondBuilding: Location = {
 };
 
 const locationTypes = [
-  "Building",
+  "College",
   "Facility",
   "Floor",
   "Room",
@@ -95,7 +95,7 @@ describe("Location policy", () => {
 
   it.each(locationTypes.map((option) => [
     option,
-    option === "Building" || option === "Facility"
+    option === "College" || option === "Facility"
       ? "outdoor"
       : option === "Floor"
         ? "floor"
@@ -329,11 +329,11 @@ describe("Location policy", () => {
   ]))(
     "accepts a canonical %s Location in %s context",
     (option, context) => {
-      const isOutdoor = option === "Building" || option === "Facility";
+      const isOutdoor = option === "College" || option === "Facility";
       const type = withLocationTypeOption(draft(), option).type;
       const location = draft(isOutdoor ? {
         type,
-        classification: option as "Building" | "Facility",
+        classification: option as "College" | "Facility",
         lat: 16.72,
         lng: 121.69,
         positioned: true,
@@ -411,9 +411,10 @@ describe("Location policy", () => {
 });
 
 describe("Place classification policy", () => {
-  it("lets Building, College, and Campus Services contain Locations, but not Facility, Food, or Parking", () => {
-    for (const classification of ["Building", "College", "Campus Services"] as const) expect(canContainLocations(classification)).toBe(true);
+  it("lets College and Campus Services contain Locations, but not Facility, Food, Parking, or an unclassified Place", () => {
+    for (const classification of ["College", "Campus Services"] as const) expect(canContainLocations(classification)).toBe(true);
     for (const classification of ["Facility", "Food", "Parking"] as const) expect(canContainLocations(classification)).toBe(false);
+    expect(canContainLocations(undefined)).toBe(false);
   });
 
   it("rejects a Facility as the parent of an indoor Location, with the original message", () => {
@@ -456,36 +457,43 @@ describe("Place classification policy", () => {
 });
 
 describe("classificationFromBackend", () => {
-  it("keeps known classifications and reads anything else as Building", () => {
+  it("keeps known classifications and reads anything else, including a stray Building, as unclassified", () => {
     expect(classificationFromBackend("Facility")).toBe("Facility");
-    expect(classificationFromBackend("Building")).toBe("Building");
     expect(classificationFromBackend("College")).toBe("College");
-    expect(classificationFromBackend("Dormitory")).toBe("Building");
-    for (const raw of [null, undefined, "", "Unknown", 4]) {
-      expect(classificationFromBackend(raw)).toBe("Building");
+    for (const raw of ["Building", "Dormitory", null, undefined, "", "Unknown", 4]) {
+      expect(classificationFromBackend(raw)).toBeUndefined();
     }
+  });
+
+  it("loads an unknown, null, or missing Place type as an unclassified Place without throwing", () => {
+    for (const raw of ["Building", null, undefined, "", "Dormitory"]) {
+      const fields = placeFieldsFromBackendType(raw);
+      expect(fields).toEqual({ type: "Place", classification: undefined });
+      expect(isUnclassifiedPlace(fields)).toBe(true);
+      expect(backendLocationType(fields)).toBeUndefined();
+    }
+    expect(placeFieldsFromBackendType("Room")).toEqual({ type: "Room" });
   });
 });
 
 describe("isLocationContainer", () => {
-  it("treats a Place without a classification as a Building", () => {
-    expect(isLocationContainer({ type: "Place" })).toBe(true);
+  it("does not treat a Place without a classification as a container", () => {
+    expect(isLocationContainer({ type: "Place" })).toBe(false);
+    expect(isLocationContainer({ type: "Place", classification: "College" })).toBe(true);
     expect(isLocationContainer({ type: "Place", classification: "Facility" })).toBe(false);
     expect(isLocationContainer({ type: "Room" })).toBe(false);
   });
 });
 
 describe("Place classification choices", () => {
-  it("never offers Building, and offers it only as a record's current value", () => {
+  it("never offers Building", () => {
     expect(placeClassificationOptions()).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
-    expect(placeClassificationOptions("Facility")).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
-    expect(placeClassificationOptions("Building")).toEqual(["College", "Campus Services", "Food", "Parking", "Facility", "Building"]);
+    expect(placeClassificationOptions()).not.toContain("Building");
   });
 
-  it("labels the legacy value Unclassified (legacy) and flags only legacy Places", () => {
-    expect(locationTypeOptionLabel("Building")).toBe("Unclassified (legacy)");
+  it("flags only Places without a classification as unclassified", () => {
+    expect(locationTypeOptionLabel("Floor")).toBe("Floor (legacy records only)");
     expect(locationTypeOptionLabel("College")).toBe("College");
-    expect(isUnclassifiedPlace({ type: "Place", classification: "Building" })).toBe(true);
     expect(isUnclassifiedPlace({ type: "Place" })).toBe(true);
     expect(isUnclassifiedPlace({ type: "Place", classification: "College" })).toBe(false);
     expect(isUnclassifiedPlace({ type: "Room" })).toBe(false);
@@ -506,7 +514,24 @@ describe("Place classification choices", () => {
     expect(evaluation.issues.map((issue) => issue.code)).toContain("building_parent_wrong_type");
   });
 
-  it.each(["College", "Campus Services", "Building"] as const)("accepts a %s Place as the parent of an indoor Location", (classification) => {
+  it("refuses an unclassified Place as the parent of a new indoor Location", () => {
+    const unclassified: Location = { ...building, id: "unclassified-1", name: "Unclassified", code: "UNC", classification: undefined };
+    const evaluation = locationPolicy.evaluate(
+      draft({ parentId: unclassified.id, building: unclassified.name, floor: "Ground Floor" }),
+      { context: "record", directory: [unclassified] },
+    );
+    expect(evaluation.issues.map((issue) => issue.code)).toContain("building_parent_wrong_type");
+  });
+
+  it("requires an unclassified Place to be given a classification before it is valid", () => {
+    const unclassified = draft({ type: "Place", name: "Hall", code: "HALL", lat: null, lng: null, positioned: false });
+    const issues = locationPolicy.evaluate(unclassified, { context: "record", directory: [] }).issues;
+    expect(issues).toEqual([expect.objectContaining({ code: "classification_required", field: "type" })]);
+    const classified = locationPolicy.evaluate({ ...unclassified, classification: "Food" }, { context: "record", directory: [] });
+    expect(classified.valid).toBe(true);
+  });
+
+  it.each(["College", "Campus Services"] as const)("accepts a %s Place as the parent of an indoor Location", (classification) => {
     const container: Location = { ...building, id: "container-1", name: "Container", code: "CON", classification };
     const evaluation = locationPolicy.evaluate(
       draft({ parentId: container.id, building: container.name, floor: "Ground Floor" }),

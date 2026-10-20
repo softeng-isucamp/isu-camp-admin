@@ -55,7 +55,7 @@ import { parseAccountType } from "../lib/accountType";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
-import { backendLocationType, indoorLocationTypes, isLocationContainer, isPlace, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
+import { backendLocationType, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
 
@@ -395,7 +395,7 @@ export const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building =
   const id = raw.id ?? raw.building_id;
   const name = raw.name ?? raw.building_name;
   const code = raw.code ?? raw.building_code;
-  const classification: PlaceClassification = classificationFromBackend(raw.type);
+  const classification = classificationFromBackend(raw.type);
   if (id === undefined || typeof name !== "string" || typeof code !== "string") {
     throw new Error("Backend returned a malformed building record.");
   }
@@ -657,7 +657,7 @@ export interface Services {
 
     save(location: LocationDraft, photos?: LocationPhotoDraft[]): Promise<Location>;
 
-    getPhotos(id: string, type: BackendLocationType): Promise<LocationPhotoDraft[]>;
+    getPhotos(id: string, type?: BackendLocationType): Promise<LocationPhotoDraft[]>;
 
     savePosition(position: LocationPosition): Promise<Location>;
 
@@ -847,7 +847,10 @@ const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
 };
 
 const photoGalleryCache = new Map<string, LocationPhotoDraft[]>();
-const photoGalleryKey = (id: string, type: BackendLocationType) => `${isPlaceClassification(type) ? "building" : "location"}:${id}`;
+/** Only a Place can lack a type, so a missing one keys the building gallery. */
+const photoGalleryKey = (id: string, type: BackendLocationType | undefined) => `${type === undefined || isPlaceClassification(type) ? "building" : "location"}:${id}`;
+/** The `?type=` query of a read: omitted for an unclassified Place, which the backend then finds by id. */
+const typeQuery = (type: BackendLocationType | undefined) => type ? `?type=${encodeURIComponent(type)}` : "";
 
 export const services: Services = {
 
@@ -1233,7 +1236,7 @@ export const services: Services = {
             [
               location.name,
               location.code,
-              backendLocationType(location),
+              backendLocationType(location) ?? "",
               location.function ?? "",
               location.keywords ?? "",
               location.building ?? "",
@@ -1263,6 +1266,11 @@ export const services: Services = {
 
     save: async (location, gallery) => {
 
+      // A Place with no classification is never sent: the backend would store a type the admin did not choose.
+      if (isUnclassifiedPlace(location)) {
+        throw new LocationPolicyError([{ code: "classification_required", field: "type", message: "Select a classification." }]);
+      }
+
       if (USE_HTTP_API) {
         const uploadsNewPhoto = location.photo?.dataUrl.startsWith("data:") === true;
         const body = gallery !== undefined || uploadsNewPhoto
@@ -1289,7 +1297,7 @@ export const services: Services = {
               return form;
             })()
           : JSON.stringify(locationWritePayload(location));
-        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}?type=${encodeURIComponent(backendLocationType(location))}` : "/api/locations", {
+        const response = await apiJson<unknown>(location.id ? `/api/actions/locations/${encodeURIComponent(location.id)}${typeQuery(backendLocationType(location))}` : "/api/locations", {
           method: location.id ? "PUT" : "POST",
           body,
         });
@@ -1327,9 +1335,9 @@ export const services: Services = {
     getPhotos: async (id, type) => {
       const key = photoGalleryKey(id, type);
       if (USE_HTTP_API) {
-        const response = await apiJson<{ items: Array<{ id: string; name: string; type: string; isCover: boolean }> }>(`/api/actions/locations/${encodeURIComponent(id)}/photos?type=${encodeURIComponent(type)}`);
+        const response = await apiJson<{ items: Array<{ id: string; name: string; type: string; isCover: boolean }> }>(`/api/actions/locations/${encodeURIComponent(id)}/photos${typeQuery(type)}`);
         const photos = await Promise.all(response.items.map(async (photo) => {
-          const blob = await apiBlob(`/api/actions/locations/${encodeURIComponent(id)}/photos/${encodeURIComponent(photo.id)}?type=${encodeURIComponent(type)}`);
+          const blob = await apiBlob(`/api/actions/locations/${encodeURIComponent(id)}/photos/${encodeURIComponent(photo.id)}${typeQuery(type)}`);
           return { id: photo.id, name: photo.name, type: photo.type, isCover: photo.isCover, previewUrl: URL.createObjectURL(blob) };
         }));
         photoGalleryCache.set(key, photos);
@@ -1385,8 +1393,7 @@ export const services: Services = {
     remove: async (id, type) => {
 
       if (USE_HTTP_API) {
-        const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
-        await apiJson<unknown>(`/api/actions/locations/${encodeURIComponent(id)}${typeQuery}`, {
+        await apiJson<unknown>(`/api/actions/locations/${encodeURIComponent(id)}${typeQuery(type)}`, {
           method: "DELETE",
         });
         return;
@@ -1590,8 +1597,7 @@ export const services: Services = {
 
     forLocation: async (id, _name, type) => {
       if (USE_HTTP_API) {
-        const typeQuery = type ? `?type=${encodeURIComponent(type)}` : "";
-        const raw = await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}/history${typeQuery}`);
+        const raw = await apiJson<unknown>(`/api/locations/${encodeURIComponent(id)}/history${typeQuery(type)}`);
         return normalizeBackendPage(raw, (row) => normalizeBackendAudit(row as BackendAudit), "logs");
       }
       enrichLegacyLocationAuditIds();

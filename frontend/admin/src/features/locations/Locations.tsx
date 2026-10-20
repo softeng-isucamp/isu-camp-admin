@@ -16,11 +16,11 @@ import {
 } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
-import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../types";
+import { PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isBlockedReclassification, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -45,9 +45,6 @@ function floorNamesInOrder(names: string[]): string[] {
   };
   return [...new Set(names)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
-
-/** Place options of the type filter. "Building" is the legacy value; it is sent to the backend as is and shown as unclassified. */
-const typeFilterPlaces: BackendLocationType[] = [...SELECTABLE_PLACE_CLASSIFICATIONS, "Building"];
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -387,7 +384,7 @@ export function Locations() {
     const normalizedQuery = query.trim().toLowerCase();
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
-      (!normalizedQuery || [item.name, item.code, backendLocationType(item), item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
+      (!normalizedQuery || [item.name, item.code, backendLocationType(item) ?? "", item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
         .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
@@ -552,7 +549,7 @@ export function Locations() {
     const validationIssues = [
       ...requiredIssues.filter(([field]) => !String(normalized[field] ?? "").trim()).map(([field, message]) => ({ field: field as keyof LocationDraft, message })),
       ...(adding && normalized.type === "Floor" ? [{ field: "type" as keyof LocationDraft, message: "Floor records are read-only compatibility data and cannot be created here." }] : []),
-      ...(!adding && selected && isPlace(normalized) && blockedReclassifications(indoorLocationsOf(selected, allLocations).length).includes(placeClassificationOf(normalized))
+      ...(!adding && selected && isPlace(normalized) && isBlockedReclassification(indoorLocationsOf(selected, allLocations).length, placeClassificationOf(normalized))
         ? [{ field: "type" as keyof LocationDraft, message: reclassificationBlockedMessage(indoorLocationsOf(selected, allLocations).length) }]
         : []),
       ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
@@ -801,9 +798,9 @@ export function Locations() {
               style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
             >
               <option>All Types</option>
-              {/* Option values are the names the backend filters on; the legacy "Building" value reads as unclassified. */}
+              {/* Option values are the names the backend filters on. */}
               <optgroup label="Places">
-                {typeFilterPlaces.map((value) => (
+                {PLACE_CLASSIFICATIONS.map((value) => (
                   <option key={value} value={value}>{locationTypeOptionLabel(value)}</option>
                 ))}
               </optgroup>
@@ -1037,10 +1034,11 @@ export function Locations() {
                   </td>
                   {item.type !== "Floor" && <>
                   <td style={{ padding: "16px 20px" }}>
-                    <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
-                      {backendLocationType(item)}
-                    </span>
-                    {isUnclassifiedPlace(item) && <> <Badge tone="grey">Unclassified</Badge></>}
+                    {isUnclassifiedPlace(item)
+                      ? <Badge tone="grey">Unclassified</Badge>
+                      : <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
+                        {backendLocationType(item)}
+                      </span>}
                   </td>
                   <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
                     {item.function || "—"}
@@ -1212,7 +1210,7 @@ export function Locations() {
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
                   : isPlace(draft)
-                    ? placeClassificationOptions(placeClassificationOf(draft))
+                    ? placeClassificationOptions()
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 disabledTypes={blockedReclassifications(reclassifyingChildren.length)}
                 typeHelper={reclassifyingChildren.length ? reclassificationBlockedMessage(reclassifyingChildren.length) : undefined}
