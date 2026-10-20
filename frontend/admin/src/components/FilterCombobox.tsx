@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { cx } from "../../lib/format";
+import { cx } from "../lib/format";
 
 export interface FilterComboboxOption {
   id: string;
@@ -34,7 +34,7 @@ interface OptionSegment {
 }
 
 /**
- * A dropdown for every Locations filter, so they all open the same popover.
+ * The dropdown behind every list filter (Locations, System Logs, User Management), so they all open the same popover.
  * By default it is a type-ahead for a campus-sized list: one field that narrows
  * the options by name or code as it is typed. With `searchable={false}` it is a
  * select-only combobox for a short fixed list. Either way the list scrolls

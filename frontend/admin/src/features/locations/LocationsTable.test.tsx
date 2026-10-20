@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
+import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
 
 function LocationRouteProbe() {
   const location = useLocation();
@@ -53,27 +54,6 @@ function chooseFilterBuilding(name: string, search = name) {
     .getAllByRole("option")
     .find((candidate) => candidate.querySelector(".parent-building-option-name")?.textContent === name);
   if (!option) throw new Error(`No BUILDING filter option named "${name}" is listed.`);
-  fireEvent.click(option);
-}
-
-/** The option names a filter lists, in order (headings are not options). Opens its dropdown by a click and closes it again. */
-function filterOptionNames(label: string) {
-  const field = screen.getByLabelText(label);
-  fireEvent.click(field);
-  const names = within(screen.getByRole("listbox")).getAllByRole("option")
-    .map((option) => option.querySelector(".parent-building-option-name")?.textContent);
-  fireEvent.keyDown(field, { key: "Escape" });
-  return names;
-}
-
-/** Drives a TYPE, FLOOR or STATUS filter: open its dropdown, then pick the option by exact name. */
-function chooseFilterOption(label: "TYPE" | "FLOOR" | "STATUS", name: string) {
-  const field = screen.getByLabelText(label);
-  if (field.getAttribute("aria-expanded") !== "true") fireEvent.click(field);
-  const option = within(screen.getByRole("listbox"))
-    .getAllByRole("option")
-    .find((candidate) => candidate.querySelector(".parent-building-option-name")?.textContent === name);
-  if (!option) throw new Error(`No ${label} filter option named "${name}" is listed.`);
   fireEvent.click(option);
 }
 

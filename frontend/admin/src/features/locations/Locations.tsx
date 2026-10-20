@@ -24,7 +24,7 @@ import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoo
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
-import { FilterCombobox } from "./FilterCombobox";
+import { FilterCombobox } from "../../components/FilterCombobox";
 import { ParentBuildingField } from "./ParentBuildingField";
 
 /** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
