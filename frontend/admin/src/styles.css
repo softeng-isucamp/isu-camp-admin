@@ -3738,9 +3738,12 @@ td small {
   text-align: center;
 }
 
-/* Filter bar combobox: sized like the native filters, with a list that scrolls. */
+/* Filter bar dropdowns (type-ahead and select-only): one field and one popover for every filter, with a list that scrolls. */
 .filter-combobox {
-  min-width: 180px;
+  /* One width for all four filters keeps the row aligned and leaves room for the action button beside it. */
+  flex: none;
+  width: 160px;
+  min-width: 0;
 }
 .filter-combobox-input {
   height: 46px;
@@ -3751,8 +3754,32 @@ td small {
   font-weight: 600;
   text-overflow: ellipsis;
 }
+/* A select-only field is read-only for typing, not a locked value: keep it looking and acting like the type-ahead. */
+.filter-combobox-input.is-select-only:read-only {
+  background: #ffffff;
+  border-color: #e1e3e4;
+  color: #191c1d;
+  font-family: inherit;
+  cursor: pointer;
+}
+.filter-combobox-input.is-select-only:read-only:focus {
+  border-color: #005931;
+}
 .filter-combobox-popover {
   min-width: 280px;
+}
+.filter-combobox-group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.filter-combobox-group-heading {
+  padding: 10px 11px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .filter-combobox-listbox {
   max-height: 320px;

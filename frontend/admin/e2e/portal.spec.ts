@@ -9,6 +9,12 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/dashboard/);
 }
 
+/** The Locations filters are dropdowns, not native selects: open one, then pick its option by exact name. */
+async function chooseLocationsFilter(page: Page, label: "TYPE" | "FLOOR" | "STATUS", option: string) {
+  await page.getByLabel(label, { exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
 test("redirects unauthenticated visitors from protected routes", async ({
   page,
 }) => {
@@ -117,27 +123,27 @@ test("locations, users, logs, and map expose their key state transitions", async
 }) => {
   await signIn(page);
   await page.goto("/locations");
-  await page.getByLabel("TYPE").selectOption("Laboratory");
+  await chooseLocationsFilter(page, "TYPE", "Laboratory");
   await expect(page.getByRole("row").filter({ hasText: /Laboratory/ }).first()).toBeVisible();
   await expect(page).toHaveScreenshot("locations-type-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("TYPE").selectOption("All Types");
-  await page.getByLabel("STATUS").selectOption("Active");
+  await chooseLocationsFilter(page, "TYPE", "All Types");
+  await chooseLocationsFilter(page, "STATUS", "Active");
   await expect(page).toHaveScreenshot("locations-status-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("STATUS").selectOption("All Statuses");
-  await page.getByLabel("BUILDING").fill("College of Information Communication Technology");
+  await chooseLocationsFilter(page, "STATUS", "All Statuses");
+  await page.getByLabel("BUILDING", { exact: true }).fill("College of Information Communication Technology");
   await page.getByRole("option", { name: /^College of Information Communication Technology/ }).click();
-  await page.getByLabel("FLOOR").selectOption({ label: "2nd Floor" });
+  await chooseLocationsFilter(page, "FLOOR", "2nd Floor");
   await expect(page.getByRole("row").filter({ hasText: /Laboratory/ }).first()).toBeVisible();
   await expect(page).toHaveScreenshot("locations-building-floor-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("BUILDING").click();
+  await page.getByLabel("BUILDING", { exact: true }).click();
   await page.getByRole("option", { name: "All Buildings" }).click();
-  await page.getByLabel("FLOOR").selectOption("All Floors");
+  await chooseLocationsFilter(page, "FLOOR", "All Floors");
   await page
     .getByRole("button", { name: /Actions for/i })
     .first()

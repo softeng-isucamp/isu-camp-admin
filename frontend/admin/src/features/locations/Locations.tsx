@@ -36,6 +36,13 @@ const keyParam = (params: URLSearchParams) => {
 /** Prefix of a FLOOR filter value that stands for a floor name across all Buildings, so it never collides with a floor record ID. */
 const floorNameValuePrefix = "floor-name:";
 
+// The TYPE filter's option IDs are the names the backend filters on.
+const typeFilterOptions = [
+  ...PLACE_CLASSIFICATIONS.map((value) => ({ id: value, name: locationTypeOptionLabel(value), group: "Places" })),
+  ...indoorLocationTypes.map((value) => ({ id: value, name: value, group: "Locations" })),
+];
+const statusFilterOptions = ["Active", "Inactive"].map((value) => ({ id: value, name: value }));
+
 /** Distinct floor names in storey order: the standard levels first, other names alphabetically, Unspecified Floor last. */
 function floorNamesInOrder(names: string[]): string[] {
   const rank = (name: string) => {
@@ -332,6 +339,11 @@ export function Locations() {
     return floorNamesInOrder(floors.map((floor) => floor.name))
       .map((name) => ({ value: `${floorNameValuePrefix}${name}`, label: name }));
   }, [floors, selectedBuildingRecord]);
+
+  const floorFilterOptions = useMemo(
+    () => floorOptions.map((option) => ({ id: option.value, name: option.label })),
+    [floorOptions],
+  );
 
   useEffect(() => {
     const buildingIsValid = buildingId === "All Buildings" || buildingOptions.some((option) => option.id === buildingId);
@@ -791,26 +803,16 @@ export function Locations() {
               gap: "12px",
             }}
           >
-            <SelectField
+            <FilterCombobox
               label="TYPE"
-              aria-label="TYPE"
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
-            >
-              <option>All Types</option>
-              {/* Option values are the names the backend filters on. */}
-              <optgroup label="Places">
-                {PLACE_CLASSIFICATIONS.map((value) => (
-                  <option key={value} value={value}>{locationTypeOptionLabel(value)}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Locations">
-                {indoorLocationTypes.map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
-              </optgroup>
-            </SelectField>
+              noun="types"
+              allLabel="All Types"
+              searchable={false}
+              // Option IDs are the names the backend filters on.
+              options={typeFilterOptions}
+              value={type === "All Types" ? null : type}
+              onChange={(id) => setType(id ?? "All Types")}
+            />
             <FilterCombobox
               label="BUILDING"
               noun="buildings"
@@ -822,29 +824,24 @@ export function Locations() {
                 setFloorId("All Floors");
               }}
             />
-            <SelectField
+            <FilterCombobox
               label="FLOOR"
-              aria-label="FLOOR"
-              value={floorId}
-              onChange={(event) => setFloorId(event.target.value)}
-              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
-            >
-              <option>All Floors</option>
-              {floorOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </SelectField>
-            <SelectField
+              noun="floors"
+              allLabel="All Floors"
+              searchable={false}
+              options={floorFilterOptions}
+              value={floorId === "All Floors" ? null : floorId}
+              onChange={(id) => setFloorId(id ?? "All Floors")}
+            />
+            <FilterCombobox
               label="STATUS"
-              aria-label="STATUS"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-              style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
-            >
-              <option>All Statuses</option>
-              <option>Active</option>
-              <option>Inactive</option>
-            </SelectField>
+              noun="statuses"
+              allLabel="All Statuses"
+              searchable={false}
+              options={statusFilterOptions}
+              value={status === "All Statuses" ? null : status}
+              onChange={(id) => setStatus(id ?? "All Statuses")}
+            />
           </div>
 
           <div

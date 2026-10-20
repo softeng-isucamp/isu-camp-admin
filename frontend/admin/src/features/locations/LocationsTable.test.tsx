@@ -56,6 +56,27 @@ function chooseFilterBuilding(name: string, search = name) {
   fireEvent.click(option);
 }
 
+/** The option names a filter lists, in order (headings are not options). Opens its dropdown by a click and closes it again. */
+function filterOptionNames(label: string) {
+  const field = screen.getByLabelText(label);
+  fireEvent.click(field);
+  const names = within(screen.getByRole("listbox")).getAllByRole("option")
+    .map((option) => option.querySelector(".parent-building-option-name")?.textContent);
+  fireEvent.keyDown(field, { key: "Escape" });
+  return names;
+}
+
+/** Drives a TYPE, FLOOR or STATUS filter: open its dropdown, then pick the option by exact name. */
+function chooseFilterOption(label: "TYPE" | "FLOOR" | "STATUS", name: string) {
+  const field = screen.getByLabelText(label);
+  if (field.getAttribute("aria-expanded") !== "true") fireEvent.click(field);
+  const option = within(screen.getByRole("listbox"))
+    .getAllByRole("option")
+    .find((candidate) => candidate.querySelector(".parent-building-option-name")?.textContent === name);
+  if (!option) throw new Error(`No ${label} filter option named "${name}" is listed.`);
+  fireEvent.click(option);
+}
+
 describe("Locations screen table and hierarchy toggle validation", () => {
   afterEach(() => {
     cleanup();
@@ -108,9 +129,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("keeps derived Floor Levels available without exposing Floor as a record filter", async () => {
     renderLocations();
-    const typeSelect = await screen.findByLabelText("TYPE");
-    expect(Array.from((typeSelect as HTMLSelectElement).options).map((option) => option.value)).not.toContain("Floor");
-    expect(Array.from((screen.getByLabelText("FLOOR") as HTMLSelectElement).options).map((option) => option.text)).toContain("Ground Floor");
+    await screen.findByLabelText("TYPE");
+    expect(filterOptionNames("TYPE")).not.toContain("Floor");
+    expect(filterOptionNames("FLOOR")).toContain("Ground Floor");
   });
 
   it("renders Floor Levels as grouping rows without location metadata", async () => {
@@ -135,7 +156,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByText(/Showing 11–20 of/i)).toBeInTheDocument();
     expect(container.querySelectorAll("tbody tr")).toHaveLength(10);
-    fireEvent.change(screen.getByLabelText("TYPE"), { target: { value: "College" } });
+    chooseFilterOption("TYPE", "College");
     expect(await screen.findByText(/Showing 1–10 of/i)).toBeInTheDocument();
   });
 
@@ -205,9 +226,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const buildingCombobox = await screen.findByLabelText("BUILDING");
     const floorSelect = screen.getByLabelText("FLOOR");
     await waitFor(() => chooseFilterBuilding(building.name));
-    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-    fireEvent.change(floorSelect, { target: { value: `${building.id}-floor-Ground Floor` } });
-    expect(floorSelect).toHaveValue(`${building.id}-floor-Ground Floor`);
+    await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+    chooseFilterOption("FLOOR", "Ground Floor");
+    expect(floorSelect).toHaveValue("Ground Floor");
 
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
@@ -288,10 +309,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     renderLocations();
     await screen.findByLabelText("BUILDING");
     chooseFilterBuilding("Floor building A");
-    const floorSelect = screen.getByLabelText("FLOOR");
-    const identicalNameOptions = Array.from((floorSelect as HTMLSelectElement).options).filter((option) => option.text === "Level One");
-    expect(identicalNameOptions.map((option) => option.value)).toEqual(["floor-a"]);
-    fireEvent.change(floorSelect, { target: { value: "floor-a" } });
+    // Only the chosen Building's own floor record is listed, not building B's same-named one.
+    expect(filterOptionNames("FLOOR").filter((name) => name === "Level One")).toHaveLength(1);
+    chooseFilterOption("FLOOR", "Level One");
     expect(await screen.findByText("Only floor A child")).toBeInTheDocument();
     expect(screen.queryByText("Only floor B child")).not.toBeInTheDocument();
   });
@@ -304,14 +324,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await seed("dedupe-room-b", "Dedupe room B", "dedupe-building-b", "Ground Floor");
     // The search keeps both rooms on the first page of the shared fixture directory.
     renderLocations(["/locations?q=Dedupe"]);
-    const floorSelect = await screen.findByLabelText("FLOOR");
-    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-    const texts = Array.from((floorSelect as HTMLSelectElement).options).map((option) => option.text);
+    await screen.findByLabelText("FLOOR");
+    await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+    const texts = filterOptionNames("FLOOR");
     expect(texts.filter((text) => text === "Ground Floor")).toHaveLength(1);
     expect(new Set(texts).size).toBe(texts.length);
 
-    const groundFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "Ground Floor")!;
-    fireEvent.change(floorSelect, { target: { value: groundFloor.value } });
+    chooseFilterOption("FLOOR", "Ground Floor");
     expect(await screen.findByText("Dedupe room A")).toBeInTheDocument();
     expect(screen.getByText("Dedupe room B")).toBeInTheDocument();
   });
@@ -443,7 +462,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: /add location/i })).toBeInTheDocument();
     expect(screen.getByText(/add a room, office, laboratory, or restroom under an existing building/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location type/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/status/i)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByLabelText(/status/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location code \/ id/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Latitude")).toHaveAttribute("type", "text");
@@ -828,19 +847,20 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("groups the type filter into Places and Locations and sends each option's backend name", async () => {
     const list = vi.spyOn(services.locations, "list");
     renderLocations();
-    const filter = await screen.findByLabelText("TYPE") as HTMLSelectElement;
+    const filter = await screen.findByLabelText("TYPE");
+    fireEvent.click(filter);
 
-    const groups = Array.from(filter.querySelectorAll("optgroup")).map((group) => ({
-      label: group.label,
-      options: Array.from(group.querySelectorAll("option")).map((option) => [option.text, option.value]),
+    const groups = within(screen.getByRole("listbox")).getAllByRole("group").map((group) => ({
+      label: group.getAttribute("aria-labelledby") ? document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent : null,
+      options: within(group).getAllByRole("option").map((option) => option.textContent),
     }));
     expect(groups).toEqual([
-      { label: "Places", options: [["College", "College"], ["Campus Services", "Campus Services"], ["Food", "Food"], ["Parking", "Parking"], ["Facility", "Facility"]] },
-      { label: "Locations", options: [["Room", "Room"], ["Office", "Office"], ["Laboratory", "Laboratory"], ["Restroom", "Restroom"]] },
+      { label: "Places", options: ["College", "Campus Services", "Food", "Parking", "Facility"] },
+      { label: "Locations", options: ["Room", "Office", "Laboratory", "Restroom"] },
     ]);
 
     for (const value of ["College", "Campus Services", "Food", "Parking", "Facility", "Room", "Restroom"]) {
-      fireEvent.change(filter, { target: { value } });
+      chooseFilterOption("TYPE", value);
       await waitFor(() => expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ type: value })));
     }
   });
@@ -1136,9 +1156,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       await seedFilterBuildings();
       renderLocations(["/locations?q=Combo"]);
       const floorSelect = await screen.findByLabelText("FLOOR");
-      await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-      const secondFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "2nd Floor")!;
-      fireEvent.change(floorSelect, { target: { value: secondFloor.value } });
+      await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+      chooseFilterOption("FLOOR", "2nd Floor");
+      expect(floorSelect).toHaveValue("2nd Floor");
       expect(await screen.findByText("Combo Alpha Room")).toBeInTheDocument();
       expect(screen.queryByText("Combo Beta Room")).not.toBeInTheDocument();
 
@@ -1192,6 +1212,161 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       } finally {
         delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
+    });
+  });
+
+  describe("TYPE, FLOOR and STATUS filter dropdowns", () => {
+    const activeOption = (field: HTMLElement) =>
+      document.getElementById(field.getAttribute("aria-activedescendant") ?? "")?.querySelector(".parent-building-option-name")?.textContent;
+
+    it("opens the same popover as BUILDING from a select-only combobox, not a native select", async () => {
+      renderLocations();
+      for (const label of ["TYPE", "FLOOR", "STATUS"]) {
+        const field = await screen.findByLabelText(label);
+        expect(field).toHaveAttribute("role", "combobox");
+        expect(field).toHaveAttribute("readonly");
+        expect(field).toHaveAttribute("aria-expanded", "false");
+        expect(field.tagName).toBe("INPUT");
+
+        fireEvent.click(field);
+        expect(field).toHaveAttribute("aria-expanded", "true");
+        const listbox = screen.getByRole("listbox");
+        expect(listbox).toHaveClass("filter-combobox-listbox");
+        expect(listbox.closest(".parent-building-popover")).not.toBeNull();
+        fireEvent.click(field);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      }
+      expect(document.querySelector("select#select-type, select#select-floor, select#select-status")).toBeNull();
+    });
+
+    it("lists the clearing option first, marks the chosen one, and clears back to it", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      expect(type).toHaveValue("All Types");
+      expect(screen.getByLabelText("FLOOR")).toHaveValue("All Floors");
+      expect(screen.getByLabelText("STATUS")).toHaveValue("All Statuses");
+      expect(filterOptionNames("TYPE")[0]).toBe("All Types");
+      fireEvent.click(type);
+      expect(within(screen.getByRole("listbox")).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(type, { key: "Escape" });
+
+      chooseFilterOption("TYPE", "Laboratory");
+      expect(type).toHaveValue("Laboratory");
+      fireEvent.click(type);
+      expect(within(screen.getByRole("listbox")).getByRole("option", { selected: true })).toHaveTextContent("Laboratory");
+      fireEvent.keyDown(type, { key: "Escape" });
+
+      chooseFilterOption("TYPE", "All Types");
+      expect(type).toHaveValue("All Types");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(filterOptionNames("FLOOR")[0]).toBe("All Floors");
+      expect(filterOptionNames("STATUS")).toEqual(["All Statuses", "Active", "Inactive"]);
+    });
+
+    it("keeps group headings out of the options and does nothing when one is clicked", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      expect(filterOptionNames("TYPE")).toEqual(["All Types", "College", "Campus Services", "Food", "Parking", "Facility", "Room", "Office", "Laboratory", "Restroom"]);
+      fireEvent.click(type);
+      const listbox = screen.getByRole("listbox");
+      expect(within(listbox).queryByRole("option", { name: "Places" })).toBeNull();
+      expect(within(listbox).queryByRole("option", { name: "Locations" })).toBeNull();
+
+      fireEvent.click(screen.getByText("Places"));
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+      expect(type).toHaveValue("All Types");
+    });
+
+    it("navigates by keyboard, stepping over group headings, and chooses with Enter", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      type.focus();
+      fireEvent.keyDown(type, { key: "ArrowDown" });
+      expect(type).toHaveAttribute("aria-expanded", "true");
+      expect(activeOption(type)).toBe("All Types");
+
+      const walked: Array<string | null | undefined> = [];
+      for (let step = 0; step < 7; step += 1) {
+        fireEvent.keyDown(type, { key: "ArrowDown" });
+        walked.push(activeOption(type));
+      }
+      // From Facility (last Place) the next stop is Room: the "Locations" heading is skipped.
+      expect(walked).toEqual(["College", "Campus Services", "Food", "Parking", "Facility", "Room", "Office"]);
+      fireEvent.keyDown(type, { key: "ArrowUp" });
+      fireEvent.keyDown(type, { key: "ArrowUp" });
+      expect(activeOption(type)).toBe("Facility");
+      fireEvent.keyDown(type, { key: "End" });
+      expect(activeOption(type)).toBe("Restroom");
+      fireEvent.keyDown(type, { key: "Home" });
+      expect(activeOption(type)).toBe("All Types");
+
+      fireEvent.keyDown(type, { key: "End" });
+      fireEvent.keyDown(type, { key: "Enter" });
+      expect(type).toHaveValue("Restroom");
+      expect(type).toHaveAttribute("aria-expanded", "false");
+      expect(type).not.toHaveAttribute("aria-activedescendant");
+    });
+
+    it("opens with Enter, Space or ArrowDown on the closed field, and closes on Escape, Tab or an outside click", async () => {
+      renderLocations();
+      const status = await screen.findByLabelText("STATUS");
+      for (const key of ["Enter", " ", "ArrowDown"]) {
+        fireEvent.keyDown(status, { key });
+        expect(status).toHaveAttribute("aria-expanded", "true");
+        fireEvent.keyDown(status, { key: "Escape" });
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(status).toHaveAttribute("aria-expanded", "false");
+      }
+      fireEvent.keyDown(status, { key: "Enter" });
+      fireEvent.keyDown(status, { key: "Tab" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      fireEvent.click(status);
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(status).toHaveValue("All Statuses");
+
+      // Space on an open list picks the highlighted option, like Enter.
+      fireEvent.keyDown(status, { key: " " });
+      fireEvent.keyDown(status, { key: "ArrowDown" });
+      fireEvent.keyDown(status, { key: " " });
+      expect(status).toHaveValue("Active");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("filters by STATUS and restores every row when All Statuses is chosen", async () => {
+      const place = (id: string, name: string, status: "Active" | "Inactive") => services.locations.save({ id, name, code: id.toUpperCase(), type: "Place", classification: "College", parentId: null, status, lat: null, lng: null, positioned: false });
+      await place("status-probe-live", "Status Probe Live", "Active");
+      await place("status-probe-dormant", "Status Probe Dormant", "Inactive");
+      const list = vi.spyOn(services.locations, "list");
+      renderLocations(["/locations?q=Status%20Probe"]);
+      expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "Inactive");
+      expect(screen.getByLabelText("STATUS")).toHaveValue("Inactive");
+      await waitFor(() => expect(screen.queryByText("Status Probe Live")).not.toBeInTheDocument());
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+      expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ status: "Inactive" }));
+
+      chooseFilterOption("STATUS", "All Statuses");
+      expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+    });
+
+    it("filters by FLOOR through the same dropdown", async () => {
+      await services.locations.save({ id: "floor-dd-building", name: "Floor Dropdown Hall", code: "FLOOR-DD", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: "floor-dd-ground", name: "Floor Dropdown Ground Room", code: "FLOOR-DD-G", type: "Room", parentId: "floor-dd-building", building: "Floor Dropdown Hall", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: "floor-dd-second", name: "Floor Dropdown Second Room", code: "FLOOR-DD-S", type: "Room", parentId: "floor-dd-building", building: "Floor Dropdown Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+      renderLocations(["/locations?q=Floor%20Dropdown"]);
+      expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
+
+      await waitFor(() => expect(filterOptionNames("FLOOR")).toContain("2nd Floor"));
+      chooseFilterOption("FLOOR", "2nd Floor");
+      expect(await screen.findByText("Floor Dropdown Second Room")).toBeInTheDocument();
+      expect(screen.queryByText("Floor Dropdown Ground Room")).not.toBeInTheDocument();
+
+      chooseFilterOption("FLOOR", "All Floors");
+      expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
     });
   });
 });
