@@ -77,7 +77,7 @@ describe("Users account type", () => {
     chooseFilterOption("REGISTERED", "Last 7 days");
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("", 1, 10, "7d", "all"));
     await waitFor(() => expect(screen.queryByText("legacy.user")).not.toBeInTheDocument());
-    expect(screen.getByLabelText("REGISTERED")).toHaveValue("Last 7 days");
+    expect(screen.getByLabelText("REGISTERED")).toHaveTextContent("Last 7 days");
 
     chooseFilterOption("REGISTERED", "All time");
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("", 1, 10, "all", "all"));
@@ -171,6 +171,6 @@ describe("Users account type", () => {
     renderUsers("/users?userType=Teacher");
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("", 1, 10, "all", "teacher"));
-    expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveValue("Staff");
+    expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveTextContent("Staff");
   });
 });

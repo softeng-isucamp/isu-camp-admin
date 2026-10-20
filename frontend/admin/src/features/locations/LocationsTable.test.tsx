@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
-import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
+import { chooseFilterOption, filterOptionIds, filterOptionNames, selectedFilterOptionId } from "../../test/filterCombobox";
 
 function LocationRouteProbe() {
   const location = useLocation();
@@ -208,7 +208,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await waitFor(() => chooseFilterBuilding(building.name));
     await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
     chooseFilterOption("FLOOR", "Ground Floor");
-    expect(floorSelect).toHaveValue("Ground Floor");
+    expect(selectedFilterOptionId("FLOOR")).toBe(`${building.id}-floor-Ground Floor`);
 
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
@@ -217,8 +217,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     await waitFor(() => {
       expect(buildingCombobox).toHaveValue("All Buildings");
-      expect(floorSelect).toHaveValue("All Floors");
+      expect(floorSelect).toHaveTextContent("All Floors");
     });
+    expect(selectedFilterOptionId("FLOOR")).toBeUndefined();
   });
 
   it("returns to the last hierarchy page after a mutation shrinks the result", async () => {
@@ -290,8 +291,10 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await screen.findByLabelText("BUILDING");
     chooseFilterBuilding("Floor building A");
     // Only the chosen Building's own floor record is listed, not building B's same-named one.
-    expect(filterOptionNames("FLOOR").filter((name) => name === "Level One")).toHaveLength(1);
+    expect(filterOptionIds("FLOOR")).toContain("floor-a");
+    expect(filterOptionIds("FLOOR")).not.toContain("floor-b");
     chooseFilterOption("FLOOR", "Level One");
+    expect(selectedFilterOptionId("FLOOR")).toBe("floor-a");
     expect(await screen.findByText("Only floor A child")).toBeInTheDocument();
     expect(screen.queryByText("Only floor B child")).not.toBeInTheDocument();
   });
@@ -1122,6 +1125,16 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       expect(document.querySelector("select#select-building")).toBeNull();
     });
 
+    it("shows a short placeholder and the full chosen name as a tooltip", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const combobox = await screen.findByLabelText("BUILDING");
+      expect(combobox).toHaveAttribute("placeholder", "Search buildings…");
+      expect(combobox).not.toHaveAttribute("title");
+      chooseFilterBuilding("Combo Beta Hall");
+      expect(combobox).toHaveAttribute("title", "Combo Beta Hall");
+    });
+
     it("narrows the list by name or code as it is typed", async () => {
       await seedFilterBuildings();
       renderLocations(["/locations?q=Combo"]);
@@ -1138,12 +1151,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       const floorSelect = await screen.findByLabelText("FLOOR");
       await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
       chooseFilterOption("FLOOR", "2nd Floor");
-      expect(floorSelect).toHaveValue("2nd Floor");
+      expect(selectedFilterOptionId("FLOOR")).toBe("floor-name:2nd Floor");
       expect(await screen.findByText("Combo Alpha Room")).toBeInTheDocument();
       expect(screen.queryByText("Combo Beta Room")).not.toBeInTheDocument();
 
       chooseFilterBuilding("Combo Beta Hall");
-      expect(floorSelect).toHaveValue("All Floors");
+      expect(floorSelect).toHaveTextContent("All Floors");
+      expect(selectedFilterOptionId("FLOOR")).toBeUndefined();
       expect(await screen.findByText("Combo Beta Room")).toBeInTheDocument();
       expect(screen.queryByText("Combo Alpha Room")).not.toBeInTheDocument();
       expect(screen.getByLabelText("BUILDING")).toHaveValue("Combo Beta Hall");
@@ -1204,9 +1218,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       for (const label of ["TYPE", "FLOOR", "STATUS"]) {
         const field = await screen.findByLabelText(label);
         expect(field).toHaveAttribute("role", "combobox");
-        expect(field).toHaveAttribute("readonly");
+        expect(field).toHaveAttribute("aria-haspopup", "listbox");
         expect(field).toHaveAttribute("aria-expanded", "false");
-        expect(field.tagName).toBe("INPUT");
+        // Nothing to edit, so it is not announced as a text box.
+        expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+        expect(screen.getByRole("combobox", { name: label })).toBe(field);
+        expect(field.tagName).not.toBe("INPUT");
 
         fireEvent.click(field);
         expect(field).toHaveAttribute("aria-expanded", "true");
@@ -1222,22 +1239,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     it("lists the clearing option first, marks the chosen one, and clears back to it", async () => {
       renderLocations();
       const type = await screen.findByLabelText("TYPE");
-      expect(type).toHaveValue("All Types");
-      expect(screen.getByLabelText("FLOOR")).toHaveValue("All Floors");
-      expect(screen.getByLabelText("STATUS")).toHaveValue("All Statuses");
+      expect(type).toHaveTextContent("All Types");
+      expect(screen.getByLabelText("FLOOR")).toHaveTextContent("All Floors");
+      expect(screen.getByLabelText("STATUS")).toHaveTextContent("All Statuses");
       expect(filterOptionNames("TYPE")[0]).toBe("All Types");
       fireEvent.click(type);
       expect(within(screen.getByRole("listbox")).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
       fireEvent.keyDown(type, { key: "Escape" });
 
       chooseFilterOption("TYPE", "Laboratory");
-      expect(type).toHaveValue("Laboratory");
+      expect(type).toHaveTextContent("Laboratory");
       fireEvent.click(type);
       expect(within(screen.getByRole("listbox")).getByRole("option", { selected: true })).toHaveTextContent("Laboratory");
       fireEvent.keyDown(type, { key: "Escape" });
 
       chooseFilterOption("TYPE", "All Types");
-      expect(type).toHaveValue("All Types");
+      expect(type).toHaveTextContent("All Types");
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       expect(filterOptionNames("FLOOR")[0]).toBe("All Floors");
       expect(filterOptionNames("STATUS")).toEqual(["All Statuses", "Active", "Inactive"]);
@@ -1254,7 +1271,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
       fireEvent.click(screen.getByText("Places"));
       expect(screen.getByRole("listbox")).toBeInTheDocument();
-      expect(type).toHaveValue("All Types");
+      expect(type).toHaveTextContent("All Types");
     });
 
     it("navigates by keyboard, stepping over group headings, and chooses with Enter", async () => {
@@ -1282,7 +1299,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
       fireEvent.keyDown(type, { key: "End" });
       fireEvent.keyDown(type, { key: "Enter" });
-      expect(type).toHaveValue("Restroom");
+      expect(type).toHaveTextContent("Restroom");
       expect(type).toHaveAttribute("aria-expanded", "false");
       expect(type).not.toHaveAttribute("aria-activedescendant");
     });
@@ -1303,14 +1320,24 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       fireEvent.click(status);
       fireEvent.mouseDown(document.body);
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-      expect(status).toHaveValue("All Statuses");
+      expect(status).toHaveTextContent("All Statuses");
 
       // Space on an open list picks the highlighted option, like Enter.
       fireEvent.keyDown(status, { key: " " });
       fireEvent.keyDown(status, { key: "ArrowDown" });
       fireEvent.keyDown(status, { key: " " });
-      expect(status).toHaveValue("Active");
+      expect(status).toHaveTextContent("Active");
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("picks a STATUS by typing its first letter, as a native select did", async () => {
+      renderLocations();
+      const status = await screen.findByLabelText("STATUS");
+      fireEvent.keyDown(status, { key: "i" });
+      expect(activeOption(status)).toBe("Inactive");
+      fireEvent.keyDown(status, { key: "Enter" });
+      expect(status).toHaveTextContent("Inactive");
+      expect(selectedFilterOptionId("STATUS")).toBe("Inactive");
     });
 
     it("filters by STATUS and restores every row when All Statuses is chosen", async () => {
@@ -1323,7 +1350,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
 
       chooseFilterOption("STATUS", "Inactive");
-      expect(screen.getByLabelText("STATUS")).toHaveValue("Inactive");
+      expect(screen.getByLabelText("STATUS")).toHaveTextContent("Inactive");
       await waitFor(() => expect(screen.queryByText("Status Probe Live")).not.toBeInTheDocument());
       expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
       expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ status: "Inactive" }));

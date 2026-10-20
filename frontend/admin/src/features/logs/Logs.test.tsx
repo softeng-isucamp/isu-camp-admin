@@ -146,7 +146,7 @@ describe("Logs DATE filter", () => {
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "7d", 1, 10));
     await waitFor(() => expect(screen.queryByText("login")).not.toBeInTheDocument());
     expect(screen.getByText("create")).toBeInTheDocument();
-    expect(screen.getByLabelText("DATE")).toHaveValue("Last 7 days");
+    expect(screen.getByLabelText("DATE")).toHaveTextContent("Last 7 days");
 
     chooseFilterOption("DATE", "All Dates");
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));

@@ -3751,16 +3751,28 @@ td small {
   font-weight: 600;
   text-overflow: ellipsis;
 }
-/* A select-only field is read-only for typing, not a locked value: keep it looking and acting like the type-ahead. */
-.filter-combobox-input.is-select-only:read-only {
+/* A select-only field is a focusable combobox, not a text box: it shows the choice and opens like the type-ahead. */
+.filter-combobox-input.is-select-only {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
   background: #ffffff;
   border-color: #e1e3e4;
   color: #191c1d;
   font-family: inherit;
   cursor: pointer;
 }
-.filter-combobox-input.is-select-only:read-only:focus {
+.filter-combobox-input.is-select-only:focus {
   border-color: #005931;
+}
+.filter-combobox-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filter-combobox-input::placeholder {
+  text-overflow: ellipsis;
 }
 .filter-combobox-popover {
   min-width: 280px;
