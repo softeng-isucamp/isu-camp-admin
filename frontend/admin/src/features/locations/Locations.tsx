@@ -1034,7 +1034,7 @@ export function Locations() {
                   <td style={{ padding: "16px 20px" }}>
                     {isUnclassifiedPlace(item)
                       ? <Badge tone="grey">Unclassified</Badge>
-                      : <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
+                      : <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441", whiteSpace: "nowrap" }}>
                         {backendLocationType(item)}
                       </span>}
                   </td>
