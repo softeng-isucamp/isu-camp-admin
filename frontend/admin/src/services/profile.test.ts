@@ -1,12 +1,12 @@
 import { expect, it, vi } from 'vitest';
-import { createProfileService } from './profile';
+import { createProfileService, supportsAlternativeEmail } from './profile';
 import { createLocalAdapter } from './localAdapter';
 
 it('keeps renamed fixture credentials and password changes in the current fixture session', async () => {
   const fixture = createLocalAdapter({ locations: [] }, null);
   await fixture.auth.login('admin_justine', 'password123');
   const service = createProfileService(vi.fn(), fixture.auth);
-  await service.update({ username: 'renamed', email: 'new@example.com' });
+  await service.update({ username: 'renamed', email: 'new@example.com', currentPassword: 'password123' });
   await service.changePassword({ currentPassword: 'password123', newPassword: 'Different123!' });
   await fixture.auth.logout();
   await expect(fixture.auth.login('renamed', 'password123')).rejects.toThrow();
@@ -58,4 +58,38 @@ it('rejects unsupported roles and propagates server errors instead of fixture fa
 it('does not claim a malformed job response succeeded', async () => {
   const service = createProfileService(vi.fn().mockResolvedValue({ success: true }));
   await expect(service.createBackup()).rejects.toThrow();
+});
+
+it('sends the alternative email and password to PATCH /api/profile and reads the alternative email back', async () => {
+  const request = vi.fn().mockResolvedValue({ id: '1', username: 'admin', email: 'admin@example.com', role: 'admin', alternativeEmail: 'alt@example.com' });
+  const service = createProfileService(request);
+  const changes = { username: 'admin', email: 'admin@example.com', alternativeEmail: 'alt@example.com', currentPassword: 'secret' };
+  expect(await service.update(changes)).toMatchObject({ alternativeEmail: 'alt@example.com' });
+  expect(request).toHaveBeenCalledWith('/api/profile', { method: 'PATCH', body: JSON.stringify(changes) });
+  await service.update({ username: 'admin', email: 'admin@example.com', alternativeEmail: null, currentPassword: 'secret' });
+  expect(JSON.parse(request.mock.lastCall![1].body)).toEqual({ ...changes, alternativeEmail: null });
+});
+
+it('tells a server without alternative emails from one with none set', async () => {
+  const absent = createProfileService(vi.fn().mockResolvedValue({ id: '1', username: 'admin', email: 'a@example.com', role: 'admin' }));
+  const unset = createProfileService(vi.fn().mockResolvedValue({ id: '1', username: 'admin', email: 'a@example.com', role: 'admin', alternativeEmail: null }));
+  expect(supportsAlternativeEmail(await absent.get())).toBe(false);
+  expect(supportsAlternativeEmail(await unset.get())).toBe(true);
+});
+
+it('hands a refusal that names a field to the caller untouched', async () => {
+  const refusal = Object.assign(new Error('That email address is already in use'), { fieldErrors: { alternativeEmail: 'That email address is already in use' } });
+  const service = createProfileService(vi.fn().mockRejectedValue(refusal));
+  await expect(service.update({ username: 'admin', email: 'a@example.com', alternativeEmail: 'b@example.com', currentPassword: 'x' })).rejects.toBe(refusal);
+});
+
+it('keeps the fixture alternative email through the profile service', async () => {
+  const fixture = createLocalAdapter({ locations: [] }, null);
+  await fixture.auth.login('admin_justine', 'password123');
+  const service = createProfileService(vi.fn(), fixture.auth);
+  expect(await service.get()).toMatchObject({ alternativeEmail: null });
+  await expect(service.update({ username: 'admin_justine', email: 'admin@isu.edu.ph', alternativeEmail: 'dean.backup@gmail.com', currentPassword: 'password123' }))
+    .rejects.toMatchObject({ fieldErrors: { alternativeEmail: 'That email address is already in use' } });
+  expect(await service.update({ username: 'admin_justine', email: 'admin@isu.edu.ph', alternativeEmail: 'justine.home@gmail.com', currentPassword: 'password123' }))
+    .toMatchObject({ alternativeEmail: 'justine.home@gmail.com' });
 });

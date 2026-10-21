@@ -95,3 +95,40 @@ describe("Administrator accounts over the fixture backend", () => {
     await waitFor(() => expect(screen.queryByText("admin_boss")).not.toBeInTheDocument());
   });
 });
+
+describe("Add Administrator over the shared email pool", () => {
+  beforeEach(async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    await services.auth.login("admin_justine", PASSWORD);
+  });
+  afterEach(async () => {
+    cleanup();
+    vi.restoreAllMocks();
+    await services.auth.logout();
+  });
+
+  it.each([
+    ["a primary email", "Registrar.Admin@isu.edu.ph"],
+    ["an alternative email", "dean.backup@gmail.com"],
+  ])("shows %s another administrator holds under the email field and adds nobody", async (_label, email) => {
+    await openAdministrators();
+
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_duplicate" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: email } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+
+    const field = screen.getByLabelText("Email").closest(".field-group")!;
+    await waitFor(() => expect(field).toHaveTextContent("That email address is already in use"));
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Username")).not.toHaveAttribute("aria-invalid");
+    expect((await services.admins.list()).some((account) => account.username === "admin_duplicate")).toBe(false);
+  });
+
+  it("does not show anyone's alternative email in the directory", async () => {
+    await openAdministrators();
+
+    expect(screen.queryByText("dean.backup@gmail.com")).not.toBeInTheDocument();
+  });
+});

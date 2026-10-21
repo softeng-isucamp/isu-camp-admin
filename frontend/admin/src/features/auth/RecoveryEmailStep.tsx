@@ -58,7 +58,7 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
     <form onSubmit={submit} noValidate>
       <h2>{title}</h2>
       <p className="muted recovery-copy">
-        Enter your admin email and we'll send you a <span className="nowrap">6-digit</span> code.
+        Enter your primary or alternative admin email and we'll send you a <span className="nowrap">6-digit</span> code.
       </p>
       <label className="field">
         <span className="recovery-label">Admin email</span>

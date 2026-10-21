@@ -212,3 +212,140 @@ it('focuses the edit dialog, keeps Tab inside it, and returns focus on close', a
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(trigger).toHaveFocus();
 });
+
+describe('alternative email', () => {
+  const PRIMARY = 'admin@isu.edu.ph';
+  // The fixture account is shared by every test in this file, so put it back.
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await services.auth.login('admin_justine', 'password123');
+    await services.profile.update({ username: 'admin_justine', email: PRIMARY, alternativeEmail: null, currentPassword: 'password123' });
+  });
+  const openDialog = async () => {
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit Profile' }));
+  };
+  const type = async (label: string, value: string) => {
+    const field = screen.getByLabelText(label);
+    await userEvent.clear(field);
+    if (value) await userEvent.type(field, value);
+  };
+  const save = () => userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+  it('offers the optional alternative email with its helper, and no password until an email changes', async () => {
+    await openDialog();
+    expect(screen.getByLabelText('Username')).toBeInTheDocument();
+    expect(screen.getByLabelText('Primary email')).toHaveValue(PRIMARY);
+    expect(screen.getByLabelText('Alternative email')).toHaveValue('');
+    expect(screen.getByText('Optional')).toBeInTheDocument();
+    expect(screen.getByText('Password reset codes are sent here.')).toBeInTheDocument();
+    expect(screen.getByText('Used for account recovery if you lose access to your primary email.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    await type('Username', 'justine.only.renamed');
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    await type('Alternative email', 'justine.home@gmail.com');
+    expect(screen.getByLabelText('Current password')).toBeInTheDocument();
+    expect(screen.getByText('Changing an email address needs your password.')).toBeInTheDocument();
+    await type('Alternative email', '');
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    await type('Primary email', 'other@isu.edu.ph');
+    expect(screen.getByLabelText('Current password')).toBeInTheDocument();
+  });
+
+  it('saves an alternative email with the password and shows it under the primary on the card', async () => {
+    const update = vi.spyOn(services.profile, 'update');
+    await openDialog();
+    await type('Alternative email', 'justine.home@gmail.com');
+    await type('Current password', 'password123');
+    await save();
+    expect(await screen.findByText('Alternative: justine.home@gmail.com')).toBeInTheDocument();
+    expect(update).toHaveBeenCalledWith({ username: 'admin_justine', email: PRIMARY, alternativeEmail: 'justine.home@gmail.com', currentPassword: 'password123' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Your profile was updated successfully.')).toBeInTheDocument();
+  });
+
+  it('clears the alternative email by emptying the field', async () => {
+    await services.profile.update({ username: 'admin_justine', email: PRIMARY, alternativeEmail: 'justine.home@gmail.com', currentPassword: 'password123' });
+    await openDialog();
+    expect(screen.getByLabelText('Alternative email')).toHaveValue('justine.home@gmail.com');
+    await type('Alternative email', '');
+    await type('Current password', 'password123');
+    await save();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByText(/Alternative:/)).not.toBeInTheDocument();
+  });
+
+  it('shows a wrong password under the password field and keeps the dialog open', async () => {
+    await openDialog();
+    await type('Alternative email', 'justine.home@gmail.com');
+    await type('Current password', 'wrong');
+    await save();
+    expect(await screen.findByText('Your current password is incorrect')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current password')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // Editing the field retires its message.
+    await userEvent.type(screen.getByLabelText('Current password'), '1');
+    expect(screen.queryByText('Your current password is incorrect')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['Primary email', 'DEAN.admin@isu.edu.ph'],
+    ['Alternative email', 'dean.backup@gmail.com'],
+  ])('shows an address another administrator holds under the %s field', async (label, taken) => {
+    await openDialog();
+    await type(label, taken);
+    await type('Current password', 'password123');
+    await save();
+    const message = await screen.findByText('That email address is already in use');
+    expect(screen.getByLabelText(label)).toHaveAttribute('aria-invalid', 'true');
+    expect(message).toBe(screen.getByLabelText(label).closest('.field-group')!.querySelector('.field-error-msg'));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('refuses an alternative equal to the primary, ignoring case', async () => {
+    await openDialog();
+    await type('Alternative email', PRIMARY.toUpperCase());
+    await type('Current password', 'password123');
+    await save();
+    expect(await screen.findByText('Use a different address from your primary email')).toBeInTheDocument();
+    expect(screen.getByLabelText('Alternative email')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('shows a taken username under the username field', async () => {
+    await openDialog();
+    await type('Username', 'admin_dean');
+    await save();
+    expect(await screen.findByText('That username is already taken')).toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('shows an invalid address under its field', async () => {
+    await openDialog();
+    await type('Alternative email', 'nope');
+    await type('Current password', 'password123');
+    await save();
+    expect(await screen.findByText('Enter a valid email address')).toBeInTheDocument();
+  });
+
+  it('hides the alternative email, and the password it would need, when the server does not report it', async () => {
+    vi.spyOn(services.profile, 'get').mockResolvedValue({ id: '1', username: 'admin_justine', email: PRIMARY, role: 'superadmin' });
+    const update = vi.spyOn(services.profile, 'update').mockResolvedValue({ id: '1', username: 'admin_justine', email: 'new@isu.edu.ph', role: 'superadmin' });
+    await openDialog();
+    expect(screen.queryByLabelText('Alternative email')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toHaveValue(PRIMARY);
+    await type('Email', 'new@isu.edu.ph');
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    await save();
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ username: 'admin_justine', email: 'new@isu.edu.ph' }));
+  });
+
+  it('shows a refusal that names no field in the dialog banner', async () => {
+    vi.spyOn(services.profile, 'update').mockRejectedValue(new Error('Failed to update your profile.'));
+    await openDialog();
+    await type('Username', 'someone');
+    await save();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to update your profile.');
+  });
+});

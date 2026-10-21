@@ -36,12 +36,12 @@ describe("fixture remembered sessions", () => {
   it("keeps remembered profile changes across a browser restart and subsequent edits", async () => {
     const first = setup();
     await first.auth.login(USERNAME, PASSWORD, true);
-    await first.auth.updateProfile({ username: "renamed", email: "new@example.com" });
+    await first.auth.updateProfile({ username: "renamed", email: "new@example.com", currentPassword: PASSWORD });
     sessionStorage.clear();
     const restored = setup();
     expect(await restored.auth.me()).toMatchObject({ username: "renamed", email: "new@example.com" });
 
-    await restored.auth.updateProfile({ username: "renamed_again", email: "again@example.com" });
+    await restored.auth.updateProfile({ username: "renamed_again", email: "again@example.com", currentPassword: PASSWORD });
     sessionStorage.clear();
     expect(await setup().auth.me()).toMatchObject({ username: "renamed_again", email: "again@example.com" });
   });
@@ -49,7 +49,7 @@ describe("fixture remembered sessions", () => {
   it("keeps unchecked profile edits transient", async () => {
     const adapter = setup();
     await adapter.auth.login(USERNAME, PASSWORD, false);
-    await adapter.auth.updateProfile({ username: "renamed", email: "new@example.com" });
+    await adapter.auth.updateProfile({ username: "renamed", email: "new@example.com", currentPassword: PASSWORD });
     expect(await setup().auth.me()).toMatchObject({ username: "renamed" });
     sessionStorage.clear();
     expect(await setup().auth.me()).toBeNull();
@@ -165,6 +165,37 @@ describe("fixture account recovery", () => {
   it("returns the username for the test code, matching the email without case or spacing", async () => {
     await adapter.auth.requestRecovery(EMAIL, "username");
     await expect(adapter.auth.verifyRecovery(" Admin@ISU.edu.ph ", "username", TEST_CODE)).resolves.toEqual({ username: USERNAME });
+  });
+
+  it("recovers the account through its alternative email, for either purpose", async () => {
+    const ALTERNATIVE = "dean.backup@gmail.com";
+    await adapter.auth.requestRecovery(ALTERNATIVE, "username");
+    await expect(adapter.auth.verifyRecovery(" Dean.Backup@GMAIL.com ", "username", TEST_CODE)).resolves.toEqual({ username: "admin_dean" });
+
+    await adapter.auth.requestRecovery(ALTERNATIVE, "password");
+    await expect(adapter.auth.resetPassword(ALTERNATIVE, TEST_CODE, "NewPassw0rd!")).resolves.toEqual({ username: "admin_dean" });
+    await expect(adapter.auth.login("admin_dean", "NewPassw0rd!")).resolves.toMatchObject({ username: "admin_dean" });
+  });
+
+  it("keeps a code requested for one address from verifying through the other", async () => {
+    await adapter.auth.requestRecovery("dean.admin@isu.edu.ph", "password");
+
+    expect(await failure(adapter.auth.verifyRecovery("dean.backup@gmail.com", "password", TEST_CODE))).toMatchObject({ kind: "invalid_code" });
+    await expect(adapter.auth.verifyRecovery("dean.admin@isu.edu.ph", "password", TEST_CODE)).resolves.toEqual({ username: "admin_dean" });
+  });
+
+  it("follows an alternative email the account just set or cleared", async () => {
+    await adapter.auth.login(USERNAME, PASSWORD);
+    await adapter.auth.updateProfile({ username: USERNAME, email: EMAIL, alternativeEmail: "justine.home@gmail.com", currentPassword: PASSWORD });
+    await adapter.auth.logout();
+    await adapter.auth.requestRecovery("justine.home@gmail.com", "username");
+    await expect(adapter.auth.verifyRecovery("justine.home@gmail.com", "username", TEST_CODE)).resolves.toEqual({ username: USERNAME });
+
+    await adapter.auth.login(USERNAME, PASSWORD);
+    await adapter.auth.updateProfile({ username: USERNAME, email: EMAIL, alternativeEmail: null, currentPassword: PASSWORD });
+    await adapter.auth.logout();
+    await adapter.auth.requestRecovery("justine.home@gmail.com", "username");
+    expect(await failure(adapter.auth.verifyRecovery("justine.home@gmail.com", "username", TEST_CODE))).toMatchObject({ kind: "invalid_code" });
   });
 
   it("counts wrong codes down from five, then invalidates the code even for the right one", async () => {

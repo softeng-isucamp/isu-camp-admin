@@ -4,9 +4,18 @@ export const profileSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
   username: z.string().min(1), email: z.string().email(),
   role: z.enum(['admin', 'superadmin']),
+  // The key is absent from a backend that predates alternative emails; null means supported and unset.
+  alternativeEmail: z.string().nullable().optional(),
 });
 export type AccountProfile = z.infer<typeof profileSchema>;
-export type ProfileChanges = Pick<AccountProfile, 'username' | 'email'>;
+export type ProfileChanges = Pick<AccountProfile, 'username' | 'email'> & {
+  /** Omitted when the server does not offer the field; null clears it. */
+  alternativeEmail?: string | null;
+  /** Required by the server whenever either email changes. */
+  currentPassword?: string;
+};
+/** Whether the server reports an alternative email at all; without it the field stays hidden. */
+export const supportsAlternativeEmail = (profile: AccountProfile) => profile.alternativeEmail !== undefined;
 export type PasswordChange = { currentPassword: string; newPassword: string };
 const jobSchema = z.object({
   id: z.string(), kind: z.enum(['backup', 'restore']),
