@@ -130,7 +130,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     if (capabilities.canDelete) actions.push({ action: 'delete', label: 'Delete' });
     return actions;
   };
-  return <Card className="table-card profile-backups" role="region" aria-labelledby="backup-heading">
+  return <Card className="table-card profile-backups" style={{ overflow: 'visible' }} role="region" aria-labelledby="backup-heading">
     <div className="table-heading">
       <div><h2 id="backup-heading" tabIndex={-1}>Backup & Recovery</h2>
         <p>{services.profile.isFixture ? 'Fixture demo: backups and restores are simulated.' : 'Server backups you can restore from.'}</p></div>

@@ -140,6 +140,8 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
       if (entry.job.status === 'succeeded') {
         if (entry.job.kind === 'backup') {
           backups.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), createdBy: entry.actor, sizeBytes: 204800, scope: 'Demo campus data', status: 'ready' });
+          // Retention removes archives whoever made them, so each removal is audited like a delete.
+          for (const removed of backups.slice(schedule.keep)) audit('Deleted Backup (retention)', removed.createdAt);
           backups = backups.slice(0, schedule.keep);
         }
         entry.job.cancellable = false;

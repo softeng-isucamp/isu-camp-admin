@@ -270,7 +270,9 @@ it('saves the fixture schedule, validates it, audits the change, and applies ret
   expect(audit).toHaveBeenCalledWith('Changed Backup Schedule', expect.stringContaining('weekly'));
   await expect(service.saveSchedule({ ...weekly, keep: 0 })).rejects.toThrow();
   await expect(service.saveSchedule({ ...weekly, day: null })).rejects.toThrow();
+  const seeded = (await service.history()).items;
   await finishJob(service, (await service.createBackup()).id);
   await finishJob(service, (await service.createBackup()).id);
   expect((await service.history()).items).toHaveLength(1);
+  for (const removed of seeded) expect(audit).toHaveBeenCalledWith('Deleted Backup (retention)', removed.createdAt);
 });
