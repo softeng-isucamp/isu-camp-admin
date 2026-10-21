@@ -94,7 +94,7 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
         ensureEmailFree(email);
         // Reported after the field errors above, as the server does, so the form can show them before asking for a password.
         if (role === "superadmin") requireConfirmation("Confirm your password to create a superadmin.");
-        const created: FixtureAccount = { id: `admin-${Date.now()}`, username, email, role, status: "Active", password };
+        const created: FixtureAccount = { id: `admin-${Date.now()}`, username, email, role, status: "Active", password, alternativeEmail: null };
         accounts.push(created);
         audit("Created Administrator", username, created.id);
         return asAccount(created);

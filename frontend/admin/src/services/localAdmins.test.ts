@@ -56,6 +56,20 @@ describe("fixture sign-ins", () => {
 
     await expect(adapter.auth.login("admin_new", "A-long-enough-secret1")).resolves.toMatchObject({ role: "admin" });
   });
+
+  it("gives a newly added administrator email settings they can change", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+    await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
+    await adapter.auth.logout();
+    await adapter.auth.login("admin_new", "A-long-enough-secret1");
+
+    // A null alternative, not a missing one: missing means a backend without the field.
+    await expect(adapter.auth.profile()).resolves.toMatchObject({ alternativeEmail: null });
+    await expect(adapter.auth.updateProfile({
+      username: "admin_new", email: "renamed@isu.edu.ph", alternativeEmail: "new.home@gmail.com", currentPassword: "A-long-enough-secret1",
+    })).resolves.toMatchObject({ email: "renamed@isu.edu.ph", alternativeEmail: "new.home@gmail.com" });
+  });
 });
 
 describe("fixture administrator directory", () => {
