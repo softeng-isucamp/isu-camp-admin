@@ -41,8 +41,8 @@ def app(monkeypatch):
     with app.app_context():
         db.session.execute(db.text("ATTACH DATABASE ':memory:' AS public"))
         db.metadata.create_all(db.engine)
-        # The vocabulary the migration seeds. Without it every Place reads
-        # as legacy, because its classification lives in type_id now.
+        # The vocabulary the migration seeds. A Place has no classification
+        # of its own: type_id is the only thing that says what it is.
         db.session.add_all([
             BuildingType(type_id=index, type_name=name,
                          can_contain_locations=name in ("College", "Campus Services"))
@@ -64,16 +64,15 @@ def manila_noon(day_offset):
 
 
 def add_building(identifier, name, **columns):
-    """Seed a Place. "Building" means legacy, so it is stored as no type."""
+    """Seed a Place, classified as a College unless told otherwise."""
 
-    classification = columns.pop("classification", "Building")
-    type_row = BuildingType.query.filter_by(type_name=classification).first()
+    classification = columns.pop("classification", "College")
+    type_row = BuildingType.query.filter_by(type_name=classification).one()
     db.session.add(Building(
         building_id=identifier,
         building_code=f"B{identifier}",
         building_name=name,
-        classification=classification,
-        type_id=type_row.type_id if type_row else None,
+        type_id=type_row.type_id,
         status=columns.pop("status", "active"),
         **columns,
     ))
@@ -250,7 +249,7 @@ def test_arrival_rate_does_not_divide_by_zero(app):
 
 def test_top_destinations_rank_by_searches_and_name_the_destination(app):
     with app.app_context():
-        add_building(1, "Library", classification="Building")
+        add_building(1, "Library", classification="Campus Services")
         add_building(2, "Gymnasium", classification="Facility")
         add_location(10, "Physics Lab", type_id=2, building_id=1)
         add_search(1, 0, user_id=1, building_id=1)
@@ -264,12 +263,14 @@ def test_top_destinations_rank_by_searches_and_name_the_destination(app):
     top = result["topDestinations"]
     assert [row["rank"] for row in top] == ["1", "2", "3"]
     assert top[0] == {
-        "rank": "1", "locationId": "Building:1", "name": "Library",
-        "context": "Building", "searches": 2, "visits": 0,
+        "rank": "1", "locationId": "Campus Services:1", "name": "Library",
+        "context": "Campus Services", "searches": 2, "visits": 0,
     }
-    # A Facility keeps its own subtype in the identity key, matching the
-    # directory's Type:id convention.
-    assert {row["locationId"] for row in top} == {"Building:1", "Facility:2", "Laboratory:10"}
+    # Each Place keeps its own classification in the identity key, matching
+    # the directory's Type:id convention.
+    assert {row["locationId"] for row in top} == {
+        "Campus Services:1", "Facility:2", "Laboratory:10",
+    }
     # An indoor Location is placed in context by its parent Building.
     laboratory = next(row for row in top if row["locationId"] == "Laboratory:10")
     assert laboratory["context"] == "Library"

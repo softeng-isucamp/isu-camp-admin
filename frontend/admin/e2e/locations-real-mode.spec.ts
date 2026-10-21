@@ -17,7 +17,7 @@ async function authenticate(page: Page) {
 test("real-mode location creation survives a directory reload", async ({ page }) => {
   await authenticate(page);
   const records: LocationDto[] = [
-    { id: "building-1", name: "Campus Building", code: "BLDG-1", type: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false },
+    { id: "building-1", name: "Campus Building", code: "BLDG-1", type: "Campus Services", parentId: null, status: "Active", lat: null, lng: null, positioned: false },
     ...Array.from({ length: 11 }, (_, index) => ({
       id: String(index + 1), name: `Campus Room ${index + 1}`, code: `ROOM-${index + 1}`,
       type: "Room", parentId: "building-1", building: "Campus Building", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false,

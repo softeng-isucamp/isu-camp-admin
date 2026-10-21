@@ -6,7 +6,6 @@ from auth import admin_required, reauth_required
 from extensions import db
 from model.building import (
     CAN_CONTAIN_LOCATIONS,
-    LEGACY_CLASSIFICATION,
     PARENT_MUST_HOLD_LOCATIONS,
     PLACE_CLASSIFICATIONS,
     RECLASSIFY_WOULD_STRAND_LOCATIONS,
@@ -203,7 +202,6 @@ def _validate(data, records, buildings, current_status=None, current_place=None)
     if not code: fields["code"] = "Location code is required."
     if location_type not in CREATABLE_TYPES: fields["type"] = UNSUPPORTED_CLASSIFICATION
     building = None
-    # Every Place classification, not only the legacy spelling of it.
     if location_type in PLACE_CLASSIFICATIONS:
         building = None
         # Shadows the trailing branch below, so the rule is repeated here to
@@ -220,8 +218,7 @@ def _validate(data, records, buildings, current_status=None, current_place=None)
                 relationships["parentId"] = "The selected Building does not exist."
             elif not building.can_contain_locations:
                 # Food, Parking and Facility are places you go to, not places
-                # with rooms in them. Legacy Places still accept Locations
-                # until Phase 3.
+                # with rooms in them.
                 relationships["parentId"] = PARENT_MUST_HOLD_LOCATIONS
         if not floor_level or floor_level == "Unspecified Floor":
             fields["floor"] = "A specific Floor Level is required for a new Indoor Location."
@@ -241,7 +238,7 @@ def _validate(data, records, buildings, current_status=None, current_place=None)
     # Location is not refused for a classification it never had.
     place_type_id = None
     if location_type in PLACE_CLASSIFICATIONS and "type" not in fields:
-        place_type_id, classification_error = _resolve_place_type(location_type, current_place)
+        place_type_id, classification_error = _resolve_place_type(location_type)
         if classification_error:
             fields["type"] = classification_error
         else:
@@ -399,7 +396,6 @@ def edit_location(location_id):
         if building is not None:
             building.building_code = values["code"]
             building.building_name = values["name"]
-            building.classification = values["type"]
             building.type_id = values["building_type_id"]
             building.status = values["status"]
             building.description = values["description"]

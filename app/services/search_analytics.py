@@ -1,7 +1,7 @@
 from sqlalchemy import func
 
 from extensions import db
-from model.building import LEGACY_CLASSIFICATION, Building
+from model.building import Building
 from model.building_type import BuildingType
 from model.location import LOCATION_TYPE_NAMES, Location
 from model.user_history import UserHistory
@@ -38,12 +38,13 @@ def summarize_user_searches(days, limit=5, now=None):
         db.session.query(
             UserHistory.building_id.label("target_id"),
             Building.building_name.label("name"),
-            func.coalesce(BuildingType.type_name, LEGACY_CLASSIFICATION).label("context"),
+            BuildingType.type_name.label("context"),
             func.count(UserHistory.id).label("search_count"),
         )
         .join(Building, Building.building_id == UserHistory.building_id)
-        # Outer: a legacy Place has no type row, and reads as "Building".
-        .outerjoin(BuildingType, BuildingType.type_id == Building.type_id)
+        # Inner: building.type_id is NOT NULL and a foreign key, so every
+        # Place has exactly one type row.
+        .join(BuildingType, BuildingType.type_id == Building.type_id)
         .filter(
             UserHistory.location_id.is_(None),
             UserHistory.building_id.isnot(None),

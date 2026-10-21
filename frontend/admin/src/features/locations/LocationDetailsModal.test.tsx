@@ -25,15 +25,15 @@ function renderModal(location: Location, directory: Location[], onSubmit = vi.fn
 }
 
 describe("LocationDetailsModal classification", () => {
-  it("keeps a legacy Place as Unclassified (legacy) through a save", async () => {
-    const { select, onSubmit } = renderModal(place("Building"), []);
-    expect(screen.getByText("Unclassified")).toBeInTheDocument();
-    expect(select).toHaveValue("Building");
-    expect([...select.options].at(-1)?.text).toBe("Unclassified (legacy)");
+  it("keeps a Place's own classification through a save, with no legacy option", async () => {
+    const { select, onSubmit } = renderModal(place("Facility"), []);
+    expect(screen.queryByText("Unclassified")).not.toBeInTheDocument();
+    expect(select).toHaveValue("Facility");
+    expect([...select.options].map((option) => option.value)).not.toContain("Building");
 
     fireEvent.click(screen.getByRole("button", { name: "Save Location" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ type: "Place", classification: "Building" });
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ type: "Place", classification: "Facility" });
   });
 
   it("blocks leaf classifications for a Place holding indoor Locations but allows College and Campus Services", async () => {

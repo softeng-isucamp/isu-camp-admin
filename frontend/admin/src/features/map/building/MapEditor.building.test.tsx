@@ -88,10 +88,10 @@ describe("Map Editor preview", () => {
     } as Location));
     services.locations.save = saveLocation;
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-eng", name: "Engineering Hall", code: "ENG", classification: "Building", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", classification: "Campus Services", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Place", classification: "Building", parentId: null, function: "Academic building", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
+      { id: "building-eng", name: "Engineering Hall", code: "ENG", type: "Place", classification: "Campus Services", parentId: null, function: "Academic building", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true },
     ]);
     renderEditor();
 
@@ -176,7 +176,7 @@ describe("Map Editor preview", () => {
         id: "building-admin",
         name: "Administration Building",
         code: "ADMIN",
-        type: "Place", classification: "Building",
+        type: "Place", classification: "Campus Services",
         parentId: null,
         status: "Active",
         lat: 16.7205,
@@ -229,7 +229,7 @@ describe("Map Editor preview", () => {
 
   it("frames and selects a polygon Building queried from a parent-location handoff", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
-      { id: "building-1", name: "Stale Building Point", code: "ENG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: 16.71, lng: 121.68, positioned: true },
+      { id: "building-1", name: "Stale Building Point", code: "ENG", type: "Place", classification: "Campus Services", parentId: null, status: "Active", lat: 16.71, lng: 121.68, positioned: true },
       { id: "room-1", name: "Room 101", code: "101", type: "Room", parentId: "building-1", status: "Active", lat: null, lng: null, positioned: false },
     ]);
     vi.mocked(services.map.buildings).mockResolvedValue([
@@ -339,7 +339,7 @@ describe("Map Editor preview", () => {
       id: "42",
       name: draft.name,
       code: draft.code,
-      type: "Place" as const, classification: "Building" as const,
+      type: "Place" as const, classification: "Campus Services" as const,
       parentId: null,
       status: draft.status,
       lat: null,
@@ -472,7 +472,7 @@ describe("Map Editor preview", () => {
 
   it("shows a building room directory and associated entrances in the inspector", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
-      { id: "building-room-test", name: "Engineering Hall", code: "ENG-HALL", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+      { id: "building-room-test", name: "Engineering Hall", code: "ENG-HALL", classification: "Campus Services", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
     vi.mocked(services.locations.list).mockResolvedValue({
       items: [{ id: "room-204", name: "Room 204", code: "204", type: "Room", parentId: "building-room-test", building: "Engineering Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false }],
@@ -714,7 +714,7 @@ describe("Map Editor preview", () => {
         id: "bld-routable",
         name: "Routable Hall",
         code: "ROUT-01",
-        type: "Place", classification: "Building",
+        type: "Place", classification: "Campus Services",
         parentId: null,
         status: "Active",
         lat: null,

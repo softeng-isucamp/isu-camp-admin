@@ -13,26 +13,22 @@ from model.record_status import status_label
 # as a type_id, because the admin portal and the User App both filter on
 # names.
 #
-# "Building" is legacy: stored as ``type_id IS NULL``, readable and editable
-# on the rows that still have it, and never assigned to a new Place. It is
-# retired in Phase 3, when classification is dropped.
-LEGACY_CLASSIFICATION = "Building"
-
-ASSIGNABLE_CLASSIFICATIONS = (
+# "Building" was the legacy value - a Place that predated the vocabulary,
+# stored as ``type_id IS NULL``. Phase 3 retired it: every Place now has a
+# type, and "Building" names only the table. One set, because every
+# classification a Place can be read as is now one it can be given.
+PLACE_CLASSIFICATIONS = {
     "College",
     "Campus Services",
     "Food",
     "Parking",
     "Facility",
-)
+}
 
-PLACE_CLASSIFICATIONS = set(ASSIGNABLE_CLASSIFICATIONS) | {LEGACY_CLASSIFICATION}
-
-# Which classifications may hold indoor Locations. Legacy Places may until
-# Phase 3, which is why it is in here. The authority for the rest is
+# Which classifications may hold indoor Locations. The authority is
 # ``building_type.can_contain_locations``; this is the same answer without a
 # query, for the paths that only have a DTO's type string to go on.
-CAN_CONTAIN_LOCATIONS = {"College", "Campus Services", LEGACY_CLASSIFICATION}
+CAN_CONTAIN_LOCATIONS = {"College", "Campus Services"}
 
 # Worded once and shared, because the two route modules validate the same
 # rules and a caller should not get two spellings of one refusal.
@@ -57,17 +53,12 @@ class Building(db.Model):
     building_code = db.Column(db.String, nullable=False)
     building_name = db.Column(db.String, nullable=False)
 
-    # No longer the source of truth, and no longer defaulted: a Place with no
-    # type is legacy, and legacy is something only existing rows may be. Kept
-    # in sync with the written name until Phase 3 drops it.
-    classification = db.Column(db.String, nullable=False)
-
-    # What this Place is. NULL means legacy - the 53 rows that said nothing
-    # but "Building" - which admins clear in Phase 2.
+    # What this Place is, and the only thing that says so: the deprecated
+    # ``classification`` column was dropped in Phase 3.
     type_id = db.Column(
         db.BigInteger,
         db.ForeignKey("public.building_type.type_id"),
-        nullable=True,
+        nullable=False,
     )
 
     # Loaded with the Place rather than per row, because every DTO a listing
@@ -76,28 +67,21 @@ class Building(db.Model):
 
     @property
     def place_classification(self):
-        """This Place's classification name, or "Building" when it is legacy.
+        """This Place's classification name.
 
-        The one place the fallback lives. ``type_id IS NULL`` is the only
-        legitimate source of "Building" in a response, so readers ask here
-        rather than each keeping an ``or "Building"`` of its own - which is
-        how a row with a real type could still be reported as legacy.
+        Named once here rather than read off ``building_type`` at each call
+        site, so there is a single answer to what a Place is.
         """
 
-        if self.building_type is not None:
-            return self.building_type.type_name
-        return LEGACY_CLASSIFICATION
+        return self.building_type.type_name
 
     @property
     def can_contain_locations(self):
         """Whether indoor Locations may sit under this Place.
 
-        Read from the type row, so the rule lives in data. Legacy Places may
-        until Phase 3.
+        Read from the type row, so the rule lives in data.
         """
 
-        if self.building_type is None:
-            return True
         return bool(self.building_type.can_contain_locations)
 
     description = db.Column(db.Text, nullable=True)

@@ -1,4 +1,4 @@
-import { PLACE_CLASSIFICATIONS, SELECTABLE_PLACE_CLASSIFICATIONS } from "../types";
+import { PLACE_CLASSIFICATIONS } from "../types";
 import type { Location, LocationDraft, LocationType, PlaceClassification } from "../types";
 
 export type LocationKind = "outdoor" | "floor" | "indoor";
@@ -19,7 +19,6 @@ export const isIndoorLocationType = (type: LocationType) =>
 const classificationCanContain: Record<PlaceClassification, boolean> = {
   College: true,
   "Campus Services": true,
-  Building: true,
   Facility: false,
   Food: false,
   Parking: false,
@@ -30,13 +29,23 @@ export const canContainLocations = (classification: PlaceClassification): boolea
 
 export const isPlace = (location: Pick<Location, "type">): boolean => location.type === "Place";
 
-/** A Place that can be the parent of indoor Locations (College, Campus Services, or an unclassified legacy Place). */
+/** A Place that can be the parent of indoor Locations: a College or a Campus Services Place. */
 export const isLocationContainer = (location: Pick<Location, "type" | "classification">): boolean =>
   isPlace(location) && canContainLocations(placeClassificationOf(location));
 
-/** Classification of a Place record; Places without one are treated as Buildings. */
+/**
+ * What an absent or unrecognized classification reads as.
+ *
+ * The backend has named one on every Place since the legacy "Building" value
+ * was retired, so nothing should reach this. Facility is the catch-all of the
+ * vocabulary and holds no indoor Locations, so a value the portal does not
+ * know cannot quietly become somewhere Rooms can be filed.
+ */
+export const FALLBACK_PLACE_CLASSIFICATION: PlaceClassification = "Facility";
+
+/** Classification of a Place record, falling back for one the portal cannot read. */
 export const placeClassificationOf = (location: Pick<Location, "classification">): PlaceClassification =>
-  location.classification ?? "Building";
+  location.classification ?? FALLBACK_PLACE_CLASSIFICATION;
 
 /** What the backend calls a record's type: a Place's classification, otherwise its own type. */
 export type BackendLocationType = Exclude<LocationType, "Place"> | PlaceClassification;
@@ -55,13 +64,9 @@ export const withLocationTypeOption = <T extends LocationDraft>(draft: T, option
 export const isPlaceClassification = (value: unknown): value is PlaceClassification =>
   (PLACE_CLASSIFICATIONS as readonly unknown[]).includes(value);
 
-/** A legacy Place: recorded before Classifications existed, so the backend still calls it a Building. */
-export const isUnclassifiedPlace = (location: Pick<Location, "type" | "classification">): boolean =>
-  isPlace(location) && placeClassificationOf(location) === "Building";
-
-/** Option text for a type or classification: the legacy "Building" value is shown as unclassified. */
+/** Option text for a type or classification; only "Floor" reads as anything but itself. */
 export const locationTypeOptionLabel = (type: BackendLocationType): string =>
-  type === "Building" ? "Unclassified (legacy)" : type === "Floor" ? "Floor (legacy records only)" : type;
+  type === "Floor" ? "Floor (legacy records only)" : type;
 
 /** The indoor Locations (Room, Office, Laboratory, Restroom) a Place holds; compatibility Floor records are not counted. */
 export const indoorLocationsOf = (place: Pick<Location, "id">, directory: readonly Location[]): Location[] =>
@@ -69,22 +74,19 @@ export const indoorLocationsOf = (place: Pick<Location, "id">, directory: readon
 
 /** Classifications a Place holding `indoorCount` indoor Locations cannot be moved to. */
 export const blockedReclassifications = (indoorCount: number): PlaceClassification[] =>
-  indoorCount > 0 ? SELECTABLE_PLACE_CLASSIFICATIONS.filter((value) => !canContainLocations(value)) : [];
+  indoorCount > 0 ? PLACE_CLASSIFICATIONS.filter((value) => !canContainLocations(value)) : [];
 
 export const reclassificationBlockedMessage = (indoorCount: number): string => {
   const names = blockedReclassifications(indoorCount);
   return `Move or delete its ${indoorCount} indoor ${indoorCount === 1 ? "Location" : "Locations"} before classifying it as ${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}.`;
 };
 
-/** What a classification picker offers: the selectable set, plus the record's current value when that is not selectable. */
-export const placeClassificationOptions = (current?: PlaceClassification): PlaceClassification[] => {
-  const selectable: PlaceClassification[] = [...SELECTABLE_PLACE_CLASSIFICATIONS];
-  return current && !selectable.includes(current) ? [...selectable, current] : selectable;
-};
+/** What a classification picker offers: every classification, because a Place may be any of them. */
+export const placeClassificationOptions = (): PlaceClassification[] => [...PLACE_CLASSIFICATIONS];
 
-/** A backend classification string; null, missing, and unknown values read as Building. */
+/** A backend classification string; null, missing, and unknown values read as `FALLBACK_PLACE_CLASSIFICATION`. */
 export const classificationFromBackend = (raw: unknown): PlaceClassification =>
-  isPlaceClassification(raw) ? raw : "Building";
+  isPlaceClassification(raw) ? raw : FALLBACK_PLACE_CLASSIFICATION;
 
 /**
  * Anything that is not an indoor type or "Floor" is a Place, classified by
@@ -100,7 +102,16 @@ export const placeFieldsFromBackendType = (raw: unknown):
 };
 
 /**
- * Maps keys prefixed with a Place classification ("Building:12", "Facility:12")
+ * A key prefix that is no longer a classification but still names a Place.
+ *
+ * "Building" was retired in Phase 3, so nothing produces it any more - but a
+ * deep link someone bookmarked before then still carries it, and reading one
+ * costs a comparison. Write-side code must not reintroduce it.
+ */
+const RETIRED_PLACE_KEY_PREFIX = "Building";
+
+/**
+ * Maps keys prefixed with a Place classification ("College:12", "Facility:12")
  * to "Place:12". Other prefixes, including the backend's "Location:" fallback
  * for an unknown indoor type, are left alone: Place and Location ids collide.
  */
@@ -108,7 +119,9 @@ export const normalizeLocationKey = (key: string): string => {
   const separator = key.indexOf(":");
   if (separator < 0) return key;
   const prefix = key.slice(0, separator);
-  return isPlaceClassification(prefix) ? `Place:${key.slice(separator + 1)}` : key;
+  return isPlaceClassification(prefix) || prefix === RETIRED_PLACE_KEY_PREFIX
+    ? `Place:${key.slice(separator + 1)}`
+    : key;
 };
 
 export const locationIdentityKey = (location: Pick<Location, "id" | "type">) =>

@@ -31,7 +31,7 @@ const existingLocations: Location[] = [
     id: "bld-eng",
     name: "Engineering Hall",
     code: "ENG-01",
-    type: "Place", classification: "Building",
+    type: "Place", classification: "College",
     parentId: null,
     status: "Active",
     lat: null,
@@ -193,11 +193,14 @@ describe("validateBuildingIdentityDetails", () => {
     expect(validateBuildingIdentityDetails(validIdentity, existingLocations)).toEqual([]);
   });
 
-  it("requires a Classification and never accepts the legacy Building value", () => {
+  it("requires a Classification the vocabulary knows", () => {
     const missing = validateBuildingIdentityDetails({ ...validIdentity, classification: undefined }, existingLocations);
     expect(missing).toContainEqual({ field: "classification", message: "Choose a Classification." });
-    const legacy = validateBuildingIdentityDetails({ ...validIdentity, classification: "Building" }, existingLocations);
-    expect(legacy).toContainEqual({ field: "classification", message: "Choose a Classification." });
+    const retired = validateBuildingIdentityDetails(
+      // The legacy value, retired in Phase 3, is now just an unknown name.
+      { ...validIdentity, classification: "Building" as never }, existingLocations,
+    );
+    expect(retired).toContainEqual({ field: "classification", message: "Choose a Classification." });
   });
 
   it("rejects empty name and empty code", () => {
@@ -229,7 +232,8 @@ describe("buildCreateBuildingOperation", () => {
       name: "New Laboratory Building",
       code: "LAB-NEW",
       type: "Place",
-      classification: "Building",
+      // No classification was picked, so the record carries the fallback.
+      classification: "Facility",
       status: "Active",
       lat: null,
       lng: null,

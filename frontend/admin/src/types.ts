@@ -1,7 +1,5 @@
-/** Every classification a Place can hold or be read as; "Building" is the legacy value. New values are added here and in locationPolicy. */
-export const PLACE_CLASSIFICATIONS = ["Building", "Facility", "College", "Campus Services", "Food", "Parking"] as const;
-/** The classifications pickers offer; "Building" is the legacy value and is only ever shown as a record's current one. */
-export const SELECTABLE_PLACE_CLASSIFICATIONS = ["College", "Campus Services", "Food", "Parking", "Facility"] as const;
+/** Every classification a Place can hold, in picker order; all of them are selectable. New values are added here and in locationPolicy. */
+export const PLACE_CLASSIFICATIONS = ["College", "Campus Services", "Food", "Parking", "Facility"] as const;
 export type PlaceClassification = typeof PLACE_CLASSIFICATIONS[number];
 export type LocationType =
   | "Place"

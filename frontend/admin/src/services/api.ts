@@ -267,7 +267,7 @@ const fetchAllBackendLocations = async (): Promise<Location[]> => {
 
 const locationWritePayload = (location: LocationDraft) => {
   const { id: _id, lat: _lat, lng: _lng, positioned: _positioned, hasPhoto: _hasPhoto, photo: _photo, photoRemoved: _photoRemoved, classification: _classification, ...payload } = location;
-  // The backend still speaks Building/Facility, so a Place is sent as its classification.
+  // The backend speaks classifications, so a Place is sent as its own.
   return { ...payload, type: backendLocationType(location) };
 };
 

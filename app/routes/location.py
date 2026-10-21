@@ -7,7 +7,6 @@ from extensions import db
 from model.audit_log import AuditLog
 from model.building import (
     CAN_CONTAIN_LOCATIONS,
-    LEGACY_CLASSIFICATION,
     PARENT_MUST_HOLD_LOCATIONS,
     PLACE_CLASSIFICATIONS,
     RECLASSIFY_WOULD_STRAND_LOCATIONS,
@@ -31,8 +30,8 @@ location_bp = Blueprint("location", __name__, url_prefix="/api/locations")
 
 TYPE_IDS = LOCATION_TYPE_IDS
 INDOOR_TYPES = {"Room", "Office", "Laboratory", "Restroom"}
-# Facility is a Building classification, never a public.location type.  It
-# remains accepted here so the API can create a classified Building record.
+# A Place classification is never a public.location type. They are accepted
+# here so the API can create a classified Place record.
 CREATABLE_TYPES = set(TYPE_IDS) | PLACE_CLASSIFICATIONS
 logger = logging.getLogger(__name__)
 
@@ -204,8 +203,7 @@ def _validate(data, records, buildings):
                 )
             elif not building.can_contain_locations:
                 # Food, Parking and Facility are places you go to, not places
-                # with rooms in them. Legacy Places still accept Locations
-                # until Phase 3.
+                # with rooms in them.
                 relationships["parentId"] = PARENT_MUST_HOLD_LOCATIONS
 
         if not floor_level or floor_level == "Unspecified Floor":
@@ -229,8 +227,8 @@ def _validate(data, records, buildings):
     # status. A caller that omits the field gets the default a new row would
     # have had anyway.
     # A Place's classification travels as a name and is stored as an id.
-    # There is no current Place on a create, so "Building" is always refused
-    # here: legacy is something only existing rows may be.
+    # "Building" is not one of the names, so a caller still sending it is
+    # refused here rather than creating an untyped Place.
     place_type_id = None
     if location_type in PLACE_CLASSIFICATIONS and "type" not in fields:
         place_type_id, classification_error = _resolve_place_type(location_type)
@@ -465,7 +463,6 @@ def create_location():
                 building_name=values["name"],
                 description=values["description"],
                 keywords=values["keywords"],
-                classification=values["type"],
                 type_id=values["building_type_id"],
                 status=values["status"],
                 latitude=latitude,

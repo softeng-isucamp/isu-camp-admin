@@ -27,8 +27,8 @@ Anything outdoors on the campus map, drawn as a footprint and given exactly one 
 _Avoid_: Building (only some Places are buildings), site, structure
 
 **Classification**:
-The kind of a Place, which also decides whether it can contain indoor Locations. One of College, Campus Services, Food, Parking, or Facility. Places recorded before these Classifications existed are **unclassified** (shown as the legacy value Building) until an admin classifies them; they can contain indoor Locations meanwhile.
-_Avoid_: Building type, category
+The kind of a Place, which also decides whether it can contain indoor Locations. One of College, Campus Services, Food, Parking, or Facility, and every Place has exactly one. The legacy value Building, carried by Places recorded before these Classifications existed, was retired once all of them had been classified.
+_Avoid_: Building type, category, unclassified
 
 **College**:
 A Place whose primary occupant is an academic unit (a college, school, or institute) and which is used mainly for classes or research. Can contain indoor Locations. Graduate School and Laboratory High School are Colleges.

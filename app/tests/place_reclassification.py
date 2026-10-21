@@ -17,6 +17,7 @@ from model.floor import Floor
 from model.location import Location
 
 COLLEGE_ID = 1
+FACILITY_ID = 2
 
 
 @pytest.fixture
@@ -45,18 +46,21 @@ def app(monkeypatch):
         db.session.add(BuildingType(
             type_id=COLLEGE_ID, type_name="College", can_contain_locations=True,
         ))
+        db.session.add(BuildingType(
+            type_id=FACILITY_ID, type_name="Facility", can_contain_locations=False,
+        ))
         db.session.add(Building(
             building_id=7, building_code="OLD", building_name="Old Hall",
-            classification="Building", type_id=None, status=1,
+            type_id=FACILITY_ID, status=1,
         ))
         db.session.commit()
-        # The route loads the row fresh, with building_type already joined as None.
+        # The route loads the row fresh, with its old building_type joined in.
         db.session.expunge_all()
         yield app
         db.session.remove()
 
 
-def test_reclassifying_a_legacy_place_reports_the_new_classification(app):
+def test_reclassifying_a_place_reports_the_new_classification(app):
     response = app.test_client().put("/api/actions/locations/7", json={
         "name": "Old Hall", "code": "OLD", "type": "College",
     })

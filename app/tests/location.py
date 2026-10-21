@@ -100,7 +100,7 @@ def stub_place_vocabulary(monkeypatch):
 
 
 class FakeBuilding:
-    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="Building", polygon_coordinates=None, keywords=None, status="active"):
+    def __init__(self, identifier, name="Engineering Hall", code="ENG", description="A building", classification="College", polygon_coordinates=None, keywords=None, status="active"):
         self.building_id = identifier
         self.building_name = name
         self.building_code = code
@@ -109,22 +109,20 @@ class FakeBuilding:
         self.status = status
         self.latitude = None
         self.longitude = None
-        self.classification = classification
         self.polygon_coordinates = polygon_coordinates
         self.gallery = []
-        self.type_id = None if classification == "Building" else 1
-        self.building_type = None if classification == "Building" else type(
-            "T", (), {"type_name": classification,
-                      "can_contain_locations": classification in ("College", "Campus Services")},
-        )()
+        # Every Place has a type since Phase 3, so there is no untyped case
+        # left to fake.
+        self.building_type = PLACE_TYPES[classification]
+        self.type_id = self.building_type.type_id
 
     @property
     def place_classification(self):
-        return self.building_type.type_name if self.building_type else "Building"
+        return self.building_type.type_name
 
     @property
     def can_contain_locations(self):
-        return self.building_type.can_contain_locations if self.building_type else True
+        return self.building_type.can_contain_locations
 
     def to_location_dto(self):
         lat = float(self.latitude) if self.latitude is not None else None
@@ -216,7 +214,7 @@ def test_list_locations_composes_buildings_and_uses_database_location_types(monk
     assert response.status_code == 200
     assert response.json["total"] == 2
     assert [(item["name"], item["type"]) for item in response.json["items"]] == [
-        ("Engineering Hall", "Building"),
+        ("Engineering Hall", "College"),
         ("Room 204", "Room"),
     ]
 
@@ -319,7 +317,7 @@ def test_facility_without_polygon_is_still_created_as_a_building(monkeypatch):
     assert response.json["type"] == "Facility"
     assert records == []
     assert len(session.buildings) == 1
-    assert session.buildings[0].classification == "Facility"
+    assert session.buildings[0].type_id == PLACE_TYPES["Facility"].type_id
 
 
 def test_facility_cannot_use_normal_location_parent_fields(monkeypatch):
@@ -485,24 +483,23 @@ def make_mutation_client(monkeypatch):
         building_id = FakeColumn()
 
         def __init__(self, **values):
+            # Written from the resolved classification, as the real model is:
+            # type_id is the only thing that says what a Place is.
+            building_type = next(
+                row for row in PLACE_TYPES.values() if row.type_id == values["type_id"]
+            )
             super().__init__(
                 0,
                 values["building_name"],
                 values["building_code"],
                 values.get("description"),
-                values.get("classification", "Building"),
+                building_type.type_name,
                 values.get("polygon_coordinates"),
                 values.get("keywords"),
                 values.get("status", "active"),
             )
             self.latitude = values.get("latitude")
             self.longitude = values.get("longitude")
-            # Written from the resolved classification, as the real model is.
-            self.type_id = values.get("type_id")
-            self.building_type = next(
-                (row for row in PLACE_TYPES.values() if row.type_id == self.type_id),
-                None,
-            )
 
     monkeypatch.setattr(location_module, "Building", MutationBuilding)
 
@@ -843,8 +840,8 @@ def test_every_classification_can_be_created_and_comes_back_unchanged(monkeypatc
     assert session.buildings[0].type_id == PLACE_TYPES[classification].type_id
 
 
-def test_a_new_place_may_not_be_created_as_legacy(monkeypatch):
-    """type_id IS NULL is what Phase 2 clears; Phase 1 stops new ones."""
+def test_the_retired_legacy_value_is_rejected(monkeypatch):
+    """Phase 3 retired "Building"; it is now just an unknown name."""
 
     client, _, session = make_mutation_client(monkeypatch)
 

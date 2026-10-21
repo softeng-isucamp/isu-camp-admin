@@ -2,8 +2,8 @@
 
 Everything outdoors on the campus map is a Place, and its classification is
 what the User App filters on. ``classification`` used to say only "Building"
-or "Facility", which separates nothing; ``building.type_id`` is now the
-source of truth and NULL means legacy.
+or "Facility", which separates nothing; ``building.type_id`` is the source of
+truth, and NOT NULL since Phase 3 retired the legacy "Building" value.
 
 The route and model rules live here; the two route modules' own behaviour is
 covered in tests/location.py and tests/actions.py.
@@ -16,7 +16,6 @@ import building_types as building_types_route
 from building_types import building_types_bp
 from model.building import (
     CAN_CONTAIN_LOCATIONS,
-    LEGACY_CLASSIFICATION,
     PLACE_CLASSIFICATIONS,
     UNSUPPORTED_CLASSIFICATION,
     Building,
@@ -71,12 +70,13 @@ def vocabulary(monkeypatch):
 # THE CONSTANTS
 # ==========================================
 
-def test_every_classification_is_named_once_and_includes_legacy():
-    assert PLACE_CLASSIFICATIONS == set(ASSIGNABLE) | {"Building"}
+def test_every_classification_is_named_once_and_legacy_is_gone():
+    assert PLACE_CLASSIFICATIONS == set(ASSIGNABLE)
+    assert "Building" not in PLACE_CLASSIFICATIONS
 
 
-def test_only_colleges_campus_services_and_legacy_hold_indoor_locations():
-    assert CAN_CONTAIN_LOCATIONS == {"College", "Campus Services", "Building"}
+def test_only_colleges_and_campus_services_hold_indoor_locations():
+    assert CAN_CONTAIN_LOCATIONS == {"College", "Campus Services"}
     for standalone in ("Food", "Parking", "Facility"):
         assert standalone not in CAN_CONTAIN_LOCATIONS
 
@@ -156,40 +156,21 @@ def test_an_unknown_classification_is_refused(vocabulary):
 
 
 # ==========================================
-# LEGACY
+# THE RETIRED LEGACY VALUE
 # ==========================================
 
 class FakePlace:
-    def __init__(self, type_id=None, building_id=1):
+    def __init__(self, type_id=1, building_id=1):
         self.type_id = type_id
         self.building_id = building_id
 
 
-def test_a_new_place_may_not_be_created_as_legacy(vocabulary):
-    """type_id IS NULL is what Phase 2 exists to clear; no new ones."""
+def test_building_is_refused_like_any_other_unknown_name(vocabulary):
+    """Phase 3 left no row that may carry it, new or existing."""
 
-    type_id, error = place_classification.resolve_place_type(LEGACY_CLASSIFICATION)
+    type_id, error = place_classification.resolve_place_type("Building")
 
     assert type_id is None
-    assert error == UNSUPPORTED_CLASSIFICATION
-
-
-def test_editing_a_legacy_place_without_reclassifying_it_still_saves(vocabulary):
-    """Otherwise none of the 53 legacy rows could be edited at all."""
-
-    type_id, error = place_classification.resolve_place_type(
-        LEGACY_CLASSIFICATION, current=FakePlace(type_id=None)
-    )
-
-    assert error is None
-    assert type_id is None
-
-
-def test_a_classified_place_cannot_be_sent_back_to_legacy(vocabulary):
-    _, error = place_classification.resolve_place_type(
-        LEGACY_CLASSIFICATION, current=FakePlace(type_id=1)
-    )
-
     assert error == UNSUPPORTED_CLASSIFICATION
 
 
@@ -218,12 +199,6 @@ def test_an_empty_place_may_become_anything(vocabulary):
     ) is None
 
 
-def test_a_legacy_place_that_is_not_reclassified_is_not_refused(vocabulary):
-    assert place_classification.reclassification_error(
-        FakePlace(type_id=None), None, has_indoor_locations=True
-    ) is None
-
-
 # ==========================================
 # THE DTO
 # ==========================================
@@ -231,7 +206,7 @@ def test_a_legacy_place_that_is_not_reclassified_is_not_refused(vocabulary):
 def _place(type_row):
     building = Building(
         building_id=1, building_code="B-1", building_name="CAS Canteen",
-        classification="Food", status="active",
+        type_id=type_row.type_id, status="active",
     )
     building.building_type = type_row
     return building
@@ -241,10 +216,11 @@ def test_a_classified_place_reports_its_classification_name():
     assert _place(VOCABULARY["Food"]).to_location_dto()["type"] == "Food"
 
 
-def test_a_legacy_place_reports_building():
-    """type_id IS NULL is the only legitimate source of "Building"."""
+def test_the_model_no_longer_maps_the_dropped_classification_column():
+    """20261022_drop_place_classification.sql removed it from the table."""
 
-    assert _place(None).to_location_dto()["type"] == LEGACY_CLASSIFICATION
+    assert "classification" not in Building.__table__.c
+    assert Building.__table__.c.type_id.nullable is False
 
 
 def test_the_dto_never_carries_a_type_id():
@@ -259,7 +235,3 @@ def test_the_dto_never_carries_a_type_id():
 ))
 def test_whether_a_place_may_hold_locations_comes_from_its_type(name, expected):
     assert _place(VOCABULARY[name]).can_contain_locations is expected
-
-
-def test_a_legacy_place_may_still_hold_locations_until_phase_three():
-    assert _place(None).can_contain_locations is True

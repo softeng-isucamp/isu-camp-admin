@@ -93,7 +93,7 @@ class ListBuilding:
     def to_location_dto(self):
         return {
             "id": str(self.building_id), "name": self.building_name,
-            "code": self.building_code, "type": "Building", "parentId": None,
+            "code": self.building_code, "type": "College", "parentId": None,
             "building": None, "floor": None, "function": None,
             "keywords": None, "status": "Active", "lat": None, "lng": None,
             "positioned": False, "hasPhoto": False,
@@ -352,15 +352,18 @@ def test_actions_can_edit_a_building(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
-        # Legacy Place, as these rows are: type_id IS NULL.
-        "type_id": None,
-        "building_type": None,
+        "type_id": PLACE_TYPES["College"].type_id,
+        "building_type": PLACE_TYPES["College"],
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
-        "classification": "Building",
         "description": "Old description",
-        "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "code": self.building_code, "type": self.classification},
+        "to_location_dto": lambda self: {
+            "id": "42", "name": self.building_name, "code": self.building_code,
+            "type": next(
+                row.type_name for row in PLACE_TYPES.values() if row.type_id == self.type_id
+            ),
+        },
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "_edit_target", lambda location_id, requested_type: (None, building))
@@ -374,7 +377,7 @@ def test_actions_can_edit_a_building(monkeypatch):
     assert response.status_code == 200
     assert building.building_name == "New Hall"
     assert building.building_code == "NEW"
-    assert building.classification == "Facility"
+    assert building.type_id == PLACE_TYPES["Facility"].type_id
     assert response.json["type"] == "Facility"
 
 
@@ -382,13 +385,11 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
-        # Legacy Place, as these rows are: type_id IS NULL.
-        "type_id": None,
-        "building_type": None,
+        "type_id": PLACE_TYPES["College"].type_id,
+        "building_type": PLACE_TYPES["College"],
         "building_id": 42,
         "building_code": "ENG",
         "building_name": "Engineering Hall",
-        "classification": "Building",
         "description": "Old description",
         "keywords": "old, tags",
         "to_location_dto": lambda self: {"id": "42", "name": self.building_name, "keywords": self.keywords},
@@ -402,7 +403,7 @@ def test_actions_edit_updates_building_search_keywords(monkeypatch):
 
     response = app.test_client().put(
         "/api/actions/locations/42",
-        json={"name": "Engineering Hall", "code": "ENG", "type": "Building", "keywords": "engineering, labs"},
+        json={"name": "Engineering Hall", "code": "ENG", "type": "College", "keywords": "engineering, labs"},
     )
 
     assert response.status_code == 200
@@ -420,13 +421,11 @@ def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
-        # Legacy Place, as these rows are: type_id IS NULL.
-        "type_id": None,
-        "building_type": None,
+        "type_id": PLACE_TYPES["College"].type_id,
+        "building_type": PLACE_TYPES["College"],
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
-        "classification": "Building",
         "description": "Old description",
         "keywords": None,
         "status": "active",
@@ -442,7 +441,7 @@ def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
 
     retired = client.put(
         "/api/actions/locations/42",
-        json={"name": "Old Hall", "code": "OLD", "type": "Building", "status": "Inactive"},
+        json={"name": "Old Hall", "code": "OLD", "type": "College", "status": "Inactive"},
     )
 
     assert retired.status_code == 200
@@ -451,7 +450,7 @@ def test_actions_edit_updates_building_lifecycle_status(monkeypatch):
 
     untouched = client.put(
         "/api/actions/locations/42",
-        json={"name": "Old Hall", "code": "OLD", "type": "Building"},
+        json={"name": "Old Hall", "code": "OLD", "type": "College"},
     )
 
     assert untouched.status_code == 200
@@ -491,13 +490,11 @@ def _edit_building_app(monkeypatch, has_photo, photo_change, applied):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
     building = type("Building", (), {
-        # Legacy Place, as these rows are: type_id IS NULL.
-        "type_id": None,
-        "building_type": None,
+        "type_id": PLACE_TYPES["College"].type_id,
+        "building_type": PLACE_TYPES["College"],
         "building_id": 42,
         "building_code": "ENG",
         "building_name": "Engineering Hall",
-        "classification": "Building",
         "description": "A building",
         "to_location_dto": lambda self: {"id": "42", "hasPhoto": has_photo},
     })()
@@ -521,7 +518,7 @@ def test_actions_can_attach_a_photo_when_editing_a_building(monkeypatch):
     applied = []
     client, building = _edit_building_app(monkeypatch, True, (change, True, None), applied)
 
-    response = client.put("/api/actions/locations/42", json={"name": "Engineering Hall", "code": "ENG", "type": "Building"})
+    response = client.put("/api/actions/locations/42", json={"name": "Engineering Hall", "code": "ENG", "type": "College"})
 
     assert response.status_code == 200
     assert applied == [(building, change, True)]
@@ -532,7 +529,7 @@ def test_editing_a_building_without_an_upload_leaves_the_gallery_alone(monkeypat
     applied = []
     client, building = _edit_building_app(monkeypatch, True, (None, False, None), applied)
 
-    response = client.put("/api/actions/locations/42", json={"name": "Renamed Hall", "code": "ENG", "type": "Building"})
+    response = client.put("/api/actions/locations/42", json={"name": "Renamed Hall", "code": "ENG", "type": "College"})
 
     assert response.status_code == 200
     assert building.building_name == "Renamed Hall"
@@ -561,7 +558,7 @@ def test_building_photo_is_served_when_the_type_hint_names_a_footprint(monkeypat
         covers={indoor: _cover(JPEG_BYTES, "image/jpeg"), footprint: _cover(PNG_BYTES, "image/png")},
     )
 
-    response = client.get("/api/actions/locations/42/photo?type=Building")
+    response = client.get("/api/actions/locations/42/photo?type=Facility")
 
     assert response.status_code == 200
     assert response.data == PNG_BYTES
@@ -599,26 +596,27 @@ def test_photo_request_for_an_unknown_id_is_not_found(monkeypatch):
 # RECLASSIFYING A PLACE (issue #121)
 # ==========================================
 
-def place_edit_app(monkeypatch, classification="Building", type_id=None, indoor_locations=()):
+def place_edit_app(monkeypatch, classification="Campus Services", indoor_locations=()):
     """A PUT-ready app whose Place carries the given type and children."""
 
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
+    type_id = PLACE_TYPES[classification].type_id
     building = type("Place", (), {
         "type_id": type_id,
-        "building_type": next(
-            (row for row in PLACE_TYPES.values() if row.type_id == type_id), None
-        ),
+        "building_type": PLACE_TYPES[classification],
         "building_id": 42,
         "building_code": "OLD",
         "building_name": "Old Hall",
-        "classification": classification,
         "description": None,
         "keywords": None,
         "status": "active",
         "to_location_dto": lambda self: {
             "id": "42", "name": self.building_name,
-            "code": self.building_code, "type": self.classification,
+            "code": self.building_code,
+            "type": next(
+                row.type_name for row in PLACE_TYPES.values() if row.type_id == self.type_id
+            ),
         },
     })()
     monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
@@ -651,7 +649,7 @@ def test_reclassifying_a_place_that_holds_locations_to_parking_is_refused(monkey
         "Move or remove this Place's indoor Locations before classifying it as "
         "Food, Parking, or Facility."
     )
-    assert building.classification == "Building", "nothing was written"
+    assert building.type_id == PLACE_TYPES["Campus Services"].type_id, "nothing was written"
 
 
 def test_the_same_place_may_become_a_college(monkeypatch):
@@ -676,9 +674,8 @@ def test_an_empty_place_may_become_parking(monkeypatch):
     assert building.type_id == PLACE_TYPES["Parking"].type_id
 
 
-def test_reclassifying_a_legacy_place_sets_its_type_id(monkeypatch):
-    app, building = place_edit_app(monkeypatch)
-    assert building.type_id is None
+def test_reclassifying_a_place_sets_its_type_id(monkeypatch):
+    app, building = place_edit_app(monkeypatch, classification="Facility")
 
     response = app.test_client().put("/api/actions/locations/42", json={
         "name": "Old Hall", "code": "OLD", "type": "Campus Services",
@@ -686,31 +683,18 @@ def test_reclassifying_a_legacy_place_sets_its_type_id(monkeypatch):
 
     assert response.status_code == 200
     assert building.type_id == PLACE_TYPES["Campus Services"].type_id
-    assert building.classification == "Campus Services"
+    assert response.json["type"] == "Campus Services"
 
 
-def test_a_legacy_place_can_still_be_edited_without_reclassifying_it(monkeypatch):
-    """Otherwise none of the legacy rows could be renamed before Phase 2."""
+def test_a_place_cannot_be_sent_back_to_the_retired_legacy_value(monkeypatch):
+    """"Building" is no longer a classification, on an edit as on a create."""
 
-    app, building = place_edit_app(monkeypatch)
-
-    response = app.test_client().put("/api/actions/locations/42", json={
-        "name": "Renamed Hall", "code": "OLD", "type": "Building",
-    })
-
-    assert response.status_code == 200
-    assert building.building_name == "Renamed Hall"
-    assert building.type_id is None, "it stays legacy"
-
-
-def test_a_classified_place_cannot_be_sent_back_to_legacy(monkeypatch):
-    app, building = place_edit_app(
-        monkeypatch, classification="Parking", type_id=PLACE_TYPES["Parking"].type_id
-    )
+    app, building = place_edit_app(monkeypatch, classification="Parking")
 
     response = app.test_client().put("/api/actions/locations/42", json={
         "name": "Old Hall", "code": "OLD", "type": "Building",
     })
 
     assert response.status_code == 400
+    assert response.json["fields"]["type"] == "Select a supported Location type."
     assert building.type_id == PLACE_TYPES["Parking"].type_id

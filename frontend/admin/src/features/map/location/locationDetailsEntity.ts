@@ -1,3 +1,4 @@
+import { FALLBACK_PLACE_CLASSIFICATION } from "../../../lib/locationPolicy";
 import type { Building, Location } from "../../../types";
 
 /**
@@ -16,7 +17,7 @@ export function locationDetailsEntity(
     name: selectedBuilding.name,
     code: selectedBuilding.code,
     type: "Place",
-    classification: selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building",
+    classification: selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? FALLBACK_PLACE_CLASSIFICATION,
     parentId: null,
     function: selectedBuildingLocation?.function ?? "Campus Building",
     keywords: selectedBuildingLocation?.keywords ?? "",

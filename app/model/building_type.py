@@ -5,9 +5,9 @@ The counterpart to ``public.location_type`` for Places - rows in
 "Building" or "Facility", which does not separate a canteen from a car park
 from a college, so the User App has nothing real to filter on.
 
-``building.type_id`` is the source of truth. ``NULL`` means legacy: a Place
-that predates the vocabulary, reported as "Building", editable but never
-created. Phase 3 makes the column NOT NULL and drops ``classification``.
+``building.type_id`` is the source of truth, and NOT NULL since Phase 3:
+every Place names one of these types, and the legacy "Building" value - a
+Place that predated the vocabulary - no longer exists.
 
 The names are read from the table rather than hardcoded here, so a type can
 be added by seeding a row. ``model.building`` still names them in

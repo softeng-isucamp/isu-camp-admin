@@ -18,6 +18,11 @@ from model.route_node import RouteNode
 from model.user_history import UserHistory
 
 
+# The seeded vocabulary's ids, in the order the migration inserts them.
+COLLEGE_ID = 1
+CAMPUS_SERVICES_ID = 2
+
+
 @pytest.fixture
 def app(monkeypatch):
     app = Flask(__name__)
@@ -33,8 +38,8 @@ def app(monkeypatch):
     with app.app_context():
         db.session.execute(db.text("ATTACH DATABASE ':memory:' AS public"))
         db.metadata.create_all(db.engine)
-        # The vocabulary the migration seeds. Without it every Place reads
-        # as legacy, because its classification lives in type_id now.
+        # The vocabulary the migration seeds. A Place has no classification
+        # of its own: type_id is the only thing that says what it is.
         db.session.add_all([
             BuildingType(type_id=index, type_name=name,
                          can_contain_locations=name in ("College", "Campus Services"))
@@ -52,8 +57,8 @@ def test_dashboard_summarizes_counts_and_recent_activity(app):
     now = datetime.now(timezone.utc)
     with app.app_context():
         db.session.add_all([
-            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", classification="Building"),
-            Building(building_id=2, building_code="LIB", building_name="Library", classification="Building"),
+            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", type_id=COLLEGE_ID),
+            Building(building_id=2, building_code="LIB", building_name="Library", type_id=CAMPUS_SERVICES_ID),
             AppUser(id=1, username="student01"),
             Location(location_id=1, building_id=1, type_id=3, location_code="ENG-201", location_name="Dean's Office"),
             Location(location_id=2, building_id=1, type_id=1, location_code="ENG-202", location_name="Room 202"),
@@ -88,8 +93,8 @@ def test_dashboard_ranks_selected_indoor_locations_without_double_counting_their
     with app.app_context():
         db.session.add_all([
             AppUser(id=1, username="student01"),
-            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", classification="Building"),
-            Building(building_id=2, building_code="LIB", building_name="Library", classification="Building"),
+            Building(building_id=1, building_code="ENG", building_name="Engineering Hall", type_id=COLLEGE_ID),
+            Building(building_id=2, building_code="LIB", building_name="Library", type_id=CAMPUS_SERVICES_ID),
             Location(location_id=1, building_id=2, type_id=1, location_code="ENG-201", location_name="Room 201"),
             UserHistory(id=1, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=2)),
             UserHistory(id=2, user_id=1, building_id=1, location_id=1, created_at=now - timedelta(hours=1)),
@@ -112,16 +117,16 @@ def test_dashboard_ranks_selected_indoor_locations_without_double_counting_their
         },
         {
             "rank": "2",
-            "locationId": "Building:1",
+            "locationId": "College:1",
             "name": "Engineering Hall",
-            "context": "Building",
+            "context": "College",
             "searches": 1,
         },
         {
             "rank": "3",
-            "locationId": "Building:2",
+            "locationId": "Campus Services:2",
             "name": "Library",
-            "context": "Building",
+            "context": "Campus Services",
             "searches": 1,
         },
     ]
@@ -136,7 +141,7 @@ def test_dashboard_filters_searches_by_range_and_limits_tied_results_determinist
                 building_id=identifier,
                 building_code=f"B{identifier}",
                 building_name=name,
-                classification="Building",
+                type_id=COLLEGE_ID,
             ))
             db.session.add(UserHistory(
                 id=identifier,

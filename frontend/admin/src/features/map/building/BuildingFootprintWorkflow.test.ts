@@ -6,7 +6,7 @@ import { createBuildingFootprintWorkflow } from "./BuildingFootprintWorkflow";
 const points: [number, number][] = [[0, 0], [0, 0.001], [0.001, 0]];
 const identity = { name: "Science Hall", code: "SCI", classification: "College" as const, function: "Teaching" };
 const location: Location = {
-  id: "building-42", name: "Science Hall", code: "SCI", type: "Place", classification: "Building", parentId: null,
+  id: "building-42", name: "Science Hall", code: "SCI", type: "Place", classification: "College", parentId: null,
   status: "Active", lat: null, lng: null, positioned: false,
 };
 const building: Building = { id: location.id, name: location.name, code: location.code, points: [] };

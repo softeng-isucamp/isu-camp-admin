@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_MODE, services, setMockFailure } from "../../services/api";
 import {
-  Badge,
   Button,
   Card,
   Empty,
@@ -16,11 +15,11 @@ import {
 } from "../../components/UI";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { PasswordConfirmationField, usePasswordConfirmation } from "../auth/PasswordConfirmation";
-import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../types";
+import { PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -46,8 +45,8 @@ function floorNamesInOrder(names: string[]): string[] {
   return [...new Set(names)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
-/** Place options of the type filter. "Building" is the legacy value; it is sent to the backend as is and shown as unclassified. */
-const typeFilterPlaces: BackendLocationType[] = [...SELECTABLE_PLACE_CLASSIFICATIONS, "Building"];
+/** Place options of the type filter: every classification, which is what the backend filters on. */
+const typeFilterPlaces: BackendLocationType[] = [...PLACE_CLASSIFICATIONS];
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -801,7 +800,7 @@ export function Locations() {
               style={{ background: "#ffffff", borderRadius: "18px", minWidth: "120px", height: "46px" }}
             >
               <option>All Types</option>
-              {/* Option values are the names the backend filters on; the legacy "Building" value reads as unclassified. */}
+              {/* Option values are the names the backend filters on. */}
               <optgroup label="Places">
                 {typeFilterPlaces.map((value) => (
                   <option key={value} value={value}>{locationTypeOptionLabel(value)}</option>
@@ -1040,7 +1039,6 @@ export function Locations() {
                     <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441" }}>
                       {backendLocationType(item)}
                     </span>
-                    {isUnclassifiedPlace(item) && <> <Badge tone="grey">Unclassified</Badge></>}
                   </td>
                   <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
                     {item.function || "—"}
@@ -1212,7 +1210,7 @@ export function Locations() {
                 allowedTypes={dialog === "add"
                   ? ["Laboratory", "Room", "Office", "Restroom"]
                   : isPlace(draft)
-                    ? placeClassificationOptions(placeClassificationOf(draft))
+                    ? placeClassificationOptions()
                     : ["Laboratory", "Room", "Office", "Restroom", ...(draft.type === "Floor" ? ["Floor" as const] : [])]}
                 disabledTypes={blockedReclassifications(reclassifyingChildren.length)}
                 typeHelper={reclassifyingChildren.length ? reclassificationBlockedMessage(reclassifyingChildren.length) : undefined}

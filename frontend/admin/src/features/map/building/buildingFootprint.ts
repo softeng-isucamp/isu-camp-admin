@@ -1,4 +1,5 @@
-import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../../types";
+import { FALLBACK_PLACE_CLASSIFICATION } from "../../../lib/locationPolicy";
+import { PLACE_CLASSIFICATIONS } from "../../../types";
 import type { Building, Location, PlaceClassification, RecordStatus } from "../../../types";
 import type { WorkingOperation } from "../types";
 import {
@@ -181,8 +182,8 @@ export function validateBuildingIdentityDetails(
 ): BuildingValidationIssue[] {
   const issues: BuildingValidationIssue[] = [];
 
-  // A new Place has no default Classification, and "Building" is never chosen.
-  if (!input.classification || !(SELECTABLE_PLACE_CLASSIFICATIONS as readonly string[]).includes(input.classification)) {
+  // A new Place has no default Classification; the admin picks one.
+  if (!input.classification || !(PLACE_CLASSIFICATIONS as readonly string[]).includes(input.classification)) {
     issues.push({ field: "classification", message: "Choose a Classification." });
   }
   if (!input.name.trim()) {
@@ -221,7 +222,7 @@ export function buildCreateBuildingOperation(
     name: input.name.trim(),
     code: input.code.trim(),
     type: "Place",
-    classification: input.classification ?? "Building",
+    classification: input.classification ?? FALLBACK_PLACE_CLASSIFICATION,
     parentId: null,
     status: input.status ?? "Active",
     lat: null,

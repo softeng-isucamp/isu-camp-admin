@@ -25,7 +25,7 @@ from sqlalchemy import func
 
 from extensions import db
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
-from model.building import LEGACY_CLASSIFICATION, Building
+from model.building import Building
 from model.building_type import BuildingType
 from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.user_history import UserHistory
@@ -224,14 +224,14 @@ def _destination_names():
 
     buildings = {
         building.building_id: building
-        # The classification name comes from building_type; a Place with no
-        # type is legacy and reads as "Building". Outer-joined because the 53
-        # legacy rows have no type row to join to.
+        # The classification name comes from building_type. Inner-joined:
+        # building.type_id is NOT NULL and a foreign key, so every Place has
+        # exactly one type row.
         for building in db.session.query(
             Building.building_id,
             Building.building_name,
-            func.coalesce(BuildingType.type_name, LEGACY_CLASSIFICATION).label("classification"),
-        ).outerjoin(BuildingType, BuildingType.type_id == Building.type_id).all()
+            BuildingType.type_name.label("classification"),
+        ).join(BuildingType, BuildingType.type_id == Building.type_id).all()
     }
     locations = {
         location.location_id: location

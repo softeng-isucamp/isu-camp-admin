@@ -2,45 +2,34 @@
 
 The API exchanges names - "College", "Campus Services" - and never ids, so
 every write has to resolve one against ``public.building_type``. Both route
-modules do it, and they have to agree on three rules, which is why they are
+modules do it, and they have to agree on two rules, which is why they are
 here rather than in either of them:
 
-* an unknown name is a refusal, not a silently untyped Place;
-* "Building" is legacy and cannot be chosen. It survives only where it
-  already is, so an edit that does not reclassify an old Place still saves;
+* an unknown name is a refusal, not a silently untyped Place. "Building" is
+  one such name: it was the legacy value, it is not in the vocabulary, and
+  Phase 3 left no row that may carry it;
 * a Place that holds indoor Locations cannot become one that may not hold
   them, because the Locations would be stranded somewhere the directory
   does not let a user reach.
 """
 
 from model.building import (
-    LEGACY_CLASSIFICATION,
     RECLASSIFY_WOULD_STRAND_LOCATIONS,
     UNSUPPORTED_CLASSIFICATION,
 )
 from model.building_type import find_type
 
 
-def resolve_place_type(name, current=None):
+def resolve_place_type(name):
     """The ``type_id`` a Place should be written with.
 
-    Returns ``(type_id, error)``. ``type_id`` is None for a legacy Place that
-    is being edited without being reclassified; ``error`` is the message for
-    ``fields["type"]`` when the name cannot be used.
-
-    ``current`` is the Place being edited, or None when one is being created.
-    It is what decides whether "Building" is an unchanged legacy value or an
-    attempt to create a new one.
+    Returns ``(type_id, error)``. ``error`` is the message for
+    ``fields["type"]`` when the name is not one the vocabulary knows, and
+    ``type_id`` is None in that case; otherwise ``type_id`` is a real id,
+    because every Place has a type.
     """
 
     cleaned = " ".join(str(name or "").split())
-
-    if cleaned == LEGACY_CLASSIFICATION:
-        # Only where it already is. A new Place, or an old one that has since
-        # been given a real type, may not go back to legacy.
-        if current is not None and current.type_id is None:
-            return None, None
-        return None, UNSUPPORTED_CLASSIFICATION
 
     record = find_type(cleaned)
     if record is None:
@@ -61,19 +50,16 @@ def reclassification_error(current, type_id, has_indoor_locations):
 
     record = find_type_by_id(type_id)
 
-    # Legacy stays able to hold Locations until Phase 3, so a Place that is
-    # not being reclassified is never refused here.
-    if record is None:
-        return None
-
-    if record.can_contain_locations:
+    # ``type_id`` came from resolve_place_type, so a missing row means the
+    # vocabulary changed under us rather than a Place without a type.
+    if record is None or record.can_contain_locations:
         return None
 
     return RECLASSIFY_WOULD_STRAND_LOCATIONS
 
 
 def find_type_by_id(type_id):
-    """The type row with this id, or None for legacy."""
+    """The type row with this id, or None when there is no such type."""
 
     if type_id is None:
         return None

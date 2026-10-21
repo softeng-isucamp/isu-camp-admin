@@ -1,4 +1,4 @@
-import { isLocationContainer } from "../../../lib/locationPolicy";
+import { FALLBACK_PLACE_CLASSIFICATION, isLocationContainer } from "../../../lib/locationPolicy";
 import type { Building, Location } from "../../../types";
 
 export const isIndoorLocation = (location: Location) =>
@@ -17,7 +17,7 @@ export const indoorLocationParent = (building: Building, locations: Location[]):
     name: building.name,
     code: building.code,
     type: "Place" as const,
-    classification: "Building" as const,
+    classification: building.classification ?? FALLBACK_PLACE_CLASSIFICATION,
     parentId: null,
     status: building.status ?? "Active",
     lat: null,

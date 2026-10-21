@@ -20,12 +20,16 @@ from extensions import db
 from model.audit_log import AuditLog  # noqa: F401  registered for create_all
 from model.building import Building
 from model.building_photo import BuildingPhoto
+from model.building_type import BuildingType
 from model.floor import Floor
 from model.location import Location
 from model.location_photo import LocationPhoto
 
 # Large enough that fetching it would be the dominant cost of a request.
 PNG_BYTES = bytes.fromhex("89504e470d0a1a0a") + b"pixels" * 8192
+
+# The College row these tests classify every Place as.
+COLLEGE_ID = 1
 
 # An image column in a SELECT list. Since the mirrored photo columns were
 # dropped, ``content`` on one of the two gallery tables is the only one left.
@@ -82,12 +86,17 @@ def client(monkeypatch):
         # public.* is a Postgres schema; SQLite reaches it as an attached database.
         db.session.execute(db.text("attach database ':memory:' as public"))
         db.create_all()
+        # Every Place names a type, so the vocabulary the migration seeds has
+        # to be here before any Place is.
+        db.session.add(BuildingType(
+            type_id=COLLEGE_ID, type_name="College", can_contain_locations=True,
+        ))
         db.session.add_all(
             Building(
                 building_id=identifier,
                 building_code=f"B-{identifier}",
                 building_name=f"Building {identifier}",
-                classification="Building",
+                type_id=COLLEGE_ID,
                 description="before",
             )
             for identifier in range(1, 21)
@@ -166,7 +175,7 @@ def test_metadata_only_building_update_never_fetches_photo_bytes(client):
     http, log, app = client
 
     response = _metadata_put(http, log, {
-        "name": "Building 1", "code": "B-1", "type": "Building", "function": "after",
+        "name": "Building 1", "code": "B-1", "type": "College", "function": "after",
     })
 
     assert log.selecting_photo_bytes() == []
@@ -180,7 +189,7 @@ def test_metadata_only_building_update_does_not_reread_the_row_after_writing(cli
     http, log, _ = client
 
     response = _metadata_put(http, log, {
-        "name": "Building 1", "code": "B-1", "type": "Building", "function": "after",
+        "name": "Building 1", "code": "B-1", "type": "College", "function": "after",
     })
 
     assert log.after("UPDATE public.building").selects("building") == []
@@ -192,7 +201,7 @@ def test_building_update_reads_one_building_row_not_the_whole_table(client):
     http, log, _ = client
 
     _metadata_put(http, log, {
-        "name": "Building 1", "code": "B-1", "type": "Building", "function": "after",
+        "name": "Building 1", "code": "B-1", "type": "College", "function": "after",
     })
 
     # One lean index over the table for the duplicate-code check, and one row
@@ -226,7 +235,7 @@ def test_the_single_photo_field_becomes_the_cover_without_being_read_back(client
     response = http.put(
         "/api/actions/locations/1",
         data={
-            "name": "Building 1", "code": "B-1", "type": "Building",
+            "name": "Building 1", "code": "B-1", "type": "College",
             "photo": (io.BytesIO(replacement), "cover.jpg", "image/jpeg"),
         },
         content_type="multipart/form-data",
@@ -277,7 +286,7 @@ def test_a_gallery_save_picks_a_cover_without_moving_any_image(client):
     response = http.put(
         "/api/actions/locations/1",
         data={
-            "name": "Building 1", "code": "B-1", "type": "Building",
+            "name": "Building 1", "code": "B-1", "type": "College",
             "photos": [
                 (io.BytesIO(first), "front.png", "image/png"),
                 (io.BytesIO(second), "side.jpg", "image/jpeg"),
@@ -308,7 +317,7 @@ def test_removing_the_last_photo_leaves_the_owner_with_no_cover(client):
     response = http.put(
         "/api/actions/locations/1",
         data={
-            "name": "Building 1", "code": "B-1", "type": "Building",
+            "name": "Building 1", "code": "B-1", "type": "College",
             "removePhotoIds": f"[{photo_id}]",
         },
         content_type="multipart/form-data",
@@ -395,7 +404,7 @@ def test_retiring_a_building_and_an_indoor_location_round_trips_through_both_tab
     http, _, app = client
 
     building = http.put("/api/actions/locations/1", json={
-        "name": "Building 1", "code": "B-1", "type": "Building", "status": "Inactive",
+        "name": "Building 1", "code": "B-1", "type": "College", "status": "Inactive",
     })
     indoor = http.put("/api/actions/locations/101", json={
         "name": "Room 101", "code": "ENG-101", "type": "Room",
