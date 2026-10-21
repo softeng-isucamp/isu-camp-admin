@@ -5,7 +5,7 @@ import { services } from '../../services/api';
 import type { BackupDownload, BackupJob, SystemBackup } from '../../services/profile';
 import { DELETE_CONFIRMATION_WORDING, PasswordConfirmationField, usePasswordConfirmation } from '../auth/PasswordConfirmation';
 import { origin, sizeText } from './backupFormat';
-import { DialogFocus } from './DialogFocus';
+import { DialogFocus, type FocusReturn } from './DialogFocus';
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : 'Unable to complete the request. Try again.';
 const BACKUP_DELETE_WORDING = { ...DELETE_CONFIRMATION_WORDING, expired: 'Your password confirmation expired. Enter it again to delete this backup.' };
@@ -19,7 +19,7 @@ function startDownload(link: BackupDownload) {
   anchor.click();
 }
 
-export function DownloadDialog({ backup, onClose, onStarted }: { backup: SystemBackup; onClose: () => void; onStarted: () => void }) {
+export function DownloadDialog({ backup, returnTo, onClose, onStarted }: { backup: SystemBackup; returnTo: FocusReturn; onClose: () => void; onStarted: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,7 +30,7 @@ export function DownloadDialog({ backup, onClose, onStarted }: { backup: SystemB
     try { startDownload(await services.profile.download(backup.id, password)); onStarted(); }
     catch (cause) { setError(message(cause)); setBusy(false); }
   };
-  return <DialogFocus busy={busy}>
+  return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Download this backup?" subtitle={`${subtitle(backup)} · ${sizeText(backup.sizeBytes)}`} size="sm" onClose={() => { if (!busy) onClose(); }}>
       <form onSubmit={submit} className="admin-form" aria-busy={busy}>
         <p className="profile-warning">This file is a complete copy of the database, including administrator password hashes. Store it securely.</p>
@@ -45,7 +45,7 @@ export function DownloadDialog({ backup, onClose, onStarted }: { backup: SystemB
   </DialogFocus>;
 }
 
-export function RestoreDialog({ backup, onClose, onStarted }: { backup: SystemBackup; onClose: () => void; onStarted: (job: BackupJob) => void }) {
+export function RestoreDialog({ backup, returnTo, onClose, onStarted }: { backup: SystemBackup; returnTo: FocusReturn; onClose: () => void; onStarted: (job: BackupJob) => void }) {
   const [confirmation, setConfirmation] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -57,7 +57,7 @@ export function RestoreDialog({ backup, onClose, onStarted }: { backup: SystemBa
     try { onStarted(await services.profile.restore(backup.id, password)); }
     catch (cause) { setError(message(cause)); setBusy(false); }
   };
-  return <DialogFocus busy={busy}>
+  return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Restore this backup?" subtitle={subtitle(backup)} size="sm" variant="danger" onClose={() => { if (!busy) onClose(); }}>
       <form onSubmit={submit} className="admin-form" aria-busy={busy}>
         <p className="admin-remove-copy">This replaces {backup.scope} with this backup. Changes made after it was created may be lost.</p>
@@ -73,7 +73,7 @@ export function RestoreDialog({ backup, onClose, onStarted }: { backup: SystemBa
   </DialogFocus>;
 }
 
-export function DeleteDialog({ backup, onlyRestorable, onClose, onDeleted }: { backup: SystemBackup; onlyRestorable: boolean; onClose: () => void; onDeleted: () => void }) {
+export function DeleteDialog({ backup, returnTo, onlyRestorable, onClose, onDeleted }: { backup: SystemBackup; returnTo: FocusReturn; onlyRestorable: boolean; onClose: () => void; onDeleted: () => void }) {
   const confirmation = usePasswordConfirmation(BACKUP_DELETE_WORDING);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -87,7 +87,7 @@ export function DeleteDialog({ backup, onlyRestorable, onClose, onDeleted }: { b
     try { await services.profile.remove(backup.id); onDeleted(); }
     catch (cause) { if (!confirmation.handleRejection(cause)) setError(message(cause)); setDeleting(false); }
   };
-  return <DialogFocus busy={busy}>
+  return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Delete this backup?" subtitle={`${subtitle(backup)} · ${backup.status === 'ready' ? sizeText(backup.sizeBytes) : 'Failed'}`} size="sm" variant="danger" onClose={() => { if (!busy) onClose(); }}>
       <div className="admin-form" aria-busy={busy}>
         <p className="admin-remove-copy">This backup will be permanently removed. This action cannot be undone.</p>
@@ -104,8 +104,8 @@ export function DeleteDialog({ backup, onlyRestorable, onClose, onDeleted }: { b
 }
 
 /** Cancelling a restore is the one cancel that asks first. */
-export function StopRestoreDialog({ onClose, onStop }: { onClose: () => void; onStop: () => void }) {
-  return <DialogFocus><Modal title="Stop the restore?" size="sm" variant="danger" onClose={onClose}>
+export function StopRestoreDialog({ returnTo, onClose, onStop }: { returnTo: FocusReturn; onClose: () => void; onStop: () => void }) {
+  return <DialogFocus returnTo={returnTo}><Modal title="Stop the restore?" size="sm" variant="danger" onClose={onClose}>
     <div className="admin-form">
       <p className="admin-remove-copy">Stop the restore? The database stays exactly as it was before the restore started.</p>
       <div className="modal-actions">

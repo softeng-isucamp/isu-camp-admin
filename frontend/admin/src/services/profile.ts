@@ -32,13 +32,14 @@ const backupSchema = z.object({
   status: z.enum(['ready', 'failed']),
 });
 export type SystemBackup = z.infer<typeof backupSchema>;
+// Weekly needs a day and daily has none; the fixture and the HTTP parse path share this check.
 export const scheduleSchema = z.object({
   enabled: z.boolean(), frequency: z.enum(['daily', 'weekly']),
   day: z.number().int().min(0).max(6).nullable(),
   time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timeZone: z.literal('Asia/Manila'),
   keep: z.number().int().min(1),
-});
+}).refine((schedule) => (schedule.frequency === 'weekly') === (schedule.day !== null));
 export type BackupSchedule = z.infer<typeof scheduleSchema>;
 // A schedule the frontend cannot read (or in another time zone) hides the schedule control rather than the whole list.
 const historySchema = z.object({
@@ -47,7 +48,7 @@ const historySchema = z.object({
   schedule: scheduleSchema.optional().catch(undefined),
 });
 export type BackupHistory = z.infer<typeof historySchema>;
-// One-time link the browser navigates to; refuses `javascript:` and other schemes.
+// One-time link the browser navigates to; refuses `javascript:` and other schemes. A root-relative path is the API's, not the page's.
 const downloadSchema = z.object({ url: z.string().regex(/^(https?:\/\/|\/(?!\/))/), expiresAt: z.string().datetime() });
 /** `filename` is only set by the fixture, whose blob link carries no Content-Disposition. */
 export type BackupDownload = z.infer<typeof downloadSchema> & { filename?: string };
@@ -61,12 +62,19 @@ type FixtureAccount = {
 };
 /** Records one action in the fixture's System Logs. */
 type Audit = (action: string, target: string) => void;
+const HOUR = 3_600_000;
+/** A few archives so the fixture history shows automatic, manual and failed rows before anything is created. */
+const seedBackups = (now = Date.now()): SystemBackup[] => [
+  { id: 'demo-backup-3', createdAt: new Date(now - 5 * HOUR).toISOString(), createdBy: 'scheduled', sizeBytes: 212_992, scope: 'Demo campus data', status: 'ready' },
+  { id: 'demo-backup-2', createdAt: new Date(now - 29 * HOUR).toISOString(), createdBy: 'admin_dean', sizeBytes: 204_800, scope: 'Demo campus data', status: 'ready' },
+  { id: 'demo-backup-1', createdAt: new Date(now - 53 * HOUR).toISOString(), createdBy: 'scheduled', sizeBytes: 0, scope: 'Demo campus data', status: 'failed' },
+];
 const FIXTURE_SCHEDULE: BackupSchedule = { enabled: true, frequency: 'daily', day: null, time: '02:30', timeZone: 'Asia/Manila', keep: 14 };
 const TERMINAL: BackupJob['status'][] = ['succeeded', 'failed', 'cancelled'];
 
 /** Proposed HTTP contract; fixture jobs demonstrate UI states without copying data. */
-export function createProfileService(request: Request, fixture?: FixtureAccount, audit: Audit = () => {}) {
-  let backups: SystemBackup[] = [];
+export function createProfileService(request: Request, fixture?: FixtureAccount, audit: Audit = () => {}, apiUrl: (path: string) => string = (path) => path) {
+  let backups: SystemBackup[] = fixture ? seedBackups() : [];
   let schedule: BackupSchedule = { ...FIXTURE_SCHEDULE };
   const jobs = new Map<string, { job: BackupJob; polls: number; actor: string; cancelRequested: boolean }>();
   let activeJob: BackupJob | null = null;
@@ -152,9 +160,12 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
       return { ...entry.job };
     },
     download: async (id: string, password: string): Promise<BackupDownload> => {
-      if (!fixture) return downloadSchema.parse(await request(`/api/backups/${encodeURIComponent(id)}/download`, {
-        method: 'POST', body: JSON.stringify({ currentPassword: password }),
-      }));
+      if (!fixture) {
+        const link = downloadSchema.parse(await request(`/api/backups/${encodeURIComponent(id)}/download`, {
+          method: 'POST', body: JSON.stringify({ currentPassword: password }),
+        }));
+        return { ...link, url: link.url.startsWith('/') ? apiUrl(link.url) : link.url };
+      }
       await superadmin();
       await fixture.confirmPassword(password);
       const backup = backups.find((item) => item.id === id && item.status === 'ready');
@@ -180,7 +191,7 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
       if (!fixture) return scheduleSchema.parse(await request('/api/backups/schedule', { method: 'PUT', body: JSON.stringify(next) }));
       await superadmin();
       const result = scheduleSchema.safeParse(next);
-      if (!result.success || (result.data.frequency === 'weekly') !== (result.data.day !== null)) throw new Error('Enter a valid time and keep at least one backup.');
+      if (!result.success) throw new Error('Enter a valid time and keep at least one backup.');
       schedule = result.data;
       audit('Changed Backup Schedule', schedule.enabled ? `${schedule.frequency} at ${schedule.time}, keep ${schedule.keep}` : 'Automatic backups off');
       return { ...schedule };

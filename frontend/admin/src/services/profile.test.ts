@@ -143,6 +143,25 @@ it.each(['javascript:alert(1)', '//evil.example/x', 'data:text/plain,hi', 'blob:
   await expect(service.download('b1', 'secret')).rejects.toThrow();
 });
 
+it('resolves a root-relative download link against the API origin, not the page origin', async () => {
+  const request = vi.fn().mockResolvedValue({ url: '/api/backup-downloads/tok', expiresAt: '2026-10-09T02:05:00Z' });
+  const service = createProfileService(request, undefined, undefined, (path) => `http://api.example:5000${path}`);
+  expect((await service.download('b1', 'secret')).url).toBe('http://api.example:5000/api/backup-downloads/tok');
+  request.mockResolvedValue({ url: 'https://files.example.com/once', expiresAt: '2026-10-09T02:05:00Z' });
+  expect((await service.download('b1', 'secret')).url).toBe('https://files.example.com/once');
+});
+
+it('drops a weekly schedule without a day, and a daily one with a day, instead of failing the history', async () => {
+  for (const schedule of [{ ...SCHEDULE, frequency: 'weekly', day: null }, { ...SCHEDULE, frequency: 'daily', day: 3 }]) {
+    const service = createProfileService(vi.fn().mockResolvedValue({ items: [BACKUP], schedule }));
+    const history = await service.history();
+    expect(history.items).toHaveLength(1);
+    expect(history.schedule).toBeUndefined();
+  }
+  const service = createProfileService(vi.fn().mockResolvedValue({ ...SCHEDULE, frequency: 'weekly', day: null }));
+  await expect(service.saveSchedule(SCHEDULE)).rejects.toThrow();
+});
+
 it('never falls back to fixture behaviour in real mode', async () => {
   const request = vi.fn().mockRejectedValue(new Error('Not found'));
   const service = createProfileService(request);
@@ -163,18 +182,26 @@ async function finishJob(service: Awaited<ReturnType<typeof fixtureService>>['se
   return job;
 }
 
-it('starts the fixture with every capability on and the seeded daily schedule', async () => {
+it('starts the fixture with every capability on, the seeded daily schedule and a varied demo history', async () => {
   const { service } = await fixtureService();
-  expect(await service.history()).toEqual({ items: [], activeJob: null, canDownload: true, canDelete: true, schedule: SCHEDULE });
+  const history = await service.history();
+  expect(history).toMatchObject({ activeJob: null, canDownload: true, canDelete: true, schedule: SCHEDULE });
+  expect(history.items.map((item) => [item.createdBy === 'scheduled' ? 'automatic' : 'manual', item.status])).toEqual([['automatic', 'ready'], ['manual', 'ready'], ['automatic', 'failed']]);
+  const times = history.items.map((item) => Date.parse(item.createdAt));
+  expect(times).toEqual([...times].sort((a, b) => b - a));
+  expect(times[0]).toBeLessThanOrEqual(Date.now());
+  expect(Date.now() - times[2]).toBeLessThan(7 * 24 * 3_600_000);
+  expect(history.items[2].sizeBytes).toBe(0);
 });
 
 it('cancels a fixture backup through to a cancelled status, adds no history row, and audits it', async () => {
   const { service, audit } = await fixtureService();
+  const before = (await service.history()).items;
   const job = await service.createBackup();
   expect(job.cancellable).toBe(true);
   expect((await service.cancelJob(job.id)).status).toBe('queued');
   expect(await service.job(job.id)).toMatchObject({ status: 'cancelled', cancellable: false });
-  expect(await service.history()).toMatchObject({ items: [], activeJob: null });
+  expect(await service.history()).toMatchObject({ items: before, activeJob: null });
   expect(audit).toHaveBeenCalledWith('Cancelled Backup', expect.any(String));
   // Cancelling a finished job is a no-op that reports its status.
   expect(await service.cancelJob(job.id)).toMatchObject({ status: 'cancelled' });
@@ -185,8 +212,9 @@ it('cancels a fixture backup through to a cancelled status, adds no history row,
 it('lets a fixture backup that was not cancelled finish', async () => {
   const { service } = await fixtureService();
   const job = await service.createBackup();
+  const before = (await service.history()).items.length;
   expect(await finishJob(service, job.id)).toMatchObject({ status: 'succeeded' });
-  expect((await service.history()).items).toHaveLength(1);
+  expect((await service.history()).items).toHaveLength(before + 1);
 });
 
 async function withBackup() {
@@ -229,7 +257,7 @@ it('deletes a fixture backup only after the password was confirmed, and not whil
   await service.cancelJob(running.id);
   await service.job(running.id);
   await service.remove(backup.id);
-  expect((await service.history()).items).toEqual([]);
+  expect((await service.history()).items.map((item) => item.id)).not.toContain(backup.id);
   expect(audit).toHaveBeenCalledWith('Deleted Backup', backup.createdAt);
   await expect(service.remove(backup.id)).rejects.toThrow('Backup is unavailable.');
 });

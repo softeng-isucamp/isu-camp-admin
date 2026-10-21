@@ -1,10 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import { services } from '../../services/api';
 import { PasswordConfirmationRequiredError } from '../../services/errors';
+import type { BackupJob } from '../../services/profile';
 
 beforeEach(async () => { await services.auth.login('admin_justine', 'password123'); });
 afterEach(() => vi.restoreAllMocks());
@@ -135,11 +136,23 @@ it('reveals password fields while the show passwords checkbox is checked', async
   expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('type', 'text');
 });
 
+it('seeds the fixture history with automatic, manual and failed backups', async () => {
+  page();
+  await screen.findByRole('table');
+  const rows = screen.getAllByRole('row').slice(1);
+  expect(rows).toHaveLength(3);
+  expect(within(rows[0]).getByText('Automatic')).toBeInTheDocument();
+  expect(within(rows[0]).getByText('Ready')).toBeInTheDocument();
+  expect(within(rows[1]).getByText('Manual')).toBeInTheDocument();
+  expect(within(rows[1]).getByText('Ready')).toBeInTheDocument();
+  expect(within(rows[2]).getByText('Failed')).toBeInTheDocument();
+  expect(screen.queryByText('No backups yet.')).not.toBeInTheDocument();
+});
+
 it('shows fixture backup history and requires explicit restore confirmation', async () => {
   page();
   expect(await screen.findByText(/Fixture demo/)).toBeInTheDocument();
-  await userEvent.click(await screen.findByRole('button', { name: /Create Backup/ }));
-  await userEvent.click(await screen.findByRole('button', { name: /Actions for backup from/ }));
+  await userEvent.click((await screen.findAllByRole('button', { name: /Actions for backup from/ }))[0]);
   await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
   expect(screen.getByRole('dialog')).toHaveTextContent('replaces');
   expect(screen.getByRole('dialog')).toHaveTextContent('may be lost');
@@ -632,6 +645,51 @@ describe('backup & recovery', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
       if (kind === 'restore') await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Stop Restore' }));
       expect(await screen.findByText(text, {}, { timeout: 3000 })).toBeInTheDocument();
+      // Only the notice: no success toast, though the history still refreshes.
+      await waitFor(() => expect(services.profile.history).toHaveBeenCalledTimes(2));
+      expect(screen.queryByText(/Demo operation completed|created successfully|restored successfully/)).not.toBeInTheDocument();
+    });
+
+    it('still shows the normal success message when the job succeeds without a cancel', async () => {
+      history({ activeJob: running('backup') });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-1', kind: 'backup', status: 'succeeded' });
+      page();
+      expect(await screen.findByText('Demo operation completed. No server data was changed.', {}, { timeout: 3000 })).toBeInTheDocument();
+      expect(screen.queryByText('The backup had already finished.')).not.toBeInTheDocument();
+    });
+
+    it('ignores a late cancel answer once polling finished that job and another one started', async () => {
+      history({ activeJob: running('backup') });
+      let answerCancel!: (job: BackupJob) => void;
+      vi.spyOn(services.profile, 'cancelJob').mockImplementation(() => new Promise((resolve) => { answerCancel = resolve; }));
+      vi.spyOn(services.profile, 'job').mockImplementation(async (id) => id === 'job-1'
+        ? { id, kind: 'backup', status: 'succeeded' } : { id, kind: 'backup', status: 'running', cancellable: true });
+      vi.spyOn(services.profile, 'createBackup').mockResolvedValue({ id: 'job-2', kind: 'backup', status: 'queued', cancellable: true });
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(await screen.findByText('The backup had already finished.', {}, { timeout: 3000 })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /Create Backup/ }));
+      expect(await screen.findByText(/Creating backup · Queued/)).toBeInTheDocument();
+      await act(async () => { answerCancel({ id: 'job-1', kind: 'backup', status: 'cancelled' }); });
+      expect(screen.getByText(/Creating backup/)).toBeInTheDocument();
+      expect(screen.queryByText('Backup cancelled.')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Create Backup/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+      // Job 2 is still the one being tracked.
+      expect(await screen.findByText(/Creating backup · In progress/, {}, { timeout: 3000 })).toBeInTheDocument();
+    });
+
+    it('ignores a late cancel failure for a job that is no longer on screen', async () => {
+      history({ activeJob: running('backup') });
+      let failCancel!: (cause: Error) => void;
+      vi.spyOn(services.profile, 'cancelJob').mockImplementation(() => new Promise((_, reject) => { failCancel = reject; }));
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-1', kind: 'backup', status: 'succeeded' });
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(await screen.findByText('The backup had already finished.', {}, { timeout: 3000 })).toBeInTheDocument();
+      await act(async () => { failCancel(new Error('Cancel is unavailable.')); });
+      expect(screen.queryByText('Cancel is unavailable.')).not.toBeInTheDocument();
+      expect(screen.getByText('The backup had already finished.')).toBeInTheDocument();
     });
 
     it('lets the administrator try again when the cancel request fails', async () => {
@@ -641,6 +699,86 @@ describe('backup & recovery', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
       expect(await screen.findByRole('alert')).toHaveTextContent('Cancel is unavailable.');
       expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    });
+  });
+
+  describe('dialog focus', () => {
+    const inDialog = () => expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
+    const openByKeyboard = async (index: number, label: string) => {
+      const trigger = within(await row(index)).getByRole('button', { name: /Actions for backup from/ });
+      trigger.focus();
+      await userEvent.keyboard('{Enter}');
+      const items = within(screen.getByRole('menu')).getAllByRole('menuitem');
+      const wanted = items.findIndex((item) => item.textContent === label);
+      for (let step = 0; step <= wanted; step++) await userEvent.tab();
+      expect(items[wanted]).toHaveFocus();
+      await userEvent.keyboard('{Enter}');
+      return trigger;
+    };
+
+    it.each([
+      ['Download', 'Your password'],
+      ['Restore', 'Type RESTORE to confirm'],
+      ['Delete', 'Confirm your password'],
+    ])('%s opened from the keyboard focuses its first field, contains Tab and Shift+Tab, and returns to the row button on Escape', async (label, field) => {
+      history();
+      page();
+      const trigger = await openByKeyboard(1, label);
+      expect(within(screen.getByRole('dialog')).getByLabelText(field)).toHaveFocus();
+      for (let step = 0; step < 8; step++) { await userEvent.tab(); inDialog(); }
+      for (let step = 0; step < 8; step++) { await userEvent.tab({ shift: true }); inDialog(); }
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('returns to the row button when Cancel is pressed', async () => {
+      history();
+      page();
+      const trigger = await openByKeyboard(1, 'Download');
+      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+
+    it('moves focus to Create Backup when the deleted backup\'s row is gone', async () => {
+      history();
+      vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      await openByKeyboard(3, 'Delete');
+      await userEvent.keyboard('password123{Enter}');
+      expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Create Backup/ })).toHaveFocus();
+    });
+
+    it('returns focus to the Edit schedule button', async () => {
+      history();
+      page();
+      const button = await screen.findByRole('button', { name: /Edit schedule/ });
+      await userEvent.click(button);
+      inDialog();
+      await userEvent.keyboard('{Escape}');
+      expect(button).toHaveFocus();
+    });
+
+    it('focuses the safe action of Stop Restore, wraps Shift+Tab inside it, and returns to Cancel', async () => {
+      history({ activeJob: { id: 'job-1', kind: 'restore', status: 'running', cancellable: true } });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-1', kind: 'restore', status: 'running', cancellable: true });
+      page();
+      const cancel = await screen.findByRole('button', { name: 'Cancel' });
+      await userEvent.click(cancel);
+      const dialog = screen.getByRole('dialog', { name: 'Stop the restore?' });
+      expect(within(dialog).getByRole('button', { name: 'Keep Restoring' })).toHaveFocus();
+      await userEvent.tab({ shift: true });
+      inDialog();
+      await userEvent.tab({ shift: true });
+      expect(within(dialog).getByRole('button', { name: 'Stop Restore' })).toHaveFocus();
+      await userEvent.tab();
+      inDialog();
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(cancel).toHaveFocus();
     });
   });
 

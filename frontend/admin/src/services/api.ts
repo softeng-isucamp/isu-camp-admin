@@ -302,6 +302,8 @@ if (loadedMapFixture && !generatedMapFixture) buildings.push(...loadedMapFixture
 const API_URL =
   import.meta.env.VITE_API_BASE_URL ??
   "http://localhost:5000";
+/** Resolves an API path against the configured backend, for links the browser follows itself. */
+export const apiUrl = (path: string) => `${API_URL}${path}`;
 export const USE_HTTP_API = API_MODE === "mock" || API_MODE === "real";
 // The directory and the local adapter must share ONE Locations array. Handing
 // the adapter `generatedMapFixture.locations` instead left fixture mode with two:
@@ -934,7 +936,7 @@ export const services: Services = {
   // AUTHENTICATION
   // ========================================
 
-  profile: createProfileService(apiJson, USE_HTTP_API ? undefined : localAdapter.auth, (action, target) => addAudit(action, target, "System")),
+  profile: createProfileService(apiJson, USE_HTTP_API ? undefined : localAdapter.auth, (action, target) => addAudit(action, target, "System"), apiUrl),
   auth: {
 
     // --------------------------------------
