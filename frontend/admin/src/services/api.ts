@@ -934,7 +934,7 @@ export const services: Services = {
   // AUTHENTICATION
   // ========================================
 
-  profile: createProfileService(apiJson, USE_HTTP_API ? undefined : localAdapter.auth),
+  profile: createProfileService(apiJson, USE_HTTP_API ? undefined : localAdapter.auth, (action, target) => addAudit(action, target, "System")),
   auth: {
 
     // --------------------------------------

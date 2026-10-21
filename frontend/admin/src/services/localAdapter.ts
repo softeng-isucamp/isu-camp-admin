@@ -99,6 +99,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   }
   // When the signed-in account last retyped its password; the server keeps this on the session.
   let confirmedAt = 0;
+  /** Whether the signed-in account confirmed its password within the server's five minutes. */
+  const recentlyConfirmed = (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS;
   const endSession = () => {
     session = null;
     confirmedAt = 0;
@@ -241,6 +243,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         }
         confirmedAt = Date.now();
       },
+      recentlyConfirmed,
       // Always succeeds and reports the same timing, so the response never says whether the email has an account.
       requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
         issueCode(email, purpose);
@@ -271,8 +274,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         refuseIfDeactivated();
         return account;
       },
-      /** Whether the signed-in account confirmed its password within the server's five minutes. */
-      recentlyConfirmed: (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS,
+      recentlyConfirmed,
     },
     locations: {
       saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {
