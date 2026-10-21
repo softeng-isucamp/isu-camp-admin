@@ -58,7 +58,7 @@ export const locationSchema = locationFields.extend({
   positioned: z.boolean(),
   polygonCoordinates: z.array(z.tuple([z.number(), z.number()])).optional(),
   photo: z.object({ name: z.string(), type: z.string(), dataUrl: z.string() }).optional(),
-}).refine((location) => (location.type === "Place") === (location.classification !== undefined), {
-  message: "Only a Place carries a classification, and every Place must have one.",
+}).refine((location) => location.type === "Place" || location.classification === undefined, {
+  message: "Only a Place carries a classification.",
   path: ["classification"],
 });

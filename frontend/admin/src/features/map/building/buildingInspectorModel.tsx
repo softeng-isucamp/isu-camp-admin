@@ -1,5 +1,5 @@
 import { Badge } from "../../../components/UI";
-import { canContainLocations } from "../../../lib/locationPolicy";
+import { canContainLocations, isUnclassifiedPlace } from "../../../lib/locationPolicy";
 import type { Location, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { SelectedBuildingView } from "./selectedBuilding";
@@ -37,7 +37,7 @@ export function buildingInspectorModel({
     entrances: selectedBuildingEntrances,
     routable: selectedBuildingRoutable,
   } = view;
-  const classification = selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building";
+  const classification = selectedBuilding.classification ?? selectedBuildingLocation?.classification;
   const canContain = canContainLocations(classification);
   return {
     id: selectedBuilding.id,
@@ -47,7 +47,7 @@ export function buildingInspectorModel({
     status: selectedBuildingRoutable ? "Routable" : "Not routable",
     summary: [
       { label: "Code", value: selectedBuilding.code },
-      ...(classification === "Building" ? [{ label: "Classification", value: <Badge tone="grey">Unclassified</Badge> }] : []),
+      ...(isUnclassifiedPlace({ type: "Place", classification }) ? [{ label: "Classification", value: <Badge tone="grey">Unclassified</Badge> }] : []),
       { label: "Entrances", value: String(selectedBuildingEntrances.length) },
     ],
     details: (

@@ -85,7 +85,7 @@ const buildDestinations = (locations: Location[]): Destination[] => {
   const destinations: Destination[] = buildings.map((location, index) => ({
     id: locationIdentityKey(location),
     name: location.name,
-    context: placeClassificationOf(location),
+    context: placeClassificationOf(location) ?? "Unclassified",
     type: "Building",
     weight: (1 - INDOOR_TRAFFIC_SHARE) * (zipf[index] / zipfTotal),
     arrival: 0.85 + (rand() - 0.5) * 0.12,

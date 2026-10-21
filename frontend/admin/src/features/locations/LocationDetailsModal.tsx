@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
-import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isLocationContainer, isUnclassifiedPlace, isPlace, locationPolicy, locationTypeOptionLabel, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
-import { SELECTABLE_PLACE_CLASSIFICATIONS } from "../../types";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isBlockedReclassification, isLocationContainer, isUnclassifiedPlace, isPlace, locationPolicy, locationTypeOptionLabel, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft } from "../../types";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 
@@ -18,7 +18,7 @@ interface LocationDetailsFieldsProps {
   onTypeChange?: (type: BackendLocationType) => void;
 }
 
-const defaultLocationTypes: BackendLocationType[] = [...indoorLocationTypes, ...SELECTABLE_PLACE_CLASSIFICATIONS];
+const defaultLocationTypes: BackendLocationType[] = [...indoorLocationTypes, ...PLACE_CLASSIFICATIONS];
 
 
 export function LocationCoordinatesFields({
@@ -94,13 +94,15 @@ export function LocationDetailsFields({
           error={errors.type}
           helper={typeHelper}
           badge={isUnclassifiedPlace(draft) ? "Unclassified" : undefined}
-          value={backendLocationType(draft)}
+          value={backendLocationType(draft) ?? ""}
           onChange={(event) => {
             const type = event.target.value as BackendLocationType;
             if (onTypeChange) onTypeChange(type);
             else onChange(withLocationTypeOption(draft, type));
           }}
         >
+          {/* An unclassified Place has no value to preselect; the admin must choose one before saving. */}
+          {isUnclassifiedPlace(draft) && <option value="" disabled>Select a classification</option>}
           {allowedTypes.map((type) => <option key={type} value={type} disabled={disabledTypes.includes(type)}>{locationTypeOptionLabel(type)}</option>)}
         </SelectField>
         <SelectField
@@ -174,7 +176,7 @@ export function LocationDetailsModal({
   }, [location.id, location.type]);
   const effectiveAllowedTypes = allowedTypes ?? (
     isPlace(location)
-      ? placeClassificationOptions(location.classification)
+      ? placeClassificationOptions()
       : undefined
   );
 
@@ -196,11 +198,16 @@ export function LocationDetailsModal({
       setError("Location name, code, and description are required.");
       return false;
     }
+    const typeIssue = evaluation.issues.find((issue) => issue.field === "type");
+    if (typeIssue) {
+      setTypeError(typeIssue.message);
+      return false;
+    }
     if (evaluation.issues.length) {
       setError(evaluation.issues[0].message);
       return false;
     }
-    if (isPlace(normalized) && blockedReclassifications(indoorCount).includes(placeClassificationOf(normalized))) {
+    if (isPlace(normalized) && isBlockedReclassification(indoorCount, placeClassificationOf(normalized))) {
       setTypeError(reclassificationBlockedMessage(indoorCount));
       return false;
     }

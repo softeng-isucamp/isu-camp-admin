@@ -56,7 +56,7 @@ export function findSelectionCandidates(
           type: "location",
           locationType: location.type,
           label: location.name,
-          kindLabel: backendLocationType(location),
+          kindLabel: backendLocationType(location) ?? "Unclassified",
           distance,
         });
       }

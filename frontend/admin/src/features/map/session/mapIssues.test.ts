@@ -115,7 +115,7 @@ describe("deriveMapIssues", () => {
         building("ok", "Open Hall"),
         building("linked", "Linked Hall"),
       ],
-      locations: [location("linked-location", "Building", { name: "Linked Hall" })],
+      locations: [location("linked-location", "College", { name: "Linked Hall" })],
       nodes: [
         entrance("e-retired", "retired", { status: "Inactive" }),
         entrance("e-ok", "ok"),
@@ -194,7 +194,7 @@ describe("deriveMapIssues", () => {
   it("scopes identity by type: a Building and a Room sharing an ID are separate rows", () => {
     const issues = derive({
       locations: [
-        location("same", "Building", { lat: OUTSIDE[0], lng: OUTSIDE[1] }),
+        location("same", "College", { lat: OUTSIDE[0], lng: OUTSIDE[1] }),
         location("same", "Room", { lat: OUTSIDE[0], lng: OUTSIDE[1] }),
       ],
     });

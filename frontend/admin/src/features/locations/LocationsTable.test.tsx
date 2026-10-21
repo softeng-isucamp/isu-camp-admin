@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
+import { chooseFilterOption, filterOptionIds, filterOptionNames, selectedFilterOptionId } from "../../test/filterCombobox";
 
 function LocationRouteProbe() {
   const location = useLocation();
@@ -108,9 +109,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("keeps derived Floor Levels available without exposing Floor as a record filter", async () => {
     renderLocations();
-    const typeSelect = await screen.findByLabelText("TYPE");
-    expect(Array.from((typeSelect as HTMLSelectElement).options).map((option) => option.value)).not.toContain("Floor");
-    expect(Array.from((screen.getByLabelText("FLOOR") as HTMLSelectElement).options).map((option) => option.text)).toContain("Ground Floor");
+    await screen.findByLabelText("TYPE");
+    expect(filterOptionNames("TYPE")).not.toContain("Floor");
+    expect(filterOptionNames("FLOOR")).toContain("Ground Floor");
   });
 
   it("renders Floor Levels as grouping rows without location metadata", async () => {
@@ -135,7 +136,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(screen.getByRole("button", { name: "2" }));
     expect(await screen.findByText(/Showing 11–20 of/i)).toBeInTheDocument();
     expect(container.querySelectorAll("tbody tr")).toHaveLength(10);
-    fireEvent.change(screen.getByLabelText("TYPE"), { target: { value: "Building" } });
+    chooseFilterOption("TYPE", "College");
     expect(await screen.findByText(/Showing 1–10 of/i)).toBeInTheDocument();
   });
 
@@ -146,7 +147,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
         id: buildingId,
         name: `Pagination Family ${index}`,
         code: `PAG-${index}`,
-        type: "Place", classification: "Building",
+        type: "Place", classification: "College",
         parentId: null,
         status: "Active",
         lat: null,
@@ -180,8 +181,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("uses building IDs to isolate duplicate building names", async () => {
-    await services.locations.save({ id: "duplicate-building-a", name: "Duplicate Building", code: "DUP-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "duplicate-building-b", name: "Duplicate Building", code: "DUP-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-building-a", name: "Duplicate Building", code: "DUP-A", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "duplicate-building-b", name: "Duplicate Building", code: "DUP-B", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "duplicate-room-a", name: "Room in duplicate A", code: "DUP-ROOM-A", type: "Room", parentId: "duplicate-building-a", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "duplicate-room-b", name: "Room in duplicate B", code: "DUP-ROOM-B", type: "Room", parentId: "duplicate-building-b", building: "Duplicate Building", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
@@ -198,16 +199,16 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("resets stale Building and Floor selections after the selected Building is deleted", async () => {
-    const building = await services.locations.save({ id: "stale-filter-building", name: "Stale Filter Building", code: "STALE-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "stale-filter-building", name: "Stale Filter Building", code: "STALE-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "stale-filter-room", name: "Stale Filter Room", code: "STALE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations();
     const buildingCombobox = await screen.findByLabelText("BUILDING");
     const floorSelect = screen.getByLabelText("FLOOR");
     await waitFor(() => chooseFilterBuilding(building.name));
-    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-    fireEvent.change(floorSelect, { target: { value: `${building.id}-floor-Ground Floor` } });
-    expect(floorSelect).toHaveValue(`${building.id}-floor-Ground Floor`);
+    await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+    chooseFilterOption("FLOOR", "Ground Floor");
+    expect(selectedFilterOptionId("FLOOR")).toBe(`${building.id}-floor-Ground Floor`);
 
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
@@ -216,13 +217,14 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     await waitFor(() => {
       expect(buildingCombobox).toHaveValue("All Buildings");
-      expect(floorSelect).toHaveValue("All Floors");
+      expect(floorSelect).toHaveTextContent("All Floors");
     });
+    expect(selectedFilterOptionId("FLOOR")).toBeUndefined();
   });
 
   it("returns to the last hierarchy page after a mutation shrinks the result", async () => {
     for (let index = 1; index <= 11; index += 1) {
-      await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: `shrink-page-building-${index}`, name: `Shrink Page ${index}`, code: `SHRINK-${index}`, type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     }
     renderLocations(["/locations?q=Shrink%20Page"]);
     expect(await screen.findByText("Shrink Page 10")).toBeInTheDocument();
@@ -242,8 +244,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("does not attach a normal child with a duplicate legacy building name to both roots", async () => {
-    await services.locations.save({ id: "legacy-name-building-a", name: "Same Name Root", code: "SAME-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "legacy-name-building-b", name: "Same Name Root", code: "SAME-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "legacy-name-building-a", name: "Same Name Root", code: "SAME-A", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    await services.locations.save({ id: "legacy-name-building-b", name: "Same Name Root", code: "SAME-B", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "authoritative-child", name: "Authoritative Child", code: "AUTH-CHILD", type: "Room", parentId: "legacy-name-building-b", building: "Same Name Root", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     renderLocations(["/locations?q=Authoritative%20Child"]);
@@ -253,8 +255,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it.each(["Building%3A", "Facility%3A", "Place%3A"])("opens an old %s deep link at the matching Place", async (prefix) => {
     const records = [
-      { id: "deep-1", name: "Deep Linked Hall", code: "DEEP-1", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
-      { id: "deep-2", name: "Other Hall", code: "DEEP-2", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "deep-1", name: "Deep Linked Hall", code: "DEEP-1", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "deep-2", name: "Other Hall", code: "DEEP-2", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
     ];
     vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
 
@@ -265,8 +267,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
   it("renders an orphaned duplicate-name record as an ungrouped row", async () => {
     const records = [
-      { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
-      { id: "orphan-building-b", name: "Orphan Duplicate Building", code: "ORPHAN-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "orphan-building-b", name: "Orphan Duplicate Building", code: "ORPHAN-B", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
       { id: "orphan-room", name: "Orphan Room", code: "ORPHAN-ROOM", type: "Room" as const, parentId: null, building: "Orphan Duplicate Building", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
     ];
     vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
@@ -278,9 +280,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("filters same-named floors by their distinct record IDs", async () => {
-    const seed = async (id: string, name: string, type: "Building" | "Floor" | "Room", parentId: string | null) => services.locations.save({ id, name, code: id.toUpperCase(), ...(type === "Building" ? { type: "Place" as const, classification: "Building" as const } : { type }), parentId, status: "Active", lat: null, lng: null, positioned: false });
-    await seed("floor-building-a", "Floor building A", "Building", null);
-    await seed("floor-building-b", "Floor building B", "Building", null);
+    const seed = async (id: string, name: string, type: "Place" | "Floor" | "Room", parentId: string | null) => services.locations.save({ id, name, code: id.toUpperCase(), ...(type === "Place" ? { type: "Place" as const, classification: "College" as const } : { type }), parentId, status: "Active", lat: null, lng: null, positioned: false });
+    await seed("floor-building-a", "Floor building A", "Place", null);
+    await seed("floor-building-b", "Floor building B", "Place", null);
     await seed("floor-a", "Level One", "Floor", "floor-building-a");
     await seed("floor-b", "Level One", "Floor", "floor-building-b");
     await services.locations.save({ id: "floor-child-a", name: "Only floor A child", code: "FLOOR-CHILD-A", type: "Room", parentId: "floor-building-a", building: "Floor building A", floor: "Level One", status: "Active", lat: null, lng: null, positioned: false });
@@ -288,10 +290,11 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     renderLocations();
     await screen.findByLabelText("BUILDING");
     chooseFilterBuilding("Floor building A");
-    const floorSelect = screen.getByLabelText("FLOOR");
-    const identicalNameOptions = Array.from((floorSelect as HTMLSelectElement).options).filter((option) => option.text === "Level One");
-    expect(identicalNameOptions.map((option) => option.value)).toEqual(["floor-a"]);
-    fireEvent.change(floorSelect, { target: { value: "floor-a" } });
+    // Only the chosen Building's own floor record is listed, not building B's same-named one.
+    expect(filterOptionIds("FLOOR")).toContain("floor-a");
+    expect(filterOptionIds("FLOOR")).not.toContain("floor-b");
+    chooseFilterOption("FLOOR", "Level One");
+    expect(selectedFilterOptionId("FLOOR")).toBe("floor-a");
     expect(await screen.findByText("Only floor A child")).toBeInTheDocument();
     expect(screen.queryByText("Only floor B child")).not.toBeInTheDocument();
   });
@@ -304,14 +307,13 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     await seed("dedupe-room-b", "Dedupe room B", "dedupe-building-b", "Ground Floor");
     // The search keeps both rooms on the first page of the shared fixture directory.
     renderLocations(["/locations?q=Dedupe"]);
-    const floorSelect = await screen.findByLabelText("FLOOR");
-    await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-    const texts = Array.from((floorSelect as HTMLSelectElement).options).map((option) => option.text);
+    await screen.findByLabelText("FLOOR");
+    await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+    const texts = filterOptionNames("FLOOR");
     expect(texts.filter((text) => text === "Ground Floor")).toHaveLength(1);
     expect(new Set(texts).size).toBe(texts.length);
 
-    const groundFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "Ground Floor")!;
-    fireEvent.change(floorSelect, { target: { value: groundFloor.value } });
+    chooseFilterOption("FLOOR", "Ground Floor");
     expect(await screen.findByText("Dedupe room A")).toBeInTheDocument();
     expect(screen.getByText("Dedupe room B")).toBeInTheDocument();
   });
@@ -425,7 +427,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("expands nested matches by default when searching", async () => {
-    const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "search-building", name: "Search Building", code: "SRCH-B", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "search-room", name: "Searchable Nested Room", code: "SRCH-R", type: "Room", parentId: building.id, building: building.name, floor: "Search Floor", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     await screen.findByRole("heading", { name: "Campus Locations" });
@@ -443,7 +445,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: /add location/i })).toBeInTheDocument();
     expect(screen.getByText(/add a room, office, laboratory, or restroom under an existing building/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location type/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/status/i)).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByLabelText(/status/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/location code \/ id/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Latitude")).toHaveAttribute("type", "text");
@@ -477,7 +479,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       id: "handoff-building",
       name: "Handoff Building",
       code: "HANDOFF",
-      type: "Place", classification: "Building",
+      type: "Place", classification: "College",
       parentId: null,
       status: "Active",
       lat: null,
@@ -501,7 +503,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       id: "pending-map-building",
       name: "Pending Map Building",
       code: "PENDING-MAP",
-      type: "Place" as const, classification: "Building" as const,
+      type: "Place" as const, classification: "College" as const,
       parentId: null,
       status: "Active" as const,
       lat: null,
@@ -525,7 +527,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
 
   it("creates a child location with a parent building and standard floor level", async () => {
-    const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     expect(Array.from((screen.getByLabelText(/location type/i) as HTMLSelectElement).options).map((option) => option.text)).toEqual([
@@ -576,8 +578,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("lists the matching parent Buildings while the name or code is typed", async () => {
-    const searched = await services.locations.save({ id: "search-parent-a", name: "Searchable Annex", code: "SRCH-ANX", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const other = await services.locations.save({ id: "search-parent-b", name: "Unrelated Pavilion", code: "UNREL-PAV", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const searched = await services.locations.save({ id: "search-parent-a", name: "Searchable Annex", code: "SRCH-ANX", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const other = await services.locations.save({ id: "search-parent-b", name: "Unrelated Pavilion", code: "UNREL-PAV", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
@@ -618,7 +620,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("lists only Places that can contain Locations as parents", async () => {
-    for (const [id, classification] of [["pp-college", "College"], ["pp-services", "Campus Services"], ["pp-legacy", "Building"], ["pp-food", "Food"], ["pp-parking", "Parking"], ["pp-facility", "Facility"]] as const) {
+    for (const [id, classification] of [["pp-college", "College"], ["pp-services", "Campus Services"], ["pp-food", "Food"], ["pp-parking", "Parking"], ["pp-facility", "Facility"]] as const) {
       await services.locations.save({ id, name: `Pick ${classification}`, code: id.toUpperCase(), type: "Place", classification, parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     }
     renderLocations();
@@ -629,12 +631,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.change(combobox, { target: { value: "Pick " } });
 
     const listed = within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent ?? "");
-    for (const name of ["Pick College", "Pick Campus Services", "Pick Building"]) expect(listed.some((option) => option.includes(name))).toBe(true);
+    for (const name of ["Pick College", "Pick Campus Services"]) expect(listed.some((option) => option.includes(name))).toBe(true);
     for (const name of ["Pick Food", "Pick Parking", "Pick Facility"]) expect(listed.some((option) => option.includes(name))).toBe(false);
   });
 
   it("chooses a parent Building from the keyboard without submitting the dialog", async () => {
-    const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "keyboard-parent", name: "Keyboard Hall", code: "KBD-H", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
     fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
@@ -660,7 +662,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("offers no parent Building search when the Building is locked by a quick-add handoff", async () => {
-    const building = { id: "locked-search-building", name: "Locked Search Building", code: "LCK-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const building = { id: "locked-search-building", name: "Locked Search Building", code: "LCK-B", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
     await services.locations.save(building);
     renderLocations([{ pathname: "/locations", search: "?add=indoor&parentId=locked-search-building", state: { indoorLocationParent: building } }]);
     const combobox = await screen.findByLabelText("PARENT BUILDING");
@@ -670,7 +672,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("populates the parent building and floor level when editing a child location", async () => {
-    const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "edit-child-building", name: "Edit Child Building", code: "EDIT-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-child-room", name: "Edit Child Room", code: "EDIT-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Basement", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
     fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Edit Child Room" } });
@@ -682,7 +684,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("keeps Pick on map labelled and disabled while indoor metadata is saving", async () => {
-    const building = { id: "saving-building", name: "Saving Building", code: "SAVE-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
+    const building = { id: "saving-building", name: "Saving Building", code: "SAVE-B", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false };
     const room = { id: "saving-room", name: "Saving Room", code: "SAVE-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", status: "Active" as const, lat: null, lng: null, positioned: false };
     vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 50 });
     let completeSave!: () => void;
@@ -706,7 +708,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("opens Map Editor directly from an existing indoor location without saving its modal draft", async () => {
-    const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Place" as const, classification: "Building" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
+    const building = { id: "fast-pick-building", name: "Fast Pick Building", code: "FP-B", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
     const room = { id: "fast-pick-room", name: "Fast Pick Room", code: "FP-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", function: "Classroom", keywords: "class", status: "Active" as const, lat: 16.721, lng: 121.68965, positioned: true };
     const page = { items: [building, room], total: 2, page: 1, pageSize: 50 };
     vi.spyOn(services.locations, "list").mockResolvedValue(page);
@@ -726,8 +728,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("offers the selectable classifications plus Unclassified (legacy) when editing a legacy Place, and keeps indoor types separate", async () => {
-    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Place", classification: "Building", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
+  it("offers the five classifications, never Building, when editing a Place, and keeps indoor types separate", async () => {
+    const building = await services.locations.save({ id: "edit-type-building", name: "Edit Type Building", code: "EDIT-TYPE-BLDG", type: "Place", classification: "College", parentId: null, function: "Academic building", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-room", name: "Edit Type Room", code: "EDIT-TYPE-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     await services.locations.save({ id: "edit-type-facility", name: "Edit Type Facility", code: "EDIT-TYPE-FACILITY", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
 
@@ -740,9 +742,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(await screen.findByRole("heading", { name: "Edit Location" })).toBeInTheDocument();
     const typeSelect = screen.getByLabelText(/location type/i) as HTMLSelectElement;
     expect(Array.from(typeSelect.options).map((option) => option.text)).toEqual([
-      "College", "Campus Services", "Food", "Parking", "Facility", "Unclassified (legacy)",
+      "College", "Campus Services", "Food", "Parking", "Facility",
     ]);
-    expect(typeSelect).toHaveValue("Building");
+    expect(typeSelect).toHaveValue("College");
     expect(screen.getByLabelText("Latitude")).toHaveValue("Not positioned");
 
     // It holds an indoor Location, so the classifications that cannot contain one are disabled.
@@ -828,33 +830,86 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   it("groups the type filter into Places and Locations and sends each option's backend name", async () => {
     const list = vi.spyOn(services.locations, "list");
     renderLocations();
-    const filter = await screen.findByLabelText("TYPE") as HTMLSelectElement;
+    const filter = await screen.findByLabelText("TYPE");
+    fireEvent.click(filter);
 
-    const groups = Array.from(filter.querySelectorAll("optgroup")).map((group) => ({
-      label: group.label,
-      options: Array.from(group.querySelectorAll("option")).map((option) => [option.text, option.value]),
+    const groups = within(screen.getByRole("listbox")).getAllByRole("group").map((group) => ({
+      label: group.getAttribute("aria-labelledby") ? document.getElementById(group.getAttribute("aria-labelledby")!)?.textContent : null,
+      options: within(group).getAllByRole("option").map((option) => option.textContent),
     }));
     expect(groups).toEqual([
-      { label: "Places", options: [["College", "College"], ["Campus Services", "Campus Services"], ["Food", "Food"], ["Parking", "Parking"], ["Facility", "Facility"], ["Unclassified (legacy)", "Building"]] },
-      { label: "Locations", options: [["Room", "Room"], ["Office", "Office"], ["Laboratory", "Laboratory"], ["Restroom", "Restroom"]] },
+      { label: "Places", options: ["College", "Campus Services", "Food", "Parking", "Facility"] },
+      { label: "Locations", options: ["Room", "Office", "Laboratory", "Restroom"] },
     ]);
 
-    for (const value of ["College", "Campus Services", "Food", "Parking", "Facility", "Building", "Room", "Restroom"]) {
-      fireEvent.change(filter, { target: { value } });
+    for (const value of ["College", "Campus Services", "Food", "Parking", "Facility", "Room", "Restroom"]) {
+      chooseFilterOption("TYPE", value);
       await waitFor(() => expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ type: value })));
     }
   });
 
-  it("badges only legacy Places as Unclassified", async () => {
-    await services.locations.save({ id: "badge-legacy", name: "Badge Legacy", code: "BADGE-L", type: "Place", classification: "Building", parentId: null, function: "Old", status: "Active", lat: null, lng: null, positioned: false });
-    await services.locations.save({ id: "badge-college", name: "Badge College", code: "BADGE-C", type: "Place", classification: "College", parentId: null, function: "New", status: "Active", lat: null, lng: null, positioned: false });
-    renderLocations();
-    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: "Badge " } });
+  describe("a Place whose classification the backend did not send", () => {
+    const place = (id: string, name: string, classification?: "College") => ({ id, name, code: id.toUpperCase(), type: "Place" as const, ...(classification ? { classification } : {}), parentId: null, function: "Campus building", status: "Active" as const, lat: null, lng: null, positioned: false });
+    const unclassified = place("unclassified-1", "Unclassified Hall");
+    const college = place("college-1", "Badge College", "College");
+    const child = { id: "unclassified-room", name: "Unclassified Room", code: "UNCL-ROOM", type: "Room" as const, parentId: unclassified.id, building: unclassified.name, floor: "Ground Floor", function: "Room", status: "Active" as const, lat: null, lng: null, positioned: false };
 
-    const legacyRow = await screen.findByRole("row", { name: /Badge Legacy/ });
-    const collegeRow = screen.getByRole("row", { name: /Badge College/ });
-    expect(within(legacyRow).getByText("Unclassified")).toBeInTheDocument();
-    expect(within(collegeRow).queryByText("Unclassified")).not.toBeInTheDocument();
+    it("badges only Places without a classification as Unclassified, and still lists their Locations", async () => {
+      const records = [unclassified, college, child];
+      vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+      renderLocations();
+      fireEvent.click(await screen.findByRole("button", { name: /toggle view mode/i }));
+
+      const unclassifiedRow = await screen.findByRole("row", { name: /Unclassified Hall/ });
+      const collegeRow = screen.getByRole("row", { name: /Badge College/ });
+      expect(within(unclassifiedRow).getByText("Unclassified")).toBeInTheDocument();
+      expect(within(collegeRow).queryByText("Unclassified")).not.toBeInTheDocument();
+      expect(screen.getByRole("row", { name: /Unclassified Room/ })).toBeInTheDocument();
+    });
+
+    it("is not offered as the parent of a new indoor Location", async () => {
+      const records = [unclassified, college];
+      vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+      renderLocations();
+      fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+      fireEvent.change(screen.getByLabelText(/location type/i), { target: { value: "Room" } });
+      const combobox = screen.getByLabelText("PARENT BUILDING");
+      fireEvent.focus(combobox);
+      fireEvent.change(combobox, { target: { value: "" } });
+
+      const listed = within(screen.getByRole("listbox")).getAllByRole("option").map((option) => option.textContent ?? "");
+      expect(listed.some((option) => option.includes("Badge College"))).toBe(true);
+      expect(listed.some((option) => option.includes("Unclassified Hall"))).toBe(false);
+    });
+
+    it("still warns that deleting it removes its indoor Locations", async () => {
+      const records = [unclassified, child];
+      vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+      renderLocations();
+      fireEvent.click(await screen.findByRole("button", { name: `Actions for ${unclassified.name}` }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /delete location/i }));
+      expect(await screen.findByText("This Building contains 1 associated Indoor Locations. Deleting this Building will permanently remove it and its child Locations. This action cannot be undone.")).toBeInTheDocument();
+    });
+
+    it("cannot be saved until the admin chooses a classification", async () => {
+      const records = [unclassified];
+      vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+      const save = vi.spyOn(services.locations, "save").mockImplementation(async (draft) => ({ ...draft, id: draft.id ?? "x" }) as never);
+      renderLocations();
+      fireEvent.click(await screen.findByRole("button", { name: `Actions for ${unclassified.name}` }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+
+      const typeSelect = await screen.findByLabelText(/location type/i) as HTMLSelectElement;
+      expect(typeSelect).toHaveValue("");
+      expect(Array.from(typeSelect.options).map((option) => option.value)).not.toContain("Building");
+      fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+      expect((await screen.findAllByText("Select a classification.")).length).toBeGreaterThan(0);
+      expect(save).not.toHaveBeenCalled();
+
+      fireEvent.change(typeSelect, { target: { value: "College" } });
+      fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+      await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ type: "Place", classification: "College" }), expect.anything()));
+    });
   });
 
   it("keeps row action options above neighboring table rows", async () => {
@@ -951,7 +1006,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
   it("warns about connected children and permanently deletes the building hierarchy", async () => {
-    const building = await services.locations.save({ id: "ui-deleted-building", name: "UI Deleted Building", code: "UI-DELETED-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "ui-deleted-building", name: "UI Deleted Building", code: "UI-DELETED-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "ui-deleted-room", name: "UI Deleted Room", code: "UI-DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
     renderLocations([`/locations?q=${encodeURIComponent(building.name)}`]);
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
@@ -1070,6 +1125,16 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       expect(document.querySelector("select#select-building")).toBeNull();
     });
 
+    it("shows a short placeholder and the full chosen name as a tooltip", async () => {
+      await seedFilterBuildings();
+      renderLocations(["/locations?q=Combo"]);
+      const combobox = await screen.findByLabelText("BUILDING");
+      expect(combobox).toHaveAttribute("placeholder", "Search buildings…");
+      expect(combobox).not.toHaveAttribute("title");
+      chooseFilterBuilding("Combo Beta Hall");
+      expect(combobox).toHaveAttribute("title", "Combo Beta Hall");
+    });
+
     it("narrows the list by name or code as it is typed", async () => {
       await seedFilterBuildings();
       renderLocations(["/locations?q=Combo"]);
@@ -1084,14 +1149,15 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       await seedFilterBuildings();
       renderLocations(["/locations?q=Combo"]);
       const floorSelect = await screen.findByLabelText("FLOOR");
-      await waitFor(() => expect((floorSelect as HTMLSelectElement).options.length).toBeGreaterThan(1));
-      const secondFloor = Array.from((floorSelect as HTMLSelectElement).options).find((option) => option.text === "2nd Floor")!;
-      fireEvent.change(floorSelect, { target: { value: secondFloor.value } });
+      await waitFor(() => expect(filterOptionNames("FLOOR").length).toBeGreaterThan(1));
+      chooseFilterOption("FLOOR", "2nd Floor");
+      expect(selectedFilterOptionId("FLOOR")).toBe("floor-name:2nd Floor");
       expect(await screen.findByText("Combo Alpha Room")).toBeInTheDocument();
       expect(screen.queryByText("Combo Beta Room")).not.toBeInTheDocument();
 
       chooseFilterBuilding("Combo Beta Hall");
-      expect(floorSelect).toHaveValue("All Floors");
+      expect(floorSelect).toHaveTextContent("All Floors");
+      expect(selectedFilterOptionId("FLOOR")).toBeUndefined();
       expect(await screen.findByText("Combo Beta Room")).toBeInTheDocument();
       expect(screen.queryByText("Combo Alpha Room")).not.toBeInTheDocument();
       expect(screen.getByLabelText("BUILDING")).toHaveValue("Combo Beta Hall");
@@ -1140,6 +1206,174 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       } finally {
         delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
       }
+    });
+  });
+
+  describe("TYPE, FLOOR and STATUS filter dropdowns", () => {
+    const activeOption = (field: HTMLElement) =>
+      document.getElementById(field.getAttribute("aria-activedescendant") ?? "")?.querySelector(".parent-building-option-name")?.textContent;
+
+    it("opens the same popover as BUILDING from a select-only combobox, not a native select", async () => {
+      renderLocations();
+      for (const label of ["TYPE", "FLOOR", "STATUS"]) {
+        const field = await screen.findByLabelText(label);
+        expect(field).toHaveAttribute("role", "combobox");
+        expect(field).toHaveAttribute("aria-haspopup", "listbox");
+        expect(field).toHaveAttribute("aria-expanded", "false");
+        // Nothing to edit, so it is not announced as a text box.
+        expect(screen.queryByRole("textbox", { name: label })).toBeNull();
+        expect(screen.getByRole("combobox", { name: label })).toBe(field);
+        expect(field.tagName).not.toBe("INPUT");
+
+        fireEvent.click(field);
+        expect(field).toHaveAttribute("aria-expanded", "true");
+        const listbox = screen.getByRole("listbox");
+        expect(listbox).toHaveClass("filter-combobox-listbox");
+        expect(listbox.closest(".parent-building-popover")).not.toBeNull();
+        fireEvent.click(field);
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      }
+      expect(document.querySelector("select#select-type, select#select-floor, select#select-status")).toBeNull();
+    });
+
+    it("lists the clearing option first, marks the chosen one, and clears back to it", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      expect(type).toHaveTextContent("All Types");
+      expect(screen.getByLabelText("FLOOR")).toHaveTextContent("All Floors");
+      expect(screen.getByLabelText("STATUS")).toHaveTextContent("All Statuses");
+      expect(filterOptionNames("TYPE")[0]).toBe("All Types");
+      fireEvent.click(type);
+      expect(within(screen.getByRole("listbox")).getAllByRole("option")[0]).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(type, { key: "Escape" });
+
+      chooseFilterOption("TYPE", "Laboratory");
+      expect(type).toHaveTextContent("Laboratory");
+      fireEvent.click(type);
+      expect(within(screen.getByRole("listbox")).getByRole("option", { selected: true })).toHaveTextContent("Laboratory");
+      fireEvent.keyDown(type, { key: "Escape" });
+
+      chooseFilterOption("TYPE", "All Types");
+      expect(type).toHaveTextContent("All Types");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(filterOptionNames("FLOOR")[0]).toBe("All Floors");
+      expect(filterOptionNames("STATUS")).toEqual(["All Statuses", "Active", "Inactive"]);
+    });
+
+    it("keeps group headings out of the options and does nothing when one is clicked", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      expect(filterOptionNames("TYPE")).toEqual(["All Types", "College", "Campus Services", "Food", "Parking", "Facility", "Room", "Office", "Laboratory", "Restroom"]);
+      fireEvent.click(type);
+      const listbox = screen.getByRole("listbox");
+      expect(within(listbox).queryByRole("option", { name: "Places" })).toBeNull();
+      expect(within(listbox).queryByRole("option", { name: "Locations" })).toBeNull();
+
+      fireEvent.click(screen.getByText("Places"));
+      expect(screen.getByRole("listbox")).toBeInTheDocument();
+      expect(type).toHaveTextContent("All Types");
+    });
+
+    it("navigates by keyboard, stepping over group headings, and chooses with Enter", async () => {
+      renderLocations();
+      const type = await screen.findByLabelText("TYPE");
+      type.focus();
+      fireEvent.keyDown(type, { key: "ArrowDown" });
+      expect(type).toHaveAttribute("aria-expanded", "true");
+      expect(activeOption(type)).toBe("All Types");
+
+      const walked: Array<string | null | undefined> = [];
+      for (let step = 0; step < 7; step += 1) {
+        fireEvent.keyDown(type, { key: "ArrowDown" });
+        walked.push(activeOption(type));
+      }
+      // From Facility (last Place) the next stop is Room: the "Locations" heading is skipped.
+      expect(walked).toEqual(["College", "Campus Services", "Food", "Parking", "Facility", "Room", "Office"]);
+      fireEvent.keyDown(type, { key: "ArrowUp" });
+      fireEvent.keyDown(type, { key: "ArrowUp" });
+      expect(activeOption(type)).toBe("Facility");
+      fireEvent.keyDown(type, { key: "End" });
+      expect(activeOption(type)).toBe("Restroom");
+      fireEvent.keyDown(type, { key: "Home" });
+      expect(activeOption(type)).toBe("All Types");
+
+      fireEvent.keyDown(type, { key: "End" });
+      fireEvent.keyDown(type, { key: "Enter" });
+      expect(type).toHaveTextContent("Restroom");
+      expect(type).toHaveAttribute("aria-expanded", "false");
+      expect(type).not.toHaveAttribute("aria-activedescendant");
+    });
+
+    it("opens with Enter, Space or ArrowDown on the closed field, and closes on Escape, Tab or an outside click", async () => {
+      renderLocations();
+      const status = await screen.findByLabelText("STATUS");
+      for (const key of ["Enter", " ", "ArrowDown"]) {
+        fireEvent.keyDown(status, { key });
+        expect(status).toHaveAttribute("aria-expanded", "true");
+        fireEvent.keyDown(status, { key: "Escape" });
+        expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+        expect(status).toHaveAttribute("aria-expanded", "false");
+      }
+      fireEvent.keyDown(status, { key: "Enter" });
+      fireEvent.keyDown(status, { key: "Tab" });
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      fireEvent.click(status);
+      fireEvent.mouseDown(document.body);
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(status).toHaveTextContent("All Statuses");
+
+      // Space on an open list picks the highlighted option, like Enter.
+      fireEvent.keyDown(status, { key: " " });
+      fireEvent.keyDown(status, { key: "ArrowDown" });
+      fireEvent.keyDown(status, { key: " " });
+      expect(status).toHaveTextContent("Active");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    });
+
+    it("picks a STATUS by typing its first letter, as a native select did", async () => {
+      renderLocations();
+      const status = await screen.findByLabelText("STATUS");
+      fireEvent.keyDown(status, { key: "i" });
+      expect(activeOption(status)).toBe("Inactive");
+      fireEvent.keyDown(status, { key: "Enter" });
+      expect(status).toHaveTextContent("Inactive");
+      expect(selectedFilterOptionId("STATUS")).toBe("Inactive");
+    });
+
+    it("filters by STATUS and restores every row when All Statuses is chosen", async () => {
+      const place = (id: string, name: string, status: "Active" | "Inactive") => services.locations.save({ id, name, code: id.toUpperCase(), type: "Place", classification: "College", parentId: null, status, lat: null, lng: null, positioned: false });
+      await place("status-probe-live", "Status Probe Live", "Active");
+      await place("status-probe-dormant", "Status Probe Dormant", "Inactive");
+      const list = vi.spyOn(services.locations, "list");
+      renderLocations(["/locations?q=Status%20Probe"]);
+      expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "Inactive");
+      expect(screen.getByLabelText("STATUS")).toHaveTextContent("Inactive");
+      await waitFor(() => expect(screen.queryByText("Status Probe Live")).not.toBeInTheDocument());
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+      expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ status: "Inactive" }));
+
+      chooseFilterOption("STATUS", "All Statuses");
+      expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
+      expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+    });
+
+    it("filters by FLOOR through the same dropdown", async () => {
+      await services.locations.save({ id: "floor-dd-building", name: "Floor Dropdown Hall", code: "FLOOR-DD", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: "floor-dd-ground", name: "Floor Dropdown Ground Room", code: "FLOOR-DD-G", type: "Room", parentId: "floor-dd-building", building: "Floor Dropdown Hall", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
+      await services.locations.save({ id: "floor-dd-second", name: "Floor Dropdown Second Room", code: "FLOOR-DD-S", type: "Room", parentId: "floor-dd-building", building: "Floor Dropdown Hall", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
+      renderLocations(["/locations?q=Floor%20Dropdown"]);
+      expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
+
+      await waitFor(() => expect(filterOptionNames("FLOOR")).toContain("2nd Floor"));
+      chooseFilterOption("FLOOR", "2nd Floor");
+      expect(await screen.findByText("Floor Dropdown Second Room")).toBeInTheDocument();
+      expect(screen.queryByText("Floor Dropdown Ground Room")).not.toBeInTheDocument();
+
+      chooseFilterOption("FLOOR", "All Floors");
+      expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
     });
   });
 });

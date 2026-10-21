@@ -17,7 +17,7 @@ export const indoorLocationParent = (building: Building, locations: Location[]):
     name: building.name,
     code: building.code,
     type: "Place" as const,
-    classification: "Building" as const,
+    classification: building.classification,
     parentId: null,
     status: building.status ?? "Active",
     lat: null,

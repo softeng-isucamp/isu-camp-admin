@@ -114,7 +114,7 @@ export function deriveMapIssues(
   };
   locations
     .filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary))
-    .forEach((item) => addOutside(`location:${item.type}:${item.id}`, item.name, backendLocationType(item),
+    .forEach((item) => addOutside(`location:${item.type}:${item.id}`, item.name, backendLocationType(item) ?? "Unclassified",
       [item.lat as number, item.lng as number], locationSelection(item)));
   nodes
     .filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary))

@@ -31,7 +31,7 @@ const existingLocations: Location[] = [
     id: "bld-eng",
     name: "Engineering Hall",
     code: "ENG-01",
-    type: "Place", classification: "Building",
+    type: "Place", classification: "College",
     parentId: null,
     status: "Active",
     lat: null,
@@ -196,7 +196,7 @@ describe("validateBuildingIdentityDetails", () => {
   it("requires a Classification and never accepts the legacy Building value", () => {
     const missing = validateBuildingIdentityDetails({ ...validIdentity, classification: undefined }, existingLocations);
     expect(missing).toContainEqual({ field: "classification", message: "Choose a Classification." });
-    const legacy = validateBuildingIdentityDetails({ ...validIdentity, classification: "Building" }, existingLocations);
+    const legacy = validateBuildingIdentityDetails({ ...validIdentity, classification: "Building" as never }, existingLocations);
     expect(legacy).toContainEqual({ field: "classification", message: "Choose a Classification." });
   });
 
@@ -217,6 +217,7 @@ describe("buildCreateBuildingOperation", () => {
     const input: BuildingIdentityInput = {
       name: "New Laboratory Building",
       code: "LAB-NEW",
+      classification: "College",
       function: "Research",
       keywords: "lab, research",
     };
@@ -229,7 +230,7 @@ describe("buildCreateBuildingOperation", () => {
       name: "New Laboratory Building",
       code: "LAB-NEW",
       type: "Place",
-      classification: "Building",
+      classification: "College",
       status: "Active",
       lat: null,
       lng: null,

@@ -9,6 +9,12 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/dashboard/);
 }
 
+/** List filters are dropdowns, not native selects: open one, then pick its option by exact name. */
+async function chooseFilter(page: Page, label: string, option: string) {
+  await page.getByLabel(label, { exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
 test("redirects unauthenticated visitors from protected routes", async ({
   page,
 }) => {
@@ -117,27 +123,27 @@ test("locations, users, logs, and map expose their key state transitions", async
 }) => {
   await signIn(page);
   await page.goto("/locations");
-  await page.getByLabel("TYPE").selectOption("Laboratory");
+  await chooseFilter(page, "TYPE", "Laboratory");
   await expect(page.getByRole("row").filter({ hasText: /Laboratory/ }).first()).toBeVisible();
   await expect(page).toHaveScreenshot("locations-type-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("TYPE").selectOption("All Types");
-  await page.getByLabel("STATUS").selectOption("Active");
+  await chooseFilter(page, "TYPE", "All Types");
+  await chooseFilter(page, "STATUS", "Active");
   await expect(page).toHaveScreenshot("locations-status-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("STATUS").selectOption("All Statuses");
-  await page.getByLabel("BUILDING").fill("College of Information Communication Technology");
+  await chooseFilter(page, "STATUS", "All Statuses");
+  await page.getByLabel("BUILDING", { exact: true }).fill("College of Information Communication Technology");
   await page.getByRole("option", { name: /^College of Information Communication Technology/ }).click();
-  await page.getByLabel("FLOOR").selectOption({ label: "2nd Floor" });
+  await chooseFilter(page, "FLOOR", "2nd Floor");
   await expect(page.getByRole("row").filter({ hasText: /Laboratory/ }).first()).toBeVisible();
   await expect(page).toHaveScreenshot("locations-building-floor-filter.png", {
     animations: "disabled",
   });
-  await page.getByLabel("BUILDING").click();
+  await page.getByLabel("BUILDING", { exact: true }).click();
   await page.getByRole("option", { name: "All Buildings" }).click();
-  await page.getByLabel("FLOOR").selectOption("All Floors");
+  await chooseFilter(page, "FLOOR", "All Floors");
   await page
     .getByRole("button", { name: /Actions for/i })
     .first()
@@ -298,8 +304,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Admin Activity" }).click();
-  await page.getByLabel("ACTOR").selectOption("admin01");
-  await page.getByLabel("DATE").selectOption("Aug 17, 2026");
+  await chooseFilter(page, "DATE", "Last 7 days");
   await expect(page).toHaveScreenshot("system-logs-date-filter.png", {
     animations: "disabled",
   });
@@ -309,8 +314,7 @@ test("locations, users, logs, and map expose their key state transitions", async
     animations: "disabled",
   });
   await page.getByPlaceholder("Search logs...").fill("");
-  await page.getByLabel("ACTOR").selectOption("All Actors");
-  await page.getByLabel("DATE").selectOption("All Dates");
+  await chooseFilter(page, "DATE", "All Dates");
   await page.getByRole("button", { name: "All Logs" }).click();
   await page.getByRole("button", { name: "2" }).click();
   await expect(page.getByText("Showing 21–25 of 25")).toBeVisible();

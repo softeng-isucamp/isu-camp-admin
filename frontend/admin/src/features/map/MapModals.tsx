@@ -79,7 +79,7 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         <LocationDetailsModal
           location={locationModalEntity}
           directory={data.locations}
-          allowedTypes={selectedBuilding ? placeClassificationOptions(locationModalEntity.classification) : undefined}
+          allowedTypes={selectedBuilding ? placeClassificationOptions() : undefined}
           onClose={actions.onCloseOwnerModal}
           onPickIndoorLocationOnMap={selectedLocation && isIndoorLocation(selectedLocation)
             ? () => actions.onPickIndoorLocationOnMap(selectedLocation)

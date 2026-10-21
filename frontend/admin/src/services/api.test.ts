@@ -151,10 +151,11 @@ describe("mock service contracts", () => {
     const normalize = (extra: Record<string, unknown>) =>
       normalizeBackendLocation({ id: "9", name: "Some place", code: "PLC", ...extra });
 
-    expect(normalize({ type: "Building" })).toMatchObject({ type: "Place", classification: "Building" });
     expect(normalize({ type: "Facility" })).toMatchObject({ type: "Place", classification: "Facility" });
-    for (const extra of [{ type: null }, {}, { type: "Dormitory" }, { type: "" }, { type_id: 4 }, { type_id: 6 }, { type_id: 8 }]) {
-      expect(normalize(extra)).toMatchObject({ type: "Place", classification: "Building" });
+    for (const extra of [{ type: "Building" }, { type: null }, {}, { type: "Dormitory" }, { type: "" }, { type_id: 4 }, { type_id: 6 }, { type_id: 8 }]) {
+      const place = normalize(extra);
+      expect(place).toMatchObject({ type: "Place" });
+      expect(place.classification).toBeUndefined();
     }
     for (const classification of ["College", "Campus Services", "Food", "Parking"]) {
       expect(normalize({ type: classification })).toMatchObject({ type: "Place", classification });
@@ -170,7 +171,7 @@ describe("mock service contracts", () => {
     expect(normalize("Facility")).toMatchObject({ classification: "Facility" });
     expect(normalize("College")).toMatchObject({ classification: "College" });
     for (const type of ["Building", null, undefined, "", "Unknown", "Dormitory"]) {
-      expect(normalize(type)).toMatchObject({ classification: "Building" });
+      expect(normalize(type).classification).toBeUndefined();
     }
   });
 
@@ -345,7 +346,7 @@ describe("mock service contracts", () => {
       id: "local-footprint-building",
       name: "Local Footprint Building",
       code: "LOCAL-FOOTPRINT",
-      type: "Place", classification: "Building",
+      type: "Place", classification: "College",
       parentId: null,
       status: "Active",
       lat: null,
@@ -359,7 +360,7 @@ describe("mock service contracts", () => {
         id: saved.id,
         name: "Local Footprint Building",
         code: "LOCAL-FOOTPRINT",
-        classification: "Building",
+        classification: "College",
         points: polygon,
         status: "Active",
       });
@@ -377,7 +378,7 @@ describe("mock service contracts", () => {
 
   it("preserves hierarchical child locations and permanently deletes families", async () => {
     const building = await services.locations.save({
-      id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Place", classification: "Building",
+      id: "ticket-01-building", name: "Ticket 01 Building", code: "T01-B", type: "Place", classification: "College",
       parentId: null, status: "Active", lat: 16.72, lng: 121.69, positioned: true,
     });
     const room = await services.locations.save({
@@ -468,7 +469,7 @@ describe("mock service contracts", () => {
         id: "building-1",
         name: "Building One",
         code: "BUILDING-ONE",
-        type: "Place", classification: "Building",
+        type: "Place", classification: "College",
         parentId: null,
         status: "Active",
         lat: null,
@@ -522,7 +523,7 @@ describe("mock service contracts", () => {
   });
 
   it("permanently deletes a building, its connected children, and audits each record", async () => {
-    const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const building = await services.locations.save({ id: "deleted-building", name: "Deleted Building", code: "DELETED-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const child = await services.locations.save({ id: "deleted-room", name: "Deleted Room", code: "DELETED-ROOM", type: "Room", parentId: building.id, building: building.name, floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false });
 
     await services.locations.remove(building.id);
@@ -533,8 +534,8 @@ describe("mock service contracts", () => {
   });
 
   it("cascades only the Indoor Locations directly owned by the deleted Building", async () => {
-    const first = await services.locations.save({ id: "same-name-building-a", name: "Duplicate Name Building", code: "DUP-A", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
-    const second = await services.locations.save({ id: "same-name-building-b", name: "Duplicate Name Building", code: "DUP-B", type: "Place", classification: "Building", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const first = await services.locations.save({ id: "same-name-building-a", name: "Duplicate Name Building", code: "DUP-A", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    const second = await services.locations.save({ id: "same-name-building-b", name: "Duplicate Name Building", code: "DUP-B", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     const firstChild = await services.locations.save({ id: "same-name-room-a", name: "Room A", code: "DUP-A-ROOM", type: "Room", parentId: first.id, building: first.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
     const secondChild = await services.locations.save({ id: "same-name-room-b", name: "Room B", code: "DUP-B-ROOM", type: "Room", parentId: second.id, building: second.name, floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
 
@@ -794,12 +795,12 @@ describe("real locations service boundary", () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
-    const saved = { id: "42", name: "Engineering Hall", code: "ENG-01", type: "Building", parentId: null, function: "Academic building", keywords: "engineering", status: "Active", lat: null, lng: null, positioned: false } as const;
+    const saved = { id: "42", name: "Engineering Hall", code: "ENG-01", type: "College", parentId: null, function: "Academic building", keywords: "engineering", status: "Active", lat: null, lng: null, positioned: false } as const;
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ location: saved }), { status: 201 }));
 
     // The backend still speaks Building/Facility, so a Place is sent as its classification.
-    const place = { ...saved, type: "Place" as const, classification: "Building" as const };
+    const place = { ...saved, type: "Place" as const, classification: "College" as const };
     await expect(httpServices.locations.save({ ...place, id: undefined })).resolves.toEqual(place);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/locations",
@@ -896,12 +897,41 @@ describe("real locations service boundary", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "7", name: "front.png", type: "image/png", isCover: true }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(new Blob(["image"], { type: "image/png" }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "42", name: "Library", code: "LIB", type: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false, hasPhoto: false }), { status: 200 }));
-    await httpServices.locations.getPhotos("42", "Building");
+    await httpServices.locations.getPhotos("42", "College");
     await httpServices.locations.save({ id: "42", name: "Library", code: "LIB", type: "Place", classification: "Facility", parentId: null, status: "Active", lat: null, lng: null, positioned: false }, []);
     const form = fetchMock.mock.calls[2]?.[1]?.body as FormData;
     expect(form.get("removePhotoIds")).toBe("[7]");
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: previousCreateObjectURL });
     vi.unstubAllEnvs();
+  });
+});
+
+describe("a Place without a classification at the HTTP boundary", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("is refused on save without any request, so no type is ever sent for it", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(httpServices.locations.save({ id: "42", name: "Library", code: "LIB", type: "Place", parentId: null, status: "Active", lat: null, lng: null, positioned: false }))
+      .rejects.toThrow("Select a classification.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads its photos without a type query", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+
+    await httpServices.locations.getPhotos("42");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/api\/actions\/locations\/42\/photos$/);
   });
 });
 
@@ -1214,20 +1244,20 @@ describe("real walking network service boundary", () => {
     expect(sent.some((body) => body.includes('"type":"Building"'))).toBe(false);
   });
 
-  it("normalizes Building and Facility footprints and reads the committed result after deletion", async () => {
+  it("normalizes College and Facility footprints and reads the committed result after deletion", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify([
-        { id: "4", name: "Engineering Hall", code: "ENG-01", type: "Building", status: "Active", points: [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]] },
+        { id: "4", name: "Engineering Hall", code: "ENG-01", type: "College", status: "Active", points: [[16.72, 121.69], [16.721, 121.69], [16.721, 121.691]] },
         { id: "8", name: "Campus Clinic", code: "CLINIC", type: "Facility", status: "Active", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] },
       ]), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
 
     await expect(httpServices.map.buildings()).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "4", classification: "Building" }),
+      expect.objectContaining({ id: "4", classification: "College" }),
       expect.objectContaining({ id: "8", classification: "Facility", points: [[16.722, 121.692], [16.723, 121.692], [16.723, 121.693]] }),
     ]));
     await httpServices.map.removeBuilding("4");
@@ -1347,7 +1377,7 @@ describe("dashboard analytics", () => {
 it("uses Manila dates and actual active directory metadata, including building footprints", () => {
   const now = Date.parse("2026-10-08T16:30:00Z"); // October 9 in Manila
   const directory: Location[] = [{
-    id: "42", name: "Library", code: "LIB", type: "Place", classification: "Building", parentId: null,
+    id: "42", name: "Library", code: "LIB", type: "Place", classification: "College", parentId: null,
     status: "Active", lat: null, lng: null, positioned: false,
     function: "Study space", keywords: "library", hasPhoto: true,
   }];

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
 import { Users } from "./Users";
 
 const page = {
@@ -53,8 +54,34 @@ describe("Users account type", () => {
     renderUsers();
     await screen.findByText("maria.santos1");
 
-    await userEvent.selectOptions(screen.getByLabelText("ACCOUNT TYPE"), "visitor");
+    chooseFilterOption("ACCOUNT TYPE", "Visitor");
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("", 1, 10, "all", "visitor"));
+  });
+
+  it("lists each filter's choices with the clearing entry first", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    expect(filterOptionNames("REGISTERED")).toEqual(["All time", "Last 7 days", "Last 30 days", "Last 90 days"]);
+    expect(filterOptionNames("ACCOUNT TYPE")).toEqual(["All", "Student", "Staff", "Visitor"]);
+  });
+
+  it("filters the list by REGISTERED and restores it when All time is chosen", async () => {
+    const list = vi.spyOn(services.users, "list").mockImplementation(async (_q, _page, _size, range) => (
+      range === "7d" ? { ...page, items: [page.items[0]], total: 1 } : page
+    ));
+    renderUsers();
+    await screen.findByText("legacy.user");
+
+    chooseFilterOption("REGISTERED", "Last 7 days");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("", 1, 10, "7d", "all"));
+    await waitFor(() => expect(screen.queryByText("legacy.user")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("REGISTERED")).toHaveTextContent("Last 7 days");
+
+    chooseFilterOption("REGISTERED", "All time");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("", 1, 10, "all", "all"));
+    expect(await screen.findByText("legacy.user")).toBeInTheDocument();
   });
 
   it("offers only the actions this portal owns for an app account", async () => {
@@ -144,6 +171,6 @@ describe("Users account type", () => {
     renderUsers("/users?userType=Teacher");
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("", 1, 10, "all", "teacher"));
-    expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveValue("teacher");
+    expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveTextContent("Staff");
   });
 });

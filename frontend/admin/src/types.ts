@@ -1,7 +1,5 @@
-/** Every classification a Place can hold or be read as; "Building" is the legacy value. New values are added here and in locationPolicy. */
-export const PLACE_CLASSIFICATIONS = ["Building", "Facility", "College", "Campus Services", "Food", "Parking"] as const;
-/** The classifications pickers offer; "Building" is the legacy value and is only ever shown as a record's current one. */
-export const SELECTABLE_PLACE_CLASSIFICATIONS = ["College", "Campus Services", "Food", "Parking", "Facility"] as const;
+/** Every classification a Place can hold. New values are added here and in locationPolicy. A Place the backend sends with none of these has no classification (it is unclassified). */
+export const PLACE_CLASSIFICATIONS = ["College", "Campus Services", "Food", "Parking", "Facility"] as const;
 export type PlaceClassification = typeof PLACE_CLASSIFICATIONS[number];
 export type LocationType =
   | "Place"
@@ -53,7 +51,7 @@ export interface Location {
   name: string;
   code: string;
   type: LocationType;
-  /** Present when `type` is "Place"; absent for every other type. */
+  /** Only a Place carries one. A Place without it is unclassified: the backend sent a null, missing, or unknown type. */
   classification?: PlaceClassification;
   parentId: string | null;
   building?: string;

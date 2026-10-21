@@ -16,7 +16,7 @@ export function locationDetailsEntity(
     name: selectedBuilding.name,
     code: selectedBuilding.code,
     type: "Place",
-    classification: selectedBuilding.classification ?? selectedBuildingLocation?.classification ?? "Building",
+    classification: selectedBuilding.classification ?? selectedBuildingLocation?.classification,
     parentId: null,
     function: selectedBuildingLocation?.function ?? "Campus Building",
     keywords: selectedBuildingLocation?.keywords ?? "",

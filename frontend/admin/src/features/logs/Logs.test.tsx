@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { services } from "../../services/api";
 import type { AuditEntry } from "../../types";
 import { formatDateTime } from "../../lib/format";
+import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
 import { Logs } from "./Logs";
 
 const isoTimestamp = "2026-09-13T03:47:29.990831+00:00";
@@ -117,5 +118,38 @@ describe("Logs deep links", () => {
     renderLogs("/system-logs?category=Nonsense");
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("All", "", "All Actors", "all", 1, 10));
+  });
+});
+
+describe("Logs DATE filter", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("lists the date ranges with All Dates first", async () => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+
+    expect(filterOptionNames("DATE")).toEqual(["All Dates", "Today", "Last 7 days", "Last 30 days"]);
+  });
+
+  it("filters the list by DATE and restores it when All Dates is chosen", async () => {
+    const list = vi.spyOn(services.logs, "list").mockImplementation(async (_category, _q, _actor, date) => {
+      const items = date === "7d" ? [entries[1]] : entries;
+      return { items, total: items.length, page: 1, pageSize: 10 };
+    });
+    renderLogs();
+    await screen.findByText("login");
+
+    chooseFilterOption("DATE", "Last 7 days");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "7d", 1, 10));
+    await waitFor(() => expect(screen.queryByText("login")).not.toBeInTheDocument());
+    expect(screen.getByText("create")).toBeInTheDocument();
+    expect(screen.getByLabelText("DATE")).toHaveTextContent("Last 7 days");
+
+    chooseFilterOption("DATE", "All Dates");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
+    expect(await screen.findByText("login")).toBeInTheDocument();
   });
 });
