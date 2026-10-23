@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { usePermissions } from "../auth/usePermissions";
 import { placeClassificationOptions } from "../../lib/locationPolicy";
 import type { Building, Location, RouteNode } from "../../types";
 import { LocationDetailsModal } from "../locations/LocationDetailsModal";
@@ -6,7 +8,7 @@ import type { useBuildingFootprintEditing } from "./building/useBuildingFootprin
 import type { PasswordConfirmation } from "../auth/PasswordConfirmation";
 import { DeleteConfirmationModal, type DeleteConfirmation } from "./DeleteConfirmationModal";
 import { IndoorLocationChooserModal } from "./indoorLocation/IndoorLocationChooserModal";
-import { isIndoorLocation } from "./indoorLocation/indoorLocations";
+import { isIndoorLocation, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import type { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { locationDetailsEntity } from "./location/locationDetailsEntity";
 import { PathPointConversionModal } from "./pathway/PathPointConversionModal";
@@ -54,6 +56,11 @@ interface MapModalsProps {
 
 /** Every modal the Map Editor can open over the map. */
 export function MapModals({ ownerModal, error, savingAction, selection, editors, data, deletion, actions }: MapModalsProps) {
+  const { can } = usePermissions();
+  const canEdit = can("edit");
+  useEffect(() => {
+    if (ownerModal === "location" && !canEdit) actions.onCloseOwnerModal();
+  }, [ownerModal, canEdit, actions.onCloseOwnerModal]);
   const { buildingEditor, pathway, indoor } = editors;
   const { building: selectedBuilding, location: selectedLocation } = selection;
   const { conversionDraft, setConversionDraft } = pathway;
@@ -75,13 +82,14 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         />
       )}
 
-      {ownerModal === "location" && locationModalEntity && (
+      {ownerModal === "location" && canEdit && locationModalEntity && (
         <LocationDetailsModal
           location={locationModalEntity}
           directory={data.locations}
           allowedTypes={selectedBuilding ? placeClassificationOptions() : undefined}
           onClose={actions.onCloseOwnerModal}
           onPickIndoorLocationOnMap={selectedLocation && isIndoorLocation(selectedLocation)
+            && can(isPositionedLocation(selectedLocation) ? "edit" : "add")
             ? () => actions.onPickIndoorLocationOnMap(selectedLocation)
             : undefined}
           onSubmit={actions.onSubmitLocationDetails}
@@ -111,7 +119,7 @@ export function MapModals({ ownerModal, error, savingAction, selection, editors,
         />
       )}
 
-      {deletion.confirmation && (
+      {deletion.confirmation && can("delete") && (
         <DeleteConfirmationModal
           confirmation={deletion.confirmation}
           error={error}

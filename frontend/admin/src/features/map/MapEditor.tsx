@@ -857,15 +857,17 @@ export function MapEditor() {
         actions={{
           onCloseOwnerModal: () => setOwnerModal(null),
           onSubmitLocationDetails: async (updated, photos) => {
-            await locationDetails.save(
+            const saved = await locationDetails.save(
               { building: selectedBuilding, buildingLocation: selectedBuildingLocation, location: selectedLocation },
               updated,
               photos,
             );
+            if (!saved) return;
             feedback.reportSuccess(`${updated.name} was updated successfully.`);
             setOwnerModal(null);
           },
           onPickIndoorLocationOnMap: (location) => {
+            if (!can(isPositionedLocation(location) ? "edit" : "add")) return;
             const parent = currentBuildings.find((item) => item.id === location.parentId || item.name === location.building);
             setOwnerModal(null);
             if (parent) beginIndoorLocationPlacement(parent, location);
