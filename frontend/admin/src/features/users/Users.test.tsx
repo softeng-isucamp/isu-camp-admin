@@ -2,9 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 import { Users } from "./Users";
 
 const page = {
@@ -36,6 +38,9 @@ function renderUsers(initialEntry = "/users") {
 }
 
 describe("Users account type", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("renders an Account Type column as plain text and a dash for unknown types", async () => {
@@ -172,5 +177,53 @@ describe("Users account type", () => {
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("", 1, 10, "all", "teacher"));
     expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveTextContent("Staff");
+  });
+});
+
+describe("Users page for a restricted administrator", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("offers only View activity on an app account without the status switch", async () => {
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    for (const username of ["maria.santos1", "legacy.user"]) {
+      await userEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }));
+      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity"]);
+      await userEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }));
+    }
+  });
+
+  it("keeps the status action when only other switches are off", async () => {
+    signInAs("admin", { permissions: { ...viewOnlyPermissions(), changeUserStatus: true } });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity", "Deactivate account"]);
+  });
+
+  it("hides the Administrators tab from an administrator, however many switches are on", async () => {
+    signInAs("admin", { permissions: allPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers("/users?tab=admins");
+    await screen.findByText("maria.santos1");
+
+    expect(screen.getByRole("button", { name: "App Users" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Administrators" })).not.toBeInTheDocument();
+  });
+
+  it("shows a superadmin both tabs and the status action whatever the record says", async () => {
+    signInAs("superadmin", { permissions: viewOnlyPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    expect(screen.getByRole("button", { name: "Administrators" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeInTheDocument();
   });
 });
