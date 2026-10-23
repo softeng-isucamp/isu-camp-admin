@@ -525,3 +525,17 @@ describe("old reset-password links", () => {
     expect(within(document.body).getByLabelText("Admin email")).toBeInTheDocument();
   });
 });
+
+describe("recovery by alternative email", () => {
+  it("names both addresses in the copy and sends the code only to the one typed", async () => {
+    const ALTERNATIVE = "dean.backup@gmail.com";
+    const { sent } = mockBackend({ [REQUEST]: [issued()] });
+    renderForgotPassword();
+    expect(screen.getByText(/primary or alternative admin email/i)).toBeInTheDocument();
+
+    await sendCodeTo(ALTERNATIVE);
+
+    expect(sent[REQUEST]).toEqual([{ email: ALTERNATIVE, purpose: "password" }]);
+    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(ALTERNATIVE);
+  });
+});

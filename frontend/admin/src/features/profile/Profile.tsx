@@ -1,11 +1,11 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { Badge, Button, Card, Field, LoadingState, Modal } from '../../components/UI';
 import { FeedbackStack, useFeedback } from '../../components/Feedback';
 import { PageIcon } from '../../components/PageIcon';
 import { PasswordChecklist } from '../../components/PasswordChecklist';
 import { services } from '../../services/api';
 import { firstPasswordIssue } from '../../services/passwordRules';
-import type { AccountProfile } from '../../services/profile';
+import { supportsAlternativeEmail, type AccountProfile } from '../../services/profile';
 import { useAuth } from '../auth/AuthContext';
 import { BackupRecovery } from './BackupRecovery';
 import { DialogFocus } from './DialogFocus';
@@ -37,7 +37,7 @@ export function Profile() {
       <Card className="profile-account">
         <div className="profile-identity">
           <div className="profile-avatar"><img src={profileIcon} alt="" /></div>
-          <div className="profile-identity-copy"><h2>{profile.username}</h2><p>{profile.email}</p></div>
+          <div className="profile-identity-copy"><h2>{profile.username}</h2><p>{profile.email}</p>{profile.alternativeEmail && <p className="profile-identity-alt">Alternative: {profile.alternativeEmail}</p>}</div>
           <Badge tone={profile.role === 'superadmin' ? 'green' : 'grey'}>{roleLabel(profile.role)}</Badge>
         </div>
         <div className="profile-actions">
@@ -60,24 +60,52 @@ export function Profile() {
   </div>;
 }
 
+type DetailsField = 'username' | 'email' | 'alternativeEmail' | 'currentPassword';
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 function DetailsDialog({ profile, onClose, onSaved }: { profile: AccountProfile; onClose: () => void; onSaved: (profile: AccountProfile) => void }) {
+  // A server that does not report the alternative email cannot store it or check a password for it either.
+  const alternativeSupported = supportsAlternativeEmail(profile);
   const [username, setUsername] = useState(profile.username);
   const [email, setEmail] = useState(profile.email);
+  const [alternativeEmail, setAlternativeEmail] = useState(profile.alternativeEmail ?? '');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<DetailsField, string>>>({});
   const [saving, setSaving] = useState(false);
-  const unchanged = username.trim() === profile.username && email.trim() === profile.email;
+  const emailsChanged = alternativeSupported
+    && (!sameEmail(email, profile.email) || !sameEmail(alternativeEmail, profile.alternativeEmail ?? ''));
+  const unchanged = username.trim() === profile.username && email.trim() === profile.email
+    && (!alternativeSupported || alternativeEmail.trim() === (profile.alternativeEmail ?? ''));
+  // Editing a field retires the refusal that was about it.
+  const edit = (field: DetailsField, set: (value: string) => void) => (event: ChangeEvent<HTMLInputElement>) => {
+    set(event.target.value);
+    setFieldErrors((current) => ({ ...current, [field]: undefined }));
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (saving || unchanged) return;
-    setError(''); setSaving(true);
-    try { onSaved(await services.profile.update({ username: username.trim(), email: email.trim() })); }
-    catch (cause) { setError(errorText(cause)); setSaving(false); }
+    setError(''); setFieldErrors({}); setSaving(true);
+    try {
+      onSaved(await services.profile.update({
+        username: username.trim(), email: email.trim(),
+        ...(alternativeSupported ? { alternativeEmail: alternativeEmail.trim() || null } : {}),
+        ...(emailsChanged ? { currentPassword } : {}),
+      }));
+    } catch (cause) {
+      const fields = (cause as { fieldErrors?: Partial<Record<DetailsField, string>> } | null)?.fieldErrors;
+      // A refusal that names a field shows under it; anything else is the dialog's own error line.
+      if (fields && Object.keys(fields).length) setFieldErrors(fields); else setError(errorText(cause));
+      setSaving(false);
+    }
   };
   return <DialogFocus busy={saving}><Modal title="Edit Profile" size="sm" onClose={() => { if (!saving) onClose(); }}>
-    <form onSubmit={save} className="admin-form">
+    <form onSubmit={save} className="admin-form" noValidate>
       {error && <div role="alert" className="admin-form-error">{error}</div>}
-      <Field label="USERNAME" aria-label="Username" value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" maxLength={100} disabled={saving} />
-      <Field label="EMAIL" aria-label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" maxLength={254} disabled={saving} subhelper="Password reset codes are sent here." />
+      <Field label="USERNAME" aria-label="Username" value={username} onChange={edit('username', setUsername)} required autoComplete="username" maxLength={100} disabled={saving} error={fieldErrors.username} />
+      <Field label={alternativeSupported ? 'PRIMARY EMAIL' : 'EMAIL'} aria-label={alternativeSupported ? 'Primary email' : 'Email'} type="email" value={email} onChange={edit('email', setEmail)} required autoComplete="email" maxLength={254} disabled={saving} subhelper="Password reset codes are sent here." error={fieldErrors.email} />
+      {alternativeSupported && <Field label="ALTERNATIVE EMAIL" aria-label="Alternative email" type="email" badge="Optional" value={alternativeEmail} onChange={edit('alternativeEmail', setAlternativeEmail)} autoComplete="email" maxLength={254} placeholder="you@example.com" disabled={saving} subhelper="Used for account recovery if you lose access to your primary email." error={fieldErrors.alternativeEmail} />}
+      {emailsChanged && <Field label="CURRENT PASSWORD" aria-label="Current password" type="password" value={currentPassword} onChange={edit('currentPassword', setCurrentPassword)} required autoComplete="current-password" disabled={saving} subhelper="Changing an email address needs your password." error={fieldErrors.currentPassword} />}
       <div className="modal-actions">
         <Button type="button" variant="subtle" disabled={saving} onClick={onClose}>Cancel</Button>
         <Button type="submit" loading={saving} disabled={!username.trim() || !email.trim() || unchanged}>Save Changes</Button>

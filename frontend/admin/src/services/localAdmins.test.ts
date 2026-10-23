@@ -56,6 +56,20 @@ describe("fixture sign-ins", () => {
 
     await expect(adapter.auth.login("admin_new", "A-long-enough-secret1")).resolves.toMatchObject({ role: "admin" });
   });
+
+  it("gives a newly added administrator email settings they can change", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+    await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
+    await adapter.auth.logout();
+    await adapter.auth.login("admin_new", "A-long-enough-secret1");
+
+    // A null alternative, not a missing one: missing means a backend without the field.
+    await expect(adapter.auth.profile()).resolves.toMatchObject({ alternativeEmail: null });
+    await expect(adapter.auth.updateProfile({
+      username: "admin_new", email: "renamed@isu.edu.ph", alternativeEmail: "new.home@gmail.com", currentPassword: "A-long-enough-secret1",
+    })).resolves.toMatchObject({ email: "renamed@isu.edu.ph", alternativeEmail: "new.home@gmail.com" });
+  });
 });
 
 describe("fixture administrator directory", () => {
@@ -645,9 +659,147 @@ describe("fixture profile update", () => {
     const { adapter } = setup();
     await adapter.auth.login("admin_registrar", PASSWORD);
 
-    await expect(adapter.auth.updateProfile({ username: "admin_registrar", email: "r@isu.edu.ph" }))
+    await expect(adapter.auth.updateProfile({ username: "admin_registrar", email: "r@isu.edu.ph", currentPassword: PASSWORD }))
       .resolves.toMatchObject({ email: "r@isu.edu.ph" });
     await expect(adapter.auth.updateProfile({ username: "Admin_Registrar", email: "r@isu.edu.ph" }))
       .resolves.toMatchObject({ username: "Admin_Registrar" });
+  });
+});
+
+describe("fixture alternative email on a profile update", () => {
+  const DEAN_ALTERNATIVE = "dean.backup@gmail.com";
+  const signIn = async (username = "admin_registrar") => {
+    const fixture = setup();
+    await fixture.adapter.auth.login(username, PASSWORD);
+    return fixture;
+  };
+  const update = (adapter: ReturnType<typeof setup>["adapter"], changes: Partial<Parameters<typeof adapter.auth.updateProfile>[0]>) =>
+    adapter.auth.updateProfile({ username: "admin_registrar", email: "registrar.admin@isu.edu.ph", ...changes });
+
+  it("reports the alternative email on the profile and leaves it out of the session and the directory", async () => {
+    const { adapter, admins } = await signIn("admin_dean");
+
+    await expect(adapter.auth.profile()).resolves.toMatchObject({ alternativeEmail: DEAN_ALTERNATIVE });
+    expect(await adapter.auth.me()).not.toHaveProperty("alternativeEmail");
+    for (const account of await admins.list()) expect(account).not.toHaveProperty("alternativeEmail");
+  });
+
+  it("sets and clears the alternative email, asking for the password each time", async () => {
+    const { adapter } = await signIn();
+
+    await expect(update(adapter, { alternativeEmail: "registrar.home@gmail.com", currentPassword: PASSWORD }))
+      .resolves.toMatchObject({ alternativeEmail: "registrar.home@gmail.com" });
+    await expect(update(adapter, { alternativeEmail: null, currentPassword: PASSWORD }))
+      .resolves.toMatchObject({ alternativeEmail: null });
+  });
+
+  it("refuses a changed email without the password, and a wrong one, under the password field", async () => {
+    const { adapter } = await signIn();
+
+    expect(await failure(update(adapter, { alternativeEmail: "registrar.home@gmail.com" })))
+      .toMatchObject({ fieldErrors: { currentPassword: "Enter your current password to change an email address" } });
+    expect(await failure(update(adapter, { email: "new@isu.edu.ph", currentPassword: "wrong" })))
+      .toMatchObject({ fieldErrors: { currentPassword: "Your current password is incorrect" } });
+    await expect(adapter.auth.profile()).resolves.toMatchObject({ email: "registrar.admin@isu.edu.ph", alternativeEmail: null });
+  });
+
+  it("needs no password when neither email changed", async () => {
+    const { adapter } = await signIn();
+
+    await expect(update(adapter, { username: "registrar_renamed", alternativeEmail: null }))
+      .resolves.toMatchObject({ username: "registrar_renamed" });
+  });
+
+  it("refuses an alternative that equals the primary, whatever the case", async () => {
+    const { adapter } = await signIn();
+
+    expect(await failure(update(adapter, { alternativeEmail: "Registrar.Admin@isu.edu.ph", currentPassword: PASSWORD })))
+      .toMatchObject({ fieldErrors: { alternativeEmail: "Use a different address from your primary email" } });
+  });
+
+  it("refuses a malformed alternative", async () => {
+    const { adapter } = await signIn();
+
+    expect(await failure(update(adapter, { alternativeEmail: "not-an-email", currentPassword: PASSWORD })))
+      .toMatchObject({ fieldErrors: { alternativeEmail: "Enter a valid email address" } });
+  });
+
+  it.each([
+    ["another administrator's primary", "Dean.Admin@isu.edu.ph"],
+    ["another administrator's alternative", "DEAN.backup@gmail.com"],
+  ])("refuses %s as the new primary or alternative, without naming the account", async (_label, taken) => {
+    const { adapter } = await signIn();
+
+    expect(await failure(update(adapter, { email: taken, currentPassword: PASSWORD })))
+      .toMatchObject({ message: "That email address is already in use", fieldErrors: { email: "That email address is already in use" } });
+    expect(await failure(update(adapter, { alternativeEmail: taken, currentPassword: PASSWORD })))
+      .toMatchObject({ fieldErrors: { alternativeEmail: "That email address is already in use" } });
+  });
+
+  it("does not say an address is taken until the password is proven", async () => {
+    const { adapter } = await signIn();
+
+    const error = await failure(update(adapter, { alternativeEmail: DEAN_ALTERNATIVE, currentPassword: "wrong" }));
+    expect(error).toMatchObject({ fieldErrors: { currentPassword: "Your current password is incorrect" } });
+    expect((error as { fieldErrors: object }).fieldErrors).not.toHaveProperty("alternativeEmail");
+  });
+
+  it("only checks the fields that changed, so an address already shared does not block another edit", async () => {
+    const { adapter } = await signIn();
+    // Issue #108: two accounts already hold the same address.
+    adapter.directory.accounts.find((account) => account.username === "admin_dean")!.email = "registrar.admin@isu.edu.ph";
+
+    await expect(update(adapter, { username: "registrar_renamed" })).resolves.toMatchObject({ username: "registrar_renamed" });
+  });
+
+  it("lets a primary be changed to the address the account itself holds as alternative once that is cleared", async () => {
+    const { adapter } = await signIn();
+    await update(adapter, { alternativeEmail: "registrar.home@gmail.com", currentPassword: PASSWORD });
+
+    await expect(update(adapter, { email: "registrar.home@gmail.com", alternativeEmail: null, currentPassword: PASSWORD }))
+      .resolves.toMatchObject({ email: "registrar.home@gmail.com", alternativeEmail: null });
+  });
+
+  it("reports every refused field at once", async () => {
+    const { adapter } = await signIn();
+
+    expect(await failure(update(adapter, { username: "admin_justine", alternativeEmail: "registrar.admin@isu.edu.ph", currentPassword: PASSWORD })))
+      .toMatchObject({ fieldErrors: { username: "That username is already taken", alternativeEmail: "Use a different address from your primary email" } });
+  });
+});
+
+describe("fixture shared email pool when adding an administrator", () => {
+  const add = (admins: ReturnType<typeof setup>["admins"], email: string) =>
+    admins.save({ username: `admin_${Math.random().toString(36).slice(2, 8)}`, email, password: "A-long-enough-secret1" });
+
+  it.each([
+    ["primary", "REGISTRAR.admin@isu.edu.ph"],
+    ["alternative", "Dean.Backup@gmail.com"],
+  ])("refuses an email that is another administrator's %s under the email field", async (_label, email) => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+
+    expect(await failure(add(admins, email))).toMatchObject({
+      message: "That email address is already in use",
+      fieldErrors: { email: "That email address is already in use" },
+    });
+    expect(await admins.list()).toHaveLength(3);
+  });
+
+  it("accepts a fresh address", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+
+    await expect(add(admins, "fresh@isu.edu.ph")).resolves.toMatchObject({ email: "fresh@isu.edu.ph" });
+  });
+
+  it("refuses a newly added address on the profile screen's alternative field too", async () => {
+    const { adapter, admins } = setup();
+    await adapter.auth.login("admin_justine", PASSWORD);
+    await add(admins, "fresh@isu.edu.ph");
+
+    expect(await failure(adapter.auth.updateProfile({
+      username: "admin_justine", email: "admin@isu.edu.ph", alternativeEmail: "FRESH@isu.edu.ph", currentPassword: PASSWORD,
+    }))).toMatchObject({ fieldErrors: { alternativeEmail: "That email address is already in use" } });
   });
 });

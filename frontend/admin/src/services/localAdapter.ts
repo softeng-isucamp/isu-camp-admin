@@ -2,7 +2,8 @@ import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
 import type { AccountStatus, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { canContainLocations, isPlace, locationPolicy, placeClassificationOf } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
-import { AuthError, RateLimitError, fieldError } from "./errors";
+import { AuthError, RateLimitError, fieldErrorsOf } from "./errors";
+import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
@@ -24,20 +25,23 @@ export type FixtureAccount = AccountProfile & { password: string; status: Accoun
 /**
  * `admin_justine` is the demo superadmin and `admin_registrar` the plain
  * administrator; `admin_dean` is a second superadmin so one can act on another.
- * They all sign in with the same password.
+ * They all sign in with the same password. `admin_dean` also has an alternative
+ * email, so the shared email pool's duplicate path can be tried.
  */
 const seedAccounts = (): FixtureAccount[] => [
-  { id: "1", username: "admin_justine", email: LOCAL_ADMIN_EMAIL, role: "superadmin", status: "Active", password: LOCAL_PASSWORD },
-  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD },
-  { id: "3", username: "admin_dean", email: "dean.admin@isu.edu.ph", role: "superadmin", status: "Active", password: LOCAL_PASSWORD },
+  { id: "1", username: "admin_justine", email: LOCAL_ADMIN_EMAIL, role: "superadmin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null },
+  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null },
+  { id: "3", username: "admin_dean", email: "dean.admin@isu.edu.ph", role: "superadmin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: "dean.backup@gmail.com" },
 ];
 
-const profileOf = ({ id, username, email, role }: FixtureAccount): AccountProfile => ({ id, username, email, role });
+const profileOf = ({ id, username, email, role, alternativeEmail }: FixtureAccount): AccountProfile => ({ id, username, email, role, alternativeEmail });
+/** The session carries the sign-in identity only; the alternative email is read from the profile. */
+const sessionOf = ({ id, username, email, role }: FixtureAccount): Session => ({ id, username, email, role });
 
 /** A code the fixture handed out. `account` is unset for emails with no account, which still behave like they have one. */
 type IssuedCode = { account?: FixtureAccount; attempts: number; expiresAt: number };
 
-const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type LocalMapData = {
   locations: Location[];
@@ -95,6 +99,8 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   }
   // When the signed-in account last retyped its password; the server keeps this on the session.
   let confirmedAt = 0;
+  /** Whether the signed-in account confirmed its password within the server's five minutes. */
+  const recentlyConfirmed = (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS;
   const endSession = () => {
     session = null;
     confirmedAt = 0;
@@ -113,7 +119,11 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
   let lockedUntil = 0;
 
   const issueCode = (email: string, purpose: RecoveryPurpose, known = true): IssuedCode => {
-    const owner = known ? accounts.find((record) => normalizeEmail(record.email) === normalizeEmail(email)) : undefined;
+    // Either address reaches the account; the code is only ever "sent" to the one typed.
+    const owner = known
+      ? accounts.find((record) => normalizeEmail(record.email) === normalizeEmail(email)
+        || (!!record.alternativeEmail && normalizeEmail(record.alternativeEmail) === normalizeEmail(email)))
+      : undefined;
     const issued = { account: owner, attempts: 0, expiresAt: Date.now() + RECOVERY_EXPIRES_SECONDS * 1000 };
     issuedCodes.set(`${purpose}:${normalizeEmail(email)}`, issued);
     return issued;
@@ -163,7 +173,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         failedLogins = 0;
         account = candidate;
         confirmedAt = 0;
-        session = profileOf(account);
+        session = sessionOf(account);
         sessionStore = remember ? rememberedStorage ?? storage : storage;
         persistSession();
         return session;
@@ -171,7 +181,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       logout: async (): Promise<void> => endSession(),
       me: async (): Promise<Session | null> => {
         if (session && account.status !== "Active") endSession();
-        return session ? profileOf(account) : null;
+        return session ? sessionOf(account) : null;
       },
       profile: async (): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to view your profile.");
@@ -181,13 +191,37 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       updateProfile: async (changes: ProfileChanges): Promise<AccountProfile> => {
         if (!session) throw new Error("Sign in to edit your profile.");
         refuseIfDeactivated();
-        if (!changes.username.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email.trim())) throw new Error("Enter a username and valid email.");
-        const taken = accounts.some((record) =>
-          record.id !== account.id && record.username.toLowerCase() === changes.username.trim().toLowerCase());
-        if (taken) throw fieldError("username", "That username is already taken");
-        account.username = changes.username.trim();
-        account.email = changes.email.trim();
-        session = profileOf(account);
+        const username = changes.username.trim();
+        const email = changes.email.trim();
+        const alternative = (changes.alternativeEmail ?? "").trim();
+        const errors: Record<string, string> = {};
+        // Each check runs only for a field that changed, so an address another account already shares does not block other edits.
+        const emailChanged = normalizeEmail(email) !== normalizeEmail(account.email);
+        const alternativeChanged = changes.alternativeEmail !== undefined
+          && normalizeEmail(alternative) !== normalizeEmail(account.alternativeEmail ?? "");
+        if (!username) errors.username = "Username is required";
+        else if (username.toLowerCase() !== account.username.toLowerCase()
+          && accounts.some((record) => record.id !== account.id && record.username.toLowerCase() === username.toLowerCase())) {
+          errors.username = "That username is already taken";
+        }
+        if (!EMAIL_PATTERN.test(email)) errors.email = "Enter a valid email address";
+        if (alternative && !EMAIL_PATTERN.test(alternative)) errors.alternativeEmail = "Enter a valid email address";
+        else if (alternative && normalizeEmail(alternative) === normalizeEmail(email)) errors.alternativeEmail = "Use a different address from your primary email";
+        if (emailChanged || alternativeChanged) {
+          const given = changes.currentPassword ?? "";
+          if (!given) errors.currentPassword = "Enter your current password to change an email address";
+          else if (given !== account.password) errors.currentPassword = "Your current password is incorrect";
+        }
+        // Only once the password is proven, so a session without it cannot probe which addresses are taken.
+        if (!errors.currentPassword) {
+          if (emailChanged && !errors.email && emailInUse(accounts, email, account.id)) errors.email = EMAIL_IN_USE_MESSAGE;
+          if (alternativeChanged && alternative && !errors.alternativeEmail && emailInUse(accounts, alternative, account.id)) errors.alternativeEmail = EMAIL_IN_USE_MESSAGE;
+        }
+        if (Object.keys(errors).length) throw fieldErrorsOf(errors);
+        account.username = username;
+        account.email = email;
+        if (changes.alternativeEmail !== undefined) account.alternativeEmail = alternative || null;
+        session = sessionOf(account);
         persistSession();
         return profileOf(account);
       },
@@ -209,6 +243,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         }
         confirmedAt = Date.now();
       },
+      recentlyConfirmed,
       // Always succeeds and reports the same timing, so the response never says whether the email has an account.
       requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
         issueCode(email, purpose);
@@ -239,8 +274,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         refuseIfDeactivated();
         return account;
       },
-      /** Whether the signed-in account confirmed its password within the server's five minutes. */
-      recentlyConfirmed: (): boolean => Date.now() - confirmedAt <= CONFIRMATION_WINDOW_MS,
+      recentlyConfirmed,
     },
     locations: {
       saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {

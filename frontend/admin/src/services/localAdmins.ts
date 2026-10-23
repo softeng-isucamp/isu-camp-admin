@@ -1,6 +1,7 @@
 import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
 import { PasswordConfirmationRequiredError, SuperadminRequiredError, fieldError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
+import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -65,6 +66,11 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
     if (taken) throw fieldError("username", "That username is already taken");
   };
 
+  /** An address is free only if no other administrator holds it, as primary or alternative; one pool, case-insensitive. */
+  const ensureEmailFree = (email: string, excludingId?: string) => {
+    if (emailInUse(accounts, email, excludingId)) throw fieldError("email", EMAIL_IN_USE_MESSAGE);
+  };
+
   /** True when the record is the only active superadmin, so changing it would leave none. */
   const isLastActiveSuperadmin = (record: FixtureAccount): boolean =>
     record.role === "superadmin" && record.status === "Active"
@@ -85,9 +91,10 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
         const role = draft.role ?? "admin";
         if (role !== "admin" && role !== "superadmin") throw fieldError("role", ROLE_MESSAGE);
         ensureUsernameFree(username);
+        ensureEmailFree(email);
         // Reported after the field errors above, as the server does, so the form can show them before asking for a password.
         if (role === "superadmin") requireConfirmation("Confirm your password to create a superadmin.");
-        const created: FixtureAccount = { id: `admin-${Date.now()}`, username, email, role, status: "Active", password };
+        const created: FixtureAccount = { id: `admin-${Date.now()}`, username, email, role, status: "Active", password, alternativeEmail: null };
         accounts.push(created);
         audit("Created Administrator", username, created.id);
         return asAccount(created);
@@ -99,6 +106,8 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       if (existing.id !== caller.id) throw new Error("You can only edit your own administrator account.");
       const { username, email, password } = readIdentity(draft, false);
       ensureUsernameFree(username, existing.id);
+      // Only a changed address is checked, so one an existing account already shares does not block other edits.
+      if (normalizeEmail(email) !== normalizeEmail(existing.email)) ensureEmailFree(email, existing.id);
       existing.username = username;
       existing.email = email;
       // A blank password leaves the existing one alone, as on the server.

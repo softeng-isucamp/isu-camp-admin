@@ -61,3 +61,7 @@ export class AuthError extends Error {
 /** A refusal that names the form field it is about, as the backend's `fields` do. */
 export const fieldError = (field: string, message: string) =>
   Object.assign(new Error(message), { fieldErrors: { [field]: message } });
+
+/** Several refusals at once, one per field; the message is the first so a plain handler still reads something. */
+export const fieldErrorsOf = (fieldErrors: Record<string, string>) =>
+  Object.assign(new Error(Object.values(fieldErrors)[0]), { fieldErrors });
