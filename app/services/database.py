@@ -27,6 +27,7 @@ from auth import auth_bp
 from model.location import Location
 from model.app_user import AppUser
 from model.audit_log import AuditLog
+from model.backup_schedule import BackupSchedule
 
 from routes.actions import actions_bp
 from routes.location import location_bp
