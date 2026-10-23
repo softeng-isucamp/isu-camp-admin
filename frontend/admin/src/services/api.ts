@@ -681,24 +681,34 @@ export interface Services {
   /**
    * Administrator accounts for the portal itself.
    *
-   * Backend contract for general permissions (add, edit, delete, change app user
-   * status; viewing is always on). The portal only decides what to offer; the
-   * server must enforce the same switches on the matching endpoints.
+   * Backend contract for general permissions. A regular administrator has four
+   * switches, `{ add, edit, delete, changeUserStatus }` (viewing is always on and has
+   * none). `add`/`edit`/`delete` cover Locations, Buildings, Route Nodes and Pathways
+   * (including entrances, indoor markers and moving or reshaping); `changeUserStatus`
+   * covers `PUT /api/users/:id/status`. A superadmin can do everything and has none.
+   * The portal only decides what to offer; the server must enforce the same switches
+   * on the matching endpoints.
    * - `GET /api/admins` items carry `permissions` for role `admin`, and none (absent
-   *   or null) for a superadmin. `GET /api/auth/me` and the login response carry the
-   *   signed-in admin's own `permissions` the same way. A response without the field
-   *   is read as "everything allowed", so today's behaviour holds until it is sent.
+   *   or null) for a superadmin. The `admin` object in the login and `me` responses
+   *   carries the signed-in admin's own `permissions` the same way. Inside the object
+   *   only an explicit `true` grants; a response without the field is read as
+   *   "everything allowed", so today's behaviour holds until it is sent.
    * - `POST /api/admins` accepts `permissions` (only read for role `admin`; a new
    *   administrator without it is view only).
-   * - `PUT /api/admins/:id/permissions` takes `{ permissions }` and returns `{ admin }`;
-   *   403 for oneself or a superadmin.
-   * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin`; promoting
-   *   discards the stored switches.
-   * Adding an administrator, saving permissions and changing a role are all superadmin
-   * only and re-authenticated like the other password-guarded actions: the portal calls
-   * `POST /api/confirm-password` first, and the endpoint refuses with
-   * `password_confirmation_required` when that confirmation is missing or has expired.
-   * Removing an administrator is no longer offered; deactivating is the replacement.
+   * - `PUT /api/admins/:id/permissions` takes `{ permissions }` (all four booleans) and
+   *   returns `{ admin }`; 403 for oneself or a superadmin.
+   * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin` (view only
+   *   when omitted); promoting discards the stored switches.
+   * Adding any administrator, saving permissions and changing a role are superadmin
+   * only (`superadmin_required`) and re-authenticated like the other password-guarded
+   * actions: the portal calls `POST /api/confirm-password` first, and the endpoint
+   * refuses with `password_confirmation_required` (the `reauth_required` guard) when
+   * that confirmation is missing or has expired. No password travels in these bodies.
+   * `DELETE /api/admins/:id` is no longer called; deactivating (`PUT
+   * /api/admins/:id/status`) replaces removal so the account and its audit trail
+   * survive. Record permission changes in System Logs ("Created Administrator",
+   * "Promoted Administrator", "Demoted Administrator", "Updated Administrator
+   * Permissions").
    */
   admins: {
     list(): Promise<AdminAccount[]>;
