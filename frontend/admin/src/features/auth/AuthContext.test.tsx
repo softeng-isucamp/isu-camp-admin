@@ -2,6 +2,7 @@ import { render, screen, act } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 import { services } from '../../services/api';
+import { canPerform } from '../../lib/permissions';
 import type { Session } from '../../types';
 afterEach(() => vi.restoreAllMocks());
 it('ignores a profile response from a session that has signed out', async () => {
@@ -106,5 +107,22 @@ describe('refreshSession', () => {
     await act(async () => { release(null); await pending; });
 
     expect(screen.getByText('justine:superadmin')).toBeInTheDocument();
+  });
+});
+
+describe('updateSession', () => {
+  it('keeps the role and permissions of a restricted administrator when a saved profile replaces their identity', async () => {
+    const permissions = { add: true, edit: false, delete: false, changeUserStatus: false };
+    vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '2', username: 'staff', role: 'admin', permissions });
+    const handle = mountConsumer();
+    await screen.findByText('staff:admin');
+
+    // The profile service answers with an account profile, which carries no permissions.
+    act(() => handle.auth.updateSession({ id: '2', username: 'staff.renamed', email: 'staff@isu.edu.ph' }));
+
+    expect(screen.getByText('staff.renamed:admin')).toBeInTheDocument();
+    expect(handle.auth.session?.permissions).toEqual(permissions);
+    expect(canPerform(handle.auth.session, 'edit')).toBe(false);
+    expect(canPerform(handle.auth.session, 'add')).toBe(true);
   });
 });

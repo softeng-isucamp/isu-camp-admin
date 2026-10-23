@@ -14,7 +14,8 @@ interface AuthValue {
   login: (u: string, p: string, remember?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
-  updateSession: (profile: Session) => void;
+  /** Takes the identity fields of a saved profile; role and permissions stay what the server last reported for the session. */
+  updateSession: (profile: Pick<Session, "id" | "username" | "email">) => void;
   /** Reads the session from the server again, e.g. after a refusal shows its role has changed. */
   refreshSession: () => Promise<void>;
 }
@@ -45,9 +46,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
     sessionEpoch.current += 1;
     setSession(s);
   };
-  // A response may only update the exact session that initiated it.
-  const updateSession = (profile: Session) => {
-    setSession((current) => current && current === session && String(current.id) === profile.id ? profile : current);
+  // A response may only update the exact session that initiated it. A saved profile says who the
+  // account is, never what it may do, so role and permissions are kept: replacing them would
+  // drop the switches, and a session that reports none allows everything.
+  const updateSession = (profile: Pick<Session, "id" | "username" | "email">) => {
+    setSession((current) => current && current === session && String(current.id) === String(profile.id)
+      ? { ...current, username: profile.username, email: profile.email }
+      : current);
   };
   // Only an explicit request re-reads the session; a failed read leaves the current one alone.
   // A read that comes back after the session it was for ended, or for another account, is ignored.
