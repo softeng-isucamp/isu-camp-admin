@@ -655,8 +655,9 @@ export function Locations() {
     if (saved?.parentId) navigate(`/map-editor?indoorLocation=${encodeURIComponent(saved.id)}`);
   };
 
+  const indoorPositionAction = dialog === "edit" && selected?.positioned ? "edit" : "add";
   const pickIndoorLocationOnMap = () => {
-    if (!isChildType(draft.type)) return;
+    if (!isChildType(draft.type) || !canRef.current(indoorPositionAction) || dialogRef.current !== dialog) return;
     if (dialog === "edit" && selected) {
       closeOverlay();
       navigate(`/map-editor?indoorLocation=${encodeURIComponent(selected.id)}&place=1`);
@@ -1259,7 +1260,7 @@ export function Locations() {
                 positioned={draft.positioned}
                 parentLabel={draft.building}
                 busy={saving}
-                onPickOnMap={isChildType(draft.type)
+                onPickOnMap={isChildType(draft.type) && can(indoorPositionAction)
                   ? pickIndoorLocationOnMap
                   : undefined}
               />

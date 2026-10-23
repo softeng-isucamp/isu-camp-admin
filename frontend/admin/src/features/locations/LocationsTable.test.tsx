@@ -1398,6 +1398,21 @@ describe("Locations for a restricted administrator", () => {
   };
 
   it.each([
+    [false, false, false],
+    [false, true, true],
+    [true, false, true],
+  ])("gates the marker handoff for positioned=%s and Add=%s", async (positioned, add, offered) => {
+    const room = { id: "pick-permission-room", name: "Marker Permission Room", code: "PICK-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active" as const, lat: positioned ? 16.721 : null, lng: positioned ? 121.689 : null, positioned };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 50 });
+    renderLocations(["/locations?q=Marker%20Permission"], ["admin", { permissions: { ...viewOnlyPermissions(), edit: true, add } }]);
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${room.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const handoff = within(screen.getByRole("dialog", { name: "Edit Location" })).queryByRole("button", { name: "Pick on map" });
+    if (offered) expect(handoff).toBeInTheDocument();
+    else expect(handoff).not.toBeInTheDocument();
+  });
+
+  it.each([
     ["add", "＋ Add room to this building", "Add Location"],
     ["edit", "Edit location", "Edit Location"],
     ["delete", "Delete location", "Delete location?"],
