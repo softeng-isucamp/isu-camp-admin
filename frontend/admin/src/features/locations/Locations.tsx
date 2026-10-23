@@ -26,6 +26,7 @@ import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { ParentBuildingField } from "./ParentBuildingField";
+import { usePermissions } from "../auth/usePermissions";
 
 /** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
 const keyParam = (params: URLSearchParams) => {
@@ -76,6 +77,8 @@ export function Locations() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeLocation = useLocation();
+  const { can } = usePermissions();
+  const canAdd = can("add");
 
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
@@ -276,7 +279,8 @@ export function Locations() {
 
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
-    if (params.get("add") !== "indoor") {
+    // The hand-off from the map opens the Add form, so it needs Add like the button does.
+    if (params.get("add") !== "indoor" || !canAdd) {
       processedIndoorHandoffRef.current = null;
       return;
     }
@@ -302,7 +306,7 @@ export function Locations() {
     setFieldErrors([]);
     setError("");
     openDialog("add");
-  }, [allLocations, routeLocation.search]);
+  }, [allLocations, routeLocation.search, canAdd]);
   const buildingOptions = allLocations.filter(isLocationContainer);
   const buildingsById = new Map(allLocations.filter(isLocationContainer).map((item) => [item.id, item]));
   const floors = useMemo(() => {
@@ -852,6 +856,7 @@ export function Locations() {
               flexWrap: "wrap",
             }}
           >
+            {can("add") && (
             <Button
               style={{
                 height: "46px",
@@ -878,6 +883,7 @@ export function Locations() {
             >
               ＋ Add Location
             </Button>
+            )}
           </div>
         </div>
       </Card>
@@ -1097,7 +1103,7 @@ export function Locations() {
                           >
                             {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                           </button>
-                          {isBuilding(item) && (
+                          {isBuilding(item) && can("add") && (
                             <button
                               role="menuitem"
                               style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1106,6 +1112,7 @@ export function Locations() {
                               ＋ Add room to this building
                             </button>
                           )}
+                          {can("edit") && (
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1116,6 +1123,7 @@ export function Locations() {
                           >
                             Edit location
                           </button>
+                          )}
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1127,6 +1135,7 @@ export function Locations() {
                           >
                             View history
                           </button>
+                          {can("delete") && (
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
@@ -1138,6 +1147,7 @@ export function Locations() {
                           >
                             Delete location
                           </button>
+                          )}
                         </div>
                       )}
                     </div>

@@ -90,4 +90,12 @@ describe("InspectorCardHUD", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions for Engineering West Hall" }));
     expect(screen.getByRole("menuitem", { name: "✎ Edit Details" })).toBeDisabled();
   });
+
+  it("drops the ⋯ trigger when no overflow action is left, keeping the primary action and close", () => {
+    render(<InspectorCardHUD object={{ ...baseObject(), overflowActions: [] }} onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "More actions for Engineering West Hall" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear object selection" })).toBeInTheDocument();
+  });
 });

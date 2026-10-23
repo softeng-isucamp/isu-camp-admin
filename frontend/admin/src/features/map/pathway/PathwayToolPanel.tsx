@@ -1,4 +1,5 @@
 import { Spinner } from "../../../components/UI";
+import { usePermissions } from "../../auth/usePermissions";
 import type { Pathway, RouteNode } from "../../../types";
 import { suggestedPathwayName } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
@@ -27,6 +28,7 @@ export function PathwayToolPanel({
   onSave: handleSavePathShape,
   onCancel,
 }: PathwayToolPanelProps) {
+  const { can } = usePermissions();
   const {
     currentPathways,
     activePathway,
@@ -49,7 +51,7 @@ export function PathwayToolPanel({
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Path Shape Points</div>
       <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Calibrate Path Points</h2>
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>
+        {can("add") && <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>}
         <button
           type="button"
           className="px-3 py-1.5 border border-[#005931] bg-white text-[#005931] rounded-full text-xs font-bold"

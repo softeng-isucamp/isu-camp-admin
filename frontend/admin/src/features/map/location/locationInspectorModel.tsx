@@ -1,5 +1,6 @@
 import { Badge } from "../../../components/UI";
 import { backendLocationType, isPlace, isUnclassifiedPlace } from "../../../lib/locationPolicy";
+import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Location } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { isIndoorLocation } from "../indoorLocation/indoorLocations";
@@ -8,6 +9,7 @@ interface LocationInspectorOptions {
   location: Location;
   buildings: Building[];
   locations: Location[];
+  can: CanPerform;
   onEditDetails: () => void;
 }
 
@@ -15,6 +17,7 @@ export function locationInspectorModel({
   location: selectedLocation,
   buildings: currentBuildings,
   locations: currentLocations,
+  can,
   onEditDetails,
 }: LocationInspectorOptions) {
   const isFootprintOwner = isPlace(selectedLocation);
@@ -47,7 +50,7 @@ export function locationInspectorModel({
       : "Campus Location",
     summary: locationSummary,
     overflowActions: [
-      { label: "✎ Edit Details", onSelect: onEditDetails },
+      ...(can("edit") ? [{ label: "✎ Edit Details", onSelect: onEditDetails }] : []),
     ],
   } satisfies InspectorCardModel;
 }

@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { services } from "../../services/api";
 import { useAuth } from "../auth/AuthContext";
+import { usePermissions } from "../auth/usePermissions";
 import { campusCenter } from "../../services/mockData";
 import type { Building, Location, Pathway, RouteNode } from "../../types";
 import { polygonFeatureAnchor } from "./mapEditing";
@@ -63,6 +64,8 @@ const MAP_EDITOR_PROJECT_ID = "proj-echague";
 
 export function MapEditor() {
   const { session } = useAuth();
+  const { can } = usePermissions();
+  const canEdit = can("edit");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeLocation = useLocation();
@@ -263,7 +266,8 @@ export function MapEditor() {
   const applyRouteIntent = (intent: MapRouteIntent) => {
     switch (intent.type) {
       case "open-building-tool":
-        toolSession.activateTool("polygon");
+        // Drawing a footprint creates a Building, so a link into the tool needs Add like the rail does.
+        if (can("add")) toolSession.activateTool("polygon");
         break;
       case "locate-indoor-location": {
         const { location, parentBuilding, place } = intent;
@@ -309,11 +313,16 @@ export function MapEditor() {
       case "open-pathway": {
         const { pathway: requested, sourceNode } = intent;
         setSelected({ type: "pathway", id: requested.id });
-        pathway.setEditingPathId(requested.id);
-        pathway.setPathwayDraft({ ...requested });
-        pathway.setPathwayDraftOriginal({ ...requested });
-        pathway.setPathPoints([...requested.pathPoints]);
-        setMode("path");
+        // Opening a Pathway for reshaping makes its points draggable, which is an edit.
+        if (can("edit")) {
+          pathway.setEditingPathId(requested.id);
+          pathway.setPathwayDraft({ ...requested });
+          pathway.setPathwayDraftOriginal({ ...requested });
+          pathway.setPathPoints([...requested.pathPoints]);
+          setMode("path");
+        } else {
+          setMode("select");
+        }
         setError("");
         if (sourceNode) flyTo([sourceNode.lat, sourceNode.lng]);
         break;
@@ -332,7 +341,8 @@ export function MapEditor() {
   const applySelection = useCallback((type: MapSelectionType, id: string) => {
     if (type === "pathway") {
       const outcome = pathway.loadForSelection(id);
-      if (outcome) setMode(outcome === "edit" ? "path" : "select");
+      // Path mode makes the Pathway's points draggable, so selecting one only enters it for an admin who may edit.
+      if (outcome) setMode(outcome === "edit" && canEdit ? "path" : "select");
     }
     if (type === "node") {
       const node = currentNodes.find((candidate) => candidate.id === id);
@@ -341,7 +351,7 @@ export function MapEditor() {
       }
     }
     pointTool.setPosition(null);
-  }, [currentNodes, currentPathways]);
+  }, [currentNodes, currentPathways, canEdit]);
   const { popover: selectionPopover, clearPopover: clearSelectionPopover, selectObject, selectCanvasObject, selectCandidate } = useMapSelection(
     mode,
     setSelected,
@@ -528,6 +538,8 @@ export function MapEditor() {
   };
 
   const selectTool = (toolType: ToolType) => {
+    // Every tool but Select creates geometry, so none can be picked without Add.
+    if (toolType !== "select" && !can("add")) return;
     if (toolType === activeTool) {
       if (toolType === "pathway") setNetworkBrowserOpen(false);
       return;
@@ -610,6 +622,7 @@ export function MapEditor() {
     buildingAssociationOptions,
     savingAction,
     linkingEntrance: entranceLinking.linking,
+    can,
     actions: {
       building: (view) => ({
         onReshape: startSelectedBuildingGeometryEdit,

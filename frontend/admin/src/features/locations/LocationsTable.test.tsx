@@ -6,16 +6,22 @@ import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
 import { chooseFilterOption, filterOptionIds, filterOptionNames, selectedFilterOptionId } from "../../test/filterCombobox";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 
 function LocationRouteProbe() {
   const location = useLocation();
   return <output data-testid="location-route">{location.pathname}{location.search}</output>;
 }
 
-function renderLocations(initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"]) {
+function renderLocations(
+  initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"],
+  session: Parameters<typeof signInAs> = ["admin"],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
+  signInAs(...session);
   const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
@@ -1375,5 +1381,62 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       chooseFilterOption("FLOOR", "All Floors");
       expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Locations for a restricted administrator", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const building = { id: "perm-building", name: "Permission Probe Hall", code: "PERM-HALL", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false } as const;
+  const rowMenuItems = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
+    return within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent);
+  };
+
+  it("hides Add Location, Add room, Edit and Delete for a view-only administrator, keeping the view actions", async () => {
+    await services.locations.save({ ...building });
+    renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: viewOnlyPermissions() }]);
+
+    expect(await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add location/i })).not.toBeInTheDocument();
+    expect(await rowMenuItems()).toEqual(["Locate on map", "View history"]);
+  });
+
+  it("offers each row action only with its own switch", async () => {
+    await services.locations.save({ ...building });
+    for (const [key, expected] of [
+      ["add", ["Locate on map", "＋ Add room to this building", "View history"]],
+      ["edit", ["Locate on map", "Edit location", "View history"]],
+      ["delete", ["Locate on map", "View history", "Delete location"]],
+    ] as const) {
+      const { unmount } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: { ...viewOnlyPermissions(), [key]: true } }]);
+      expect(await rowMenuItems(), key).toEqual(expected);
+      unmount();
+    }
+  });
+
+  it("shows Add Location with the Add switch, and everything to a superadmin or an unreported session", async () => {
+    renderLocations(["/locations"], ["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+    cleanup();
+
+    renderLocations(["/locations"], ["superadmin", { permissions: viewOnlyPermissions() }]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+    cleanup();
+
+    renderLocations(["/locations"], ["admin"]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+  });
+
+  it("does not open the Add form from the map's indoor-location hand-off without the Add switch", async () => {
+    await services.locations.save({ ...building });
+    renderLocations([`/locations?q=Permission%20Probe&add=indoor&parentId=${building.id}`], ["admin", { permissions: { ...allPermissions(), add: false } }]);
+
+    await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 });
+    await waitFor(() => expect(screen.getByText("Permission Probe Hall")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Add Location" })).not.toBeInTheDocument();
   });
 });

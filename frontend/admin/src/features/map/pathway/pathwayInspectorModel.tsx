@@ -1,3 +1,4 @@
+import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Pathway, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { suggestedPathwayName } from "../mapEditing";
@@ -11,6 +12,8 @@ interface PathwayInspectorOptions {
   pathway: ReturnType<typeof usePathwayEditing>;
   nodes: RouteNode[];
   savingAction: SaveAction | null;
+  /** What the signed-in administrator may do; an action they may not do is left out, not disabled. */
+  can: CanPerform;
   onSelect: (selection: PathwayInspectorSelection) => void;
   /** Applies the staged Pathway metadata; MapEditor closes the tool when the result says so. */
   onApply: () => void;
@@ -31,6 +34,7 @@ export function selectedPathwayInspectorModel({
   nodes: currentNodes,
   buildings: currentBuildings,
   savingAction,
+  can,
   onApply,
   onCancel,
   onReshape,
@@ -55,7 +59,8 @@ export function selectedPathwayInspectorModel({
       { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
       { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
     ],
-    details: (
+    // Metadata, geometry and Cancel are all edits, so a view-only administrator keeps the summary alone.
+    details: can("edit") ? (
       <>
         <section className="inspector-related-section" aria-label="Pathway metadata">
           <h3>Pathway metadata</h3>
@@ -78,23 +83,23 @@ export function selectedPathwayInspectorModel({
           <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
         </section>
       </>
-    ),
-    primaryAction: {
+    ) : undefined,
+    primaryAction: can("edit") ? {
       label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
       disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
-    },
+    } : undefined,
     overflowActions: [
-      { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
-      { label: "⌁ Reshape Pathway", onSelect: () => onReshape(selectedPath) },
-      {
+      ...(can("edit") ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
+      ...(can("edit") ? [{ label: "⌁ Reshape Pathway", onSelect: () => onReshape(selectedPath) }] : []),
+      ...(can("delete") ? [{
         label: "🗑 Delete Pathway",
         tone: "danger" as const,
         onSelect: () => {
           onDelete({ kind: "pathway", id: selectedPath.id, name: selectedPath.name, impact: calculateDeleteImpact({ object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
         },
-      },
+      }] : []),
     ],
   } satisfies InspectorCardModel;
 }
@@ -111,6 +116,7 @@ export function pathPointInspectorModel({
   id,
   nodes: currentNodes,
   savingAction,
+  can,
   onSelect,
   onApply,
   onCancel,
@@ -165,16 +171,19 @@ export function pathPointInspectorModel({
         <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
       </>
     ),
-    primaryAction: {
+    // Updating, cancelling and removing a point change the Pathway (Edit); converting a point creates a Route Node (Add).
+    primaryAction: can("edit") ? {
       label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
       disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
-    },
+    } : undefined,
     overflowActions: [
-      { label: "✓ Update Pathway", onSelect: onApply },
-      { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
-      { label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion },
+      ...(can("edit") ? [
+        { label: "✓ Update Pathway", onSelect: onApply },
+        { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
+      ] : []),
+      ...(can("add") ? [{ label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion }] : []),
       {
         label: "↩ Inspect Parent Pathway",
         onSelect: () => {
@@ -182,7 +191,7 @@ export function pathPointInspectorModel({
           onSelect(activePathway ? { type: "pathway", id: activePathway.id } : null);
         },
       },
-      {
+      ...(can("edit") ? [{
         label: "🗑 Remove Path Point",
         tone: "danger" as const,
         onSelect: () => {
@@ -191,7 +200,7 @@ export function pathPointInspectorModel({
           onSelect(activePathway ? { type: "pathway", id: activePathway.id } : null);
           setPathDraftDirty(true);
         },
-      },
+      }] : []),
     ],
   } satisfies InspectorCardModel;
 }

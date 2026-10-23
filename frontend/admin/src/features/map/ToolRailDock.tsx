@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePermissions } from "../auth/usePermissions";
 import type { ActiveToolDraft, ToolType } from "./types";
 
 type ToolDefinition = {
@@ -56,6 +57,11 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
   const [minimized, setMinimized] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [pathwayOptionsOpen, setPathwayOptionsOpen] = useState(false);
+  const { can } = usePermissions();
+  const canAdd = can("add");
+  // Route Node, Building Polygon and Pathway tools all create geometry, so they need Add. Select stays. The Pathway
+  // entry stays for everyone as the way into Browse Walking Network, which is a view; it offers no editing without Add.
+  const visibleTools = toolDefinitions.filter((tool) => canAdd || tool.id === "select" || tool.id === "pathway");
   const activeDefinition = getToolDefinition(activeTool);
 
   return (
@@ -77,7 +83,7 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
           </button>
         ) : (
           <div role="toolbar" aria-label="Map command dock" className="map-glass-panel flex items-center gap-1 overflow-x-auto rounded-full p-1.5">
-            {toolDefinitions.map((tool) => {
+            {visibleTools.map((tool) => {
               const active = activeTool === tool.id;
               return (
                 <button
@@ -97,7 +103,7 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition ${active ? "bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
                 >
                   <span aria-hidden="true">{tool.icon}</span>
-                  <span>{tool.label}</span>
+                  <span>{tool.id === "pathway" && !canAdd ? "Walking Network" : tool.label}</span>
                 </button>
               );
             })}
@@ -125,14 +131,16 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
             >
               Browse Walking Network
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => { onSelectTool("pathway"); setPathwayOptionsOpen(false); }}
-              className="rounded-xl px-3 py-2 text-left text-xs font-bold text-[#264d3b] hover:bg-emerald-50"
-            >
-              Create or edit Pathway
-            </button>
+            {canAdd && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { onSelectTool("pathway"); setPathwayOptionsOpen(false); }}
+                className="rounded-xl px-3 py-2 text-left text-xs font-bold text-[#264d3b] hover:bg-emerald-50"
+              >
+                Create or edit Pathway
+              </button>
+            )}
           </div>
         )}
       </div>
