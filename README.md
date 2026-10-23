@@ -90,48 +90,121 @@ The Map Editor's indoor-location markers require the `public.location` schema to
 
 Pathway distance and estimated time are no longer stored or returned by the application. Legacy `public.pathway.distance_m` and `public.pathway.estimated_minutes` columns are unused by the application and may remain in the database.
 
+## Administrator email addresses
+
+An administrator holds up to two addresses: `public.admin.gmail` and the optional `public.admin.alternative_email`. **Account recovery accepts either one**, which is the reason the second exists — the only way back into a locked-out account used to be the inbox it was created with.
+
+`GET /api/profile` returns `alternativeEmail`, `null` when none is registered. The key's presence is what tells My Profile the server knows about the field; a build talking to an older API sees no key and hides the control.
+
+`PATCH /api/profile` accepts `alternativeEmail` (a string, or `null`/`""` to clear) and `currentPassword`:
+
+```json
+{"username":"justine","email":"justine@example.com","alternativeEmail":"justine.home@gmail.com","currentPassword":"…"}
+```
+
+Leaving `alternativeEmail` out leaves it unchanged, so an older client that posts only `username` and `email` cannot clear it by accident.
+
+### One shared pool
+
+Every administrator's two addresses are **one pool**, compared trimmed and case-insensitively. An address is taken if any *other* administrator holds it as either of theirs, and an alternative cannot repeat its own primary. The database does not enforce this: accounts created before the rule already share primary addresses ([#108](https://github.com/softeng-isucamp/isu-camp-admin/issues/108)), so a unique index would fail to build. The check lives in the application (`auth.admins_holding_email`) and applies **only to the field a request is changing**, so an existing duplicate blocks nothing but a change to the duplicated field itself.
+
+`POST /api/admins` applies the same pool. No `/api/admins` response ever carries anyone's alternative email: it is a recovery address, and that listing is readable by every active administrator.
+
+### What the password is for
+
+`currentPassword` is required **only when the primary or alternative email changes** — a rename alone does not ask. It is checked **before** the duplicate checks, so a session left open on a shared machine can neither move an address nor be used to probe which addresses exist.
+
+| Field | Status | Message |
+| --- | --- | --- |
+| `username` | 409 | `That username is already taken` |
+| `email` / `alternativeEmail` | 409 | `That email address is already in use` |
+| `email` / `alternativeEmail` | 400 | `Enter a valid email address` |
+| `alternativeEmail` | 400 | `Use a different address from your primary email` |
+| `currentPassword` | 401 | `Your current password is incorrect`, or `Enter your current password to change an email address` when it is missing |
+
+A conflict never names the account that holds the address. Several fields can be refused in one response: `fields` carries each of them and `message` is the first, in the order the form reads.
+
+### Recovery
+
+Forgot password and forgot username accept either address. The code is sent **only to the address that was typed** — mailing the primary instead would tell whoever typed the alternative that the two belong together — and the response is identical whether or not an account matches. Codes are keyed per purpose and typed address, so a code requested for one address does not verify through the other. An address two accounts hold between them recovers neither, the same as an ambiguous primary always has.
+
+Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
+
 ## Database backups
 
-Backup & Recovery on My Profile takes real `pg_dump` archives. Four routes back it, all superadmin-only:
+Backup & Recovery on My Profile takes real `pg_dump` archives. These routes back it, all superadmin-only:
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/backups` | Stored archives, plus the running job if there is one |
+| `GET /api/backups` | Stored archives, the running job if there is one, and which controls this server can serve |
 | `POST /api/backups` | Start a dump; returns a job to poll |
 | `POST /api/backups/<id>/restore` | Restore an archive; needs the caller's password |
+| `POST /api/backups/<id>/download` | Issue a one-time download link; needs the caller's password |
+| `DELETE /api/backups/<id>` | Delete one archive; needs a recent password confirmation |
+| `PUT /api/backups/schedule` | Save the automatic backup schedule |
 | `GET /api/jobs/<id>` | Poll one operation until it is terminal |
+| `POST /api/jobs/<id>/cancel` | Ask a running backup or restore to stop |
+
+`GET /api/backup-downloads/<token>` streams one archive and is the only route here with no session check: the browser's own downloader fetches it, so it is authorised by the token instead.
 
 The archive is `pg_dump`'s custom format, so `pg_restore` can list it, pull one table out of it, or restore all of it with no code from this repository involved. That is the reason for preferring it to an application-level export. Measured against this project: **75 MB in about a minute**, covering all 17 tables of the `public` schema. It was 24 MB in 1 minute 45 seconds when this was written; the growth is `building_photo` and `location_photo`, which store image bytes in the database, so size retention against a fresh measurement rather than against this sentence.
 
 These are jobs rather than plain responses because of that runtime. The API runs `gunicorn --timeout 120`, so a synchronous dump would be killed before finishing. `POST /api/backups` returns `202` with `{id, kind, status}` and the panel polls `GET /api/jobs/<id>` every 1.5 seconds.
 
+### Every control is advertised, not assumed
+
+`GET /api/backups` carries `canDownload`, `canDelete` and `schedule`, and a job carries `cancellable`. **A key that is missing hides its control**, which is what lets the frontend and the backend land separately: a build talking to a deployment that has only half of this offers only the half that works, rather than a button that 404s. An unreadable `schedule` — a deployment that has not applied `migrations/20261023_add_backup_schedule.sql` — is treated the same as a missing one.
+
+### Cancelling
+
+`POST /api/jobs/<id>/cancel` answers `202` with the job as it stands, usually still `running`: the tool has been asked to stop, not finished stopping, and the panel shows "Cancelling…" while it keeps polling. The terminal status is `cancelled`, alongside `succeeded` and `failed`.
+
+- **A cancelled backup leaves nothing behind** — no archive, no history row, and the partial file is removed.
+- **A cancelled restore leaves the database exactly as it was.** `pg_restore` runs with `--single-transaction`, so terminating it abandons the transaction rather than leaving the schema half replaced.
+- **A lost race reports the real outcome.** A dump that had already written its last byte did succeed, and calling that `cancelled` would be a lie about an archive that now exists.
+- **Any superadmin can cancel any job**, including one the schedule started: whoever is watching a dump compete with the thing they need the database for is the person who should be able to stop it.
+
+Once an operation is past its point of no return it reports `cancellable: false` instead of accepting a cancel, so the button goes away rather than appearing to work.
+
+### Downloading and deleting
+
+`POST /api/backups/<id>/download` re-checks the password and returns `{url, expiresAt}`. The link is unguessable, **single-use**, expires in three minutes, and streams with `Content-Disposition: attachment`. Only a `ready` archive can be downloaded; anything else answers `404`, and so does an archive that is not there — the password is checked first, so a session left open cannot be used to ask which archives exist.
+
+`DELETE /api/backups/<id>` answers `204` and uses the portal's existing re-authentication convention rather than a password in the body: a lapsed confirmation answers `403` with `{"code":"password_confirmation_required"}`, the same code every other delete uses. It works on `ready` and `failed` archives, refuses with `409` while any backup or restore is running, and will delete the last archive you have — the UI warns about that; the server does not pretend an archive nobody wants is made safe by being the only one.
+
 ### Automatic backups
 
-One dump a day, taken by a thread inside the API process (`app/services/backup_schedule.py`). It calls the same `start_backup` as the panel's button, so an automatic archive differs from a hand-made one only in its `createdBy`, lands in the same list, and is restored the same way. There is no scheduler library and no cron entry to keep in step with the code.
+One dump on a schedule, taken by a thread inside the API process (`app/services/backup_schedule.py`). It calls the same `start_backup` as the panel's button, so an automatic archive differs from a hand-made one only in its `createdBy`, lands in the same list, and is restored the same way. There is no scheduler library and no cron entry to keep in step with the code.
 
-| Setting | Default | What it does |
+**The schedule is a database row** (`public.backup_schedule`, one row), saved from the panel and re-read by the thread every minute, so a change takes effect without restarting the API. These three environment variables seed that row the **first time it is read** and are ignored afterwards:
+
+| Setting | Seeds | What it meant |
 | --- | --- | --- |
-| `BACKUP_SCHEDULE_ENABLED` | off | Must be `true`, `1` or `yes` before anything runs |
-| `BACKUP_SCHEDULE_AT` | `18:30` | Daily run time, in **UTC**. 18:30 UTC is 02:30 Philippine time |
-| `BACKUP_KEEP` | `14` | Archives kept; the rest are deleted after each automatic run |
+| `BACKUP_SCHEDULE_ENABLED` | `enabled` (default off) | `true`, `1` or `yes` to start switched on |
+| `BACKUP_SCHEDULE_AT` | `time` (default `02:30` Manila) | A **UTC** time of day, converted on the way in: 18:30 UTC is 02:30 Philippine time |
+| `BACKUP_KEEP` | `keep` (default `14`) | Archives kept after each completed backup |
 
-Four things to know before switching it on:
+The saved schedule is `{enabled, frequency, day, time, timeZone, keep}`: `frequency` is `daily` or `weekly`, `day` is 0–6 with Sunday as 0 (required for weekly, `null` for daily), `time` is 24-hour `HH:MM`, and `timeZone` is always `Asia/Manila` — the time of day is **local**, and the server converts. A quiet hour is a local hour, so storing 18:30 UTC instead would make 02:30 a fact somebody has to recompute every time they read the row.
 
-- **Retention deletes archives that people took by hand.** It keeps the newest `BACKUP_KEEP` files in the directory whoever made them, because the limit is about disk rather than about authorship. At today's ~75 MB a dump, the default is a little over 1 GB.
+Switching it off keeps the other fields, so switching it back on restores the schedule somebody set rather than a default they have to re-enter. The timer therefore runs whether or not the schedule is currently on: being off is a value in the row, and a thread that only started when the row said "on" could never see it change to "on".
+
+Things to know:
+
+- **Retention deletes archives that people took by hand.** It keeps the newest `keep` files in the directory whoever made them, because the limit is about disk rather than about authorship. At today's ~75 MB a dump, the default is a little over 1 GB. It runs **after each completed backup**, so a button press is held to the same limit as a scheduled run — and **saving a schedule deletes nothing by itself**, so lowering `keep` is never a delete somebody did not expect.
 - **A missed night is picked up at startup.** If the newest archive is more than a day old, a backup runs two minutes after the process starts instead of waiting for the next scheduled minute, because a development machine is rarely awake at 02:30. A restart an hour after a successful run does not take another.
 - **Starting it in two processes is safe.** Each run is claimed by creating a `.claimed-<time>` marker in the backup directory with `O_EXCL`, so `flask --debug` (which runs the app twice) or a second gunicorn worker still produces one dump rather than two writing the same file. Because the marker outlives the process, a restart does not re-take a night that was already taken.
-- **Every run reaches the audit log** as a `System` row with actor `scheduler` — `backup`, `backup failed`, or `backup skipped` when somebody's own job was already running. The Logs page shows these under All.
+- **Every run reaches the audit log** as a `System` row with actor `scheduler` — `backup`, `backup failed`, or `backup skipped` when somebody's own job was already running. Download, delete, cancel and a schedule change are `System` rows too, naming the administrator who did it; a retention removal names the archive it took. No row ever carries a password or a download link. The Logs page shows these under All.
 
 An unfinished dump is no longer mistaken for a backup. `pg_dump` creates its output file immediately and fills it as it reads, so a run that died part way through — a dropped pooler connection mid `building_photo` has happened here — used to leave a truncated file that the panel listed as ready to restore from. A dump now writes `<id>.dump.partial` and is renamed to `<id>.dump` only once the tool has exited cleanly, and leftovers are swept before each automatic run.
 
 ### What a deployment needs
 
-Two things that are **not** in place today:
+Two things, both of which the production recipe in [`deploy/`](deploy/README.md) now provides:
 
-1. **`pg_dump` and `pg_restore` must be on the server.** The API image (`python:3.12-slim-bookworm`) does not include them, so a deployed backup fails with a clear `503` rather than a crash. Debian bookworm's `postgresql-client` is version 15, and **a 15 client refuses to dump a 17 server** — Supabase runs 17.6, so the client must be 17 or newer. Installing that needs the PostgreSQL APT repository, which would add an unpinned source to an image that otherwise pins its base by digest and its Python packages by hash. That trade is a deliberate decision, so it has not been made here. Set `PG_DUMP_PATH` and `PG_RESTORE_PATH` to point at specific binaries.
-2. **The archive directory must outlive the container.** Archives are written to `BACKUP_DIR` (default `backups/`, gitignored). `deploy/compose.yaml` mounts no volume, so in a container they would disappear on the next deployment. Mount a volume at the configured path, or move storage to object storage.
+1. **`pg_dump` and `pg_restore` must be on the server.** Without them a backup fails with a clear `503` rather than a crash. The client must be **17 or newer**: Supabase runs 17.6, and a 15 client refuses to dump a 17 server — which is what Debian bookworm's own `postgresql-client` would give you. `deploy/admin-api.Dockerfile` installs `postgresql-client-17` from the PostgreSQL APT repository for exactly that reason. `PG_DUMP_PATH` and `PG_RESTORE_PATH` point at specific binaries when the ones on `PATH` are the wrong version.
+2. **The archive directory must outlive the container.** Archives are written to `BACKUP_DIR` (default `backups/`, gitignored), and a path inside a container disappears on the next deployment. `deploy/compose.yaml` sets `BACKUP_DIR=/srv/backups` and mounts the external volume `kumpas-admin-backups` there; the volume has to be created once before the first deployment that uses it.
 
-Both are also why the schedule is off by default. On today's image an automatic run would fail with that `503` every night, and any archive it did manage to write would go with the container on the next deployment — so `BACKUP_SCHEDULE_ENABLED` is something to switch on after fixing both, not before.
+Check both on any deployment that is not built from that recipe, because the schedule is seeded off and switching it on is now a decision somebody makes in the panel rather than in a deployment's environment. On a server missing either one, every night fails — visibly, in the audit log, rather than quietly.
 
 Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL install, and `backups/` persists.
 
@@ -141,4 +214,4 @@ Locally neither applies: `pg_dump` arrives with pgAdmin or any PostgreSQL instal
 
 The caller's password is required and is checked **before** the flag, so a caller who cannot authenticate learns nothing about whether restoring is available.
 
-**An archive is a complete copy of the database, including the `public.admin` password hashes.** Treat a `.dump` file as credential material: `backups/` is gitignored, and a copy moved anywhere else needs the same care.
+**An archive is a complete copy of the database, including the `public.admin` password hashes.** Treat a `.dump` file as credential material: `backups/` is gitignored, a download link is a bearer token for exactly that, and a copy moved anywhere else needs the same care.

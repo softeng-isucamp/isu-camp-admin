@@ -35,12 +35,13 @@ def app(monkeypatch):
 
 
 def add_admin(identifier=1, username="admin01", email="admin01@isu.edu.ph",
-              password=None, role="admin", hashed=True):
+              password=None, role="admin", hashed=True, alternative_email=None):
     stored = password if password is not None else CURRENT_PASSWORD
     record = Admin(
         id=identifier,
         username=username,
         gmail=email,
+        alternative_email=alternative_email,
         password=hash_password(stored) if hashed else stored,
         status="active",
         role=role,
@@ -77,6 +78,9 @@ def test_profile_is_returned_unenveloped_for_the_frontend_schema(app, monkeypatc
     assert response.get_json() == {
         "id": "1",
         "username": "admin01",
+        # Present and null rather than absent: the key is the capability flag
+        # that tells My Profile the server knows about the field at all.
+        "alternativeEmail": None,
         "email": "admin01@isu.edu.ph",
         "role": "superadmin",
     }
@@ -123,12 +127,29 @@ def test_profile_requires_a_session(app, monkeypatch):
 # ==========================================
 
 def test_profile_update_renames_the_account_and_returns_the_new_state(app, monkeypatch):
+    """A rename alone needs no password: only moving an email address does."""
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_renamed", "email": "admin01@isu.edu.ph",
+        })
+
+        assert response.status_code == 200
+        assert response.get_json()["username"] == "admin_renamed"
+        assert db.session.get(Admin, 1).username == "admin_renamed"
+
+
+def test_profile_update_moves_the_email_with_the_current_password(app, monkeypatch):
     with app.app_context():
         record = add_admin()
         sign_in_as(app, monkeypatch, record)
 
         response = app.test_client().patch("/api/profile", json={
             "username": "admin_renamed", "email": "renamed@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
         })
 
         assert response.status_code == 200
@@ -176,6 +197,7 @@ def test_keeping_your_own_username_is_not_a_conflict(app, monkeypatch):
 
         response = app.test_client().patch("/api/profile", json={
             "username": "admin01", "email": "moved@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
         })
 
     assert response.status_code == 200
@@ -196,6 +218,384 @@ def test_profile_update_ignores_a_password_field(app, monkeypatch):
         })
 
         assert db.session.get(Admin, 1).password == before
+
+# ==========================================
+# THE ALTERNATIVE EMAIL
+# ==========================================
+
+def test_a_registered_alternative_email_is_reported(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().get("/api/profile")
+
+    assert response.get_json()["alternativeEmail"] == "admin01.home@gmail.com"
+
+
+def test_an_alternative_email_is_saved_with_the_current_password(app, monkeypatch):
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": "admin01.home@gmail.com",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+        assert response.status_code == 200
+        assert response.get_json()["alternativeEmail"] == "admin01.home@gmail.com"
+        assert db.session.get(Admin, 1).alternative_email == "admin01.home@gmail.com"
+
+
+@pytest.mark.parametrize("cleared", (None, ""))
+def test_null_or_blank_clears_the_alternative_email(app, monkeypatch, cleared):
+    """Both spellings of no address reach the column as NULL, never as empty."""
+
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": cleared, "currentPassword": CURRENT_PASSWORD,
+        })
+
+        assert response.status_code == 200
+        assert response.get_json()["alternativeEmail"] is None
+        assert db.session.get(Admin, 1).alternative_email is None
+
+
+def test_leaving_the_field_out_keeps_the_stored_alternative_email(app, monkeypatch):
+    """An older client sends only username and email; its save must not clear it."""
+
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_renamed", "email": "admin01@isu.edu.ph",
+        })
+
+        assert response.status_code == 200
+        assert db.session.get(Admin, 1).alternative_email == "admin01.home@gmail.com"
+
+
+def test_resending_the_same_alternative_email_needs_no_password(app, monkeypatch):
+    """The form posts every field, so an unchanged address is not a change."""
+
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_renamed", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": "ADMIN01.HOME@gmail.com",
+        })
+
+    assert response.status_code == 200
+
+
+def test_an_invalid_alternative_email_is_refused(app, monkeypatch):
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": "not-an-email", "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["message"] == "Enter a valid email address"
+    assert body["fields"] == {"alternativeEmail": "Enter a valid email address"}
+
+
+def test_the_alternative_email_cannot_repeat_the_primary(app, monkeypatch):
+    """Two copies of one address are one address, and recovery could not tell."""
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            # Same address, different case and padding.
+            "alternativeEmail": "  ADMIN01@ISU.EDU.PH  ",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert body["message"] == "Use a different address from your primary email"
+    assert "alternativeEmail" in body["fields"]
+
+
+def test_both_email_fields_can_be_refused_at_once(app, monkeypatch):
+    """The form shows them together, so one request reports both problems."""
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "bad-primary",
+            "alternativeEmail": "bad-alternative", "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 400
+    body = response.get_json()
+    assert set(body["fields"]) == {"email", "alternativeEmail"}
+    # The message is the first refusal, in the order the form reads.
+    assert body["message"] == body["fields"]["email"]
+
+
+def test_an_over_long_alternative_email_is_refused(app, monkeypatch):
+    """Longer than the column holds could never collide with a stored address."""
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": "a" * 250 + "@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 400
+    assert "alternativeEmail" in response.get_json()["fields"]
+
+
+# ==========================================
+# THE PASSWORD THAT GUARDS AN EMAIL CHANGE
+# ==========================================
+
+@pytest.mark.parametrize("body", (
+    {"username": "admin01", "email": "moved@isu.edu.ph"},
+    {"username": "admin01", "email": "admin01@isu.edu.ph",
+     "alternativeEmail": "admin01.home@gmail.com"},
+))
+def test_moving_an_email_without_the_password_is_refused(app, monkeypatch, body):
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json=body)
+
+        assert response.status_code == 401
+        assert response.get_json()["fields"] == {
+            "currentPassword": "Enter your current password to change an email address",
+        }
+        # Nothing moved.
+        stored = db.session.get(Admin, 1)
+        assert stored.gmail == "admin01@isu.edu.ph"
+        assert stored.alternative_email is None
+
+
+def test_moving_an_email_with_the_wrong_password_is_refused(app, monkeypatch):
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "moved@isu.edu.ph",
+            "currentPassword": "not-it",
+        })
+
+        assert response.status_code == 401
+        assert response.get_json()["fields"] == {
+            "currentPassword": "Your current password is incorrect",
+        }
+        assert db.session.get(Admin, 1).gmail == "admin01@isu.edu.ph"
+
+
+def test_the_password_is_checked_before_the_duplicate_check(app, monkeypatch):
+    """Otherwise an unattended session could ask which addresses exist."""
+
+    with app.app_context():
+        record = add_admin(1, "admin01")
+        add_admin(2, "admin_registrar", "registrar@isu.edu.ph")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "registrar@isu.edu.ph",
+            "currentPassword": "not-it",
+        })
+
+    # 401 for the password, not 409 for the address that is already in use.
+    assert response.status_code == 401
+    assert response.get_json()["message"] == "Your current password is incorrect"
+
+
+def test_a_rename_alone_never_asks_for_the_password(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_renamed", "email": "ADMIN01@isu.edu.ph",
+            "alternativeEmail": "admin01.home@gmail.com",
+        })
+
+    assert response.status_code == 200
+
+
+def test_an_email_change_is_rate_limited(app, monkeypatch):
+    """The password check here is an online guess, like the change-password one."""
+
+    from flask import jsonify
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+        monkeypatch.setattr(
+            profile_route, "rate_limited",
+            lambda *args, **kwargs: (jsonify({"success": False, "message": "Too many"}), 429),
+        )
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "moved@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+        assert response.status_code == 429
+        assert db.session.get(Admin, 1).gmail == "admin01@isu.edu.ph"
+
+
+# ==========================================
+# THE SHARED EMAIL POOL
+# ==========================================
+
+@pytest.mark.parametrize("field, held_as", (
+    ("email", "gmail"),
+    ("email", "alternative_email"),
+    ("alternativeEmail", "gmail"),
+    ("alternativeEmail", "alternative_email"),
+))
+def test_an_address_another_account_holds_is_in_use(app, monkeypatch, field, held_as):
+    """Primary and alternative are one pool: either column takes the address."""
+
+    with app.app_context():
+        record = add_admin(1, "admin01")
+        other = add_admin(2, "admin_registrar", "registrar@isu.edu.ph")
+        setattr(other, held_as, "shared@isu.edu.ph")
+        db.session.commit()
+        sign_in_as(app, monkeypatch, record)
+
+        body = {
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        }
+        # Different case, because the pool is compared case-insensitively.
+        body[field] = "SHARED@isu.edu.ph"
+        response = app.test_client().patch("/api/profile", json=body)
+
+    assert response.status_code == 409
+    refused = response.get_json()
+    assert refused["message"] == "That email address is already in use"
+    assert refused["fields"] == {field: "That email address is already in use"}
+
+
+def test_the_conflict_never_names_the_account_that_holds_the_address(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(1, "admin01")
+        add_admin(2, "admin_registrar", "registrar@isu.edu.ph")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "registrar@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+    text = response.get_data(as_text=True)
+    assert response.status_code == 409
+    assert "admin_registrar" not in text
+
+
+def test_your_own_alternative_email_may_become_your_primary(app, monkeypatch):
+    """Swapping your two addresses is not a collision with yourself."""
+
+    with app.app_context():
+        record = add_admin(alternative_email="admin01.home@gmail.com")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01.home@gmail.com",
+            "alternativeEmail": "admin01@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+        assert response.status_code == 200
+        stored = db.session.get(Admin, 1)
+        assert stored.gmail == "admin01.home@gmail.com"
+        assert stored.alternative_email == "admin01@isu.edu.ph"
+
+
+def test_an_existing_duplicate_primary_does_not_block_an_unrelated_edit(app, monkeypatch):
+    """Issue #108: accounts predate the pool, and share addresses today.
+
+    The rule applies to the value a request is changing, so an account whose
+    stored address is already a duplicate can still be renamed - otherwise the
+    only way out of a duplicate would be to fix it in the database by hand.
+    """
+
+    with app.app_context():
+        record = add_admin(1, "admin01", "shared@isu.edu.ph")
+        add_admin(2, "admin_registrar", "shared@isu.edu.ph")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_renamed", "email": "shared@isu.edu.ph",
+        })
+
+        assert response.status_code == 200
+        assert db.session.get(Admin, 1).username == "admin_renamed"
+
+
+def test_a_username_and_an_email_can_be_refused_together(app, monkeypatch):
+    with app.app_context():
+        record = add_admin(1, "admin01")
+        add_admin(2, "admin_registrar", "registrar@isu.edu.ph")
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin_registrar", "email": "registrar@isu.edu.ph",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 409
+    refused = response.get_json()
+    assert set(refused["fields"]) == {"username", "email"}
+    assert refused["message"] == "That username is already taken"
+
+
+def test_the_alternative_email_change_is_audited_without_the_address(app, monkeypatch):
+    """Every administrator reads the audit log, and no password is ever logged."""
+
+    recorded = []
+    monkeypatch.setattr(
+        profile_route, "log_audit",
+        lambda *arguments, **keywords: recorded.append(arguments),
+    )
+
+    with app.app_context():
+        record = add_admin()
+        sign_in_as(app, monkeypatch, record)
+
+        response = app.test_client().patch("/api/profile", json={
+            "username": "admin01", "email": "admin01@isu.edu.ph",
+            "alternativeEmail": "admin01.home@gmail.com",
+            "currentPassword": CURRENT_PASSWORD,
+        })
+
+    assert response.status_code == 200
+    detail = recorded[-1][-1]
+    assert detail == "Changed own alternative email"
+    assert "admin01.home@gmail.com" not in detail
+    assert CURRENT_PASSWORD not in detail
 
 
 # ==========================================

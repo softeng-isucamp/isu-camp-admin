@@ -1,3 +1,5 @@
+import importlib
+import pkgutil
 import sys
 from pathlib import Path
 
@@ -9,9 +11,16 @@ for path in (APP_ROOT, APP_ROOT / "routes", APP_ROOT / "services"):
         sys.path.insert(0, entry)
 
 
-# Pathway names PathPoint and PathwayAllowedMode by string in its relationships.
-# Register them here so any subset of tests can configure the mapper registry,
-# not only runs that happen to collect the dashboard tests.
-from model.path_point import PathPoint  # noqa: E402,F401
-from model.pathway import Pathway  # noqa: E402,F401
-from model.pathway_allowed_mode import PathwayAllowedMode  # noqa: E402,F401
+# Every model, imported for its side effect of registering itself.
+#
+# The models name each other by string - Pathway's relationships name PathPoint
+# and PathwayAllowedMode, and the foreign keys name tables like
+# "public.building" - and SQLAlchemy only resolves those names once the class
+# that defines them has been imported. A test file that creates the metadata
+# without them gets NoReferencedTableError from db.metadata.create_all() for a
+# table nothing in that file mentions, which fails every test in the file at
+# the fixture, with an error that names a module the test never touched. Taking
+# the whole package means a new model, or a new foreign key between two
+# existing ones, cannot break an unrelated test file by being added.
+for module in pkgutil.iter_modules([str(APP_ROOT / "model")]):
+    importlib.import_module(f"model.{module.name}")

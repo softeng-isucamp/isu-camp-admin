@@ -15,6 +15,7 @@ from flask import Blueprint, jsonify, request, session
 from auth import (
     Admin,
     admin_required,
+    email_taken,
     rate_limited,
     reauth_required,
     send_password_reset_otp,
@@ -31,6 +32,12 @@ admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 ROLES = ("admin", "superadmin")
 LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Never names the account that holds it. One administrator reading another's
+# recovery address out of an error message is the thing this does not do, and
+# an address is a duplicate whether the holder keeps it as their primary or
+# their alternative - see auth.admins_holding_email.
+EMAIL_TAKEN_MESSAGE = "That email address is already in use"
 
 
 def _error(message, status=400, field=None):
@@ -161,6 +168,9 @@ def create_admin():
     if _username_taken(values["username"]):
         return _error("That username is already taken", status=409, field="username")
 
+    if email_taken(values["email"]):
+        return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
+
     # Minting a superadmin is as deliberate as promoting one, so it asks for the
     # password too. A plain administrator is created without the prompt.
     if role == "superadmin":
@@ -213,6 +223,15 @@ def update_admin(admin_id):
 
     if _username_taken(values["username"], excluding_id=admin_id):
         return _error("That username is already taken", status=409, field="username")
+
+    # Only a move is checked, for the same reason PATCH /api/profile checks only
+    # what changed: accounts created before the pool existed may already share
+    # an address (issue #108), and a rule about new values must not stop those
+    # accounts saving a rename. This route edits the caller's own account only,
+    # so the pool excludes it.
+    if (values["email"] or "").strip().lower() != (record.gmail or "").strip().lower():
+        if email_taken(values["email"], excluding_id=admin_id):
+            return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
 
     try:
         record.username = values["username"]

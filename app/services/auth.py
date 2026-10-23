@@ -134,6 +134,17 @@ class Admin(db.Model):
         nullable=False
     )
 
+    # An optional second address, offered alongside gmail for account recovery.
+    # NULL when none is registered, which is also how the routes clear it: an
+    # empty string would be a second spelling of "none". The two columns are
+    # one pool for uniqueness - see admins_holding_email - but the database
+    # does not enforce that, because accounts predating the rule already share
+    # primary addresses. See migrations/20261023_add_admin_alternative_email.sql.
+    alternative_email = db.Column(
+        db.String(255),
+        nullable=True
+    )
+
     # Whether this account may sign in, lowercase per model.record_status. The
     # column arrived with User Management's Activate/Deactivate action; rows
     # that predate it were defaulted to active.
@@ -168,13 +179,79 @@ class Admin(db.Model):
         Not wrapped in the usual success envelope: the frontend parses this
         response body directly against its own schema (services/profile.ts),
         so the fields sit at the top level.
+
+        ``alternativeEmail`` is always present, ``null`` when none is
+        registered. Its presence is what tells My Profile the server knows
+        about the field at all: a build talking to an older API sees no key and
+        hides the control rather than offering an edit that would be dropped.
         """
         return {
             "id": str(self.id),
             "username": self.username,
             "email": self.gmail or "",
+            "alternativeEmail": self.alternative_email or None,
             "role": "superadmin" if self.is_superadmin else "admin",
         }
+
+
+# ==========================================
+# The Shared Email Pool
+# ==========================================
+
+# One administrator's two addresses and every other administrator's are a
+# single pool: an address is taken if anybody holds it as either of theirs.
+# Recovery is the reason. Both addresses can be typed into Forgot password, so
+# an address shared by two accounts would be a code that could reach the wrong
+# inbox, or a username disclosed to whoever asked - which is exactly why
+# find_recovery_admin refuses an ambiguous address rather than guessing.
+#
+# The database does not enforce it (see the migration): accounts predating the
+# rule already share primary addresses, so the check lives here and is applied
+# only to the field a request is actually changing. An existing duplicate then
+# blocks nothing but a change to the duplicated field itself.
+
+
+def normalized_email(value):
+    """An address in the form addresses are compared in: trimmed, lowercased.
+
+    ``''`` for anything that is not a usable string, including None, so a
+    caller can treat "no address" and "not an address" the same way.
+    """
+
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    return value.strip().lower()
+
+
+def admins_holding_email(email, *, excluding_id=None, limit=2):
+    """Administrators whose primary or alternative address is ``email``.
+
+    Compared trimmed and case-insensitively on both sides, so a stored address
+    that was saved with stray whitespace still collides. ``excluding_id`` drops
+    one account from the pool, which is how an administrator keeps an address
+    they already hold.
+
+    ``limit`` is two by default because two is enough to know an address is
+    ambiguous, and nothing in the schema makes it unique.
+    """
+
+    compared = normalized_email(email)
+    if not compared:
+        return []
+
+    query = Admin.query.filter(db.or_(
+        func.lower(func.trim(Admin.gmail)) == compared,
+        func.lower(func.trim(Admin.alternative_email)) == compared,
+    ))
+    if excluding_id is not None:
+        query = query.filter(Admin.id != excluding_id)
+    return query.limit(limit).all()
+
+
+def email_taken(email, *, excluding_id=None):
+    """Whether any other administrator already holds ``email`` as either address."""
+
+    return bool(admins_holding_email(email, excluding_id=excluding_id, limit=1))
 
 
 # ==========================================
@@ -843,12 +920,14 @@ def run_in_background(work):
 
 
 def admins_with_email(email):
-    """At most two administrators whose address is ``email``, ignoring case.
+    """At most two administrators who hold ``email`` as either of their addresses.
 
-    Two is enough to know the address is ambiguous. Nothing in the database
-    makes an address unique, so the caller has to cope with more than one.
+    The alternative address counts, which is the whole point of registering
+    one: recovery accepts either. Two is enough to know the address is
+    ambiguous. Nothing in the database makes an address unique, so the caller
+    has to cope with more than one.
     """
-    return Admin.query.filter(func.lower(Admin.gmail) == email).limit(2).all()
+    return admins_holding_email(email, limit=2)
 
 
 def find_recovery_admin(email):
@@ -926,7 +1005,7 @@ def issue_recovery_code(purpose, email, admin):
     return otp
 
 
-def send_recovery_otp(admin, purpose, otp):
+def send_recovery_otp(admin, purpose, otp, address):
     if purpose == "username":
         subject = "ISU-CAMP Username Recovery Code"
         body = f"""
@@ -962,7 +1041,12 @@ If you did not request this password reset, please ignore this email.
 ISU-CAMP Admin System
 """
 
-    message = Message(subject=subject, recipients=[admin.gmail])
+    # The address that was typed, not the account's primary one. An
+    # administrator who asks from their alternative address gets the code
+    # there; sending to the primary instead would tell whoever typed the
+    # alternative that the two belong together, and would mail a code to an
+    # inbox nobody asked about.
+    message = Message(subject=subject, recipients=[address])
     message.body = body
 
     def deliver():
@@ -1147,7 +1231,7 @@ def recovery_request():
         admin = find_recovery_admin(email)
         otp = issue_recovery_code(purpose, email, admin)
         if admin:
-            send_recovery_otp(admin, purpose, otp)
+            send_recovery_otp(admin, purpose, otp, email)
 
         return jsonify({
             "success": True,
