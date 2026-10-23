@@ -175,6 +175,21 @@ describe("mock service contracts", () => {
     }
   });
 
+  it("points a root-relative backup download link at the configured API origin", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.stubEnv("VITE_API_BASE_URL", "http://localhost:5000");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      url: "/api/backup-downloads/token", expiresAt: "2026-10-09T02:05:00Z",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await expect(httpServices.profile.download("b1", "secret")).resolves.toMatchObject({
+      url: "http://localhost:5000/api/backup-downloads/token",
+    });
+    vi.unstubAllEnvs();
+  });
+
   it("uses only the real service response for list data and preserves pagination", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
