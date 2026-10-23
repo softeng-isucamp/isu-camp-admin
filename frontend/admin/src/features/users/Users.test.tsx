@@ -25,7 +25,7 @@ function LogsProbe() {
 
 function renderUsers(initialEntry = "/users") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = () => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
@@ -33,8 +33,10 @@ function renderUsers(initialEntry = "/users") {
           <Route path="/system-logs" element={<LogsProbe />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const rendered = render(view());
+  return { ...rendered, rerenderSession: () => rendered.rerender(view()) };
 }
 
 describe("Users account type", () => {
@@ -182,6 +184,36 @@ describe("Users account type", () => {
 
 describe("Users page for a restricted administrator", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("closes deactivation when a refreshed session revokes the status switch", async () => {
+    signInAs("admin", { permissions: allPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    const setStatus = vi.spyOn(services.users, "setStatus");
+    const { rerenderSession } = renderUsers();
+    await screen.findByText("maria.santos1");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Deactivate account" }));
+    expect(screen.getByRole("dialog", { name: "Deactivate this account?" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...viewOnlyPermissions(), changeUserStatus: true } });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: "Deactivate this account?" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    rerenderSession();
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(setStatus).not.toHaveBeenCalled();
+    signInAs("admin", { permissions: allPermissions() });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    signInAs("admin", { permissions: viewOnlyPermissions() });
+    rerenderSession();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity"]);
+    await userEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
+    expect(await screen.findByTestId("logs-route")).toHaveTextContent("category=User");
+  });
 
   it("offers only View activity on an app account without the status switch", async () => {
     signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });

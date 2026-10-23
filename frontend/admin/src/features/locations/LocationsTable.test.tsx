@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,7 @@ function renderLocations(
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   signInAs(...session);
-  const rendered = render(
+  const view = () => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
         <Locations />
@@ -30,7 +30,8 @@ function renderLocations(
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return { ...rendered, queryClient };
+  const rendered = render(view());
+  return { ...rendered, queryClient, rerenderSession: () => rendered.rerender(view()) };
 }
 
 /** Deletes are re-authenticated: fill the open dialog's password prompt. */
@@ -1395,6 +1396,68 @@ describe("Locations for a restricted administrator", () => {
     fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
     return within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent);
   };
+
+  it.each([
+    ["add", "＋ Add room to this building", "Add Location"],
+    ["edit", "Edit location", "Edit Location"],
+    ["delete", "Delete location", "Delete location?"],
+  ] as const)("closes an open %s dialog when a refreshed session revokes its switch", async (action, menuItem, title) => {
+    await services.locations.save({ ...building });
+    const save = vi.spyOn(services.locations, "save");
+    const remove = vi.spyOn(services.locations, "remove");
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), [action]: false } });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(await rowMenuItems()).toContain("View history");
+
+    signInAs("admin", { permissions: allPermissions() });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps read-only history open when a refreshed session revokes all write switches", async () => {
+    await services.locations.save({ ...building });
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: "View history" }));
+    expect(screen.getByRole("dialog", { name: "Audit History" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: viewOnlyPermissions() });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: "Audit History" })).toBeInTheDocument();
+  });
+
+  it("does not delete after permission is revoked while password confirmation is pending", async () => {
+    await services.locations.save({ ...building });
+    let confirm!: () => void;
+    const confirmation = new Promise<void>((resolve) => { confirm = resolve; });
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword").mockReturnValue(confirmation);
+    const remove = vi.spyOn(services.locations, "remove");
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete location" }));
+    confirmDeletePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Delete", exact: true }));
+    expect(confirmPassword).toHaveBeenCalledWith("password123");
+
+    signInAs("admin", { permissions: { ...allPermissions(), delete: false } });
+    rerenderSession();
+    await act(async () => { confirm(); await confirmation; });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 
   it("hides Add Location, Add room, Edit and Delete for a view-only administrator, keeping the view actions", async () => {
     await services.locations.save({ ...building });

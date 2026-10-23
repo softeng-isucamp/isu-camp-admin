@@ -55,7 +55,7 @@ type Dialog =
 /**
  * Administrator accounts for the portal itself. Unlike the app users beside
  * them — owned by the User App — these are this app's own records, so they can
- * be added, deactivated and removed here.
+ * be added, activated and deactivated here.
  *
  * Editing is deliberately absent: sign-in details belong to their holder, so
  * each administrator changes their own through account customization rather

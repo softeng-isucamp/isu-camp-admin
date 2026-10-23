@@ -23,8 +23,16 @@ function AppUserDirectory() {
   const queryClient = useQueryClient();
   const feedback = useFeedback();
   const { can } = usePermissions();
+  const canChangeStatus = can("changeUserStatus");
+  const canChangeStatusRef = useRef(canChangeStatus);
+  canChangeStatusRef.current = canChangeStatus;
   const [pendingDeactivation, setPendingDeactivation] = useState<UserAccount | null>(null);
   const [statusError, setStatusError] = useState("");
+  useEffect(() => {
+    if (canChangeStatus) return;
+    setPendingDeactivation(null);
+    setStatusError("");
+  }, [canChangeStatus]);
   const [searchParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [createdRange, setCreatedRange] = useState("all");
@@ -66,6 +74,7 @@ function AppUserDirectory() {
 
   /** Restoring access is harmless and immediate; revoking it asks first. */
   const changeStatus = (user: UserAccount) => {
+    if (!canChangeStatusRef.current) return;
     setActionMenuId(null);
     setStatusError("");
     if (user.status === "Inactive") setStatus.mutate({ user, status: "Active" });
@@ -172,7 +181,7 @@ function AppUserDirectory() {
         <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} />
       </Card>
 
-      {pendingDeactivation && (
+      {pendingDeactivation && canChangeStatus && (
         <Modal
           title="Deactivate this account?"
           subtitle="The account is kept, but it cannot sign in to the User App."
@@ -195,7 +204,9 @@ function AppUserDirectory() {
             </Button>
             <Button
               loading={setStatus.isPending}
-              onClick={() => setStatus.mutate({ user: pendingDeactivation, status: "Inactive" })}
+              onClick={() => {
+                if (canChangeStatusRef.current) setStatus.mutate({ user: pendingDeactivation, status: "Inactive" });
+              }}
             >
               {setStatus.isPending ? "Deactivating…" : "Deactivate Account"}
             </Button>
