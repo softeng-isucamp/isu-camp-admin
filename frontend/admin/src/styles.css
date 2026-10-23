@@ -3923,6 +3923,12 @@ td small {
   gap: 14px;
   min-width: 0;
 }
+@media (max-width: 640px) {
+  .admin-form-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .users-page .table-heading {
   display: flex;
   align-items: center;
