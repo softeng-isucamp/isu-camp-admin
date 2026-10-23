@@ -86,6 +86,11 @@ export function AdministratorsPanel({ feedback }: {
   const { session, refreshSession } = useAuth();
   const canManage = session?.role === "superadmin";
   const [dialog, setDialog] = useState<Dialog>(null);
+  const submissionGeneration = useRef(0);
+  const submissionContext = useRef({ session, dialog });
+  submissionContext.current = { session, dialog };
+  // A confirmation may outlive this panel or the session that opened it.
+  useEffect(() => () => { submissionGeneration.current += 1; }, [session]);
   const passwordConfirmation = usePasswordConfirmation(
     dialog?.kind === "role" ? ROLE_CHANGE_WORDING
       : dialog?.kind === "add" ? CREATE_ADMIN_WORDING
@@ -114,6 +119,7 @@ export function AdministratorsPanel({ feedback }: {
   }, []);
 
   const closeDialog = () => {
+    submissionGeneration.current += 1;
     setDialog(null);
     setDraft(blankDraft());
     setPermissions(viewOnlyPermissions());
@@ -124,6 +130,7 @@ export function AdministratorsPanel({ feedback }: {
 
   /** Opens a dialog with a clean slate; `switches` seeds the editor in the dialogs that have one. */
   const openDialog = (next: NonNullable<Dialog>, switches: AdminPermissions = viewOnlyPermissions()) => {
+    submissionGeneration.current += 1;
     setError("");
     setFieldErrors({});
     passwordConfirmation.reset();
@@ -234,6 +241,15 @@ export function AdministratorsPanel({ feedback }: {
     else setDialog({ kind: "deactivate", account });
   };
 
+  const confirmSubmission = async () => {
+    if (!dialog || !canManage) return false;
+    const generation = ++submissionGeneration.current;
+    if (!await passwordConfirmation.confirm()) return false;
+    const current = submissionContext.current;
+    return generation === submissionGeneration.current
+      && current.dialog === dialog && current.session === session;
+  };
+
   const submitDraft = async () => {
     setError("");
     setFieldErrors({});
@@ -250,19 +266,19 @@ export function AdministratorsPanel({ feedback }: {
       return;
     }
     // Adding any administrator is guarded like promoting one; the form keeps its details if the password is refused.
-    if (!await passwordConfirmation.confirm()) return;
+    if (!await confirmSubmission()) return;
     save.mutate({ ...draft, username, email, ...(draft.role === "admin" ? { permissions } : {}) });
   };
 
   const confirmPermissions = async (account: AdminAccount) => {
     setError("");
-    if (!await passwordConfirmation.confirm()) return;
+    if (!await confirmSubmission()) return;
     savePermissions.mutate({ account, switches: permissions });
   };
 
   const confirmRoleChange = async (account: AdminAccount, role: AdminRole) => {
     setError("");
-    if (!await passwordConfirmation.confirm()) return;
+    if (!await confirmSubmission()) return;
     // The switches only mean something to an administrator, so a promotion sends none.
     setRole.mutate({ account, role, ...(role === "admin" ? { switches: permissions } : {}) });
   };

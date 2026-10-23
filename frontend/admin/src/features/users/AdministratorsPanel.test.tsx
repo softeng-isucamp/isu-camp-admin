@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
@@ -38,7 +38,7 @@ function LogsProbe() {
 
 function renderUsers(initialEntry = "/users") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
+  const page = () => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
@@ -46,8 +46,10 @@ function renderUsers(initialEntry = "/users") {
           <Route path="/system-logs" element={<LogsProbe />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const view = render(page());
+  return { ...view, rerenderUsers: () => view.rerender(page()) };
 }
 
 /** Opens the Administrators tab and waits for its rows. */
@@ -1028,6 +1030,116 @@ describe("Editing an administrator's permissions", () => {
     await openEditor("admin_registrar");
     expect(switchOf("Edit")).toBeChecked();
     expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+  });
+});
+
+describe.each(["add", "permissions", "promote", "demote"] as const)("Pending administrator confirmation: %s", (action) => {
+  const dean: AdminAccount = { id: "3", username: "admin_dean", email: "dean@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false };
+
+  beforeEach(() => {
+    signInAs("superadmin");
+    vi.spyOn(services.admins, "list").mockResolvedValue([...directory, dean]);
+    vi.spyOn(services.users, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    vi.spyOn(services.admins, "save").mockResolvedValue(directory[1]);
+    vi.spyOn(services.admins, "setPermissions").mockResolvedValue(directory[1]);
+    vi.spyOn(services.admins, "setRole").mockResolvedValue(directory[1]);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function openForm() {
+    if (action === "add") {
+      fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+      fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+      fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
+    } else {
+      openRowMenu(action === "demote" ? "admin_dean" : "admin_registrar");
+      const menuItem = action === "permissions" ? "Edit permissions"
+        : action === "promote" ? "Make superadmin" : "Make administrator";
+      fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+      if (action === "permissions") fireEvent.click(screen.getByRole("checkbox", { name: /^Edit/ }));
+    }
+  }
+
+  function submit() {
+    typeConfirmation();
+    const button = action === "add" ? "Add Administrator" : action === "permissions" ? "Save Permissions"
+      : action === "promote" ? "Make Superadmin" : "Make Administrator";
+    fireEvent.click(screen.getByRole("button", { name: button }));
+  }
+
+  async function holdConfirmation() {
+    let accept!: () => void;
+    const pending = new Promise<void>((resolve) => { accept = resolve; });
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword").mockReturnValueOnce(pending).mockResolvedValue(undefined);
+    submit();
+    expect(confirmPassword).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Confirming…" })).toBeDisabled();
+    return async () => {
+      await act(async () => {
+        accept();
+        await pending;
+      });
+    };
+  }
+
+  function expectNoMutation() {
+    expect(services.admins.save).not.toHaveBeenCalled();
+    expect(services.admins.setPermissions).not.toHaveBeenCalled();
+    expect(services.admins.setRole).not.toHaveBeenCalled();
+  }
+
+  it.each(["Escape", "close button"])("discards a confirmation after cancellation by %s, even with a new dialog open", async (method) => {
+    await openAdministrators();
+    openForm();
+    const accept = await holdConfirmation();
+
+    if (method === "Escape") fireEvent.keyDown(window, { key: "Escape" });
+    else fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    openForm();
+    expect(screen.getByLabelText("Confirm your password")).toHaveValue("");
+
+    await accept();
+
+    expectNoMutation();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // A fresh confirmation still submits the reopened dialog normally.
+    submit();
+    const mutation = action === "add" ? services.admins.save
+      : action === "permissions" ? services.admins.setPermissions : services.admins.setRole;
+    await waitFor(() => expect(mutation).toHaveBeenCalledOnce());
+  });
+
+  it("discards a confirmation after the panel unmounts", async () => {
+    await openAdministrators();
+    openForm();
+    const accept = await holdConfirmation();
+
+    fireEvent.click(screen.getByRole("button", { name: "App Users" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await accept();
+
+    expectNoMutation();
+  });
+
+  it("discards a confirmation started by a previous signed-in account", async () => {
+    const view = renderUsers("/users?tab=admins");
+    await screen.findByText("admin_registrar");
+    openForm();
+    const accept = await holdConfirmation();
+
+    const auth = AuthContext.useAuth();
+    vi.mocked(AuthContext.useAuth).mockReturnValue({
+      ...auth, session: { id: "3", username: "admin_dean", role: "superadmin" },
+    });
+    view.rerenderUsers();
+    await accept();
+
+    expectNoMutation();
   });
 });
 
