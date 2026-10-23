@@ -1448,7 +1448,7 @@ describe("Locations for a restricted administrator", () => {
     await rowMenuItems();
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete location" }));
     confirmDeletePassword();
-    fireEvent.click(screen.getByRole("button", { name: "Delete", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(confirmPassword).toHaveBeenCalledWith("password123");
 
     signInAs("admin", { permissions: { ...allPermissions(), delete: false } });
