@@ -23,10 +23,14 @@ GENERIC_MESSAGE = "If an account exists for this email, a code has been sent."
 
 
 class FakeAdmin:
-    def __init__(self, id, username, gmail, status="active", password="old-password"):
+    def __init__(self, id, username, gmail, status="active", password="old-password",
+                 alternative_email=None):
         self.id = id
         self.username = username
         self.gmail = gmail
+        # Recovery accepts either address, which is the whole point of
+        # registering a second one.
+        self.alternative_email = alternative_email
         self.status = status
         self.password = password
 
@@ -69,8 +73,15 @@ class Harness:
         monkeypatch.setattr(auth_module, "Message", FakeMessage)
         monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda _, m: send(m)})())
         monkeypatch.setattr(auth_module, "run_in_background", lambda work: work())
+        # Stands in for the one query auth.admins_holding_email builds, keeping
+        # the rule it stands for: either of an account's two addresses matches,
+        # compared trimmed and case-insensitively.
         monkeypatch.setattr(auth_module, "admins_with_email", lambda email: [
-            a for a in self.admins if (a.gmail or "").lower() == email
+            a for a in self.admins
+            if email in {
+                (held or "").strip().lower()
+                for held in (a.gmail, a.alternative_email) if held
+            }
         ])
         monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
         monkeypatch.setattr(auth_module.db, "session", FakeSession())
@@ -1266,3 +1277,86 @@ def test_an_address_one_character_over_the_column_is_still_refused(harness):
 
     assert harness.request_code(email=email).status_code == 400
     assert recovery_entries() == {}
+
+
+# ==========================================
+# Recovering through the alternative address
+# ==========================================
+
+ALTERNATIVE = "justine.home@gmail.com"
+
+
+@pytest.fixture
+def two_addresses(monkeypatch):
+    """One account reachable at either of its two registered addresses."""
+
+    return Harness(monkeypatch, [
+        FakeAdmin(1, "admin_justine", "admin@isu.edu.ph", alternative_email=ALTERNATIVE),
+    ])
+
+
+@pytest.mark.parametrize("purpose", ("password", "username"))
+def test_either_address_recovers_the_same_account(two_addresses, purpose):
+    response = two_addresses.request_code(email=ALTERNATIVE, purpose=purpose)
+
+    assert response.status_code == 200
+    assert len(two_addresses.sent) == 1
+    verified = two_addresses.verify(
+        two_addresses.issued_code(), email=ALTERNATIVE, purpose=purpose,
+    )
+    assert verified.status_code == 200
+    assert verified.json["username"] == "admin_justine"
+
+
+def test_the_code_goes_only_to_the_address_that_was_typed(two_addresses):
+    """Mailing the primary instead would tell whoever typed the alternative
+    that the two belong together, and would put a code in an inbox nobody
+    asked about."""
+
+    two_addresses.request_code(email=ALTERNATIVE)
+
+    assert [m.recipients for m in two_addresses.sent] == [[ALTERNATIVE]]
+
+
+def test_the_alternative_address_matches_case_insensitively(two_addresses):
+    response = two_addresses.request_code(email="  JUSTINE.Home@Gmail.com ")
+
+    assert response.status_code == 200
+    assert two_addresses.sent[0].recipients == [ALTERNATIVE.lower()]
+
+
+def test_a_code_for_one_address_does_not_verify_through_the_other(two_addresses):
+    """Codes are keyed on the typed address, so the two are separate requests."""
+
+    two_addresses.request_code(email=ALTERNATIVE)
+    code = two_addresses.issued_code()
+
+    through_primary = two_addresses.verify(code, email="admin@isu.edu.ph")
+
+    assert through_primary.status_code == 400
+    assert through_primary.json["code"] == "invalid_code"
+    # The code still works where it was issued.
+    assert two_addresses.verify(code, email=ALTERNATIVE).status_code == 200
+
+
+def test_a_password_reset_through_the_alternative_address_changes_the_password(two_addresses):
+    two_addresses.admins[0].password = hash_password("old-password")
+    two_addresses.request_code(email=ALTERNATIVE)
+
+    response = two_addresses.reset(two_addresses.issued_code(), email=ALTERNATIVE)
+
+    assert response.status_code == 200
+    assert verify_password(two_addresses.admins[0].password, NEW_PASSWORD)[0]
+
+
+def test_an_address_two_accounts_hold_between_them_recovers_neither(two_addresses):
+    """One account's primary and another's alternative are still one pool: an
+    ambiguous address is refused quietly rather than picking a username."""
+
+    two_addresses.admins.append(FakeAdmin(2, "admin_other", ALTERNATIVE))
+
+    response = two_addresses.request_code(email=ALTERNATIVE)
+
+    assert response.status_code == 200
+    assert response.json["message"] == GENERIC_MESSAGE
+    assert two_addresses.sent == []

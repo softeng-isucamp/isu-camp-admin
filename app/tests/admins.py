@@ -89,11 +89,15 @@ class FakeAdmin:
     is_active = auth_module.Admin.is_active
     is_superadmin = auth_module.Admin.is_superadmin
 
-    def __init__(self, username=None, password=None, gmail=None, id=None, status="active", role="admin"):
+    def __init__(self, username=None, password=None, gmail=None, id=None, status="active",
+                 role="admin", alternative_email=None):
         self.id = id
         self.username = username
         self.password = password
         self.gmail = gmail
+        # The second address an account may hold. /api/admins never returns
+        # anyone's, but it counts towards the pool these routes check.
+        self.alternative_email = alternative_email
         self.status = status
         self.role = role
 
@@ -224,6 +228,19 @@ def admin_directory(monkeypatch):
     # fake query calls predicates, so comparisons are replaced with plain lambdas.
     monkeypatch.setattr(admins_module, "_username_taken", lambda username, excluding_id=None: any(
         record.username.lower() == username.lower() and record.id != excluding_id
+        for record in FakeAdmin.store
+    ))
+    # Likewise for the shared email pool, which auth.admins_holding_email
+    # builds as one OR over two columns. The rule it stands for - an address is
+    # taken when any other account holds it as either of its two, compared
+    # trimmed and case-insensitively - is kept here, so these tests still say
+    # what the routes refuse.
+    monkeypatch.setattr(admins_module, "email_taken", lambda email, excluding_id=None: any(
+        (email or "").strip().lower() in {
+            (held or "").strip().lower()
+            for held in (record.gmail, getattr(record, "alternative_email", None))
+            if held
+        } and record.id != excluding_id
         for record in FakeAdmin.store
     ))
     return session
@@ -1336,3 +1353,101 @@ def test_the_existing_self_rules_still_hold_for_a_superadmin(admin_directory):
         "You cannot deactivate your own administrator account."
     )
     assert client.delete("/api/admins/1").json["message"] == "You cannot remove your own administrator account."
+
+
+# ==========================================
+# THE SHARED EMAIL POOL
+# ==========================================
+
+@pytest.mark.parametrize("held_as", ("gmail", "alternative_email"))
+def test_creating_refuses_an_address_another_account_holds(held_as):
+    """Primary and alternative are one pool: either column takes the address."""
+
+    setattr(FakeAdmin.store[1], held_as, "shared@example.com")
+    client = signed_in(admins_app())
+
+    response = client.post("/api/admins", json={
+        # Different case, because the pool is compared case-insensitively.
+        "username": "admin03", "email": "SHARED@example.com",
+        "password": "Another-secret1!",
+    })
+
+    assert response.status_code == 409
+    assert response.json["message"] == "That email address is already in use"
+    assert response.json["fields"] == {"email": "That email address is already in use"}
+    assert not any(record.username == "admin03" for record in FakeAdmin.store)
+
+
+def test_the_conflict_never_names_the_account_that_holds_the_address():
+    """One administrator does not get to read another's recovery addresses."""
+
+    FakeAdmin.store[1].alternative_email = "admin02.home@example.com"
+    client = signed_in(admins_app())
+
+    response = client.post("/api/admins", json={
+        "username": "admin03", "email": "admin02.home@example.com",
+        "password": "Another-secret1!",
+    })
+
+    text = response.get_data(as_text=True)
+    assert response.status_code == 409
+    assert "admin02" not in text
+
+
+def test_a_free_address_is_still_accepted():
+    client = signed_in(admins_app())
+
+    response = client.post("/api/admins", json={
+        "username": "admin03", "email": "admin03@example.com",
+        "password": "Another-secret1!",
+    })
+
+    assert response.status_code == 201
+
+
+def test_no_response_carries_anyone_s_alternative_email():
+    """The field belongs to My Profile. It is a recovery address, and this
+    listing is readable by every active administrator."""
+
+    FakeAdmin.store[0].alternative_email = "admin01.home@example.com"
+    FakeAdmin.store[1].alternative_email = "admin02.home@example.com"
+    client = signed_in(admins_app())
+
+    listing = client.get("/api/admins")
+    created = client.post("/api/admins", json={
+        "username": "admin03", "email": "admin03@example.com",
+        "password": "Another-secret1!",
+    })
+
+    for response in (listing, created):
+        text = response.get_data(as_text=True)
+        assert "alternativeEmail" not in text
+        assert "home@example.com" not in text
+
+
+def test_self_editing_refuses_an_address_another_account_holds():
+    FakeAdmin.store[1].alternative_email = "admin02.home@example.com"
+    client = signed_in(admins_app())
+
+    response = client.put("/api/admins/1", json={
+        "username": "admin01", "email": "admin02.home@example.com",
+    })
+
+    assert response.status_code == 409
+    assert response.json["fields"] == {"email": "That email address is already in use"}
+    assert FakeAdmin.store[0].gmail == "admin01@example.com"
+
+
+def test_self_editing_keeps_an_address_that_is_already_a_duplicate():
+    """Issue #108: accounts predate the pool and share addresses today, so the
+    rule applies to the value a request changes, not to one it leaves alone."""
+
+    FakeAdmin.store[1].gmail = "admin01@example.com"
+    client = signed_in(admins_app())
+
+    response = client.put("/api/admins/1", json={
+        "username": "admin_renamed", "email": "admin01@example.com",
+    })
+
+    assert response.status_code == 200
+    assert FakeAdmin.store[0].username == "admin_renamed"
