@@ -1,4 +1,4 @@
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 import { services } from '../../services/api';
@@ -48,6 +48,20 @@ describe('refreshSession', () => {
     await act(async () => { await handle.auth.refreshSession(); });
 
     expect(screen.getByText('Signed out')).toBeInTheDocument();
+  });
+  it('ignores an older refresh that arrives after a permission revocation', async () => {
+    const full: Session = { id: '1', username: 'justine', role: 'admin', permissions: { add: true, edit: true, delete: true, changeUserStatus: true } };
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce(full);
+    const handle = mountConsumer();
+    await screen.findByText('justine:admin');
+    let release!: (value: Session) => void;
+    me.mockReturnValueOnce(new Promise<Session>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    act(() => { pending = handle.auth.refreshSession(); });
+    me.mockResolvedValueOnce({ ...full, permissions: { ...full.permissions!, edit: false } });
+    await act(async () => handle.auth.refreshSession());
+    await act(async () => { release(full); await pending; });
+    expect(canPerform(handle.auth.session, 'edit')).toBe(false);
   });
   it('keeps the current session when the refresh fails', async () => {
     const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce({ id: '1', username: 'justine', role: 'superadmin' });
@@ -124,5 +138,43 @@ describe('updateSession', () => {
     expect(handle.auth.session?.permissions).toEqual(permissions);
     expect(canPerform(handle.auth.session, 'edit')).toBe(false);
     expect(canPerform(handle.auth.session, 'add')).toBe(true);
+  });
+});
+
+
+describe('permission revalidation', () => {
+  const full = { id: '2', username: 'staff', role: 'admin' as const,
+    permissions: { add: true, edit: true, delete: true, changeUserStatus: true } };
+  const restricted = { ...full, permissions: { ...full.permissions, edit: false } };
+
+  it('refreshes permissions on focus and throttles repeated focus and visibility events', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce(full).mockResolvedValue(restricted);
+    const handle = mountConsumer();
+    await screen.findByText('staff:admin');
+    expect(canPerform(handle.auth.session, 'edit')).toBe(true);
+
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(canPerform(handle.auth.session, 'edit')).toBe(false));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(me).toHaveBeenCalledTimes(2);
+
+    clock.mockReturnValue(131_000);
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(me).toHaveBeenCalledTimes(3));
+  });
+
+  it('refreshes after a permission refusal even inside the focus throttle', async () => {
+    const me = vi.spyOn(services.auth, 'me').mockResolvedValueOnce(full).mockResolvedValueOnce(full).mockResolvedValue(restricted);
+    const handle = mountConsumer();
+    await screen.findByText('staff:admin');
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(me).toHaveBeenCalledTimes(2);
+    act(() => window.dispatchEvent(new Event('isu-camp:permission-denied')));
+    await waitFor(() => expect(canPerform(handle.auth.session, 'edit')).toBe(false));
+    expect(me).toHaveBeenCalledTimes(3);
   });
 });

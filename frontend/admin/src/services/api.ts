@@ -30,6 +30,9 @@ import {
   AuthError,
   type AuthErrorKind,
   PASSWORD_CONFIRMATION_REQUIRED,
+  PERMISSION_DENIED,
+  PERMISSION_DENIED_EVENT,
+  PermissionDeniedError,
   PasswordConfirmationRequiredError,
   RateLimitError,
   SUPERADMIN_REQUIRED,
@@ -512,6 +515,10 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
       throw new PasswordConfirmationRequiredError(envelope.message);
     }
+    if (response.status === 403 && envelope?.code === PERMISSION_DENIED) {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(PERMISSION_DENIED_EVENT));
+      throw new PermissionDeniedError(envelope.message);
+    }
     if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
       throw new SuperadminRequiredError(envelope.message);
     }
@@ -696,9 +703,13 @@ export interface Services {
    * - `POST /api/admins` accepts `permissions` (only read for role `admin`; a new
    *   administrator without it is view only).
    * - `PUT /api/admins/:id/permissions` takes `{ permissions }` (all four booleans) and
-   *   returns `{ admin }`; 403 for oneself or a superadmin.
+   *   returns `{ admin }`; 409 for oneself or a superadmin.
    * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin` (view only
    *   when omitted); promoting discards the stored switches.
+   * `GET /api/me` must read permissions from the database each time. The portal
+   * refreshes on window focus/visibility (at most once per 30s), and immediately
+   * after a write returns 403 with `code: "PERMISSION_DENIED"`. Every write must
+   * enforce its action server-side, including each change in a map save.
    * Adding any administrator, saving permissions and changing a role are superadmin
    * only (`superadmin_required`) and re-authenticated like the other password-guarded
    * actions: the portal calls `POST /api/confirm-password` first, and the endpoint

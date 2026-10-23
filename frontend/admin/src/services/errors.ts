@@ -65,3 +65,13 @@ export const fieldError = (field: string, message: string) =>
 /** Several refusals at once, one per field; the message is the first so a plain handler still reads something. */
 export const fieldErrorsOf = (fieldErrors: Record<string, string>) =>
   Object.assign(new Error(Object.values(fieldErrors)[0]), { fieldErrors });
+
+/** A permission refusal refreshes the session as well as reporting the failed action. */
+export const PERMISSION_DENIED = "PERMISSION_DENIED";
+export const PERMISSION_DENIED_EVENT = "isu-camp:permission-denied";
+export class PermissionDeniedError extends Error {
+  constructor(message?: string) {
+    super(message ?? "You don't have permission to do that. Ask a superadmin.");
+    this.name = "PermissionDeniedError";
+  }
+}

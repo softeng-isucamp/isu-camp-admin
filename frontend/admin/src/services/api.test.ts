@@ -1571,6 +1571,23 @@ describe("real administrators service boundary", () => {
     expect(promote).toEqual({ role: "superadmin" });
   });
 
+  it("announces a coded permission refusal so an open session revalidates", async () => {
+    const { services: http, errors } = await httpServices();
+    const listener = vi.fn();
+    window.addEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    try {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(json({ code: "PERMISSION_DENIED", message: "Permission revoked." }, 403))
+        .mockResolvedValueOnce(json({ message: "Other refusal." }, 403));
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toBeInstanceOf(errors.PermissionDeniedError);
+      expect(listener).toHaveBeenCalledTimes(1);
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toThrow("Other refusal.");
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    }
+  });
+
   it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
     const { services: admins, errors } = await httpServices();
     const noSwitches = { add: false, edit: false, delete: false, changeUserStatus: false };

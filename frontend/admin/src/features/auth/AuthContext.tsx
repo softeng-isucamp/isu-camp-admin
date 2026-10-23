@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   PropsWithChildren,
   useContext,
   useEffect,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import type { Session } from "../../types";
 import { services } from "../../services/api";
+import { PERMISSION_DENIED_EVENT } from "../../services/errors";
 interface AuthValue {
   session: Session | null;
   login: (u: string, p: string, remember?: boolean) => Promise<void>;
@@ -25,6 +27,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
   // Counts sign-ins and sign-outs, so a read can tell whether the session it was for is still the one in place.
   const sessionEpoch = useRef(0);
+  const sessionRead = useRef(0);
   useEffect(() => {
     let mounted = true;
     void services.auth.me()
@@ -54,23 +57,42 @@ export function AuthProvider({ children }: PropsWithChildren) {
       ? { ...current, username: profile.username, email: profile.email }
       : current);
   };
-  // Only an explicit request re-reads the session; a failed read leaves the current one alone.
+  // A failed read leaves the current session alone.
   // A read that comes back after the session it was for ended, or for another account, is ignored.
-  const refreshSession = async () => {
+  const refreshSession = useCallback(async () => {
     const startedIn = sessionEpoch.current;
+    const read = ++sessionRead.current;
     let fresh: Session | null;
     try {
       fresh = await services.auth.me();
     } catch {
       return;
     }
-    if (startedIn !== sessionEpoch.current) return;
+    if (startedIn !== sessionEpoch.current || read !== sessionRead.current) return;
     setSession((current) => {
       if (!current) return current;
       if (!fresh) return null;
       return String(current.id) === String(fresh.id) ? fresh : current;
     });
-  };
+  }, []);
+  useEffect(() => {
+    if (!session) return;
+    let lastRefresh = -Infinity;
+    const revalidate = () => {
+      if (document.visibilityState === "hidden" || Date.now() - lastRefresh < 30_000) return;
+      lastRefresh = Date.now();
+      void refreshSession();
+    };
+    const onRefusal = () => { void refreshSession(); };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    window.addEventListener(PERMISSION_DENIED_EVENT, onRefusal);
+    return () => {
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
+      window.removeEventListener(PERMISSION_DENIED_EVENT, onRefusal);
+    };
+  }, [session?.id, refreshSession]);
   const logout = async () => {
     try {
       await services.auth.logout();
