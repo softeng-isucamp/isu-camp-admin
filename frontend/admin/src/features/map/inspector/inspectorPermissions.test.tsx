@@ -52,7 +52,7 @@ describe("Building inspector", () => {
 
   it("maps each switch to its own actions", () => {
     expect(labels(buildingModel(only("add")))).toEqual(["＋ Add indoor location", "⌂ Mark indoor location", "＋ Add entrance"]);
-    expect(labels(buildingModel(only("edit")))).toEqual(["✎ Edit Details", "↔ Link existing entrance"]);
+    expect(labels(buildingModel(only("edit")))).toEqual(["✎ Edit Details", "⌂ Mark indoor location", "↔ Link existing entrance"]);
     expect(buildingModel(only("edit")).primaryAction?.label).toBe("▱ Reshape Footprint");
     expect(labels(buildingModel(only("delete")))).toEqual(["🗑 Delete Building"]);
     expect(buildingModel(only("changeUserStatus")).overflowActions).toEqual([]);

@@ -1,3 +1,4 @@
+import { usePermissions } from "../../auth/usePermissions";
 import { Button, Modal } from "../../../components/UI";
 import type { Building, Location } from "../../../types";
 import { belongsToBuilding, isIndoorLocation } from "./indoorLocations";
@@ -19,6 +20,7 @@ export function IndoorLocationChooserModal({
   error,
   onBeginPlacement,
 }: IndoorLocationChooserModalProps) {
+  const { can } = usePermissions();
   return (
     <Modal
       title="Mark indoor location"
@@ -38,8 +40,8 @@ export function IndoorLocationChooserModal({
                 <span className="block text-[10px] text-[#526359]">{positioned ? "Marker placed" : "No map marker"}</span>
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button onClick={() => onBeginPlacement(selectedBuilding, location)}>{positioned ? "Reposition" : "Place marker"}</Button>
-                <Button variant="subtle" disabled={!positioned} onClick={() => indoor.clear(selectedBuilding, location)}>Clear</Button>
+                {can(positioned ? "edit" : "add") && <Button onClick={() => { if (can(positioned ? "edit" : "add")) onBeginPlacement(selectedBuilding, location); }}>{positioned ? "Reposition" : "Place marker"}</Button>}
+                {positioned && can("edit") && <Button variant="subtle" onClick={() => indoor.clear(selectedBuilding, location)}>Clear</Button>}
               </div>
             </div>
           );

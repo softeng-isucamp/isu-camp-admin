@@ -160,7 +160,6 @@ export function MapEditor() {
     pathwayCrossings,
     selectedPath,
     editingPathId,
-    setEditingPathId,
     setProvisionalPathwayId,
     setPathPoints,
     setPathDraftDirty,
@@ -203,12 +202,16 @@ export function MapEditor() {
     editorContext: { mode, selected },
   });
   const activeTool = activeToolForMode(mode);
+  const activeAction = mode === "select" ? null
+    : mode === "move" || (mode === "area" && buildingEditor.editingBuildingId)
+      || (mode === "path" && editingPathId && editingPathId !== pathway.provisionalPathwayId) ? "edit" : "add";
   const editorState = { setMode, setSelected, setNetworkBrowserOpen };
   const toolSession = useToolSession({
     manager: workingSessionManager,
     journal: workingSessionJournal,
     key: workingSessionKey,
     activeTool,
+    activeAction,
     tools: { point: pointTool, polygon: buildingEditor, pathway },
     onToolActivated: (toolType, openedPathway) => enterToolMode(toolType, openedPathway, editorState),
     onDraftRestored: (toolType, records) => restoreToolMode(toolType, records, editorState),
@@ -315,10 +318,7 @@ export function MapEditor() {
         setSelected({ type: "pathway", id: requested.id });
         // Opening a Pathway for reshaping makes its points draggable, which is an edit.
         if (can("edit")) {
-          pathway.setEditingPathId(requested.id);
-          pathway.setPathwayDraft({ ...requested });
-          pathway.setPathwayDraftOriginal({ ...requested });
-          pathway.setPathPoints([...requested.pathPoints]);
+          pathway.loadForEditing(requested);
           setMode("path");
         } else {
           setMode("select");
@@ -392,6 +392,7 @@ export function MapEditor() {
       clearSelectionPopover();
       return;
     }
+    if (activeAction && !can(activeAction)) return;
     if (isOverviewZoom) {
       setError("Zoom in to edit map geometry.");
       return;
@@ -414,7 +415,7 @@ export function MapEditor() {
   };
 
   const handleStartMoveNode = () => {
-    if (!selectedNode) return;
+    if (!can("edit") || !selectedNode) return;
     pointTool.startMove(selectedNode);
     setMode("move");
   };
@@ -485,6 +486,7 @@ export function MapEditor() {
   };
 
   const startNewPathway = () => {
+    if (!can("add")) return;
     pathway.startNew();
     setSelected(null);
     setMode("path");
@@ -498,8 +500,8 @@ export function MapEditor() {
   }, crossing);
 
   const reshapePathway = (path: Pathway) => {
-    setEditingPathId(path.id);
-    setPathPoints(path.pathPoints || []);
+    if (!can("edit")) return;
+    pathway.loadForEditing(path);
     setMode("path");
   };
 
@@ -538,8 +540,8 @@ export function MapEditor() {
   };
 
   const selectTool = (toolType: ToolType) => {
-    // Every tool but Select creates geometry, so none can be picked without Add.
-    if (toolType !== "select" && !can("add")) return;
+    // Pathway can edit existing records as well as create new ones.
+    if (toolType !== "select" && !(toolType === "pathway" ? can("add") || can("edit") : can("add"))) return;
     if (toolType === activeTool) {
       if (toolType === "pathway") setNetworkBrowserOpen(false);
       return;
@@ -669,6 +671,7 @@ export function MapEditor() {
     <div className="flex flex-col gap-4 h-[calc(100vh-100px)] min-h-[580px] p-2">
       <MapPageHeader />
 
+      {toolSession.permissionNotice && <p role="status" className="text-sm text-amber-900">{toolSession.permissionNotice}</p>}
       <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
 
       <div className="relative flex-1 rounded-[28px] overflow-hidden border border-[#e1e3e4] shadow-sm bg-[#dce8e2] min-h-[500px]">

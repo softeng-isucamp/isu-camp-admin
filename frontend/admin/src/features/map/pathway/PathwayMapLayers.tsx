@@ -129,25 +129,27 @@ export function PathwayDraftLayer({
   } = pathway;
   return (
     <>
-      {!isOverviewZoom && mode === "path" &&
+      {!isOverviewZoom && (mode === "path" || (mode === "select" && activePathway)) &&
         pathPoints.map((point, index) => (
           <Marker
             key={`path-point-${index}`}
             position={point}
             icon={createPointIcon(true)}
-            draggable={selectedPathPointIndex === index}
+            draggable={pathway.canModify && selectedPathPointIndex === index}
             eventHandlers={{
               click: () => {
                 setSelectedPathPointIndex(index);
                 setSelected({ type: "path_point", id: `${editingPathId ?? "pathway"}:point:${index}` });
               },
               drag: (event) => {
+                if (!pathway.canModify) return;
                 const marker = event.target as L.Marker;
                 const next = marker.getLatLng();
                 setPathPointDragPreview({ index, point: [next.lat, next.lng] });
                 setSelectedPathPointIndex(index);
               },
               dragend: (event) => {
+                if (!pathway.canModify) return;
                 const marker = event.target as L.Marker;
                 const next = marker.getLatLng();
                 setPathPointDragPreview(null);
@@ -168,7 +170,7 @@ export function PathwayDraftLayer({
           />
         ))}
 
-      {!isOverviewZoom && mode === "path" && activePathway && (() => {
+      {!isOverviewZoom && mode === "path" && pathway.canModify && activePathway && (() => {
         const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
         const destination = currentNodes.find((node) => node.id === activePathway.destinationNodeId);
         if (!source || !destination) return null;

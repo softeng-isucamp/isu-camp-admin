@@ -59,7 +59,7 @@ export const clickMap = (lat: number, lng: number) => {
 
 export const choosePathwayEditor = async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Create or edit Pathway" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^(Create or edit|Create|Edit) Pathway$/ }));
 };
 
 export const chooseWalkingNetworkBrowser = async () => {

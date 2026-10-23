@@ -1,3 +1,4 @@
+import { draftPermission } from "./session/draftPermissions";
 import { useState } from "react";
 import { usePermissions } from "../auth/usePermissions";
 import type { ActiveToolDraft, ToolType } from "./types";
@@ -59,8 +60,8 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
   const [pathwayOptionsOpen, setPathwayOptionsOpen] = useState(false);
   const { can } = usePermissions();
   const canAdd = can("add");
-  // Route Node, Building Polygon and Pathway tools all create geometry, so they need Add. Select stays. The Pathway
-  // entry stays for everyone as the way into Browse Walking Network, which is a view; it offers no editing without Add.
+  // Pathway supports both creation and editing; its browser remains available to everyone.
+  const canUsePathway = canAdd || can("edit");
   const visibleTools = toolDefinitions.filter((tool) => canAdd || tool.id === "select" || tool.id === "pathway");
   const activeDefinition = getToolDefinition(activeTool);
 
@@ -103,7 +104,7 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
                   className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition ${active ? "bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}
                 >
                   <span aria-hidden="true">{tool.icon}</span>
-                  <span>{tool.id === "pathway" && !canAdd ? "Walking Network" : tool.label}</span>
+                  <span>{tool.id === "pathway" && !canUsePathway ? "Walking Network" : tool.label}</span>
                 </button>
               );
             })}
@@ -131,14 +132,14 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
             >
               Browse Walking Network
             </button>
-            {canAdd && (
+            {canUsePathway && (
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => { onSelectTool("pathway"); setPathwayOptionsOpen(false); }}
                 className="rounded-xl px-3 py-2 text-left text-xs font-bold text-[#264d3b] hover:bg-emerald-50"
               >
-                Create or edit Pathway
+                {canAdd && can("edit") ? "Create or edit Pathway" : canAdd ? "Create Pathway" : "Edit Pathway"}
               </button>
             )}
           </div>
@@ -169,9 +170,9 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
                 <div key={draft.id} className="rounded-xl border border-amber-100 bg-amber-50 p-3">
                   <strong className="block text-xs text-amber-950">{definition.label} draft</strong>
                   <span className="mt-1 block text-[10px] text-amber-800">{draft.provisionalGeometry.points?.length ?? 0} provisional point{draft.provisionalGeometry.points?.length === 1 ? "" : "s"}</span>
-                  <button type="button" aria-label={`Resume ${definition.label} draft`} onClick={() => { onResumeDraft(draft.id); setShelfOpen(false); }} className="mt-2 text-xs font-extrabold text-[#005931]">
+                  {can(draftPermission(draft)) ? <button type="button" aria-label={`Resume ${definition.label} draft`} onClick={() => { onResumeDraft(draft.id); setShelfOpen(false); }} className="mt-2 text-xs font-extrabold text-[#005931]">
                     Resume
-                  </button>
+                  </button> : <p className="mt-2 text-xs text-amber-900">This draft’s action is no longer permitted.</p>}
                 </div>
               );
             })}

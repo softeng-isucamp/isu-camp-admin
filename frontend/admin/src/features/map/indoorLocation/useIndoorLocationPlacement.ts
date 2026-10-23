@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePermissions } from "../../auth/usePermissions";
 import { services } from "../../../services/api";
 import type { Building, Location } from "../../../types";
 import { pointInPolygon, type MapPoint } from "../campusBoundary";
@@ -27,12 +28,24 @@ const UNAVAILABLE = "Indoor location positioning is unavailable in this environm
  * Building's footprint (see ADR 0001).
  */
 export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorPlacementContext, onError: (message: string) => void) {
+  const { can } = usePermissions();
+  const canPlace = (location: Location) => can(isPositionedLocation(location) ? "edit" : "add");
   const [placement, setPlacement] = useState<IndoorPlacement | null>(null);
   const [saving, setSaving] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
 
+  useEffect(() => {
+    if (!placement) return;
+    const location = context.locations.find((item) => item.id === placement.locationId);
+    if (!location || !canPlace(location)) {
+      setPlacement(null);
+      onError("Indoor positioning ended because its action is no longer permitted.");
+    }
+  }, [can("add"), can("edit"), context.locations, placement]);
+
   /** Starts placement for a location, seeded with its current marker, if any. */
   const startPlacement = (building: Building, location: Location) => {
+    if (!canPlace(location)) return;
     setPlacement({
       locationId: location.id,
       buildingId: building.id,
@@ -42,6 +55,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
 
   /** Starts placement from the chooser; returns false when the building has no footprint. */
   const begin = (building: Building, location: Location) => {
+    if (!canPlace(location)) return false;
     if (building.points.length < 3) {
       onError(`${building.name} needs a footprint before an indoor location can be marked.`);
       return false;
@@ -67,6 +81,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
       setPlacement(null);
       return true;
     }
+    if (!canPlace(location)) return true;
     if (context.zoom < INDOOR_PLACEMENT_MIN_ZOOM) {
       onError("Zoom in to level 20 or closer to place an indoor location marker.");
       return true;
@@ -93,6 +108,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
       onError("The selected indoor location or its building is no longer available.");
       return null;
     }
+    if (!canPlace(location)) return null;
     if (!pointInPolygon(placement.position, building.points)) {
       onError(`Place ${location.name} inside ${building.name}'s footprint.`);
       return null;
@@ -122,6 +138,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
   };
 
   const clear = async (building: Building, location: Location) => {
+    if (!can("edit")) return;
     if (typeof services.locations.saveIndoorPosition !== "function") {
       onError(UNAVAILABLE);
       return;

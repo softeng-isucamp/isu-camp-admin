@@ -123,7 +123,7 @@ export function buildingInspectorModel({
     overflowActions: [
       ...(can("edit") ? [{ label: "✎ Edit Details", onSelect: actions.onEditDetails }] : []),
       ...(canContain && can("add") ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
-      ...(canContain && can("add") ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
+      ...(canContain && (can("add") || can("edit")) ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
       ...(can("add") ? [{ label: "＋ Add entrance", onSelect: actions.onAddEntrance }] : []),
       ...(can("edit") ? [{ label: "↔ Link existing entrance", onSelect: actions.onLinkExistingEntrance }] : []),
       ...(can("delete") ? [{ label: "🗑 Delete Building", tone: "danger" as const, onSelect: actions.onDelete }] : []),
