@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PasswordConfirmationRequiredError } from './errors';
+import { InvalidResponseError, PasswordConfirmationRequiredError, RequestError } from './errors';
 
 export const profileSchema = z.object({
   id: z.union([z.string(), z.number()]).transform(String),
@@ -52,6 +52,12 @@ export type BackupHistory = z.infer<typeof historySchema>;
 const downloadSchema = z.object({ url: z.string().regex(/^(https?:\/\/|\/(?!\/))/), expiresAt: z.string().datetime() });
 /** `filename` is only set by the fixture, whose blob link carries no Content-Disposition. */
 export type BackupDownload = z.infer<typeof downloadSchema> & { filename?: string };
+/** Reads a server reply with its schema; a reply that does not fit is an `InvalidResponseError`, not a raw Zod dump. */
+const parseReply = <S extends z.ZodTypeAny>(schema: S, value: unknown, what: string): z.infer<S> => {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new InvalidResponseError(what, result.error.message);
+  return result.data;
+};
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 type FixtureAccount = {
   profile: () => Promise<AccountProfile>;
@@ -94,18 +100,18 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
     get: async (): Promise<AccountProfile> => {
       if (fixture) return fixture.profile();
       const result = profileSchema.safeParse(await request('/api/profile'));
-      if (!result.success) throw new Error('Profile settings are unavailable. The server must provide your email and account role.');
+      if (!result.success) throw new RequestError('invalid_response', { message: "Your profile couldn't be loaded. Please try again.", detail: `Profile reply is missing the email or account role: ${result.error.message}` });
       return result.data;
     },
     update: async (changes: ProfileChanges): Promise<AccountProfile> => fixture
       ? fixture.updateProfile(changes)
-      : profileSchema.parse(await request('/api/profile', { method: 'PATCH', body: JSON.stringify(changes) })),
+      : parseReply(profileSchema, await request('/api/profile', { method: 'PATCH', body: JSON.stringify(changes) }), 'Profile update reply is malformed.'),
     changePassword: async (changes: PasswordChange): Promise<void> => {
       if (fixture) return fixture.changePassword(changes);
       await request('/api/profile/password', { method: 'POST', body: JSON.stringify(changes) });
     },
     history: async () => {
-      if (!fixture) return historySchema.parse(await request('/api/backups'));
+      if (!fixture) return parseReply(historySchema, await request('/api/backups'), 'Backup history reply is malformed.');
       await superadmin();
       return {
         items: structuredClone(backups), activeJob: activeJob ? { ...activeJob } : null,
@@ -113,21 +119,21 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
       };
     },
     createBackup: async (): Promise<BackupJob> => fixture ? start('backup')
-      : jobSchema.parse(await request('/api/backups', { method: 'POST', body: '{}' })),
+      : parseReply(jobSchema, await request('/api/backups', { method: 'POST', body: '{}' }), 'Backup job reply is malformed.'),
     restore: async (id: string, password: string): Promise<BackupJob> => {
-      if (!fixture) return jobSchema.parse(await request(`/api/backups/${encodeURIComponent(id)}/restore`, {
+      if (!fixture) return parseReply(jobSchema, await request(`/api/backups/${encodeURIComponent(id)}/restore`, {
         method: 'POST', body: JSON.stringify({ currentPassword: password }),
-      }));
+      }), 'Restore job reply is malformed.');
       await superadmin();
       await fixture.confirmPassword(password);
-      if (!backups.some((backup) => backup.id === id && backup.status === 'ready')) throw new Error('Backup is unavailable.');
+      if (!backups.some((backup) => backup.id === id && backup.status === 'ready')) throw new Error('That backup is no longer available. Reload the page.');
       return start('restore');
     },
     job: async (id: string): Promise<BackupJob> => {
-      if (!fixture) return jobSchema.parse(await request(`/api/jobs/${encodeURIComponent(id)}`));
+      if (!fixture) return parseReply(jobSchema, await request(`/api/jobs/${encodeURIComponent(id)}`), 'Job status reply is malformed.');
       await superadmin();
       const entry = jobs.get(id);
-      if (!entry) throw new Error('Job was not found.');
+      if (!entry) throw new Error('That backup operation is no longer available. Reload the page.');
       if (TERMINAL.includes(entry.job.status)) return { ...entry.job };
       entry.polls++;
       if (entry.cancelRequested) {
@@ -151,10 +157,10 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
     },
     /** Asks the server to stop a job. It stops asynchronously, so callers keep polling for the terminal status. */
     cancelJob: async (id: string): Promise<BackupJob> => {
-      if (!fixture) return jobSchema.parse(await request(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }));
+      if (!fixture) return parseReply(jobSchema, await request(`/api/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }), 'Cancel reply is malformed.');
       await superadmin();
       const entry = jobs.get(id);
-      if (!entry) throw new Error('Job was not found.');
+      if (!entry) throw new Error('That backup operation is no longer available. Reload the page.');
       if (!TERMINAL.includes(entry.job.status)) {
         entry.cancelRequested = true;
         audit(entry.job.kind === 'backup' ? 'Cancelled Backup' : 'Cancelled Restore', 'Demo campus data');
@@ -163,15 +169,15 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
     },
     download: async (id: string, password: string): Promise<BackupDownload> => {
       if (!fixture) {
-        const link = downloadSchema.parse(await request(`/api/backups/${encodeURIComponent(id)}/download`, {
+        const link = parseReply(downloadSchema, await request(`/api/backups/${encodeURIComponent(id)}/download`, {
           method: 'POST', body: JSON.stringify({ currentPassword: password }),
-        }));
+        }), 'Download link reply is malformed.');
         return { ...link, url: link.url.startsWith('/') ? apiUrl(link.url) : link.url };
       }
       await superadmin();
       await fixture.confirmPassword(password);
       const backup = backups.find((item) => item.id === id && item.status === 'ready');
-      if (!backup) throw new Error('Backup is unavailable.');
+      if (!backup) throw new Error('That backup is no longer available. Reload the page.');
       const file = new Blob([`ISU Camp backup ${backup.id}\nDEMO FILE: the fixture holds no real data, so this is not a database backup.\n`], { type: 'text/plain' });
       const url = URL.createObjectURL(file);
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -185,12 +191,12 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
       if (!fixture.recentlyConfirmed()) throw new PasswordConfirmationRequiredError();
       if (activeJob) throw new Error('Another backup or restore is already running.');
       const backup = backups.find((item) => item.id === id);
-      if (!backup) throw new Error('Backup is unavailable.');
+      if (!backup) throw new Error('That backup is no longer available. Reload the page.');
       backups = backups.filter((item) => item.id !== id);
       audit('Deleted Backup', backup.createdAt);
     },
     saveSchedule: async (next: BackupSchedule): Promise<BackupSchedule> => {
-      if (!fixture) return scheduleSchema.parse(await request('/api/backups/schedule', { method: 'PUT', body: JSON.stringify(next) }));
+      if (!fixture) return parseReply(scheduleSchema, await request('/api/backups/schedule', { method: 'PUT', body: JSON.stringify(next) }), 'Backup schedule reply is malformed.');
       await superadmin();
       const result = scheduleSchema.safeParse(next);
       if (!result.success) throw new Error('Enter a valid time and keep at least one backup.');

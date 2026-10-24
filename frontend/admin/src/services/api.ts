@@ -28,14 +28,18 @@ import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recov
 import {
   AuthError,
   type AuthErrorKind,
+  InvalidResponseError,
+  isTechnicalMessage,
   PASSWORD_CONFIRMATION_REQUIRED,
   PasswordConfirmationRequiredError,
   RateLimitError,
+  RequestError,
+  type RequestFailureKind,
   SUPERADMIN_REQUIRED,
   SuperadminRequiredError,
 } from "./errors";
 
-export { AuthError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError, SUPERADMIN_REQUIRED, SuperadminRequiredError } from "./errors";
+export { AuthError, InvalidResponseError, PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError, RateLimitError, RequestError, SUPERADMIN_REQUIRED, SuperadminRequiredError } from "./errors";
 import { z } from "zod";
 
 import {
@@ -89,11 +93,11 @@ export const parseAccountStatus = (raw: unknown): AccountStatus =>
 type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
-  if (id === undefined || typeof raw.username !== "string") throw new Error("Backend returned a malformed user record.");
+  if (id === undefined || typeof raw.username !== "string") throw new InvalidResponseError("Backend returned a malformed user record.");
   return { id: String(id), username: raw.username, createdAt: String(raw.createdAt ?? raw.created_at ?? ""), userType: parseAccountType(raw.userType ?? raw.user_type), status: parseAccountStatus(raw.status) };
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
-  if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new Error("Backend returned a malformed audit record.");
+  if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new InvalidResponseError("Backend returned a malformed audit record.");
   return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: raw.detail == null ? undefined : String(raw.detail), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
 };
 
@@ -130,7 +134,7 @@ export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary
     ? (raw as { data: unknown }).data
     : raw;
   const parsed = dashboardMetricsSchema.safeParse(value);
-  if (!parsed.success) throw new Error("Backend returned a malformed dashboard summary.");
+  if (!parsed.success) throw new InvalidResponseError("Backend returned a malformed dashboard summary.");
   try {
     return {
       ...parsed.data,
@@ -139,7 +143,7 @@ export const normalizeBackendDashboardSummary = (raw: unknown): DashboardSummary
       recent: parsed.data.recent.map((entry) => normalizeBackendAudit(entry as BackendAudit)),
     };
   } catch {
-    throw new Error("Backend returned a malformed dashboard summary.");
+    throw new InvalidResponseError("Backend returned a malformed dashboard summary.");
   }
 };
 const nonNegInt = z.number().int().nonnegative();
@@ -183,13 +187,13 @@ const dashboardAnalyticsSchema = z.object({
 export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnalytics => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const parsed = dashboardAnalyticsSchema.safeParse(value);
-  if (!parsed.success) throw new Error("Backend returned malformed dashboard analytics.");
+  if (!parsed.success) throw new InvalidResponseError("Backend returned malformed dashboard analytics.");
   return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
 };
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const page = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  if (!Array.isArray(page.items) || typeof page.total !== "number" || typeof page.page !== "number" || typeof page.pageSize !== "number") throw new Error(`Backend returned a malformed ${label} page.`);
+  if (!Array.isArray(page.items) || typeof page.total !== "number" || typeof page.page !== "number" || typeof page.pageSize !== "number") throw new InvalidResponseError(`Backend returned a malformed ${label} page.`);
   return { items: page.items.map(normalize), total: page.total, page: page.page, pageSize: page.pageSize };
 };
 
@@ -207,21 +211,21 @@ export const normalizeBackendLocation = (raw: BackendLocation): Location => {
   const code = raw.code ?? raw.location_code;
   const rawType = raw.type ?? (typeof raw.type_id === "number" ? persistedLocationTypes[raw.type_id] : undefined);
   if (id === undefined || typeof name !== "string" || typeof code !== "string") {
-    throw new Error("Backend returned a malformed location record.");
+    throw new InvalidResponseError("Backend returned a malformed location record.");
   }
   const typeFields = placeFieldsFromBackendType(rawType);
   const status = raw.status ?? "Active";
-  if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new Error("Backend returned an invalid location status.");
+  if (!locationStatuses.includes(status as typeof locationStatuses[number])) throw new InvalidResponseError("Backend returned an invalid location status.");
   const lat = raw.lat === null || raw.lat === undefined ? null : Number(raw.lat);
   const lng = raw.lng === null || raw.lng === undefined ? null : Number(raw.lng);
   if ((lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) ||
       (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) ||
       ((lat === null) !== (lng === null))) {
-    throw new Error("Backend returned malformed location coordinates.");
+    throw new InvalidResponseError("Backend returned malformed location coordinates.");
   }
   const hasPosition = lat !== null && lng !== null;
   if (raw.positioned !== undefined && (typeof raw.positioned !== "boolean" || raw.positioned !== hasPosition)) {
-    throw new Error("Backend returned inconsistent location position.");
+    throw new InvalidResponseError("Backend returned inconsistent location position.");
   }
   const normalized: Location = {
     id: String(id), name, code, ...typeFields,
@@ -247,7 +251,7 @@ export const normalizeBackendLocationPage = (raw: unknown): Page<Location> => {
   const value = envelope && typeof envelope === "object" ? envelope as Record<string, unknown> : {};
   const rows = value.items ?? value.locations;
   if (!Array.isArray(rows) || typeof value.total !== "number" || typeof value.page !== "number" || typeof value.pageSize !== "number") {
-    throw new Error("Backend returned a malformed locations page.");
+    throw new InvalidResponseError("Backend returned a malformed locations page.");
   }
   return { items: rows.map((row) => normalizeBackendLocation(row as BackendLocation)), total: value.total, page: value.page, pageSize: value.pageSize };
 };
@@ -388,7 +392,7 @@ const normalizeMapPoints = (raw: unknown, label: string): [number, number][] => 
     && point.length === 2
     && point.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate)),
   )) {
-    throw new Error(`Backend returned malformed ${label} geometry.`);
+    throw new InvalidResponseError(`Backend returned malformed ${label} geometry.`);
   }
   return raw.map(([lat, lng]) => [lat, lng]);
 };
@@ -399,11 +403,11 @@ export const normalizeBackendMapBuilding = (raw: BackendMapBuilding): Building =
   const code = raw.code ?? raw.building_code;
   const classification = classificationFromBackend(raw.type);
   if (id === undefined || typeof name !== "string" || typeof code !== "string") {
-    throw new Error("Backend returned a malformed building record.");
+    throw new InvalidResponseError("Backend returned a malformed building record.");
   }
   const status = raw.status ?? "Active";
   if (!locationStatuses.includes(status as typeof locationStatuses[number])) {
-    throw new Error("Backend returned an invalid building status.");
+    throw new InvalidResponseError("Backend returned an invalid building status.");
   }
   return {
     id: String(id),
@@ -483,10 +487,19 @@ const pathPointWritePayload = (pathwayId: number, sequenceNo: number, [latitude,
   status: "active",
 });
 
+/** Path Points are written one request at a time, so a failure part-way may leave some saved. */
 const actionablePathPointError = (pathwayId: string, cause: unknown) => {
-  const message = cause instanceof Error ? cause.message : "The backend did not accept the Path Point change.";
-  return new Error(`Could not persist Path Points for Pathway ${pathwayId}: ${message}`);
+  if (cause instanceof RequestError && cause.kind === "session") return cause;
+  return new RequestError("outcome_unknown", {
+    message: "Some of your pathway changes couldn't be saved. Reload the map to check the pathway, then try again.",
+    detail: `Could not persist Path Points for Pathway ${pathwayId}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    cause,
+  });
 };
+
+/** The record has no server id, so it was never saved; the id stays in `detail` for developers. */
+const unsavedRecordError = (record: string, id: string) =>
+  new RequestError("not_found", { message: `This ${record} hasn't been saved to the server yet. Reload the map and try again.`, detail: `${record} "${id}" has no database ID.` });
 const canonicalNetwork = createCanonicalNetworkStore(
   generatedMapFixture
     ? { buildings: generatedMapFixture.buildings, nodes: generatedMapFixture.nodes, pathways: generatedMapFixture.pathways, locationBuildings: generatedMapFixture.locations.filter((location: Location) => isLocationContainer(location)) }
@@ -494,9 +507,72 @@ const canonicalNetwork = createCanonicalNetworkStore(
   !USE_HTTP_API && typeof sessionStorage !== "undefined" ? sessionStorage : null,
 );
 
+/**
+ * A rejected fetch means nothing was confirmed: a read simply failed, but a write may or may not have been
+ * applied. Sign-in, sign-out, password confirmation and recovery steps change no data an administrator
+ * would check, so they pass `dataChange: false` and read as a plain network failure.
+ */
+const sendRequest = async (url: string, init: RequestInit = {}, dataChange = true): Promise<Response> => {
+  try {
+    return await fetch(url, init);
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+    const read = !dataChange || ["GET", "HEAD"].includes((init.method ?? "GET").toUpperCase());
+    throw new RequestError(read ? "network" : "outcome_unknown", { cause, detail: cause instanceof Error ? cause.message : String(cause) });
+  }
+};
+
+/** Backend messages written for developers, shown as the instruction an administrator can act on. */
+const BACKEND_MESSAGES: Record<string, string> = {
+  "Selected Path Point changed; reload the Pathway": "This pathway changed since you opened it. Reload the map and try again.",
+  "Selected Path Point no longer exists": "That path point no longer exists. Reload the map and try again.",
+  "A Route Node already exists at this Path Point; reload the map": "A route node already exists at this point. Reload the map to see it.",
+  "Existing Route Node must be active and at the selected point": "Choose an active route node at the selected point.",
+  "Only an active Pathway can be split": "Only an active pathway can be split. Reopen the pathway first.",
+  "Pathway endpoints no longer exist": "One of this pathway's route nodes was removed. Reload the map and try again.",
+  "Entrance Route Nodes require a Building": "Choose the building this entrance belongs to.",
+  "Walkways cannot allow Vehicle mode": "Walkways can't allow vehicles. Choose Road or remove Vehicle.",
+  "sequence_no is already used by another path point in this pathway": "This pathway changed since you opened it. Reload the map and try again.",
+  "Location type is required when record IDs overlap.": "This record couldn't be identified. Reload the page and try again.",
+  "lat and lng must both be finite numbers or both null.": "The marker position is invalid. Place the marker again.",
+  "lat and lng are required.": "The marker position is invalid. Place the marker again.",
+};
+/** The 401 texts that only mean "no session"; any other 401 message (a wrong current password) is the answer itself. "Admin account not found" is also a 404 elsewhere, so only a 401 counts. */
+const SESSION_MESSAGES: ReadonlySet<string> = new Set(["Authentication required", "Not authenticated", "Admin account not found"]);
+const REJECTED_MESSAGE = "The request couldn't be completed. Check the details and try again.";
+const STATUS_KINDS: Partial<Record<number, RequestFailureKind>> = { 401: "session", 403: "permission", 404: "not_found", 409: "conflict" };
+
+type FailureBody = { message?: unknown; fields?: Record<string, string>; relationships?: Record<string, string> };
+
+/**
+ * The error for a non-OK reply. Clear backend text stays; developer text and the text of a server
+ * fault (some routes echo `str(exception)`) is replaced by the status default, with the original in `detail`.
+ */
+const requestFailure = (response: Response, data: FailureBody | null): Error => {
+  const status = response.status;
+  const fieldErrors = { ...data?.fields, ...data?.relationships };
+  const raw = typeof data?.message === "string" ? data.message.trim() : "";
+  const detail = `HTTP ${status}${raw ? `: ${raw}` : ""}`;
+  const statusKind = STATUS_KINDS[status];
+  let error: Error;
+  if (status === 401 && (!raw || SESSION_MESSAGES.has(raw))) error = new RequestError("session", { status, detail });
+  else if (status >= 500 && Object.keys(fieldErrors).length === 0) error = new RequestError("server", { status, detail });
+  else if (BACKEND_MESSAGES[raw]) error = new Error(BACKEND_MESSAGES[raw]);
+  else if (raw && !isTechnicalMessage(raw)) error = new Error(raw);
+  else error = statusKind ? new RequestError(statusKind, { status, detail }) : new Error(REJECTED_MESSAGE);
+  (error as Error & { fieldErrors?: Record<string, string> }).fieldErrors = fieldErrors;
+  return error;
+};
+
+/** A reply that should have carried JSON and did not: a gateway page means the server is down, a 2xx means a broken reply. */
+const unreadableReply = (response: Response): RequestError =>
+  response.ok
+    ? new InvalidResponseError(`HTTP ${response.status} reply was not JSON.`)
+    : new RequestError([502, 503, 504].includes(response.status) ? "network" : "server", { status: response.status, detail: `HTTP ${response.status} reply was not JSON.` });
+
 const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const isMultipart = typeof FormData !== "undefined" && init?.body instanceof FormData;
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await sendRequest(`${API_URL}${path}`, {
     // `init` is spread first so a caller's own headers merge with the defaults
     // below instead of replacing them: the session cookie and the JSON
     // Content-Type must survive every call.
@@ -504,31 +580,40 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     credentials: "include",
     headers: { ...(isMultipart ? {} : { "Content-Type": "application/json" }), ...(init?.headers ?? {}) },
   });
-  const data = (await response.json().catch(() => null)) as T & { message?: string; fields?: Record<string, string>; relationships?: Record<string, string> } | null;
+  // An empty body (a 204) reads as null as before; a body that is not JSON, or one cut off mid-read, is only
+  // an error on success, where resolving would report a change the server never confirmed.
+  const text = await response.text().catch((cause) => {
+    if (response.ok) throw new InvalidResponseError(`HTTP ${response.status} reply could not be read.`, String(cause));
+    return "";
+  });
+  let data: T & FailureBody | null = null;
+  try {
+    data = text.trim() ? JSON.parse(text) : null;
+  } catch {
+    if (response.ok) throw unreadableReply(response);
+  }
   if (!response.ok) {
     const envelope = data as (typeof data) & { code?: string };
+    const confirmationMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
-      throw new PasswordConfirmationRequiredError(envelope.message);
+      throw new PasswordConfirmationRequiredError(confirmationMessage);
     }
     if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
-      throw new SuperadminRequiredError(envelope.message);
+      throw new SuperadminRequiredError(confirmationMessage);
     }
-    const error = new Error(data?.message ?? `Request failed (${response.status})`) as Error & { fieldErrors?: Record<string, string> };
-    error.fieldErrors = { ...data?.fields, ...data?.relationships };
-    throw error;
+    throw requestFailure(response, data);
   }
   return data as T;
 };
 
 const apiBlob = async (path: string, init?: RequestInit): Promise<Blob> => {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await sendRequest(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
   });
   if (!response.ok) {
     // Failures still come back as the standard JSON error envelope.
-    const data = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(data?.message ?? `Request failed (${response.status})`);
+    throw requestFailure(response, (await response.json().catch(() => null)) as FailureBody | null);
   }
   return response.blob();
 };
@@ -821,30 +906,32 @@ const recoveryErrorKinds: ReadonlySet<string> = new Set(["invalid_code", "code_e
 
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0;
 
-/** POSTs a recovery step and returns the JSON body, turning failures into `RateLimitError`, `AuthError` or a plain `Error`. */
-async function recoveryPost(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const response = await fetch(`${API_URL}${path}`, {
+/** POSTs a recovery step and returns the JSON body, turning failures into `RateLimitError`, `AuthError` or a `RequestError`/plain `Error`. */
+async function recoveryPost(path: string, body: Record<string, unknown>, dataChange = false): Promise<Record<string, unknown>> {
+  const response = await sendRequest(`${API_URL}${path}`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
+  }, dataChange);
   const data = await readJsonObject(response);
   // A rate limit needs only the status and Retry-After, so it must not depend on the body.
   checkRateLimit(response, data?.message);
-  if (!data) throw new Error("Unable to connect to the backend.");
+  if (!data) throw unreadableReply(response);
   if (!response.ok) {
-    const message = data.message || "Account recovery failed.";
     if (typeof data.code === "string" && recoveryErrorKinds.has(data.code)) {
-      throw new AuthError(data.code as AuthErrorKind, message, parseAttemptsRemaining(data));
+      throw new AuthError(data.code as AuthErrorKind, data.message || "Account recovery failed.", parseAttemptsRemaining(data));
     }
-    throw new Error(message);
+    throw requestFailure(response, data);
   }
   return data;
 }
 
+/** A reset whose reply was lost may already have changed the password, so the next step is to try it. */
+const PASSWORD_RESET_UNCONFIRMED = "The connection was interrupted, so we couldn't confirm whether your password was changed. Try signing in with the new password; if that fails, request a new code.";
+
 const recoveryResult = (data: Record<string, unknown>): RecoveryResult => {
-  if (typeof data.username !== "string" || !data.username) throw new Error("The server did not return a username.");
+  if (typeof data.username !== "string" || !data.username) throw new InvalidResponseError("The server did not return a username.");
   return { username: data.username };
 };
 
@@ -953,7 +1040,7 @@ export const services: Services = {
         return localAdapter.auth.login(username, password, remember);
       }
 
-      const response = await fetch(
+      const response = await sendRequest(
         `${API_URL}/api/login`,
         {
           method: "POST",
@@ -969,7 +1056,8 @@ export const services: Services = {
             password,
             remember: Boolean(remember),
           }),
-        }
+        },
+        false
       );
 
       const data = await readJsonObject(response);
@@ -977,9 +1065,7 @@ export const services: Services = {
       checkRateLimit(response, data?.message);
 
       if (!data) {
-        throw new Error(
-          "Unable to connect to the backend."
-        );
+        throw unreadableReply(response);
       }
 
       if (response.status === 401) {
@@ -991,10 +1077,7 @@ export const services: Services = {
       }
 
       if (!response.ok) {
-        throw new Error(
-          data.message ||
-          "Invalid username or password"
-        );
+        throw requestFailure(response, data);
       }
 
       if (
@@ -1003,7 +1086,7 @@ export const services: Services = {
       ) {
         throw new Error(
           data.message ||
-          "Login failed"
+          "Sign-in didn't complete. Check your username and password and try again."
         );
       }
 
@@ -1026,7 +1109,7 @@ export const services: Services = {
         return localAdapter.auth.logout();
       }
 
-      const response = await fetch(
+      const response = await sendRequest(
         `${API_URL}/api/logout`,
         {
           method: "POST",
@@ -1036,7 +1119,8 @@ export const services: Services = {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
+        false
       );
 
       let data: any;
@@ -1044,16 +1128,11 @@ export const services: Services = {
       try {
         data = await response.json();
       } catch {
-        throw new Error(
-          "Unable to connect to the backend."
-        );
+        throw unreadableReply(response);
       }
 
       if (!response.ok) {
-        throw new Error(
-          data.message ||
-          "Logout failed"
-        );
+        throw requestFailure(response, data);
       }
 
       return data;
@@ -1068,7 +1147,7 @@ export const services: Services = {
 
       if (!USE_HTTP_API) return localAdapter.auth.me();
 
-      const response = await fetch(
+      const response = await sendRequest(
         `${API_URL}/api/me`,
         {
           method: "GET",
@@ -1085,7 +1164,9 @@ export const services: Services = {
         return null;
       }
 
-      const data = await response.json();
+      const data = await readJsonObject(response);
+
+      if (!data) throw unreadableReply(response);
 
       if (
         !data.authenticated ||
@@ -1112,14 +1193,15 @@ export const services: Services = {
         return localAdapter.auth.confirmPassword(password);
       }
 
-      const response = await fetch(
+      const response = await sendRequest(
         `${API_URL}/api/confirm-password`,
         {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ password }),
-        }
+        },
+        false
       );
 
       let data: any;
@@ -1127,12 +1209,14 @@ export const services: Services = {
       try {
         data = await response.json();
       } catch {
-        throw new Error("Unable to connect to the backend.");
+        throw unreadableReply(response);
       }
 
       checkRateLimit(response, data.message);
 
-      if (!response.ok || data.success === false) {
+      if (!response.ok) throw requestFailure(response, data);
+
+      if (data.success === false) {
         throw new Error(data.message || "Password is incorrect");
       }
     },
@@ -1157,7 +1241,12 @@ export const services: Services = {
 
     resetPassword: async (email, code, password) => {
       if (!USE_HTTP_API) return localAdapter.auth.resetPassword(email, code, password);
-      return recoveryResult(await recoveryPost("/api/recovery/reset-password", { email, code, password }));
+      try {
+        return recoveryResult(await recoveryPost("/api/recovery/reset-password", { email, code, password }, true));
+      } catch (cause) {
+        if (!(cause instanceof RequestError && cause.kind === "outcome_unknown")) throw cause;
+        throw new RequestError("outcome_unknown", { cause, detail: cause.detail, message: PASSWORD_RESET_UNCONFIRMED });
+      }
     },
   },
 
@@ -1360,7 +1449,7 @@ export const services: Services = {
 
     savePosition: async (position) => {
       if (USE_HTTP_API) {
-        throw new Error("Updating location positions is not available yet.");
+        throw new Error("Moving a location on the map isn't available with the server yet.");
       }
       const location = localAdapter.locations.savePosition(position.id, position.lat, position.lng);
       addAudit("Positioned Location", location.name, "Admin", location.id);
@@ -1372,7 +1461,7 @@ export const services: Services = {
         const buildingNumber = Number(buildingId);
         const locationNumber = Number(id);
         if (!Number.isSafeInteger(buildingNumber) || !Number.isSafeInteger(locationNumber)) {
-          throw new Error("Indoor Location and Building must be saved before positioning.");
+          throw new Error("Save the location and its building before placing it on the map.");
         }
         const response = await apiJson<unknown>(`/api/map/buildings/${buildingNumber}/indoor-locations/${locationNumber}`, {
           method: "PATCH",
@@ -1391,7 +1480,7 @@ export const services: Services = {
         return apiBlob(`/api/actions/locations/${encodeURIComponent(id)}/photo${typeQuery}`);
       }
       const location = locations.find((item) => item.id === id);
-      if (!location?.photo?.dataUrl) throw new Error("Location photo not found.");
+      if (!location?.photo?.dataUrl) throw new Error("This location has no photo to show.");
       return fetch(location.photo.dataUrl).then((response) => response.blob());
     },
 
@@ -1459,7 +1548,7 @@ export const services: Services = {
         return normalizeBackendUser(response.user);
       }
       const user = localUsers.find((record) => record.id === id);
-      if (!user) throw new Error("User not found.");
+      if (!user) throw new Error("That account no longer exists. Reload the page to see the latest list.");
       user.status = status;
       addAudit(status === "Inactive" ? "Deactivated User" : "Activated User", user.username, "Admin", user.id);
       return wait(clone(user));
@@ -1622,14 +1711,14 @@ export const services: Services = {
     buildings: async () => {
       if (!USE_HTTP_API) return wait(localAdapter.buildings.list());
       const response = await apiJson<unknown>("/api/map/buildings");
-      if (!Array.isArray(response)) throw new Error("Backend returned a malformed buildings response.");
+      if (!Array.isArray(response)) throw new InvalidResponseError("Backend returned a malformed buildings response.");
       return response.map((building) => normalizeBackendMapBuilding(building as BackendMapBuilding));
     },
 
     removeBuilding: async (id) => {
       if (USE_HTTP_API) {
         const buildingId = Number(id);
-        if (!Number.isInteger(buildingId)) throw new Error(`Cannot delete Building "${id}". Invalid database ID.`);
+        if (!Number.isInteger(buildingId)) throw unsavedRecordError("building", id);
         await apiJson<unknown>(`/api/map/buildings/${buildingId}`, { method: "DELETE" });
         return;
       }
@@ -1673,7 +1762,7 @@ export const services: Services = {
         return clone(node);
       }
       const nodeId = Number(node.id);
-      if (!Number.isInteger(nodeId)) throw new Error(`Cannot update Route Node "${node.id}". Invalid database ID.`);
+      if (!Number.isInteger(nodeId)) throw unsavedRecordError("route node", node.id);
       const response = await apiJson<{ route_node: BackendRouteNode }>(`/api/route-nodes/${nodeId}`, {
         method: "PUT",
         body: JSON.stringify(serializeRouteNode(node)),
@@ -1688,7 +1777,7 @@ export const services: Services = {
         return;
       }
       const nodeId = Number(id);
-      if (!Number.isInteger(nodeId)) throw new Error(`Cannot delete Route Node "${id}". Invalid database ID.`);
+      if (!Number.isInteger(nodeId)) throw unsavedRecordError("route node", id);
       await apiJson<unknown>(`/api/route-nodes/${nodeId}`, { method: "DELETE" });
     },
 
@@ -1721,7 +1810,7 @@ export const services: Services = {
         const savedNode = existingNodeId
           ? mapNodes.find((item: { id: string; }) => item.id === existingNodeId)
           : node ? { ...node, id: `node-${Date.now()}` } : undefined;
-        if (!savedNode) throw new Error("Route Node is unavailable.");
+        if (!savedNode) throw new Error("The new route node couldn't be found after saving. Reload the map to check it.");
         const savedPaths = replacements.map((pathway, index) => ({ ...pathway, id: `pathway-${Date.now()}-${index}` })) as [Pathway, Pathway];
         if (!existingNodeId) routeNodes.push(savedNode);
         const original = pathways.find((item) => item.id === pathwayId);
@@ -1730,7 +1819,7 @@ export const services: Services = {
         return { node: clone(savedNode), pathways: clone(savedPaths) };
       }
       const id = Number(pathwayId);
-      if (!Number.isInteger(id)) throw new Error("Pathway must be saved before conversion.");
+      if (!Number.isInteger(id)) throw new Error("Save the pathway before converting this point.");
       const response = await apiJson<{ route_node: BackendRouteNode; pathways: BackendPathway[] }>(`/api/pathways/${id}/convert-point`, {
         method: "POST",
         body: JSON.stringify({
@@ -1748,7 +1837,7 @@ export const services: Services = {
           })),
         }),
       });
-      if (response.pathways.length !== 2) throw new Error("Backend returned an incomplete Pathway split.");
+      if (response.pathways.length !== 2) throw new InvalidResponseError("Backend returned an incomplete Pathway split.");
       return {
         node: normalizeBackendRouteNode(response.route_node),
         pathways: response.pathways.map((raw) => normalizeBackendPathway(raw, raw.path_points ?? [])) as [Pathway, Pathway],
@@ -1762,7 +1851,7 @@ export const services: Services = {
         return clone(pathway);
       }
       const pathwayId = Number(pathway.id);
-      if (!Number.isInteger(pathwayId)) throw new Error(`Cannot update Pathway "${pathway.id}". Invalid database ID.`);
+      if (!Number.isInteger(pathwayId)) throw unsavedRecordError("pathway", pathway.id);
       const response = await apiJson<{ pathway: BackendPathway }>(`/api/pathways/${pathwayId}`, {
         method: "PUT",
         body: JSON.stringify(serializePathway(pathway)),
@@ -1778,17 +1867,17 @@ export const services: Services = {
         return;
       }
       const pathwayId = Number(id);
-      if (!Number.isInteger(pathwayId)) throw new Error(`Cannot delete Pathway "${id}". Invalid database ID.`);
+      if (!Number.isInteger(pathwayId)) throw unsavedRecordError("pathway", id);
       await apiJson<unknown>(`/api/pathways/${pathwayId}`, { method: "DELETE" });
     },
 
     replacePathPoints: async (pathwayId, points) => {
       if (!USE_HTTP_API) return;
       const numericPathwayId = Number(pathwayId);
-      if (!Number.isInteger(numericPathwayId)) throw new Error(`Cannot persist Path Points for Pathway "${pathwayId}". Invalid database ID.`);
+      if (!Number.isInteger(numericPathwayId)) throw unsavedRecordError("pathway", pathwayId);
       try {
         const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
-        if (!Array.isArray(existing.path_points)) throw new Error("Backend returned a malformed Path Point response.");
+        if (!Array.isArray(existing.path_points)) throw new InvalidResponseError("Backend returned a malformed Path Point response.");
         const currentPoints = existing.path_points
           .filter((point) => point.pathway_id === numericPathwayId)
           .sort((left, right) => left.sequence_no - right.sequence_no);

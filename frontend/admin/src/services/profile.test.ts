@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createProfileService, supportsAlternativeEmail, type BackupSchedule } from './profile';
 import { createLocalAdapter } from './localAdapter';
-import { PasswordConfirmationRequiredError } from './errors';
+import { InvalidResponseError, PasswordConfirmationRequiredError } from './errors';
 
 it('keeps renamed fixture credentials and password changes in the current fixture session', async () => {
   const fixture = createLocalAdapter({ locations: [] }, null);
@@ -50,7 +50,11 @@ it('sends authenticated operations through the proposed endpoint contract', asyn
 it('rejects unsupported roles and propagates server errors instead of fixture fallback', async () => {
   const request = vi.fn().mockResolvedValue({ id: '1', username: 'admin', email: 'admin@example.com', role: 'owner' });
   const service = createProfileService(request);
-  await expect(service.get()).rejects.toThrow(/unavailable/);
+  await expect(service.get()).rejects.toMatchObject({
+    kind: 'invalid_response',
+    message: "Your profile couldn't be loaded. Please try again.",
+    detail: expect.stringContaining('missing the email or account role'),
+  });
   request.mockRejectedValue(new Error('Superadmin access required'));
   await expect(service.createBackup()).rejects.toThrow('Superadmin access required');
   expect(service.isFixture).toBe(false);
@@ -58,7 +62,7 @@ it('rejects unsupported roles and propagates server errors instead of fixture fa
 
 it('does not claim a malformed job response succeeded', async () => {
   const service = createProfileService(vi.fn().mockResolvedValue({ success: true }));
-  await expect(service.createBackup()).rejects.toThrow();
+  await expect(service.createBackup()).rejects.toBeInstanceOf(InvalidResponseError);
 });
 
 it('sends the alternative email and password to PATCH /api/profile and reads the alternative email back', async () => {
@@ -239,7 +243,7 @@ it('checks the password for a fixture download and returns a clearly labelled de
   const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob!); });
   expect(text).toContain('DEMO FILE');
   expect(audit).toHaveBeenCalledWith('Downloaded Backup', backup.createdAt);
-  await expect(service.download('missing', 'password123')).rejects.toThrow('Backup is unavailable.');
+  await expect(service.download('missing', 'password123')).rejects.toThrow('That backup is no longer available. Reload the page.');
 });
 
 it('deletes a fixture backup only after the password was confirmed, and not while a job runs', async () => {
@@ -259,7 +263,7 @@ it('deletes a fixture backup only after the password was confirmed, and not whil
   await service.remove(backup.id);
   expect((await service.history()).items.map((item) => item.id)).not.toContain(backup.id);
   expect(audit).toHaveBeenCalledWith('Deleted Backup', backup.createdAt);
-  await expect(service.remove(backup.id)).rejects.toThrow('Backup is unavailable.');
+  await expect(service.remove(backup.id)).rejects.toThrow('That backup is no longer available. Reload the page.');
 });
 
 it('saves the fixture schedule, validates it, audits the change, and applies retention to new backups', async () => {

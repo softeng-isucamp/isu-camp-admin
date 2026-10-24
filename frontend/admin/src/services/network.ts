@@ -1,5 +1,6 @@
 import type { Building as LegacyBuilding, Pathway as LegacyPathway, RouteNode as LegacyRouteNode } from "../types";
 import { normalizePathwayLifecycleStatus, normalizePathwayWayType, PATHWAY_WAY_TYPES } from "../types";
+import { InvalidResponseError } from "./errors";
 import { geometryOnCampus, type MapPoint } from "../features/map/campusBoundary";
 
 export type NetworkStatus = "active" | "inactive";
@@ -128,29 +129,29 @@ export const validatePathway = (
   if (!pathway.type?.trim()) throw new Error("Pathway type is required.");
   if (!pathway.direction) throw new Error("Pathway direction is required.");
   if (!pathway.status) throw new Error("Pathway lifecycle status is required.");
-  if (pathway.direction !== "two_way" && pathway.direction !== "one_way") throw new Error("Pathway direction must be two_way or one_way.");
-  if (pathway.status !== "active" && pathway.status !== "closed") throw new Error("Pathway lifecycle status must be active or closed.");
-  if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error("At least one valid Allowed mode is required.");
-  if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error("Walkways cannot allow Vehicle mode.");
+  if (pathway.direction !== "two_way" && pathway.direction !== "one_way") throw new Error("Choose a direction: one-way or two-way.");
+  if (pathway.status !== "active" && pathway.status !== "closed") throw new Error("Choose a status: active or closed.");
+  if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error("Choose at least one allowed mode: walking or vehicle.");
+  if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error("Walkways can't allow vehicles. Choose Road or remove Vehicle.");
   if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) {
-    throw new Error("Pathway Way type must use the fixed vocabulary: Walkway or Road.");
+    throw new Error("Choose a way type: Walkway or Road.");
   }
   const source = snapshot.routeNodes.find((node) => node.id === pathway.sourceNodeId);
   const destination = snapshot.routeNodes.find((node) => node.id === pathway.destinationNodeId);
-  if (!source || !destination) throw new Error("Pathway endpoints must reference existing Route Nodes.");
+  if (!source || !destination) throw new Error("One of the selected route nodes no longer exists. Reload the map and choose two route nodes.");
   if (source.status !== "active" || destination.status !== "active") {
-    throw new Error("Pathway endpoints must reference active Route Nodes.");
+    throw new Error("Select two active route nodes to connect this pathway.");
   }
   if (pathway.sourceNodeId === pathway.destinationNodeId) {
-    throw new Error("Pathway endpoints must be distinct; self-links are not allowed.");
+    throw new Error("A pathway must connect two different route nodes.");
   }
   const duplicate = snapshot.pathways.find((candidate) =>
     candidate.id !== (options.existingPathwayId ?? pathway.id) &&
     pathwayKey(candidate.sourceNodeId, candidate.destinationNodeId) === pathwayKey(pathway.sourceNodeId, pathway.destinationNodeId),
   );
-  if (duplicate) throw new Error(`Pathway duplicates the physical connection already used by ${duplicate.name}.`);
+  if (duplicate) throw new Error(`These route nodes are already connected by ${duplicate.name}. Edit that pathway instead.`);
   pathway.pathSequence.points.forEach((point) => {
-    if (!coordinate(point)) throw new Error("Every Path Point must contain valid latitude and longitude coordinates.");
+    if (!coordinate(point)) throw new Error("One of the pathway's points has an invalid position. Redraw that point and try again.");
   });
   if (options.campusBoundary) {
     const geometry = [
@@ -159,7 +160,7 @@ export const validatePathway = (
       { latitude: destination.latitude, longitude: destination.longitude },
     ].map((point) => [point.latitude, point.longitude] as MapPoint);
     if (!geometryOnCampus(geometry, options.campusBoundary)) {
-      throw new Error("Pathway geometry must remain inside the ISU Echague campus boundary.");
+      throw new Error("Keep the pathway inside the ISU Echague campus boundary.");
     }
   }
 };
@@ -205,28 +206,28 @@ export const validateNetworkSnapshot = (snapshot: NetworkSnapshot): void => {
   const nodeIds = new Set(snapshot.routeNodes.map((node) => node.id));
   const buildingIds = new Set(snapshot.buildings.map((building) => building.id));
   snapshot.routeNodes.forEach((node) => {
-    if (!coordinate({ latitude: node.latitude, longitude: node.longitude })) throw new Error(`Invalid coordinates for Route Node ${node.id}.`);
-    if (node.type !== "entrance" && node.buildingId !== null) throw new Error(`Only Entrance Route Nodes may reference a Building.`);
-    if (node.buildingId !== null && !buildingIds.has(node.buildingId)) throw new Error(`Building ${node.buildingId} was not found.`);
+    if (!coordinate({ latitude: node.latitude, longitude: node.longitude })) throw new InvalidResponseError(`Invalid coordinates for Route Node ${node.id}.`);
+    if (node.type !== "entrance" && node.buildingId !== null) throw new InvalidResponseError(`Only Entrance Route Nodes may reference a Building.`);
+    if (node.buildingId !== null && !buildingIds.has(node.buildingId)) throw new InvalidResponseError(`Building ${node.buildingId} was not found.`);
   });
   snapshot.buildings.forEach((building) => building.geometry?.forEach((point) => {
-    if (!coordinate(point)) throw new Error(`Invalid geometry for Building ${building.id}.`);
+    if (!coordinate(point)) throw new InvalidResponseError(`Invalid geometry for Building ${building.id}.`);
   }));
   const connections = new Set<string>();
   snapshot.pathways.forEach((pathway) => {
-    if (!pathway.name.trim()) throw new Error(`Pathway ${pathway.id} must have a name.`);
-    if (!pathway.type?.trim()) throw new Error(`Pathway ${pathway.id} must have a type.`);
-    if (!pathway.direction) throw new Error(`Pathway ${pathway.id} must have a direction.`);
-    if (pathway.status !== "active" && pathway.status !== "closed") throw new Error(`Pathway ${pathway.id} must have an active or closed lifecycle status.`);
-    if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new Error(`Pathway ${pathway.id} must allow at least one valid travel mode.`);
-    if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new Error(`Pathway ${pathway.id} cannot allow Vehicle mode because it is a Walkway.`);
-    if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) throw new Error(`Pathway ${pathway.id} has an unsupported Way type.`);
-    if (!nodeIds.has(pathway.sourceNodeId) || !nodeIds.has(pathway.destinationNodeId)) throw new Error(`Pathway ${pathway.id} references a missing Route Node.`);
-    if (pathway.sourceNodeId === pathway.destinationNodeId) throw new Error(`Pathway endpoints must be distinct.`);
+    if (!pathway.name.trim()) throw new InvalidResponseError(`Pathway ${pathway.id} must have a name.`);
+    if (!pathway.type?.trim()) throw new InvalidResponseError(`Pathway ${pathway.id} must have a type.`);
+    if (!pathway.direction) throw new InvalidResponseError(`Pathway ${pathway.id} must have a direction.`);
+    if (pathway.status !== "active" && pathway.status !== "closed") throw new InvalidResponseError(`Pathway ${pathway.id} must have an active or closed lifecycle status.`);
+    if (!pathway.allowedModes?.length || pathway.allowedModes.some((mode) => mode !== "walking" && mode !== "vehicle")) throw new InvalidResponseError(`Pathway ${pathway.id} must allow at least one valid travel mode.`);
+    if (pathway.type === "Walkway" && pathway.allowedModes.includes("vehicle")) throw new InvalidResponseError(`Pathway ${pathway.id} cannot allow Vehicle mode because it is a Walkway.`);
+    if (!PATHWAY_WAY_TYPES.includes(pathway.type as typeof PATHWAY_WAY_TYPES[number])) throw new InvalidResponseError(`Pathway ${pathway.id} has an unsupported Way type.`);
+    if (!nodeIds.has(pathway.sourceNodeId) || !nodeIds.has(pathway.destinationNodeId)) throw new InvalidResponseError(`Pathway ${pathway.id} references a missing Route Node.`);
+    if (pathway.sourceNodeId === pathway.destinationNodeId) throw new InvalidResponseError(`Pathway endpoints must be distinct.`);
     const key = pathwayKey(pathway.sourceNodeId, pathway.destinationNodeId);
-    if (connections.has(key)) throw new Error(`Pathway ${pathway.id} duplicates an existing physical connection.`);
+    if (connections.has(key)) throw new InvalidResponseError(`Pathway ${pathway.id} duplicates an existing physical connection.`);
     connections.add(key);
-    pathway.pathSequence.points.forEach((point) => { if (!coordinate(point)) throw new Error(`Invalid Path Point in Pathway ${pathway.id}.`); });
+    pathway.pathSequence.points.forEach((point) => { if (!coordinate(point)) throw new InvalidResponseError(`Invalid Path Point in Pathway ${pathway.id}.`); });
   });
 };
 
@@ -352,26 +353,26 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
   const setPathwayStatus = (id: string, status: PathwayStatus): Pathway => {
     const current = read();
     const pathway = current.pathways.find((candidate) => candidate.id === id);
-    if (!pathway) throw new Error("Pathway not found.");
+    if (!pathway) throw new Error("That pathway no longer exists. Reload the map.");
     if (status === "active") validatePathway({ ...pathway, status }, current, { existingPathwayId: id });
     pathway.status = status;
     return write(current).pathways.find((candidate) => candidate.id === id)!;
   };
 
   const removePathway = (id: string, confirmed = false): void => {
-    if (!confirmed) throw new Error("Deleting a Pathway requires explicit confirmation.");
+    if (!confirmed) throw new Error("Confirm the deletion before removing this pathway.");
     const current = read();
     const index = current.pathways.findIndex((candidate) => candidate.id === id);
-    if (index < 0) throw new Error("Pathway not found.");
+    if (index < 0) throw new Error("That pathway no longer exists. Reload the map.");
     current.pathways.splice(index, 1);
     write(current);
   };
 
   const associateEntrance = (nodeId: string, buildingId: string): RouteNode => {
     const current = read();
-    if (!current.buildings.some((building) => building.id === buildingId)) throw new Error("Building not found.");
+    if (!current.buildings.some((building) => building.id === buildingId)) throw new Error("That building no longer exists. Reload the map.");
     const node = current.routeNodes.find((candidate) => candidate.id === nodeId);
-    if (!node) throw new Error("Route Node not found.");
+    if (!node) throw new Error("That route node no longer exists. Reload the map.");
     const next: EntranceRouteNode = { ...node, type: "entrance", buildingId } as EntranceRouteNode;
     const index = current.routeNodes.findIndex((candidate) => candidate.id === nodeId);
     current.routeNodes[index] = next;
@@ -381,7 +382,7 @@ export const createCanonicalNetworkStore = (seed: LegacyNetworkData, storage: St
   const clearEntranceAssociation = (nodeId: string): RouteNode => {
     const current = read();
     const node = current.routeNodes.find((candidate) => candidate.id === nodeId);
-    if (!node) throw new Error("Route Node not found.");
+    if (!node) throw new Error("That route node no longer exists. Reload the map.");
     const next: BaseRouteNode = { ...node, type: "access_point", buildingId: null } as BaseRouteNode;
     const index = current.routeNodes.findIndex((candidate) => candidate.id === nodeId);
     current.routeNodes[index] = next;

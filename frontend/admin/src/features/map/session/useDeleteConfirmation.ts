@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { services } from "../../../services/api";
 import { usePasswordConfirmation } from "../../auth/PasswordConfirmation";
+import { errorMessage } from "../../../services/errors";
 import type { DeleteConfirmation } from "../DeleteConfirmationModal";
 import type { MapOverlay } from "./useMapOverlay";
 
@@ -42,7 +43,7 @@ export function useDeleteConfirmation({ overlay, refreshMapData, onError, onDele
       onError("");
     } catch (cause) {
       if (passwordConfirmation.handleRejection(cause)) return;
-      onError(cause instanceof Error ? cause.message : `Failed to delete ${deleteConfirmation.name}. Retry when ready.`);
+      onError(errorMessage(cause, `${deleteConfirmation.name} couldn't be deleted. Please try again.`, { mutation: true }));
     } finally {
       setDeleting(false);
     }

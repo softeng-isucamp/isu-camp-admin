@@ -1,6 +1,7 @@
 import { FormEvent, useId, useState } from 'react';
 import { Button, Field, Modal, SelectField } from '../../components/UI';
 import { services } from '../../services/api';
+import { errorMessage } from '../../services/errors';
 import type { BackupSchedule } from '../../services/profile';
 import { DAYS } from './backupFormat';
 import { DialogFocus } from './DialogFocus';
@@ -25,7 +26,7 @@ export function ScheduleDialog({ initial, onClose, onSaved }: { initial: BackupS
       ? { enabled, frequency, day: frequency === 'weekly' ? day : null, time, timeZone: 'Asia/Manila', keep: keepCount }
       : { ...initial, enabled };
     try { onSaved(await services.profile.saveSchedule(next)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to save the schedule. Try again.'); setSaving(false); }
+    catch (cause) { setError(errorMessage(cause, "The schedule couldn't be saved. Please try again.", { mutation: true })); setSaving(false); }
   };
   return <DialogFocus busy={saving}><Modal title="Automatic backups" size="sm" onClose={() => { if (!saving) onClose(); }}>
     <form onSubmit={save} className="admin-form" aria-busy={saving}>

@@ -11,6 +11,7 @@ import {
 } from "./buildingFootprint";
 import type { WorkingOperation } from "../types";
 import type { WorkingSessionManager } from "../WorkingSessionManager";
+import { errorMessage } from "../../../services/errors";
 
 export interface BuildingFootprintContext {
   locations: readonly Location[];
@@ -133,7 +134,7 @@ export function createBuildingFootprintWorkflow(dependencies: {
         return {
           ok: false,
           reason: "persistence",
-          message: cause instanceof Error ? cause.message : "Building footprint could not be saved.",
+          message: errorMessage(cause, "The building outline couldn't be saved. Please try again.", { mutation: true }),
           fieldErrors: (cause as { fieldErrors?: Record<string, string> } | null)?.fieldErrors,
         };
       }

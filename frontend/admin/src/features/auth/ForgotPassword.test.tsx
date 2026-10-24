@@ -123,7 +123,7 @@ describe("forgot-password: email step", () => {
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to connect to the backend.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach the ISU-CAMP server. Check your connection and try again.");
   });
 
   it("counts a server rate limit down on the Send code button, with a number-free urgent alert", async () => {
