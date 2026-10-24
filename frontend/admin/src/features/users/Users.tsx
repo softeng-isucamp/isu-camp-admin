@@ -10,6 +10,7 @@ import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/acco
 import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
 import { AdministratorsPanel } from "./AdministratorsPanel";
+import { usePermissions } from "../auth/usePermissions";
 
 const rangeOptions = [{ id: "7d", name: "Last 7 days" }, { id: "30d", name: "Last 30 days" }, { id: "90d", name: "Last 90 days" }];
 const accountTypeOptions = accountTypes.map((type) => ({ id: type.key, name: type.label }));
@@ -21,8 +22,17 @@ function AppUserDirectory() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const feedback = useFeedback();
+  const { can } = usePermissions();
+  const canChangeStatus = can("changeUserStatus");
+  const canChangeStatusRef = useRef(canChangeStatus);
+  canChangeStatusRef.current = canChangeStatus;
   const [pendingDeactivation, setPendingDeactivation] = useState<UserAccount | null>(null);
   const [statusError, setStatusError] = useState("");
+  useEffect(() => {
+    if (canChangeStatus) return;
+    setPendingDeactivation(null);
+    setStatusError("");
+  }, [canChangeStatus]);
   const [searchParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [createdRange, setCreatedRange] = useState("all");
@@ -64,6 +74,7 @@ function AppUserDirectory() {
 
   /** Restoring access is harmless and immediate; revoking it asks first. */
   const changeStatus = (user: UserAccount) => {
+    if (!canChangeStatusRef.current) return;
     setActionMenuId(null);
     setStatusError("");
     if (user.status === "Inactive") setStatus.mutate({ user, status: "Active" });
@@ -134,7 +145,9 @@ function AppUserDirectory() {
                         <div className="row-action-menu" role="menu">
                           {/* An app account's details are the User App's, so
                               the portal offers what it owns: their recorded
-                              activity, and whether the account may sign in. */}
+                              activity, and whether the account may sign in
+                              (an administrator without that switch is only
+                              offered the activity). */}
                           <button
                             role="menuitem"
                             onClick={() => {
@@ -144,13 +157,15 @@ function AppUserDirectory() {
                           >
                             View activity
                           </button>
-                          <button
-                            role="menuitem"
-                            disabled={setStatus.isPending}
-                            onClick={() => changeStatus(user)}
-                          >
-                            {user.status === "Active" ? "Deactivate account" : "Activate account"}
-                          </button>
+                          {can("changeUserStatus") && (
+                            <button
+                              role="menuitem"
+                              disabled={setStatus.isPending}
+                              onClick={() => changeStatus(user)}
+                            >
+                              {user.status === "Active" ? "Deactivate account" : "Activate account"}
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -166,7 +181,7 @@ function AppUserDirectory() {
         <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} />
       </Card>
 
-      {pendingDeactivation && (
+      {pendingDeactivation && canChangeStatus && (
         <Modal
           title="Deactivate this account?"
           subtitle="The account is kept, but it cannot sign in to the User App."
@@ -189,7 +204,9 @@ function AppUserDirectory() {
             </Button>
             <Button
               loading={setStatus.isPending}
-              onClick={() => setStatus.mutate({ user: pendingDeactivation, status: "Inactive" })}
+              onClick={() => {
+                if (canChangeStatusRef.current) setStatus.mutate({ user: pendingDeactivation, status: "Inactive" });
+              }}
             >
               {setStatus.isPending ? "Deactivating…" : "Deactivate Account"}
             </Button>
@@ -201,7 +218,17 @@ function AppUserDirectory() {
 }
 
 export function Users() {
-  const [tab, setTab] = useState<DirectoryTab>("app");
+  const { isSuperadmin } = usePermissions();
+  const adminFeedback = useFeedback();
+  // `?tab=admins` opens the Administrators tab so the link can be shared. The tab is a superadmin's:
+  // anyone else lands on App Users, whatever the address says.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: DirectoryTab = isSuperadmin && searchParams.get("tab") === "admins" ? "admins" : "app";
+  const setTab = (next: DirectoryTab) => setSearchParams((params) => {
+    const updated = new URLSearchParams(params);
+    updated.set("tab", next);
+    return updated;
+  }, { replace: true });
 
   return (
     <div className="page users-page">
@@ -218,12 +245,15 @@ export function Users() {
           <button className={tab === "app" ? "active" : ""} aria-pressed={tab === "app"} onClick={() => setTab("app")}>
             App Users
           </button>
-          <button className={tab === "admins" ? "active" : ""} aria-pressed={tab === "admins"} onClick={() => setTab("admins")}>
-            Administrators
-          </button>
+          {isSuperadmin && (
+            <button className={tab === "admins" ? "active" : ""} aria-pressed={tab === "admins"} onClick={() => setTab("admins")}>
+              Administrators
+            </button>
+          )}
         </div>
-        {tab === "admins" && <AdministratorsPanel />}
+        {tab === "admins" && <AdministratorsPanel feedback={adminFeedback} />}
       </Card>
+      <FeedbackStack messages={adminFeedback.messages} onDismiss={adminFeedback.dismiss} />
 
       {tab === "app" && <AppUserDirectory />}
     </div>

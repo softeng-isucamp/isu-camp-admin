@@ -26,6 +26,7 @@ import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { ParentBuildingField } from "./ParentBuildingField";
+import { usePermissions } from "../auth/usePermissions";
 
 /** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
 const keyParam = (params: URLSearchParams) => {
@@ -76,6 +77,12 @@ export function Locations() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeLocation = useLocation();
+  const { can } = usePermissions();
+  const canAdd = can("add");
+  const canEdit = can("edit");
+  const canDelete = can("delete");
+  const canRef = useRef(can);
+  canRef.current = can;
 
   useEffect(() => {
     const failure = new URLSearchParams(window.location.search).get(
@@ -110,6 +117,8 @@ export function Locations() {
   const [dialog, setDialog] = useState<
     "add" | "edit" | "history" | "remove" | null
   >(null);
+  const dialogRef = useRef(dialog);
+  dialogRef.current = dialog;
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -162,6 +171,9 @@ export function Locations() {
 
   const activeOverlay = success ? "success" : dialog;
   const openDialog = (next: NonNullable<typeof dialog>) => {
+    if ((next === "add" && !canRef.current("add")) ||
+        (next === "edit" && !canRef.current("edit")) ||
+        (next === "remove" && !canRef.current("delete"))) return;
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setDialog(next);
   };
@@ -174,6 +186,18 @@ export function Locations() {
     setSuccess(null);
     passwordConfirmation.reset();
   };
+
+  useEffect(() => {
+    if ((dialog !== "add" || canAdd) &&
+        (dialog !== "edit" || canEdit) &&
+        (dialog !== "remove" || canDelete)) return;
+    // Revocation also closes a delete that is waiting for password confirmation.
+    photoLoadSequence.current += 1;
+    releasePhotoPreviews();
+    setPhotos([]);
+    setDialog(null);
+    passwordConfirmation.reset();
+  }, [dialog, canAdd, canEdit, canDelete]);
 
   useEffect(() => {
     if (!activeOverlay) return;
@@ -276,7 +300,8 @@ export function Locations() {
 
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
-    if (params.get("add") !== "indoor") {
+    // The hand-off from the map opens the Add form, so it needs Add like the button does.
+    if (params.get("add") !== "indoor" || !canAdd) {
       processedIndoorHandoffRef.current = null;
       return;
     }
@@ -302,7 +327,7 @@ export function Locations() {
     setFieldErrors([]);
     setError("");
     openDialog("add");
-  }, [allLocations, routeLocation.search]);
+  }, [allLocations, routeLocation.search, canAdd]);
   const buildingOptions = allLocations.filter(isLocationContainer);
   const buildingsById = new Map(allLocations.filter(isLocationContainer).map((item) => [item.id, item]));
   const floors = useMemo(() => {
@@ -548,6 +573,8 @@ export function Locations() {
   };
 
   const save = async (options: { refreshAfterSave?: boolean } = {}): Promise<Location | null> => {
+    if ((dialog !== "add" && dialog !== "edit") || dialogRef.current !== dialog ||
+        !canRef.current(dialog === "add" ? "add" : "edit")) return null;
     setError("");
     setFieldErrors([]);
     const adding = dialog === "add";
@@ -578,9 +605,11 @@ export function Locations() {
       if (adding && API_MODE === "local" && handoffParent && !directory?.some((item) => item.id === handoffParent.id)) {
         await services.locations.save(handoffParent);
       }
+      if (dialogRef.current !== dialog || !canRef.current(adding ? "add" : "edit")) return null;
       const gallery = !adding && (loadingPhotos || photoLoadFailed) ? undefined : photos;
       let saved = await services.locations.save(normalized, gallery);
       if (isChildType(saved.type) && saved.parentId && normalized.lat !== null && normalized.lng !== null) {
+        if (dialogRef.current !== dialog || !canRef.current(adding ? "add" : "edit")) return null;
         saved = await services.locations.saveIndoorPosition({
           id: saved.id,
           buildingId: saved.parentId,
@@ -626,8 +655,9 @@ export function Locations() {
     if (saved?.parentId) navigate(`/map-editor?indoorLocation=${encodeURIComponent(saved.id)}`);
   };
 
+  const indoorPositionAction = dialog === "edit" && selected?.positioned ? "edit" : "add";
   const pickIndoorLocationOnMap = () => {
-    if (!isChildType(draft.type)) return;
+    if (!isChildType(draft.type) || !canRef.current(indoorPositionAction) || dialogRef.current !== dialog) return;
     if (dialog === "edit" && selected) {
       closeOverlay();
       navigate(`/map-editor?indoorLocation=${encodeURIComponent(selected.id)}&place=1`);
@@ -638,10 +668,11 @@ export function Locations() {
   };
 
   const remove = async () => {
-    if (!selected || deleting) return;
+    if (!selected || deleting || dialogRef.current !== "remove" || !canRef.current("delete")) return;
     setError("");
     // A permanent delete is re-authenticated: the signed-in admin retypes their password.
     if (!await passwordConfirmation.confirm()) return;
+    if (dialogRef.current !== "remove" || !canRef.current("delete")) return;
     setDeleting(true);
     try {
       await services.locations.remove(selected.id, backendLocationType(selected));
@@ -852,6 +883,7 @@ export function Locations() {
               flexWrap: "wrap",
             }}
           >
+            {can("add") && (
             <Button
               style={{
                 height: "46px",
@@ -878,6 +910,7 @@ export function Locations() {
             >
               ＋ Add Location
             </Button>
+            )}
           </div>
         </div>
       </Card>
@@ -1097,7 +1130,7 @@ export function Locations() {
                           >
                             {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                           </button>
-                          {isBuilding(item) && (
+                          {isBuilding(item) && can("add") && (
                             <button
                               role="menuitem"
                               style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1106,6 +1139,7 @@ export function Locations() {
                               ＋ Add room to this building
                             </button>
                           )}
+                          {can("edit") && (
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1116,6 +1150,7 @@ export function Locations() {
                           >
                             Edit location
                           </button>
+                          )}
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
@@ -1127,6 +1162,7 @@ export function Locations() {
                           >
                             View history
                           </button>
+                          {can("delete") && (
                           <button
                             role="menuitem"
                             style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
@@ -1138,6 +1174,7 @@ export function Locations() {
                           >
                             Delete location
                           </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1162,7 +1199,7 @@ export function Locations() {
       </Card>
 
       {/* Add / Edit Location Modal */}
-      {(dialog === "add" || dialog === "edit") && (
+      {((dialog === "add" && canAdd) || (dialog === "edit" && canEdit)) && (
         <div className="modal-backdrop locations-overlay">
           <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-form-title" aria-describedby="location-form-description" style={{ background: "#fff", borderRadius: "28px", overflow: "hidden", width: "720px", maxWidth: "95%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             {/* Top Green Banner */}
@@ -1223,7 +1260,7 @@ export function Locations() {
                 positioned={draft.positioned}
                 parentLabel={draft.building}
                 busy={saving}
-                onPickOnMap={isChildType(draft.type)
+                onPickOnMap={isChildType(draft.type) && can(indoorPositionAction)
                   ? pickIndoorLocationOnMap
                   : undefined}
               />
@@ -1304,7 +1341,7 @@ export function Locations() {
       )}
 
       {/* Delete Confirmation Modal */}
-      {dialog === "remove" && selected && (
+      {dialog === "remove" && canDelete && selected && (
         <div className="modal-backdrop locations-overlay">
           <div className="modal-card locations-modal-card" role="dialog" aria-modal="true" aria-labelledby="location-delete-title" aria-describedby="location-delete-description" style={{ background: "#fff", borderRadius: "28px", padding: "32px", width: "460px", maxWidth: "90%", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)" }}>
             <div style={{ display: "flex", gap: "16px", alignItems: "center", marginBottom: "16px" }}>

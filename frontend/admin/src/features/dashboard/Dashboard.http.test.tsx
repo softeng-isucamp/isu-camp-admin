@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { signInAs } from "../../test/session";
 import { Dashboard } from "./Dashboard";
 
 vi.mock("../../services/api", async (importOriginal) => ({
@@ -20,6 +21,7 @@ it("keeps HTTP Overview searches usable without the future analytics endpoint", 
     topSearched: [{ rank: "1", locationId: "Building:42", name: "Library", context: "Building", searches: 18 }],
   });
   const analytics = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+  signInAs("admin");
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter><Dashboard /></MemoryRouter>

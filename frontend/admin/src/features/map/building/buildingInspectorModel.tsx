@@ -1,5 +1,6 @@
 import { Badge } from "../../../components/UI";
 import { canContainLocations, isUnclassifiedPlace } from "../../../lib/locationPolicy";
+import type { CanPerform } from "../../../lib/permissions";
 import type { Location, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { SelectedBuildingView } from "./selectedBuilding";
@@ -21,6 +22,8 @@ interface BuildingInspectorOptions {
   contentLocations: Location[];
   nodes: RouteNode[];
   linkingEntrance: boolean;
+  /** What the signed-in administrator may do; an action they may not do is left out, not disabled. */
+  can: CanPerform;
   actions: BuildingInspectorActions;
 }
 
@@ -29,6 +32,7 @@ export function buildingInspectorModel({
   contentLocations: buildingContentLocations,
   nodes: currentNodes,
   linkingEntrance: linkingBuildingEntrance,
+  can,
   actions,
 }: BuildingInspectorOptions): InspectorCardModel {
   const {
@@ -55,7 +59,7 @@ export function buildingInspectorModel({
         <section aria-label="Building content" className="inspector-related-section">
           <div className="flex items-center justify-between gap-2">
             <h3>Building content</h3>
-            {canContain && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
+            {canContain && can("add") && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
           </div>
           <section aria-label="Building room directory">
             <div className="inspector-related-heading">
@@ -93,11 +97,14 @@ export function buildingInspectorModel({
               ? <div className="inspector-node-list">{selectedBuildingEntrances.map((node) => <div key={node.id} className="inspector-node-row"><span className="inspector-node-icon" aria-hidden="true">⌖</span><div><strong>{node.name}</strong><span>{node.lat.toFixed(5)}, {node.lng.toFixed(5)}</span></div><em>{node.status === "Inactive" ? "Inactive" : "Active"}</em></div>)}</div>
               : <p>No active Entrance Route Node.</p>}
           </section>
-          <div className="inspector-inline-actions">
-            <button type="button" onClick={actions.onAddEntrance}>＋ Add entrance</button>
-            <button type="button" onClick={actions.onToggleLinkEntrance}>↔ Link existing entrance</button>
-          </div>
-          {linkingBuildingEntrance && (
+          {/* Adding an entrance creates a Route Node (Add); linking an existing one changes it (Edit). */}
+          {(can("add") || can("edit")) && (
+            <div className="inspector-inline-actions">
+              {can("add") && <button type="button" onClick={actions.onAddEntrance}>＋ Add entrance</button>}
+              {can("edit") && <button type="button" onClick={actions.onToggleLinkEntrance}>↔ Link existing entrance</button>}
+            </div>
+          )}
+          {linkingBuildingEntrance && can("edit") && (
             <div className="inspector-related-group" aria-label="Existing Entrance Route Nodes">
               <strong>Select an existing Entrance Route Node</strong>
               {currentNodes.filter((node) => node.nodeType === "Entrance").map((node) => <button key={node.id} type="button" onClick={() => actions.onLinkEntrance(node)}>Link {node.name}</button>)}
@@ -107,17 +114,19 @@ export function buildingInspectorModel({
         </section>
       </>
     ),
-    primaryAction: {
+    // Reshaping and Edit Details are edits; indoor locations and entrances are additions (marking one counts as adding);
+    // linking an entrance changes an existing node (Edit).
+    primaryAction: can("edit") ? {
       label: "▱ Reshape Footprint",
       onSelect: actions.onReshape,
-    },
+    } : undefined,
     overflowActions: [
-      { label: "✎ Edit Details", onSelect: actions.onEditDetails },
-      ...(canContain ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
-      ...(canContain ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
-      { label: "＋ Add entrance", onSelect: actions.onAddEntrance },
-      { label: "↔ Link existing entrance", onSelect: actions.onLinkExistingEntrance },
-      { label: "🗑 Delete Building", tone: "danger" as const, onSelect: actions.onDelete },
+      ...(can("edit") ? [{ label: "✎ Edit Details", onSelect: actions.onEditDetails }] : []),
+      ...(canContain && can("add") ? [{ label: "＋ Add indoor location", onSelect: actions.onAddIndoorLocation }] : []),
+      ...(canContain && (can("add") || can("edit")) ? [{ label: "⌂ Mark indoor location", onSelect: actions.onMarkIndoorLocation }] : []),
+      ...(can("add") ? [{ label: "＋ Add entrance", onSelect: actions.onAddEntrance }] : []),
+      ...(can("edit") ? [{ label: "↔ Link existing entrance", onSelect: actions.onLinkExistingEntrance }] : []),
+      ...(can("delete") ? [{ label: "🗑 Delete Building", tone: "danger" as const, onSelect: actions.onDelete }] : []),
     ],
   } satisfies InspectorCardModel;
 }

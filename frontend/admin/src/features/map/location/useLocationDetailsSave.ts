@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import { usePermissions } from "../../auth/usePermissions";
 import { placeClassificationOf } from "../../../lib/locationPolicy";
 import { services } from "../../../services/api";
 import type { Building, Location } from "../../../types";
@@ -27,6 +29,15 @@ export interface LocationDetailsTarget {
  * staging it in the overlay, and journaling the property edit.
  */
 export function useLocationDetailsSave({ workingSession, overlay, refreshMapData }: UseLocationDetailsSaveOptions) {
+  const { can } = usePermissions();
+  const canEdit = useRef(can("edit"));
+  canEdit.current = can("edit");
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
   const recordPropertyOperation = (
     domain: SpatialDomain,
     entityId: string,
@@ -45,6 +56,7 @@ export function useLocationDetailsSave({ workingSession, overlay, refreshMapData
   };
 
   const save = async (target: LocationDetailsTarget, updated: Location, photos: Parameters<typeof services.locations.save>[1]) => {
+    if (!canEdit.current || !mounted.current) return false;
     const { building: selectedBuilding, buildingLocation: selectedBuildingLocation, location: selectedLocation } = target;
     if (selectedBuilding) {
       const savedLocation = typeof services.locations.save === "function"
@@ -64,6 +76,7 @@ export function useLocationDetailsSave({ workingSession, overlay, refreshMapData
       const savedRecord = typeof services.locations.save === "function"
         ? await services.locations.save(updated, photos)
         : updated;
+      if (!canEdit.current || !mounted.current) return false;
       const savedLocation = isIndoorLocation(updated) && updated.parentId && typeof services.locations.saveIndoorPosition === "function"
         ? await services.locations.saveIndoorPosition({
             id: savedRecord.id,
@@ -76,6 +89,7 @@ export function useLocationDetailsSave({ workingSession, overlay, refreshMapData
       recordPropertyOperation("Locations", selectedLocation.id, selectedLocation, savedLocation, `Edit ${selectedLocation.name} details`);
     }
     await refreshMapData();
+    return true;
   };
 
   return { save };

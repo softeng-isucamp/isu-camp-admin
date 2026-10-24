@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PasswordConfirmationRequiredError, SuperadminRequiredError } from "./errors";
 import { createLocalAdapter, type FixtureAccount } from "./localAdapter";
 import { createLocalAdmins } from "./localAdmins";
+import { allPermissions, viewOnlyPermissions } from "../lib/permissions";
 
 const PASSWORD = "password123";
 
@@ -51,15 +52,17 @@ describe("fixture sign-ins", () => {
   it("lets a newly added administrator sign in with the password they were given", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
+    await adapter.auth.confirmPassword(PASSWORD);
     await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     await adapter.auth.logout();
 
-    await expect(adapter.auth.login("admin_new", "A-long-enough-secret1")).resolves.toMatchObject({ role: "admin" });
+    await expect(adapter.auth.login("admin_new", "A-long-enough-secret1")).resolves.toMatchObject({ role: "admin", permissions: viewOnlyPermissions() });
   });
 
   it("gives a newly added administrator email settings they can change", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
+    await adapter.auth.confirmPassword(PASSWORD);
     await admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     await adapter.auth.logout();
     await adapter.auth.login("admin_new", "A-long-enough-secret1");
@@ -131,10 +134,10 @@ describe("fixture refusals for a plain administrator", () => {
     expect((await fixture.admins.list()).find((account) => account.id === "3")?.status).toBe("Active");
   });
 
-  it("refuses a removal", async () => {
-    const error = await failure(fixture.admins.remove("3"));
+  it("refuses a permissions change", async () => {
+    const error = await failure(fixture.admins.setPermissions("3", viewOnlyPermissions()));
     expect(error).toBeInstanceOf(SuperadminRequiredError);
-    expect(await fixture.admins.list()).toHaveLength(3);
+    expect(await fixture.admins.list()).toHaveLength(4);
   });
 
   it("refuses a role change", async () => {
@@ -149,16 +152,16 @@ describe("fixture refusals for a plain administrator", () => {
     expect(await failure(fixture.admins.setRole("2", "superadmin"))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.setStatus("missing", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.setStatus("2", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
-    expect(await failure(fixture.admins.remove("2"))).toBeInstanceOf(SuperadminRequiredError);
+    expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(SuperadminRequiredError);
   });
 
   it("records nothing for a refused request", async () => {
-    await failure(fixture.admins.remove("3"));
+    await failure(fixture.admins.setPermissions("3", viewOnlyPermissions()));
     expect(fixture.audit).not.toHaveBeenCalled();
   });
 
   it("still lists accounts and sends a reset code to any of them, a superadmin included", async () => {
-    expect(await fixture.admins.list()).toHaveLength(3);
+    expect(await fixture.admins.list()).toHaveLength(4);
     await expect(fixture.admins.sendPasswordReset("1")).resolves.toBe("A password reset code was sent to admin@isu.edu.ph.");
   });
 });
@@ -171,9 +174,12 @@ describe("fixture rules for a superadmin", () => {
     await fixture.adapter.auth.login("admin_justine", PASSWORD);
   });
 
-  it("adds a plain administrator", async () => {
+  it("adds a plain administrator, view only unless told otherwise", async () => {
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
     const created = await fixture.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
-    expect(created).toMatchObject({ username: "admin_new", role: "admin", status: "Active", isCurrent: false });
+    expect(created).toMatchObject({
+      username: "admin_new", role: "admin", status: "Active", isCurrent: false, permissions: viewOnlyPermissions(),
+    });
   });
 
   it("adds a superadmin only after the password was confirmed, and says so before the account exists", async () => {
@@ -192,11 +198,17 @@ describe("fixture rules for a superadmin", () => {
     expect((await fixture.admins.list()).find((account) => account.username === "admin_boss")?.role).toBe("superadmin");
   });
 
-  it("needs no confirmation to add a plain administrator, whether the role is named or not", async () => {
-    await expect(fixture.admins.save({ username: "a_one", email: "a1@isu.edu.ph", password: "A-long-enough-secret1", role: "admin" }))
-      .resolves.toMatchObject({ role: "admin" });
-    await expect(fixture.admins.save({ username: "a_two", email: "a2@isu.edu.ph", password: "A-long-enough-secret1" }))
-      .resolves.toMatchObject({ role: "admin" });
+  it("asks for the password to add a plain administrator too, whether the role is named or not", async () => {
+    const draft = { username: "a_one", email: "a1@isu.edu.ph", password: "A-long-enough-secret1" };
+    const refusal = await failure(fixture.admins.save({ ...draft, role: "admin" }));
+    expect(refusal).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(refusal).toMatchObject({ message: "Confirm your password to add an administrator." });
+    expect(await failure(fixture.admins.save(draft))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(fixture.audit).not.toHaveBeenCalled();
+
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
+    await expect(fixture.admins.save({ ...draft, role: "admin" })).resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.save({ ...draft, username: "a_two", email: "a2@isu.edu.ph" })).resolves.toMatchObject({ role: "admin" });
   });
 
   it("forgets the confirmation when the account signs out", async () => {
@@ -220,37 +232,31 @@ describe("fixture rules for a superadmin", () => {
     expect(duplicate).toMatchObject({ fieldErrors: { username: "That username is already taken" } });
   });
 
-  it("deactivates, reactivates and removes another account", async () => {
+  it("deactivates and reactivates another account", async () => {
     await expect(fixture.admins.setStatus("2", "Inactive")).resolves.toMatchObject({ status: "Inactive" });
     await expect(fixture.admins.setStatus("2", "Active")).resolves.toMatchObject({ status: "Active" });
-    await fixture.adapter.auth.confirmPassword(PASSWORD);
-    await fixture.admins.remove("2");
-    expect((await fixture.admins.list()).map((account) => account.username)).not.toContain("admin_registrar");
   });
 
   it("treats another superadmin like any other account", async () => {
     await expect(fixture.admins.setStatus("3", "Inactive")).resolves.toMatchObject({ username: "admin_dean", status: "Inactive" });
-    await fixture.adapter.auth.confirmPassword(PASSWORD);
-    await fixture.admins.remove("3");
   });
 
-  it("refuses to deactivate or remove the signed-in account, with the server's messages", async () => {
-    await fixture.adapter.auth.confirmPassword(PASSWORD);
+  it("refuses to deactivate the signed-in account, with the server's message", async () => {
     expect(await failure(fixture.admins.setStatus("1", "Inactive"))).toMatchObject({
       message: "You cannot deactivate your own administrator account.",
-    });
-    expect(await failure(fixture.admins.remove("1"))).toMatchObject({
-      message: "You cannot remove your own administrator account.",
     });
   });
 
   it("follows the signed-in account: the demo superadmin's row is no longer special for someone else", async () => {
     await fixture.adapter.auth.login("admin_dean", PASSWORD);
-    await fixture.adapter.auth.confirmPassword(PASSWORD);
     await expect(fixture.admins.setStatus("1", "Inactive")).resolves.toMatchObject({ status: "Inactive" });
-    expect(await failure(fixture.admins.remove("3"))).toMatchObject({
-      message: "You cannot remove your own administrator account.",
+    expect(await failure(fixture.admins.setStatus("3", "Inactive"))).toMatchObject({
+      message: "You cannot deactivate your own administrator account.",
     });
+  });
+
+  it("no longer removes accounts: the service has no removal", () => {
+    expect(fixture.admins).not.toHaveProperty("remove");
   });
 });
 
@@ -338,10 +344,9 @@ describe("fixture last-superadmin rule", () => {
     await adapter.auth.confirmPassword(PASSWORD);
   });
 
-  it("refuses to demote, deactivate or remove the only active superadmin", async () => {
+  it("refuses to demote or deactivate the only active superadmin", async () => {
     expect(await failure(fixture.admins.setRole("3", "admin"))).toMatchObject({ message: LAST_SUPERADMIN });
     expect(await failure(fixture.admins.setStatus("3", "Inactive"))).toMatchObject({ message: LAST_SUPERADMIN });
-    expect(await failure(fixture.admins.remove("3"))).toMatchObject({ message: LAST_SUPERADMIN });
 
     const dean = (await fixture.admins.list()).find((account) => account.id === "3");
     expect(dean).toMatchObject({ role: "superadmin", status: "Active" });
@@ -364,7 +369,7 @@ describe("fixture last-superadmin rule", () => {
   });
 });
 
-describe("fixture password confirmation for role changes and removal", () => {
+describe("fixture password confirmation for role and permission changes", () => {
   let fixture: ReturnType<typeof setup>;
 
   beforeEach(async () => {
@@ -387,15 +392,15 @@ describe("fixture password confirmation for role changes and removal", () => {
     await expect(fixture.admins.setRole("2", "superadmin")).resolves.toMatchObject({ role: "superadmin" });
   });
 
-  it("asks for the password before a removal, in the delete wording", async () => {
-    const refusal = await failure(fixture.admins.remove("2"));
+  it("asks for the password before saving permissions, in their own words", async () => {
+    const refusal = await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()));
     expect(refusal).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(refusal).toMatchObject({ message: "Confirm your password to delete this record." });
-    expect((await fixture.admins.list()).map((account) => account.id)).toContain("2");
+    expect(refusal).toMatchObject({ message: "Confirm your password to change this administrator's permissions." });
+    expect((await fixture.admins.list()).find((account) => account.id === "2")?.permissions).toEqual(allPermissions());
     expect(fixture.audit).not.toHaveBeenCalled();
 
     await fixture.adapter.auth.confirmPassword(PASSWORD);
-    await expect(fixture.admins.remove("2")).resolves.toBeUndefined();
+    await expect(fixture.admins.setPermissions("2", viewOnlyPermissions())).resolves.toMatchObject({ permissions: viewOnlyPermissions() });
   });
 
   it("asks before it looks at the account, the role or who is asking", async () => {
@@ -403,15 +408,15 @@ describe("fixture password confirmation for role changes and removal", () => {
     expect(await failure(fixture.admins.setRole("2", "owner" as never))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setRole("1", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setRole("2", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.remove("missing"))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.remove("1"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setPermissions("missing", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setPermissions("1", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
 
   it("refuses a plain administrator outright, never with a password prompt", async () => {
     await fixture.adapter.auth.login("admin_registrar", PASSWORD);
 
     expect(await failure(fixture.admins.setRole("3", "admin"))).toBeInstanceOf(SuperadminRequiredError);
-    expect(await failure(fixture.admins.remove("3"))).toBeInstanceOf(SuperadminRequiredError);
+    expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(SuperadminRequiredError);
   });
 
   it("asks again once the five minutes are over", async () => {
@@ -422,7 +427,7 @@ describe("fixture password confirmation for role changes and removal", () => {
     vi.advanceTimersByTime(5 * 60 * 1000 + 1);
 
     expect(await failure(fixture.admins.setRole("2", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.remove("2"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
 
   it("does not ask for a status change, as the server does not", async () => {
@@ -434,7 +439,7 @@ describe("fixture password confirmation for role changes and removal", () => {
     await expect(fixture.adapter.auth.confirmPassword("wrong")).rejects.toThrow("Password is incorrect");
 
     expect(await failure(fixture.admins.setRole("2", "superadmin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.remove("2"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.save({
       username: "admin_boss", email: "boss@isu.edu.ph", password: "A-long-enough-secret1", role: "superadmin",
     }))).toBeInstanceOf(PasswordConfirmationRequiredError);
@@ -479,7 +484,7 @@ describe("fixture deactivated accounts", () => {
       ["status", () => fixture.admins.setStatus("2", "Inactive")],
       ["role", () => fixture.admins.setRole("2", "superadmin")],
       ["reset code", () => fixture.admins.sendPasswordReset("2")],
-      ["remove", () => fixture.admins.remove("2")],
+      ["permissions", () => fixture.admins.setPermissions("2", viewOnlyPermissions())],
     ];
     for (const [name, request] of requests) {
       await fixture.adapter.auth.login("admin_justine", PASSWORD);
@@ -491,7 +496,7 @@ describe("fixture deactivated accounts", () => {
 
       fixture.adapter.directory.accounts.find((account) => account.id === "1")!.status = "Active";
     }
-    expect((await (async () => { await fixture.adapter.auth.login("admin_justine", PASSWORD); return fixture.admins.list(); })()).length).toBe(3);
+    expect((await (async () => { await fixture.adapter.auth.login("admin_justine", PASSWORD); return fixture.admins.list(); })()).length).toBe(4);
     expect(fixture.audit).not.toHaveBeenCalled();
   });
 
@@ -510,6 +515,7 @@ describe("fixture validation of a new or edited account", () => {
   beforeEach(async () => {
     fixture = setup();
     await fixture.adapter.auth.login("admin_justine", PASSWORD);
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
   });
 
   it.each([
@@ -582,12 +588,104 @@ describe("fixture validation of a new or edited account", () => {
   });
 });
 
+describe("fixture administrator permissions", () => {
+  let fixture: ReturnType<typeof setup>;
+  const draft = { username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" };
+
+  beforeEach(async () => {
+    fixture = setup();
+    await fixture.adapter.auth.login("admin_justine", PASSWORD);
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
+  });
+
+  it("seeds the registrar with every switch on, the viewer with none, and superadmins with no switches", async () => {
+    const byName = Object.fromEntries((await fixture.admins.list()).map((account) => [account.username, account]));
+    expect(byName.admin_registrar.permissions).toEqual(allPermissions());
+    expect(byName.admin_viewer.permissions).toEqual(viewOnlyPermissions());
+    expect(byName.admin_justine).not.toHaveProperty("permissions");
+    expect(byName.admin_dean).not.toHaveProperty("permissions");
+  });
+
+  it("reports an administrator's own switches in their session, and none for a superadmin", async () => {
+    await expect(fixture.adapter.auth.me()).resolves.not.toHaveProperty("permissions");
+    await fixture.adapter.auth.login("admin_viewer", PASSWORD);
+    await expect(fixture.adapter.auth.me()).resolves.toMatchObject({ role: "admin", permissions: viewOnlyPermissions() });
+    await expect(fixture.adapter.auth.login("admin_registrar", PASSWORD)).resolves.toMatchObject({ permissions: allPermissions() });
+  });
+
+  it("adds an administrator with the switches chosen, and records it", async () => {
+    const chosen = { add: true, edit: false, delete: false, changeUserStatus: true };
+    await expect(fixture.admins.save({ ...draft, permissions: chosen })).resolves.toMatchObject({ role: "admin", permissions: chosen });
+    expect(fixture.audit).toHaveBeenCalledWith("Created Administrator", "admin_new", expect.any(String));
+  });
+
+  it("ignores switches sent for a superadmin, who has none", async () => {
+    const created = await fixture.admins.save({ ...draft, role: "superadmin", permissions: allPermissions() });
+    expect(created.role).toBe("superadmin");
+    expect(created).not.toHaveProperty("permissions");
+  });
+
+  it("refuses switches that are not a whole set of booleans, against the permissions field", async () => {
+    const error = await failure(fixture.admins.save({ ...draft, permissions: { add: true } as never }));
+    expect(error).toMatchObject({ fieldErrors: { permissions: expect.stringContaining("Permissions must be") } });
+    expect((await fixture.admins.list()).map((account) => account.username)).not.toContain("admin_new");
+  });
+
+  it("saves another administrator's permissions and records the change", async () => {
+    const next = { add: true, edit: true, delete: false, changeUserStatus: false };
+    await expect(fixture.admins.setPermissions("2", next)).resolves.toMatchObject({ username: "admin_registrar", permissions: next });
+    expect((await fixture.admins.list()).find((account) => account.id === "2")?.permissions).toEqual(next);
+    expect(fixture.audit).toHaveBeenCalledWith("Updated Administrator Permissions", "admin_registrar", "2");
+  });
+
+  it("takes effect on the administrator's next session read", async () => {
+    await fixture.admins.setPermissions("2", viewOnlyPermissions());
+    await fixture.adapter.auth.login("admin_registrar", PASSWORD);
+    await expect(fixture.adapter.auth.me()).resolves.toMatchObject({ permissions: viewOnlyPermissions() });
+  });
+
+  it("refuses to change one's own permissions and a superadmin's", async () => {
+    expect(await failure(fixture.admins.setPermissions("1", viewOnlyPermissions()))).toMatchObject({ message: "You cannot change your own permissions." });
+    expect(await failure(fixture.admins.setPermissions("3", viewOnlyPermissions()))).toMatchObject({
+      message: expect.stringContaining("Superadmins have every permission"),
+    });
+    expect(fixture.audit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a missing account and an incomplete set of switches", async () => {
+    expect(await failure(fixture.admins.setPermissions("missing", viewOnlyPermissions()))).toMatchObject({ message: "Administrator not found." });
+    expect(await failure(fixture.admins.setPermissions("2", { add: true } as never))).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
+  });
+
+  it("starts a demoted superadmin view only", async () => {
+    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin", permissions: viewOnlyPermissions() });
+  });
+
+  it("starts a demoted superadmin with the switches given, and refuses an incomplete set before demoting", async () => {
+    const given = { add: true, edit: false, delete: false, changeUserStatus: false };
+    expect(await failure(fixture.admins.setRole("3", "admin", { add: true } as never))).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
+    expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("superadmin");
+
+    await expect(fixture.admins.setRole("3", "admin", given)).resolves.toMatchObject({ permissions: given });
+  });
+
+  it("discards the switches when an administrator is promoted, and view-only comes back on a later demotion", async () => {
+    const promoted = await fixture.admins.setRole("2", "superadmin");
+    expect(promoted).not.toHaveProperty("permissions");
+    await expect(fixture.adapter.auth.login("admin_registrar", PASSWORD)).resolves.not.toHaveProperty("permissions");
+    await fixture.adapter.auth.login("admin_justine", PASSWORD);
+    await fixture.adapter.auth.confirmPassword(PASSWORD);
+    await expect(fixture.admins.setRole("2", "admin")).resolves.toMatchObject({ permissions: viewOnlyPermissions() });
+  });
+});
+
 describe("fixture session restore", () => {
   beforeEach(() => sessionStorage.clear());
 
   it("signs out a restored session whose account the fresh fixture does not have", async () => {
     const first = setup(sessionStorage);
     await first.adapter.auth.login("admin_justine", PASSWORD);
+    await first.adapter.auth.confirmPassword(PASSWORD);
     await first.admins.save({ username: "admin_new", email: "new@isu.edu.ph", password: "A-long-enough-secret1" });
     await first.adapter.auth.logout();
     await first.adapter.auth.login("admin_new", "A-long-enough-secret1");
@@ -783,12 +881,13 @@ describe("fixture shared email pool when adding an administrator", () => {
       message: "That email address is already in use",
       fieldErrors: { email: "That email address is already in use" },
     });
-    expect(await admins.list()).toHaveLength(3);
+    expect(await admins.list()).toHaveLength(4);
   });
 
   it("accepts a fresh address", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
+    await adapter.auth.confirmPassword(PASSWORD);
 
     await expect(add(admins, "fresh@isu.edu.ph")).resolves.toMatchObject({ email: "fresh@isu.edu.ph" });
   });
@@ -796,6 +895,7 @@ describe("fixture shared email pool when adding an administrator", () => {
   it("refuses a newly added address on the profile screen's alternative field too", async () => {
     const { adapter, admins } = setup();
     await adapter.auth.login("admin_justine", PASSWORD);
+    await adapter.auth.confirmPassword(PASSWORD);
     await add(admins, "fresh@isu.edu.ph");
 
     expect(await failure(adapter.auth.updateProfile({

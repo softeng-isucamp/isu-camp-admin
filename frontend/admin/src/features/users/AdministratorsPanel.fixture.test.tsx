@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
@@ -75,7 +75,7 @@ describe("Administrator accounts over the fixture backend", () => {
     expect((await services.admins.list()).find((account) => account.username === "admin_registrar")?.role).toBe("admin");
   });
 
-  it("adds a superadmin and an administrator, then removes the superadmin", async () => {
+  it("adds a superadmin, and offers no way to remove them", async () => {
     await openAdministrators();
 
     fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
@@ -88,11 +88,56 @@ describe("Administrator accounts over the fixture backend", () => {
     expect(await screen.findByText("admin_boss was added successfully.")).toBeInTheDocument();
 
     openRowMenu("admin_boss");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove administrator" }));
+    expect(screen.queryByRole("menuitem", { name: /remove/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit permissions" })).not.toBeInTheDocument();
+    expect(within(screen.getByText("admin_boss").closest("tr")!).getByText("All permissions")).toBeInTheDocument();
+  });
+
+  it("adds a view-only administrator by default, who then signs in with those switches", async () => {
+    await openAdministrators();
+
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_new" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
     typePassword();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Administrator" }));
-    expect(await screen.findByText("admin_boss was removed successfully.")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText("admin_boss")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+    expect(await screen.findByText("admin_new was added successfully.")).toBeInTheDocument();
+    expect(within(screen.getByText("admin_new").closest("tr")!).getByText("View only")).toBeInTheDocument();
+
+    await services.auth.logout();
+    await expect(services.auth.login("admin_new", "A-long-enough-secret1"))
+      .resolves.toMatchObject({ role: "admin", permissions: { add: false, edit: false, delete: false, changeUserStatus: false } });
+  });
+
+  it("saves another administrator's permissions after the password, and logs it", async () => {
+    await openAdministrators();
+
+    // The seeded view-only administrator.
+    openRowMenu("admin_viewer");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit permissions" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Delete/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Change app user status/ }));
+    typePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Save Permissions" }));
+
+    expect(await screen.findByText("admin_viewer's permissions were updated successfully.")).toBeInTheDocument();
+    expect(within(screen.getByText("admin_viewer").closest("tr")!).getByText("View + Delete, Change app user status")).toBeInTheDocument();
+    const logs = await services.logs.list("Admin", "admin_viewer");
+    expect(logs.items.map((entry) => entry.action)).toContain("Updated Administrator Permissions");
+  });
+
+  it("demotes a superadmin into the switches chosen in the dialog", async () => {
+    await openAdministrators();
+
+    openRowMenu("admin_dean");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Edit/ }));
+    typePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Make Administrator" }));
+
+    expect(await screen.findByText("admin_dean was demoted to administrator successfully.")).toBeInTheDocument();
+    expect(within(screen.getByText("admin_dean").closest("tr")!).getByText("View + Edit")).toBeInTheDocument();
   });
 });
 
@@ -117,6 +162,7 @@ describe("Add Administrator over the shared email pool", () => {
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin_duplicate" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: email } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "A-long-enough-secret1" } });
+    typePassword();
     fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
 
     const field = screen.getByLabelText("Email").closest(".field-group")!;

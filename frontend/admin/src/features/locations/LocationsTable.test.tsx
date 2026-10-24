@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,17 +6,23 @@ import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
 import { chooseFilterOption, filterOptionIds, filterOptionNames, selectedFilterOptionId } from "../../test/filterCombobox";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 
 function LocationRouteProbe() {
   const location = useLocation();
   return <output data-testid="location-route">{location.pathname}{location.search}</output>;
 }
 
-function renderLocations(initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"]) {
+function renderLocations(
+  initialEntries: Array<string | { pathname: string; search?: string; state?: unknown }> = ["/locations"],
+  session: Parameters<typeof signInAs> = ["admin"],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
-  const rendered = render(
+  signInAs(...session);
+  const view = () => (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
         <Locations />
@@ -24,7 +30,8 @@ function renderLocations(initialEntries: Array<string | { pathname: string; sear
       </MemoryRouter>
     </QueryClientProvider>
   );
-  return { ...rendered, queryClient };
+  const rendered = render(view());
+  return { ...rendered, queryClient, rerenderSession: () => rendered.rerender(view()) };
 }
 
 /** Deletes are re-authenticated: fill the open dialog's password prompt. */
@@ -1375,5 +1382,139 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       chooseFilterOption("FLOOR", "All Floors");
       expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Locations for a restricted administrator", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const building = { id: "perm-building", name: "Permission Probe Hall", code: "PERM-HALL", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false } as const;
+  const rowMenuItems = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${building.name}` }));
+    return within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent);
+  };
+
+  it.each([
+    [false, false, false],
+    [false, true, true],
+    [true, false, true],
+  ])("gates the marker handoff for positioned=%s and Add=%s", async (positioned, add, offered) => {
+    const room = { id: "pick-permission-room", name: "Marker Permission Room", code: "PICK-R", type: "Room" as const, parentId: building.id, building: building.name, floor: "Ground Floor", status: "Active" as const, lat: positioned ? 16.721 : null, lng: positioned ? 121.689 : null, positioned };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 50 });
+    renderLocations(["/locations?q=Marker%20Permission"], ["admin", { permissions: { ...viewOnlyPermissions(), edit: true, add } }]);
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${room.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const handoff = within(screen.getByRole("dialog", { name: "Edit Location" })).queryByRole("button", { name: "Pick on map" });
+    if (offered) expect(handoff).toBeInTheDocument();
+    else expect(handoff).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["add", "＋ Add room to this building", "Add Location"],
+    ["edit", "Edit location", "Edit Location"],
+    ["delete", "Delete location", "Delete location?"],
+  ] as const)("closes an open %s dialog when a refreshed session revokes its switch", async (action, menuItem, title) => {
+    await services.locations.save({ ...building });
+    const save = vi.spyOn(services.locations, "save");
+    const remove = vi.spyOn(services.locations, "remove");
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: title })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), [action]: false } });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(await rowMenuItems()).toContain("View history");
+
+    signInAs("admin", { permissions: allPermissions() });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps read-only history open when a refreshed session revokes all write switches", async () => {
+    await services.locations.save({ ...building });
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: "View history" }));
+    expect(screen.getByRole("dialog", { name: "Audit History" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: viewOnlyPermissions() });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: "Audit History" })).toBeInTheDocument();
+  });
+
+  it("does not delete after permission is revoked while password confirmation is pending", async () => {
+    await services.locations.save({ ...building });
+    let confirm!: () => void;
+    const confirmation = new Promise<void>((resolve) => { confirm = resolve; });
+    const confirmPassword = vi.spyOn(services.auth, "confirmPassword").mockReturnValue(confirmation);
+    const remove = vi.spyOn(services.locations, "remove");
+    const { rerenderSession } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: allPermissions() }]);
+    await rowMenuItems();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete location" }));
+    confirmDeletePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(confirmPassword).toHaveBeenCalledWith("password123");
+
+    signInAs("admin", { permissions: { ...allPermissions(), delete: false } });
+    rerenderSession();
+    await act(async () => { confirm(); await confirmation; });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("hides Add Location, Add room, Edit and Delete for a view-only administrator, keeping the view actions", async () => {
+    await services.locations.save({ ...building });
+    renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: viewOnlyPermissions() }]);
+
+    expect(await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add location/i })).not.toBeInTheDocument();
+    expect(await rowMenuItems()).toEqual(["Locate on map", "View history"]);
+  });
+
+  it("offers each row action only with its own switch", async () => {
+    await services.locations.save({ ...building });
+    for (const [key, expected] of [
+      ["add", ["Locate on map", "＋ Add room to this building", "View history"]],
+      ["edit", ["Locate on map", "Edit location", "View history"]],
+      ["delete", ["Locate on map", "View history", "Delete location"]],
+    ] as const) {
+      const { unmount } = renderLocations(["/locations?q=Permission%20Probe"], ["admin", { permissions: { ...viewOnlyPermissions(), [key]: true } }]);
+      expect(await rowMenuItems(), key).toEqual(expected);
+      unmount();
+    }
+  });
+
+  it("shows Add Location with the Add switch, and everything to a superadmin or an unreported session", async () => {
+    renderLocations(["/locations"], ["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+    cleanup();
+
+    renderLocations(["/locations"], ["superadmin", { permissions: viewOnlyPermissions() }]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+    cleanup();
+
+    renderLocations(["/locations"], ["admin"]);
+    expect(await screen.findByRole("button", { name: /add location/i })).toBeInTheDocument();
+  });
+
+  it("does not open the Add form from the map's indoor-location hand-off without the Add switch", async () => {
+    await services.locations.save({ ...building });
+    renderLocations([`/locations?q=Permission%20Probe&add=indoor&parentId=${building.id}`], ["admin", { permissions: { ...allPermissions(), add: false } }]);
+
+    await screen.findByRole("heading", { name: "Campus Locations" }, { timeout: 4000 });
+    await waitFor(() => expect(screen.getByText("Permission Probe Hall")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Add Location" })).not.toBeInTheDocument();
   });
 });

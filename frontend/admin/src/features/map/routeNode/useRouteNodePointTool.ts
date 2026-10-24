@@ -1,3 +1,4 @@
+import { usePermissions } from "../../auth/usePermissions";
 import { useMemo, useState } from "react";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
@@ -35,6 +36,7 @@ const isPlacingNodeType = (value: unknown): value is PlacingNodeType =>
  * owns editor mode and selection, and reacts to the saves' results.
  */
 export function useRouteNodePointTool({ workflow, overlay, saving, context, refreshMapData, onError, editorContext }: UseRouteNodePointToolOptions) {
+  const { can } = usePermissions();
   const [position, setPosition] = useState<MapPoint | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
   const [snapped, setSnapped] = useState(false);
@@ -64,6 +66,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
 
   /** Positions the provisional point from a map click. */
   const placeAt = (point: MapPoint) => {
+    if (!can(editorContext.mode === "move" ? "edit" : "add")) return;
     setPosition(point);
     setSnapped(false);
     setDraftDirty(true);
@@ -71,6 +74,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
 
   /** Positions the provisional point from a drag or a typed coordinate. */
   const editPosition = (point: MapPoint) => {
+    if (!can(editorContext.mode === "move" ? "edit" : "add")) return;
     setPosition(point);
     setDraftDirty(true);
   };
@@ -92,6 +96,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
   };
 
   const startMove = (node: RouteNode) => {
+    if (!can("edit")) return;
     setMovingId(node.id);
     const origin: MapPoint = [node.lat, node.lng];
     setMoveOrigin(origin);
@@ -103,6 +108,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
   };
 
   const updateMovePosition = (point: MapPoint, pointSnapped = false) => {
+    if (!can("edit")) return;
     setPosition(point);
     if (pointOnCampus(point, context.campusBoundary)) setLastValidMovePosition(point);
     setSnapped(pointSnapped);
@@ -134,6 +140,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
    * completed (the caller then returns to selection), or null otherwise.
    */
   const savePosition = async (): Promise<string | null> => {
+    if (!can("edit")) return null;
     if (!position) return null;
     if (!saving.beginSaving("position")) return null;
     let completedId: string | null = null;
@@ -177,6 +184,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
    * it was placed from, or null when nothing was placed.
    */
   const savePlacedNode = async (): Promise<{ node: RouteNode; draft: Omit<RouteNode, "id"> } | null> => {
+    if (!can("add")) return null;
     if (!position || !placingNodeName.trim()) return null;
     if (!saving.beginSaving("route-node")) return null;
     const draft: Omit<RouteNode, "id"> = {

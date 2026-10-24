@@ -1,4 +1,6 @@
+import { isPositionedLocation } from "./indoorLocations";
 import { Spinner } from "../../../components/UI";
+import { usePermissions } from "../../auth/usePermissions";
 import type { Building, Location } from "../../../types";
 import type { useIndoorLocationPlacement } from "./useIndoorLocationPlacement";
 
@@ -19,8 +21,11 @@ export function IndoorLocationPlacementPanel({
   error,
   onSave,
 }: IndoorLocationPlacementPanelProps) {
+  const { can } = usePermissions();
   const indoorPlacement = indoor.placement;
   if (!indoorPlacement) return null;
+  const location = buildingContentLocations.find((item) => item.id === indoorPlacement.locationId);
+  const allowed = location && can(isPositionedLocation(location) ? "edit" : "add");
   return (
     <aside className="absolute right-4 top-4 z-[1000] flex max-h-[calc(100%-2rem)] w-[min(24rem,calc(100%-2rem))] flex-col gap-4 overflow-auto rounded-2xl border border-[#dbe6df] bg-white/95 p-5 text-[#234333] shadow-xl backdrop-blur" aria-label="Indoor location position editor">
       <div>
@@ -41,7 +46,8 @@ export function IndoorLocationPlacementPanel({
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="flex justify-end gap-2 border-t border-[#e6ece8] pt-3">
         <button type="button" className="rounded-full border border-[#dbe0e2] px-4 py-2 text-xs font-bold" disabled={indoor.saving} onClick={indoor.cancel}>Cancel</button>
-        <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={onSave}>{indoor.saving && <Spinner size={12} />}{indoor.saving ? "Saving Position…" : "Save Position"}</button>
+        {/* Saving a position writes the Location: marking a new one is Add, moving an existing marker is Edit. */}
+        {allowed && <button type="button" className="rounded-full bg-[#005931] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!indoorPlacement.position || currentMapZoom < 20 || indoor.saving} onClick={onSave}>{indoor.saving && <Spinner size={12} />}{indoor.saving ? "Saving Position…" : "Save Position"}</button>}
       </div>
     </aside>
   );

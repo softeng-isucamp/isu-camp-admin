@@ -3,6 +3,7 @@ import type {
   AccountStatus,
   AdminAccount,
   AdminAccountDraft,
+  AdminPermissions,
   AdminRole,
   AuditEntry,
   Building,
@@ -29,6 +30,9 @@ import {
   AuthError,
   type AuthErrorKind,
   PASSWORD_CONFIRMATION_REQUIRED,
+  PERMISSION_DENIED,
+  PERMISSION_DENIED_EVENT,
+  PermissionDeniedError,
   PasswordConfirmationRequiredError,
   RateLimitError,
   SUPERADMIN_REQUIRED,
@@ -52,6 +56,7 @@ import {
 import { createLocalAdapter } from "./localAdapter";
 import { createLocalAdmins } from "./localAdmins";
 import { parseAccountType } from "../lib/accountType";
+import { readPermissions } from "../lib/permissions";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
@@ -510,6 +515,10 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
       throw new PasswordConfirmationRequiredError(envelope.message);
     }
+    if (response.status === 403 && envelope?.code === PERMISSION_DENIED) {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(PERMISSION_DENIED_EVENT));
+      throw new PermissionDeniedError(envelope.message);
+    }
     if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
       throw new SuperadminRequiredError(envelope.message);
     }
@@ -676,17 +685,56 @@ export interface Services {
     setStatus(id: string, status: AccountStatus): Promise<UserAccount>;
   };
 
-  /** Administrator accounts for the portal itself. */
+  /**
+   * Administrator accounts for the portal itself.
+   *
+   * Backend contract for general permissions. A regular administrator has four
+   * switches, `{ add, edit, delete, changeUserStatus }` (viewing is always on and has
+   * none). `add`/`edit`/`delete` cover Locations, Buildings, Route Nodes and Pathways
+   * (including entrances, indoor markers and moving or reshaping); `changeUserStatus`
+   * covers `PUT /api/users/:id/status`. A superadmin can do everything and has none.
+   * The portal only decides what to offer; the server must enforce the same switches
+   * on the matching endpoints.
+   * - `GET /api/admins` items carry `permissions` for role `admin`, and none (absent
+   *   or null) for a superadmin. The `admin` object in the login and `me` responses
+   *   carries the signed-in admin's own `permissions` the same way. Inside the object
+   *   only an explicit `true` grants; a response without the field is read as
+   *   "everything allowed", so today's behaviour holds until it is sent.
+   * - `POST /api/admins` accepts `permissions` (only read for role `admin`; a new
+   *   administrator without it is view only).
+   * - `PUT /api/admins/:id/permissions` takes `{ permissions }` (all four booleans) and
+   *   returns `{ admin }`; 409 for oneself or a superadmin.
+   * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin` (view only
+   *   when omitted); promoting discards the stored switches.
+   * `GET /api/me` must read permissions from the database each time. The portal
+   * refreshes on window focus/visibility (at most once per 30s), and immediately
+   * after a write returns 403 with `code: "PERMISSION_DENIED"`. Every write must
+   * enforce its action server-side, including each change in a map save.
+   * Adding any administrator, saving permissions and changing a role are superadmin
+   * only (`superadmin_required`) and re-authenticated like the other password-guarded
+   * actions: the portal calls `POST /api/confirm-password` first, and the endpoint
+   * refuses with `password_confirmation_required` (the `reauth_required` guard) when
+   * that confirmation is missing or has expired. No password travels in these bodies.
+   * `DELETE /api/admins/:id` is no longer called; deactivating (`PUT
+   * /api/admins/:id/status`) replaces removal so the account and its audit trail
+   * survive. Record permission changes in System Logs ("Created Administrator",
+   * "Promoted Administrator", "Demoted Administrator", "Updated Administrator
+   * Permissions").
+   */
   admins: {
     list(): Promise<AdminAccount[]>;
     save(draft: AdminAccountDraft): Promise<AdminAccount>;
     /** Activates or deactivates an administrator's access to the portal. */
     setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
-    /** Promotes an administrator to superadmin or demotes a superadmin; returns the updated account. */
-    setRole(id: string, role: AdminRole): Promise<AdminAccount>;
+    /**
+     * Promotes an administrator to superadmin or demotes a superadmin; returns the updated account.
+     * `permissions` only applies when demoting: the switches the account starts with (view only when omitted).
+     */
+    setRole(id: string, role: AdminRole, permissions?: AdminPermissions): Promise<AdminAccount>;
+    /** Replaces a regular administrator's permissions; returns the updated account. */
+    setPermissions(id: string, permissions: AdminPermissions): Promise<AdminAccount>;
     /** Emails a password reset code to that account's own address. */
     sendPasswordReset(id: string): Promise<string>;
-    remove(id: string): Promise<void>;
   };
 
   logs: {
@@ -771,9 +819,29 @@ const localUsers: UserAccount[] = createMockUsers();
 const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId) =>
   addAudit(action, target, "Admin", targetId));
 
-/** A missing or unrecognized role means a plain administrator, never a superadmin. */
-const normalizeAdmin = (account: AdminAccount): AdminAccount =>
-  ({ ...account, role: account.role === "superadmin" ? "superadmin" : "admin" });
+/**
+ * A missing or unrecognized role means a plain administrator, never a superadmin.
+ * Permissions only belong to an administrator; a missing record stays missing.
+ */
+const normalizeAdmin = (account: AdminAccount): AdminAccount => {
+  const { permissions: reported, ...rest } = account;
+  const role = account.role === "superadmin" ? "superadmin" : "admin";
+  const permissions = role === "admin" ? readPermissions(reported) : undefined;
+  return { ...rest, role, ...(permissions ? { permissions } : {}) };
+};
+
+/** The signed-in admin as the login and `me` responses describe them. */
+const sessionFromAdmin = (admin: { id: string; username: string; email?: unknown; role?: unknown; permissions?: unknown }): Session => {
+  const role = admin.role === "admin" || admin.role === "superadmin" ? admin.role : undefined;
+  const permissions = role === "admin" ? readPermissions(admin.permissions) : undefined;
+  return {
+    id: admin.id,
+    username: admin.username,
+    ...(typeof admin.email === "string" ? { email: admin.email } : {}),
+    ...(role ? { role } : {}),
+    ...(permissions ? { permissions } : {}),
+  };
+};
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -1007,12 +1075,7 @@ export const services: Services = {
         );
       }
 
-      return {
-        id: data.admin.id,
-        username: data.admin.username,
-        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
-        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
-      };
+      return sessionFromAdmin(data.admin);
     },
 
 
@@ -1094,12 +1157,7 @@ export const services: Services = {
         return null;
       }
 
-      return {
-        id: data.admin.id,
-        username: data.admin.username,
-        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
-        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
-      };
+      return sessionFromAdmin(data.admin);
     },
 
     // --------------------------------------
@@ -1490,6 +1548,8 @@ export const services: Services = {
           ...(draft.password ? { password: draft.password } : {}),
           // A role is only chosen when adding; the edit route is for one's own sign-in details.
           ...(!draft.id && draft.role ? { role: draft.role } : {}),
+          // Only an administrator has switches, and only when adding; a superadmin never sends any.
+          ...(!draft.id && draft.role !== "superadmin" && draft.permissions ? { permissions: draft.permissions } : {}),
         });
         const response = await apiJson<{ admin: AdminAccount }>(
           draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",
@@ -1511,15 +1571,27 @@ export const services: Services = {
       return wait(await localAdmins.setStatus(id, status));
     },
 
-    setRole: async (id, role) => {
+    setRole: async (id, role, permissions) => {
       if (USE_HTTP_API) {
         const response = await apiJson<{ admin: AdminAccount }>(
           `/api/admins/${encodeURIComponent(id)}/role`,
-          { method: "PUT", body: JSON.stringify({ role }) },
+          // The switches only travel with a demotion; promoting discards them.
+          { method: "PUT", body: JSON.stringify({ role, ...(role === "admin" && permissions ? { permissions } : {}) }) },
         );
         return normalizeAdmin(response.admin);
       }
-      return wait(await localAdmins.setRole(id, role));
+      return wait(await localAdmins.setRole(id, role, permissions));
+    },
+
+    setPermissions: async (id, permissions) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ admin: AdminAccount }>(
+          `/api/admins/${encodeURIComponent(id)}/permissions`,
+          { method: "PUT", body: JSON.stringify({ permissions }) },
+        );
+        return normalizeAdmin(response.admin);
+      }
+      return wait(await localAdmins.setPermissions(id, permissions));
     },
 
     sendPasswordReset: async (id) => {
@@ -1531,15 +1603,6 @@ export const services: Services = {
         return response.message ?? "A password reset code was sent.";
       }
       return wait(await localAdmins.sendPasswordReset(id));
-    },
-
-    remove: async (id) => {
-      if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
-        return;
-      }
-      await localAdmins.remove(id);
-      return wait(undefined);
     },
   },
 

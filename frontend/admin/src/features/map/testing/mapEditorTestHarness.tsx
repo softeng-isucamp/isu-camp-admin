@@ -7,7 +7,7 @@ import type { RouteNode } from "../../../types";
 import { MapEditor } from "../MapEditor";
 import { mapClickHandler, resetMapMockState, TEST_ADMIN_PASSWORD } from "./mapEditorMocks";
 
-export { mapClickHandler, mapFitBounds, mapFlyTo, mapTestState, mapZoomEndHandler } from "./mapEditorMocks";
+export { mapClickHandler, mapFitBounds, mapFlyTo, mapTestSession, mapTestState, mapZoomEndHandler } from "./mapEditorMocks";
 
 /** Registers the shared beforeEach/afterEach for a Map Editor integration describe block. */
 export const useMapEditorTestLifecycle = () => {
@@ -59,7 +59,7 @@ export const clickMap = (lat: number, lng: number) => {
 
 export const choosePathwayEditor = async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Pathway" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Create or edit Pathway" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^(Create or edit|Create|Edit) Pathway$/ }));
 };
 
 export const chooseWalkingNetworkBrowser = async () => {
