@@ -2,7 +2,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required
+from auth import admin_required, permission_error
 from extensions import db
 from model.audit_log import AuditLog
 from model.building import (
@@ -406,10 +406,15 @@ def location_history(location_id):
 @location_bp.route("", methods=["POST"])
 def create_location():
 
-    _, error = admin_required()
+    admin, error = admin_required()
 
     if error:
         return error
+
+    # Creating a record is the "add" permission wherever it happens, so this
+    # answers the same 403 as every other create in the portal.
+    if denied := permission_error(admin, "add"):
+        return denied
 
     try:
 
