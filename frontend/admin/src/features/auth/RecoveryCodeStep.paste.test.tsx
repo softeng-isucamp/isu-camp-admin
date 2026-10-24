@@ -107,7 +107,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
       await settle();
     }
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/^Incorrect code\. 4 attempts left\.$/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^Incorrect verification code\. You have 4 attempts remaining\.$/);
     expect(boxValues()).toBe(REJECTED);
     positions.forEach((n) => expect(box(n)).toHaveValue(REJECTED[n - 1]));
     positions.forEach((n) => expect(box(n)).not.toHaveAttribute("placeholder"));
@@ -154,7 +154,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual([REJECTED, "127456"]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
   });
 
   it("sends the edited code when Enter is pressed in a box", async () => {
@@ -269,7 +269,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     await pasteIntoFirstBox(user, REJECTED);
 
     expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
     expect(boxValues()).toBe(REJECTED);
     expectAllInvalid();
   });
@@ -284,7 +284,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual([REJECTED, "222222", "333333"]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 2 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
   });
 
   it("sends a code pasted without a click after a rejection, because focus is already in box 1", async () => {
@@ -316,13 +316,13 @@ describe("code step: a rejected code stays as real, editable values", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
     expect(boxValues()).toBe(REJECTED);
     expectAllInvalid();
   });
 
   it("sends nothing on its own after a rejection: not on blur, refocus or the passing of time", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3)] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
@@ -346,7 +346,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
   });
 
   it("comes back from a resend with six empty, valid boxes, and the same digits are checked against the new code", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({
       [REQUEST]: [issued({ resendAfterSeconds: 1 }), issued()],
       [VERIFY]: [wrongCode(4), wrongCode(3)],
@@ -462,7 +462,7 @@ describe("code step: boxes that are disabled", () => {
 
 describe("code step: a code entered during a rate-limit wait", () => {
   const openCodeStep = async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
@@ -492,7 +492,7 @@ describe("code step: a code entered during a rate-limit wait", () => {
     await settle();
 
     expect(sentCodes(sent)).toEqual(["111111", "222222"]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
 
     await tickSecond();
     await tickSecond();
@@ -595,7 +595,7 @@ describe("code step: a code entered during a rate-limit wait", () => {
 
 describe("code step: a rejected code and a rate-limit wait", () => {
   const openCodeStep = async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
@@ -620,7 +620,7 @@ describe("code step: a rejected code and a rate-limit wait", () => {
 
     await endWait();
     expect(sentCodes(sent)).toEqual(["123456", "123456", "123456"]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
 
     await endWait();
     expect(sentCodes(sent)).toHaveLength(3);
@@ -647,7 +647,7 @@ describe("code step: a rejected code and a rate-limit wait", () => {
 
 describe("code step: a code that stops being valid", () => {
   const openExpiring = async (queues: Parameters<typeof mockBackend>[0]) => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const backend = mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 2 })], ...queues });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
@@ -677,7 +677,7 @@ describe("code step: a code that stops being valid", () => {
 
     await pasteIntoFirstBox(user, "123456");
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/^You have used all your attempts\. Request a new code to continue\.$/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^You've used all verification attempts for this code\. Request a new code to continue\.$/);
     positions.forEach((n) => expect(box(n)).toBeDisabled());
     expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
     expect(screen.getByRole("button", { name: "Resend code" })).toBeInTheDocument();
@@ -687,7 +687,7 @@ describe("code step: a code that stops being valid", () => {
 
 describe("code step: completing a code again", () => {
   it("submits the same code when it is completed again by a keystroke after an incomplete wait", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [RATE_LIMITED(), wrongCode(4)] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
@@ -971,7 +971,7 @@ describe("code step: the error alert describes the code boxes", () => {
 
     await pasteIntoFirstBox(user, "123456");
 
-    expect(group).toHaveAccessibleDescription("Incorrect code. 4 attempts left.");
+    expect(group).toHaveAccessibleDescription("Incorrect verification code. You have 4 attempts remaining.");
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     positions.forEach((n) => expect(screen.getByRole("textbox", { name: `Digit ${n} of 6` })).toBe(box(n)));
   });

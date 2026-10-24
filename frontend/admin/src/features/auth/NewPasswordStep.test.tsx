@@ -282,8 +282,8 @@ describe("new password step: submit", () => {
 
 describe("new password step: the server turns the code down", () => {
   it.each([
-    ["code_exhausted", "You have used all your attempts. Request a new code to continue."],
-    ["code_expired", "This code has expired. Request a new code to continue."],
+    ["code_exhausted", "You've used all verification attempts for this code. Request a new code to continue."],
+    ["code_expired", "This verification code has expired. Request a new code to continue."],
   ])("%s sends the admin back to the code step to request a new code", async (code, message) => {
     const { requests } = mockBackend([jsonResponse({ success: false, code, message: "Server says no." }, 400)]);
     await reachNewPassword();
@@ -301,7 +301,7 @@ describe("new password step: the server turns the code down", () => {
 
     // Resend is the primary action, available at once, and asks for a new code for the same email.
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
-    expect(await screen.findByText("A new code has been sent.")).toBeInTheDocument();
+    expect(await screen.findByText("A new verification code has been sent. Your previous code is no longer valid.")).toBeInTheDocument();
     expect(requests).toEqual([{ email: EMAIL, purpose: "password" }, { email: EMAIL, purpose: "password" }]);
     expect(screen.getByLabelText("Digit 1 of 6")).toBeEnabled();
     expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
