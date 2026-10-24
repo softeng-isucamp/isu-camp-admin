@@ -29,7 +29,7 @@ const quiet = (page: Page) => page.waitForTimeout(300);
 async function pasteWrongCode(page: Page, code: string) {
   await box(page, 1).focus();
   await ctrlV(page, code);
-  await expect(page.getByRole("alert")).toContainText("Incorrect code.");
+  await expect(page.getByRole("alert")).toContainText("Incorrect verification code.");
 }
 
 async function expectInvalid(page: Page, invalid: boolean) {
@@ -44,7 +44,7 @@ test("a wrong code pasted with Ctrl+V stays as real, selectable digits in invali
 
   await pasteWrongCode(page, "123456");
 
-  await expect(page.getByRole("alert")).toContainText("Incorrect code. 4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("Incorrect verification code. You have 4 attempts remaining.");
   expect(await boxValues(page)).toBe("123456");
   await expectInvalid(page, true);
   const first = box(page, 1);

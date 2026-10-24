@@ -27,14 +27,17 @@ export class SuperadminRequiredError extends Error {
   }
 }
 
-/** The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number. */
+/**
+ * The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number.
+ * It is absent when the server sent no valid `Retry-After`: callers must not invent a wait.
+ */
 export class RateLimitError extends Error {
-  readonly retryAfterSeconds: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(retryAfterSeconds: number, message?: string) {
+  constructor(retryAfterSeconds?: number, message?: string) {
     super(message ?? "Too many requests. Try again shortly.");
     this.name = "RateLimitError";
-    this.retryAfterSeconds = retryAfterSeconds;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

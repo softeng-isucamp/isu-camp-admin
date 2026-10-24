@@ -798,8 +798,8 @@ function checkRateLimit(response: Response, message?: string): void {
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
     const parsedSeconds = retryAfter ? Number.parseInt(retryAfter, 10) : NaN;
-    const seconds = Number.isFinite(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : 60;
-    throw new RateLimitError(seconds, message);
+    // A missing or invalid header stays undefined; the sign-in screen applies its own fallback.
+    throw new RateLimitError(Number.isFinite(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : undefined, message);
   }
 }
 

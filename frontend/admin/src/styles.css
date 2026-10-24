@@ -1567,6 +1567,14 @@ td small {
   font-weight: 600;
   color: var(--green-2);
 }
+/* The live code lifetime; tabular digits keep the text from shifting as it ticks. */
+.recovery-modal .recovery-expiry {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
 .recovery-modal .recovery-username {
   margin: 0;
   padding: 12px 14px;

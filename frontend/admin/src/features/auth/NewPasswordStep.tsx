@@ -7,7 +7,7 @@ import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
 import type { DeadCode } from "./RecoveryCodeStep";
 import type { VerifiedRecovery } from "./RecoveryFlow";
-import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { AuthAlert, RECOVERY_RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { BackToLogin, SuccessIcon } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
@@ -56,8 +56,8 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         return;
       }
       if (err instanceof RateLimitError) {
-        setError(RATE_LIMIT_MESSAGE);
-        wait.start(err.retryAfterSeconds);
+        setError(RECOVERY_RATE_LIMIT_MESSAGE);
+        if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
         setError(err instanceof Error ? err.message : "Unable to reset password");
       }
@@ -74,7 +74,7 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
           <SuccessIcon />
           <h2 ref={successHeading} tabIndex={-1}>Password reset successful</h2>
           <p className="muted recovery-copy">
-            Your admin password has been updated. You can now sign in using your new password.
+            Your password has been reset successfully. You can now sign in with your new password.
           </p>
         </div>
         <Button className="recovery-primary" onClick={() => returnToLogin(username)}>
@@ -97,7 +97,9 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
   return (
     <form onSubmit={submit} noValidate>
       <h2>Create a new password</h2>
-      <p className="muted recovery-copy">Choose a strong password for the admin account.</p>
+      <p className="muted recovery-copy">
+        Create a new password for your administrator account. If your verification code expires before you finish, you'll need to request a new one.
+      </p>
       <PasswordField
         label="New password"
         toggleName="new password"

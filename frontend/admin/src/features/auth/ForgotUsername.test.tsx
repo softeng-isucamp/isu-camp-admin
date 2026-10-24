@@ -8,7 +8,7 @@ vi.hoisted(() => vi.stubEnv("VITE_API_MODE", "real"));
 import { AuthProvider } from "./AuthContext";
 import { ForgotUsername } from "./ForgotUsername";
 import { Login } from "./AuthPages";
-import { issued, jsonResponse, mockBackend, settle, verified } from "./testing/recoveryFetch";
+import { exhausted, expired, issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
 const REQUEST = "/api/recovery/request";
@@ -92,6 +92,7 @@ describe("forgot-username flow", () => {
     expect(sent[VERIFY]).toEqual([{ email: EMAIL, purpose: "username", code: "000000" }]);
     expect(await screen.findByRole("heading", { name: /your username/i })).toBeInTheDocument();
     expect(screen.getByText("admin_justine")).toBeInTheDocument();
+    expect(screen.getByText("Your username has been recovered. Use it to sign in to the admin console.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to login" }));
 
@@ -112,7 +113,49 @@ describe("forgot-username flow", () => {
     typeCode("111111");
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
     expect(screen.queryByText("admin_justine")).not.toBeInTheDocument();
+  });
+});
+
+describe("forgot-username: same instructions and feedback as forgot password", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the shared email helper, code-step instructions, countdown and resend cooldown", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
+    renderFrom("/forgot-username");
+    expect(screen.getByText(/primary or alternative email associated with your administrator account/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await settle();
+
+    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(
+      `If an account exists for ${EMAIL}, a 6-digit verification code has been sent to that address.`,
+    );
+    expect(screen.getByText(/Only the most recently sent code will work/)).toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    expect(screen.getByText("Resend available in 60s.")).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 09:59");
+  });
+
+  it.each([
+    ["an incorrect code without a count", () => wrongCode(), "The verification code is incorrect. Please try again."],
+    ["the last attempt", () => wrongCode(1), "Incorrect verification code. You have 1 attempt remaining."],
+    ["an expired code", () => expired(), "This verification code has expired. Request a new code to continue."],
+    ["an exhausted code", () => exhausted(), "You've used all verification attempts for this code. Request a new code to continue."],
+  ])("words %s like forgot password", async (_name, reply, message) => {
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [reply()] });
+    renderFrom("/forgot-username");
+    await reachCodeStep();
+
+    typeCode("111111");
+    await settle();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
   });
 });
