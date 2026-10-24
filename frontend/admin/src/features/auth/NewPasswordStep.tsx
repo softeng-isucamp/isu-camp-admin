@@ -7,7 +7,7 @@ import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
 import type { DeadCode } from "./RecoveryCodeStep";
 import type { VerifiedRecovery } from "./RecoveryFlow";
-import { AuthAlert, RECOVERY_RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { BackToLogin, SuccessIcon } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
@@ -56,7 +56,7 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         return;
       }
       if (err instanceof RateLimitError) {
-        setError(RECOVERY_RATE_LIMIT_MESSAGE);
+        setError(recoveryRateLimitMessage(err));
         if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
         setError(err instanceof Error ? err.message : "Unable to reset password");

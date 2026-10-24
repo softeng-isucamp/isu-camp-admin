@@ -33,11 +33,14 @@ export class SuperadminRequiredError extends Error {
  */
 export class RateLimitError extends Error {
   readonly retryAfterSeconds?: number;
+  /** The server sent `code: "recovery_restricted"`: recovery as a whole is locked, not just this one request. */
+  readonly restricted: boolean;
 
-  constructor(retryAfterSeconds?: number, message?: string) {
+  constructor(retryAfterSeconds?: number, message?: string, restricted = false) {
     super(message ?? "Too many requests. Try again shortly.");
     this.name = "RateLimitError";
     if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
+    this.restricted = restricted;
   }
 }
 

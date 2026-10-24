@@ -3,8 +3,17 @@ import type { ReactNode } from "react";
 /** Shown for every server rate limit. It names no number: the button that is locked counts down the live wait. */
 export const RATE_LIMIT_MESSAGE = "Too many attempts. Try again when the button unlocks.";
 
-/** Shown on the recovery screens. The button counts down only when the server said how long to wait. */
-export const RECOVERY_RATE_LIMIT_MESSAGE = "Too many attempts. Please try again when the restriction ends.";
+/**
+ * The rate-limit sentence on the recovery screens. Only a known wait mentions an end, because only then does a button count down;
+ * only the server's `recovery_restricted` code says recovery itself is restricted.
+ */
+export const recoveryRateLimitMessage = ({ retryAfterSeconds, restricted }: { retryAfterSeconds?: number; restricted: boolean }) => {
+  const known = retryAfterSeconds !== undefined;
+  if (restricted) {
+    return `Account recovery is temporarily restricted after too many attempts. Please try again ${known ? "when the restriction ends" : "later"}.`;
+  }
+  return known ? "Too many attempts. Please try again when the restriction ends." : "Too many attempts. Please wait a moment and try again.";
+};
 
 /** The label of a button locked by a rate limit. */
 export const tryAgainLabel = (seconds: number) => `Try again in ${seconds}s`;

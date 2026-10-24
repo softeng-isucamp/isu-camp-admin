@@ -575,7 +575,7 @@ describe("code step: rate limits without a duration", () => {
     typeCode("123456");
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/^Too many attempts\. Please try again when the restriction ends\.$/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^Too many attempts\. Please wait a moment and try again\.$/);
     expect(screen.queryByRole("button", { name: /try again in/i })).toBeNull();
     expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
   });
@@ -588,9 +588,112 @@ describe("code step: rate limits without a duration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Please try again when the restriction ends.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Too many attempts. Please wait a moment and try again.");
     expect(screen.queryByRole("button", { name: /try again in/i })).toBeNull();
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
+  });
+
+  it.each(["60abc", "15.5", "Wed, 21 Oct 2026 07:28:00 GMT", "0", "-5"])("treats a Retry-After of %j as no duration", async (header) => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [jsonResponse({ message: "Too many attempts." }, 429, { "Retry-After": header })] });
+    await openCodeStep();
+
+    typeCode("123456");
+    await settle();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Too many attempts. Please wait a moment and try again.");
+    expect(screen.queryByRole("button", { name: /try again in/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
+  });
+});
+
+const restricted = (retryAfter?: string) =>
+  jsonResponse(
+    { success: false, code: "recovery_restricted", message: "Too many attempts." },
+    429,
+    retryAfter === undefined ? {} : { "Retry-After": retryAfter },
+  );
+
+describe("code step: recovery restriction", () => {
+  it("locks Verify and Resend for the same wait and says recovery is restricted", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600 })], [VERIFY]: [restricted("900")] });
+    await openCodeStep();
+
+    typeCode("111111");
+    await settle();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Account recovery is temporarily restricted after too many attempts. Please try again when the restriction ends.",
+    );
+    // Verify and Resend both count the restriction down.
+    const locked = screen.getAllByRole("button", { name: "Try again in 900s" });
+    expect(locked).toHaveLength(2);
+    locked.forEach((button) => expect(button).toBeDisabled());
+  });
+
+  it("does not send the held code by itself when the restriction ends", async () => {
+    useCountdownTimers();
+    const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [restricted("3")] });
+    await openCodeStep();
+
+    typeCode("111111");
+    await settle();
+    await tickSeconds(4);
+    await settle();
+
+    expect(sent[VERIFY]).toHaveLength(1);
+    expectBoxes("111111");
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
+  });
+
+  it("keeps Resend locked when the code expires during the restriction, then offers it once the restriction ends", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 5 })], [VERIFY]: [restricted("10")] });
+    await openCodeStep();
+
+    typeCode("111111");
+    await settle();
+    await tickSeconds(6);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This verification code has expired. You can request a new code when the restriction ends.",
+    );
+    expect(screen.getByRole("button", { name: /^Try again in \d+s$/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Resend code" })).toBeNull();
+
+    await tickSeconds(5);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("This verification code has expired. Request a new code to continue.");
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
+  });
+
+  it("locks Verify too when a resend is refused by the restriction", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued(), restricted("900")] });
+    await openCodeStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+
+    const locked = screen.getAllByRole("button", { name: "Try again in 900s" });
+    expect(locked).toHaveLength(2);
+    locked.forEach((button) => expect(button).toBeDisabled());
+  });
+
+  it("names no end and locks nothing when the restriction has no Retry-After", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued()], [VERIFY]: [restricted()] });
+    await openCodeStep();
+
+    typeCode("111111");
+    await settle();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Account recovery is temporarily restricted after too many attempts. Please try again later.",
+    );
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
   });
 });
 

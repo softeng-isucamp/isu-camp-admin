@@ -80,7 +80,7 @@ describe("forgot-password: email step", () => {
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/^Too many attempts\. Please try again when the restriction ends\.$/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Too many attempts\. Please wait a moment and try again\.$/);
     expect(screen.queryByRole("button", { name: /try again in/i })).toBeNull();
     expect(screen.getByRole("button", { name: /send code/i })).toBeEnabled();
   });

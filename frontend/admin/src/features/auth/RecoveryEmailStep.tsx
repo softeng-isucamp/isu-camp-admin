@@ -3,7 +3,7 @@ import { Button } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { recoveryEmailSchema } from "../../services/schemas";
-import { AuthAlert, RECOVERY_RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
@@ -43,7 +43,7 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
       onSent(parsed.data, await services.auth.requestRecovery(parsed.data, purpose));
     } catch (err) {
       if (err instanceof RateLimitError) {
-        setError(RECOVERY_RATE_LIMIT_MESSAGE);
+        setError(recoveryRateLimitMessage(err));
         // Without a Retry-After there is nothing to count down, so the button stays usable.
         if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
