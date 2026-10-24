@@ -186,8 +186,17 @@ class Admin(db.Model):
     # One JSON value rather than four columns because the four are always read
     # and written together, and the API carries them as one object. See
     # migrations/20261024_add_admin_permissions.sql.
+    #
+    # ``none_as_null`` on both variants, because a JSON column has two
+    # different nothings and only one of them is the one meant here. Left to
+    # its default, assigning Python None stores the JSON scalar ``null`` - a
+    # value - rather than SQL NULL, and the migration's shape constraint
+    # rejects it: jsonb_typeof('null') is 'null', not 'object'. That made
+    # creating a superadmin and promoting an administrator fail with a check
+    # violation, since both assign None deliberately (issue #145). SQLite has
+    # no such constraint, which is why only PostgreSQL showed it.
     permissions = db.Column(
-        JSONB().with_variant(db.JSON(), "sqlite"),
+        JSONB(none_as_null=True).with_variant(db.JSON(none_as_null=True), "sqlite"),
         nullable=True
     )
 

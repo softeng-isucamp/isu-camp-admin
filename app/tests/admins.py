@@ -1657,6 +1657,111 @@ def test_a_demotion_with_a_partial_set_is_a_field_error():
 
 
 # ==========================================
+# A SUPPLIED NULL IS A VALUE, NOT AN OMISSION
+# ==========================================
+
+def test_creating_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    """Absent means "default"; present-and-null is a value the caller chose.
+
+    The one shape a supplied value may take is the four booleans, so null is
+    refused like any other wrong shape. Reading the two the same way meant a
+    client asking for "no permissions" silently received the view-only default
+    instead of being told its request made no sense (issue #145).
+    """
+
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "permissions": None})
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_create(admin_directory):
+    """The other half of the same rule, which must not change: an account being
+    set up has not been given anything yet."""
+
+    response = signed_in(admins_app()).post("/api/admins", json=NEW_ACCOUNT)
+
+    assert response.status_code == 201
+    assert created_accounts()[0].permissions == ALL_OFF
+
+
+def test_creating_a_superadmin_with_an_explicit_null_is_still_accepted():
+    """Ignored rather than refused, as documented: a client may hold one form
+    for both roles, and a field that cannot apply must not fail the request."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 201
+    assert response.json["admin"]["permissions"] is None
+    assert created_accounts()[0].permissions is None
+
+
+def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={
+        "role": "admin", "permissions": None,
+    })
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert role_of(3) == "superadmin"
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_a_demotion():
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert permissions_of(3) == ALL_OFF
+
+
+def test_promoting_with_an_explicit_null_permissions_is_accepted():
+    """A promotion discards the switches whatever it was sent."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/role", json={
+        "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 200
+    assert permissions_of(2) is None
+
+
+def test_setting_permissions_to_an_explicit_null_is_still_a_field_error(admin_directory):
+    """This route always refused it; the create and demote paths now agree."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/permissions", json={"permissions": None})
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert permissions_of(2) is None
+
+
+@pytest.mark.parametrize("supplied", [None, "everything", 42, ["add"], {}, {"add": True}])
+def test_every_wrong_shape_is_refused_the_same_way_on_create(supplied, admin_directory):
+    """One answer for every value that is not the four booleans, so a client
+    cannot tell which kind of wrong it was - and null is simply one of them."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "permissions": supplied,
+    })
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
+
+
+# ==========================================
 # THE SHARED EMAIL POOL
 # ==========================================
 
