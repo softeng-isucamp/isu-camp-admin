@@ -3883,6 +3883,13 @@ td small {
 .permissions-editor-option input:disabled {
   cursor: not-allowed;
 }
+.permissions-editor:disabled .permissions-editor-option {
+  background: #f4f7f5;
+  color: var(--muted);
+}
+.permissions-editor:disabled .permissions-editor-option label {
+  cursor: not-allowed;
+}
 .permissions-editor-option label {
   flex: 1;
   display: flex;

@@ -746,14 +746,19 @@ describe("Choosing a role and permissions when adding an administrator", () => {
     })));
   });
 
-  it("drops the editor and sends no switches for a superadmin, who has everything", async () => {
+  it("shows every permission checked and disabled for a superadmin and sends no switches", async () => {
     vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
     const save = vi.spyOn(services.admins, "save").mockResolvedValue(added("superadmin"));
     const dialog = await openAddForm();
 
     fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "superadmin" } });
-    expect(within(dialog).queryByText("PERMISSIONS")).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("PERMISSIONS")).toBeInTheDocument();
+    const checkboxes = within(dialog).getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(5);
+    for (const checkbox of checkboxes) {
+      expect(checkbox).toBeChecked();
+      expect(checkbox).toBeDisabled();
+    }
     expect(within(dialog).getByLabelText("Confirm your password")).toBeInTheDocument();
 
     fillDetails();

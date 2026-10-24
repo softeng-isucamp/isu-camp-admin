@@ -467,23 +467,20 @@ export function AdministratorsPanel({ feedback }: {
           <Modal
             title="Add Administrator"
             subtitle="This account can sign in to the admin portal."
-            size={isAdmin ? "lg" : "sm"}
+            size="lg"
             onClose={closeDialog}
           >
-            {isAdmin ? (
-              <div className="admin-form admin-form-columns">
-                <div className="admin-form-column">{identityFields}</div>
-                <div className="admin-form-column">
-                  <PermissionsEditor value={permissions} onChange={setPermissions} disabled={busy} />
-                  {confirmationField}
-                </div>
-              </div>
-            ) : (
-              <div className="admin-form">
-                {identityFields}
+            <div className="admin-form admin-form-columns">
+              <div className="admin-form-column">{identityFields}</div>
+              <div className="admin-form-column">
+                <PermissionsEditor
+                  value={isAdmin ? permissions : allPermissions()}
+                  onChange={setPermissions}
+                  disabled={busy || !isAdmin}
+                />
                 {confirmationField}
               </div>
-            )}
+            </div>
             <div className="modal-actions">
               <Button variant="subtle" disabled={busy} onClick={closeDialog}>Cancel</Button>
               <Button loading={busy} onClick={() => void submitDraft()}>
