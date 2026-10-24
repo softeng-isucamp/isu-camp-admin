@@ -130,6 +130,73 @@ Forgot password and forgot username accept either address. The code is sent **on
 
 Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
 
+## Recovery attempt limits
+
+Two limits guard `/api/recovery/*`, both persistent and both measured over the same **15-minute sliding window**:
+
+| Limit | Value | What happens past it |
+| --- | --- | --- |
+| Codes requested | 3 per window | 429 `recovery_restricted`, and **nothing is mailed** |
+| Wrong codes guessed | 5 per window | 15-minute restriction, starting with the 5th guess itself |
+
+Unchanged: a code still expires after **10 minutes** and a resend is still refused for **60 seconds**.
+
+### The counts belong to an account, not to a code
+
+A code used to carry its own budget of five guesses, which made asking for a new one the way to get five more — five guesses a minute, indefinitely, which is not a limit. The counts are now kept against a **subject**:
+
+- an **account**, when the submitted address belongs to exactly one, so its primary and alternative addresses share a single budget and a single request cap; or
+- the **address itself** otherwise — unknown, or shared by several accounts.
+
+So the five guesses are cumulative **across resends, across both of an account's addresses, and across the password and username flows** (both verify the same inbox, so counting them apart would only double the guesses on offer). Two unrelated addresses keep their own budgets — otherwise guessing at an invented address would be a way to lock somebody else out.
+
+### The restriction
+
+The **5th wrong code is itself answered with the restriction**, not with `code_exhausted`. Being told "request a new one" was advice that led straight back to five more guesses.
+
+While a subject is restricted, **every** recovery route answers 429 `recovery_restricted` with an integer `Retry-After` — including a request for a new code, so the restriction cannot be waited out by mailing yourself codes until it lifts, and **including a request carrying the correct code**. A restriction the right code could walk through would only ever hold up the people who had lost their code.
+
+When it lifts, the whole budget comes back. Leaving the failures at the limit would restrict the account again on its very next mistake, and the next — a permanent lockout wearing a fifteen-minute label.
+
+The failure count also **decays** once the window passes with no new failure. Five mistakes *in fifteen minutes*, not five in a lifetime: without that, an address that mistyped four codes last month would be one slip away from being locked out for good.
+
+### What a success clears
+
+A correct code **clears the failures** — it proves whoever is asking is reading the inbox, which is the only thing the attempt limit was there to establish, so holding four earlier typos against them afterwards protects nothing. This applies to a successful username recovery as much as to a password reset.
+
+It deliberately **does not clear the request window**: that cap is about how much mail the form may send, and a success does not excuse it.
+
+### Telling the two kinds of 429 apart
+
+Both carry `Retry-After`; the frontend reads the `code`, not the message.
+
+| `code` | Means | Scope | Typical wait |
+| --- | --- | --- | --- |
+| `recovery_restricted` | This account's recovery is closed for a while | the subject | minutes |
+| `rate_limited` | This client is going too fast | per IP, or per IP and address | seconds |
+
+The 60-second resend cooldown and the per-IP flood limits are `rate_limited`. The 3-per-window request cap and the 5-failure restriction are `recovery_restricted`.
+
+`invalid_code` still carries `attemptsRemaining`, and it is now the **cumulative** figure rather than what is left on one code.
+
+### Unknown addresses
+
+An address with no account is counted, capped and restricted exactly like one that has an account, and receives the same status codes, bodies and `Retry-After` values. Any difference would be the answer to "does this address have an account here", which is the question the whole flow is built not to answer.
+
+### What is stored
+
+`public.recovery_attempt`, one row per subject, holding only counters: the failures, when the newest one landed, what the restriction runs until, and the times of the last few requests.
+
+**No code and no password hash is ever written there.** The codes stay in process memory, so a restart still invalidates outstanding codes and the admin asks for another — losing those costs an attacker nothing, which is exactly why they are the part that may be lost. What survives a restart is the part an attacker benefits from losing, which is why it moved into the database in the first place: a restart used to clear every counter, and a second worker ran a second set of budgets alongside the first.
+
+An address with **no account** is stored as `email:` followed by an HMAC of it keyed with `SECRET_KEY`, never as the address. The table would otherwise become a list of every address anybody has ever typed into Forgot Password, sitting in the admin database — addresses that by definition belong to people with no account here. A plain hash would not do: an email address is guessable enough that an unkeyed digest is a dictionary away from the address. Rotating `SECRET_KEY` abandons those counters, which is acceptable because rotating it already signs every session out.
+
+Rows untouched for longer than both windows remember nothing and are deleted, which is also what keeps a flood of invented addresses from growing the table past the addresses actually seen in the last few minutes.
+
+Within one process a lock serializes the read-decide-write; across processes `SELECT … FOR UPDATE` on the subject's row does the same, so a deployment with several workers counts once per guess rather than once per worker.
+
+Apply `migrations/20261024_add_recovery_attempt.sql` before using any of this.
+
 ## Administrator permissions
 
 A superadmin switches four general actions on or off for each regular administrator. **Viewing is not one of them**: it is the least-privilege minimum every active account keeps, so an administrator who should see nothing is deactivated, not given four off switches.
