@@ -295,7 +295,8 @@ describe("code step: resend recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Unable to send the code.");
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn't send a new code. Please try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Unable to send the code.");
     expect(box(1)).toBeDisabled();
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
   });

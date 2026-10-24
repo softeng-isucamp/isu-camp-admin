@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
+import { errorMessage } from "../../services/errors";
 import { resetSchema } from "../../services/schemas";
 import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { OtpInput, type OtpInputHandle } from "./OtpInput";
@@ -131,7 +132,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           setError("Incorrect code.");
           setAttemptsRemaining(err.attemptsRemaining);
         } else {
-          setError(err instanceof Error ? err.message : "Unable to verify the code.");
+          setError(errorMessage(err, "We couldn't verify the code. Please try again."));
         }
       }
     } finally {
@@ -180,7 +181,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         setResendLimited(true);
         resendWait.start(err.retryAfterSeconds);
       } else {
-        setError(err instanceof Error ? err.message : "Failed to resend code.");
+        setError(errorMessage(err, "We couldn't send a new code. Please try again."));
       }
     } finally {
       inFlight.current = false;

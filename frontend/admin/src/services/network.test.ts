@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { InvalidResponseError } from "./errors";
 import {
   createCanonicalNetworkStore,
+  validateNetworkSnapshot,
+  validatePathway,
   normalizePathway,
   normalizeRouteNode,
   evaluateBuildingRoutability,
@@ -76,5 +79,47 @@ describe("canonical walking-network contract", () => {
     next.pathways[0].name = "Renamed";
     store.save(next);
     expect(store.pathways()[0]).toMatchObject({ name: "Renamed", pathSequence: { points: [] } });
+  });
+});
+
+describe("pathway validation wording", () => {
+  const node = (id: string, status: "active" | "inactive" = "active") =>
+    ({ id, name: id, type: "access_point" as const, buildingId: null, status, latitude: 16.72, longitude: 121.69 });
+  const snapshot = (nodes = [node("a"), node("b")]) => ({
+    buildings: [], routeNodes: nodes,
+    pathways: [{
+      id: "existing", name: "Main walk", sourceNodeId: "a", destinationNodeId: "b", pathSequence: { points: [] },
+      type: "Walkway", shade: null, direction: "two_way" as const, status: "active" as const, allowedModes: ["walking" as const],
+    }],
+  });
+  const draft = (changes: Record<string, unknown> = {}) => ({
+    name: "New walk", sourceNodeId: "a", destinationNodeId: "b", pathSequence: { points: [] },
+    type: "Walkway", shade: null, direction: "two_way" as const, status: "active" as const, allowedModes: ["walking" as const],
+    ...changes,
+  });
+
+  it.each([
+    ["inactive endpoint", { sourceNodeId: "a", destinationNodeId: "c" }, snapshot([node("a"), node("b"), node("c", "inactive")]), "Select two active route nodes to connect this pathway."],
+    ["missing endpoint", { destinationNodeId: "gone" }, snapshot(), "One of the selected route nodes no longer exists. Reload the map and choose two route nodes."],
+    ["same endpoint", { destinationNodeId: "a" }, snapshot(), "A pathway must connect two different route nodes."],
+    ["duplicate connection", {}, snapshot(), "These route nodes are already connected by Main walk. Edit that pathway instead."],
+    ["bad point", { destinationNodeId: "c", pathSequence: { points: [{ latitude: Number.NaN, longitude: 121.69 }] } }, snapshot([node("a"), node("c")]), "One of the pathway's points has an invalid position. Redraw that point and try again."],
+    ["bad direction", { direction: "sideways" }, snapshot(), "Choose a direction: one-way or two-way."],
+    ["bad status", { status: "paused" }, snapshot(), "Choose a status: active or closed."],
+    ["bad way type", { type: "Trail" }, snapshot(), "Choose a way type: Walkway or Road."],
+  ])("explains %s in plain words", (_name, changes, current, message) => {
+    expect(() => validatePathway(draft(changes) as never, current as never)).toThrow(message);
+  });
+
+  it("keeps stored-data integrity failures out of the message", () => {
+    const broken = { ...snapshot(), pathways: [{ ...snapshot().pathways[0], name: "  " }] };
+    try {
+      validateNetworkSnapshot(broken as never);
+      throw new Error("Expected the snapshot to be rejected.");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(InvalidResponseError);
+      expect((cause as InvalidResponseError).detail).toBe("Pathway existing must have a name.");
+      expect((cause as InvalidResponseError).message).not.toContain("existing");
+    }
   });
 });

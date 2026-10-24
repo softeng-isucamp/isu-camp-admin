@@ -3,6 +3,7 @@ import type { Building, Location, RouteNode } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
 import type { RouteNodeWorkflow } from "../routeNode/RouteNodeWorkflow";
 import type { SelectedBuildingView } from "./selectedBuilding";
+import { reportError } from "../../../services/errors";
 
 interface UseEntranceLinkingOptions {
   workflow: RouteNodeWorkflow;
@@ -43,7 +44,8 @@ export function useEntranceLinking({
       onNodeSaved(result.node);
       await refreshMapData();
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "The Entrance association was saved, but the map could not refresh.");
+      reportError(cause);
+      onError("The entrance was linked, but the map could not refresh. Reload the map to see it.");
       return;
     }
     setLinking(false);

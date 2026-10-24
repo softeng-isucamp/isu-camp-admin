@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { services } from "../../../services/api";
+import { errorMessage } from "../../../services/errors";
 import { echagueCampusBoundary } from "../campusBoundary";
 import { deriveMapLoad, mapLoadProgressFor, type MapLoadState, type QueryLoadState } from "./mapLoadProgress";
 
@@ -9,7 +10,7 @@ const queryLoadState = (query: UseQueryResult<unknown>): QueryLoadState => ({
   fetching: query.isFetching,
   // A refetch that fails keeps the data on screen; only a load with nothing to show is an error.
   error: query.isError && query.data === undefined
-    ? (query.error instanceof Error ? query.error.message : "The Map Editor data could not be loaded.")
+    ? errorMessage(query.error, "The Map Editor data couldn't be loaded. Please try again.")
     : null,
   retrying: query.isFetching && query.failureCount > 0,
 });

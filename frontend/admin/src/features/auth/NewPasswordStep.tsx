@@ -2,6 +2,7 @@ import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } fr
 import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import { resetPasswordSchema } from "../../services/schemas";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
@@ -59,7 +60,7 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         setError(RATE_LIMIT_MESSAGE);
         wait.start(err.retryAfterSeconds);
       } else {
-        setError(err instanceof Error ? err.message : "Unable to reset password");
+        setError(errorMessage(err, "We couldn't reset your password. Please try again.", { mutation: true }));
       }
     } finally {
       inFlight.current = false;

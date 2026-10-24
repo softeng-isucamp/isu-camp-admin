@@ -14,6 +14,7 @@ import { createRoutableCrossing } from "./pathwayCommands";
 import { isPathwayDraft } from "./pathwayDrafts";
 import { findPathwayCrossings, insertPathPointAtSegmentMidpoint, pathwayConnectionError, type PathwayCrossing } from "./pathwayTopology";
 import { createPathwayWorkflow } from "./PathwayWorkflow";
+import { errorMessage, reportError } from "../../../services/errors";
 
 export interface PathwayNetwork {
   directoryPathways: Pathway[];
@@ -244,7 +245,8 @@ export function usePathwayEditing({
       try {
         await refreshMapData();
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
+        reportError(cause);
+        setError("Your pathway changes were saved, but the map could not refresh. Reload the map to see them.");
         endSaving();
         return false;
       }
@@ -287,7 +289,7 @@ export function usePathwayEditing({
       setPathPoints([]);
       onCreated(junction);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the Junction Route Node.");
+      setError(errorMessage(cause, "The junction couldn't be created. Reload the map to check, then try again.", { mutation: true }));
     } finally {
       endSaving();
     }
@@ -378,7 +380,7 @@ export function usePathwayEditing({
       setError("");
       await refreshMapData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not convert Path Point.");
+      setError(errorMessage(cause, "The path point couldn't be converted to a route node. Reload the map to check, then try again.", { mutation: true }));
     } finally {
       endSaving();
     }
@@ -417,7 +419,8 @@ export function usePathwayEditing({
       setPathDraftDirty(false);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Pathway was saved, but the map could not refresh. Retry the refresh before saving again.");
+      reportError(cause);
+        setError("Your pathway changes were saved, but the map could not refresh. Reload the map to see them.");
     } finally {
       endSaving();
     }

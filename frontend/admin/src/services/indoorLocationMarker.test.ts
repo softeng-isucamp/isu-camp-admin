@@ -22,9 +22,9 @@ describe("indoor marker storage", () => {
     expect(adapter.locations.saveIndoorPosition(room.id, building.id, 16.7205, 121.6895))
       .toMatchObject({ lat: 16.7205, lng: 121.6895, positioned: true });
     expect(() => adapter.locations.saveIndoorPosition(room.id, building.id, 16.725, 121.695))
-      .toThrow(/inside.*Building footprint/);
+      .toThrow(/inside the building's outline/);
     expect(() => adapter.locations.saveIndoorPosition(room.id, "other-building", 16.7205, 121.6895))
-      .toThrow(/does not belong/);
+      .toThrow(/doesn't belong to the selected building/);
     expect(adapter.locations.saveIndoorPosition(room.id, building.id, null, null))
       .toMatchObject({ lat: null, lng: null, positioned: false });
   });

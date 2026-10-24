@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import { services } from '../../services/api';
-import { PasswordConfirmationRequiredError } from '../../services/errors';
+import { InvalidResponseError, PasswordConfirmationRequiredError } from '../../services/errors';
 import type { BackupJob } from '../../services/profile';
 
 beforeEach(async () => { await services.auth.login('admin_justine', 'password123'); });
@@ -183,6 +183,30 @@ it('displays failed backup jobs without claiming completion', async () => {
   await userEvent.click(await screen.findByRole('button', { name: /Create Backup/ }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Storage is unavailable.');
   expect(screen.queryByText(/completed|successfully/)).not.toBeInTheDocument();
+});
+
+it.each([
+  ['backup' as const, "The backup couldn't be completed. Try again, or check the server logs if it keeps failing."],
+  ['restore' as const, "The restore couldn't be completed. Check the data before making changes, and try again."],
+])('replaces raw exception text in a failed %s job with a plain line', async (kind, line) => {
+  const raw = 'The operation could not be completed: (psycopg2.errors.UndefinedTable) relation "admin" does not exist';
+  vi.spyOn(services.profile, 'createBackup').mockResolvedValue({ id: 'failed-job', kind, status: 'failed', message: raw });
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: /Create Backup/ }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent(line);
+  expect(alert).not.toHaveTextContent(/psycopg2|relation|could not be completed:/);
+});
+
+it('says the outcome is unknown when a profile save gets a reply it cannot read', async () => {
+  vi.spyOn(services.profile, 'update').mockRejectedValue(new InvalidResponseError('Profile update reply is malformed.'));
+  page();
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit Profile' }));
+  const username = screen.getByLabelText('Username');
+  await userEvent.clear(username);
+  await userEvent.type(username, 'someone');
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent("The server didn't confirm the result, so your change may already be saved. Reload to check before trying again.");
 });
 
 it('refreshes completed backup history even when the HTTP response arrives later', async () => {

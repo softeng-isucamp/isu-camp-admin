@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { RequestError } from "../../services/errors";
 import { generateDashboardAnalytics } from "../../services/fixtures/dashboardAnalytics";
 import { locations } from "../../services/mockData";
 import type { DashboardAnalytics, DashboardRange, DashboardSummary } from "../../types";
@@ -95,12 +96,13 @@ describe("Dashboard backend boundary", () => {
   });
 
   it("shows an actionable error when the backend request fails", async () => {
-    vi.spyOn(services.dashboard, "summary").mockRejectedValue(new Error("Service unavailable"));
-    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Service unavailable"));
+    vi.spyOn(services.dashboard, "summary").mockRejectedValue(new RequestError("server", { status: 503, detail: "Service unavailable" }));
+    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 503, detail: "Service unavailable" }));
     renderDashboard();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Unable to load the dashboard. Service unavailable");
+    expect(alert).toHaveTextContent("Dashboard information couldn't be loaded. Please try again.");
+    expect(alert).not.toHaveTextContent(/Service unavailable|503|Backend returned/);
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByText("Search analytics are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("Recent activity is unavailable.")).toBeInTheDocument();
@@ -152,12 +154,12 @@ describe("Dashboard backend boundary", () => {
 
   it("explains that analytics failed to load and retries on request", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 500, detail: "Not found" }));
     renderDashboard();
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+    expect(await screen.findByText("Analytics couldn't be loaded. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Not found");
     const failedCalls = request.mock.calls.length;
 
     request.mockResolvedValue(analytics());

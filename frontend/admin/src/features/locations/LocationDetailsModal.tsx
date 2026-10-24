@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isBlockedReclassification, isLocationContainer, isUnclassifiedPlace, isPlace, locationPolicy, locationTypeOptionLabel, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft } from "../../types";
@@ -163,7 +164,7 @@ export function LocationDetailsModal({
     }).catch((cause) => {
       if (active) {
         setPhotoLoadFailed(true);
-        setError(cause instanceof Error ? cause.message : "Unable to load location photos.");
+        setError(errorMessage(cause, "The location photos couldn't be loaded. Please try again."));
       }
     }).finally(() => {
       if (active) setLoadingPhotos(false);
@@ -224,7 +225,7 @@ export function LocationDetailsModal({
       return true;
     } catch (cause) {
       setTypeError((cause as { fieldErrors?: Record<string, string> } | null)?.fieldErrors?.type ?? "");
-      setError(cause instanceof Error ? cause.message : "Unable to save location.");
+      setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
       return false;
     } finally {
       setSubmitting(false);

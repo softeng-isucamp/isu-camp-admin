@@ -2,11 +2,20 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Empty, LoadingState } from '../../components/UI';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
+import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
 import type { BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
 import { isAutomatic, scheduleWhen, sizeText } from './backupFormat';
 import { DeleteDialog, DownloadDialog, RestoreDialog, StopRestoreDialog } from './BackupDialogs';
 import { ScheduleDialog } from './BackupScheduleDialog';
-const message = (cause: unknown) => cause instanceof Error ? cause.message : 'Unable to complete the request. Try again.';
+/** A job's own message when it is plain; the server appends raw exception text after a colon, which is replaced by a line for the kind of job. */
+const jobFailureText = (job: BackupJob) => {
+  const raw = job.message?.trim();
+  if (raw && !/could not be (started|completed|recorded): /.test(raw) && !isTechnicalMessage(raw)) return raw;
+  if (raw) reportError(raw);
+  return job.kind === 'restore'
+    ? "The restore couldn't be completed. Check the data before making changes, and try again."
+    : "The backup couldn't be completed. Try again, or check the server logs if it keeps failing.";
+};
 const pending = (job: BackupJob | null) => job?.status === 'queued' || job?.status === 'running';
 type Target = { action: 'download' | 'restore' | 'delete'; backup: SystemBackup };
 
@@ -49,7 +58,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     setLoading(true); setError('');
     services.profile.history().then((history) => {
       if (live) { apply(history); setJob(history.activeJob ?? null); }
-    }).catch((cause) => { if (live) setError(message(cause)); })
+    }).catch((cause) => { if (live) setError(errorMessage(cause, "Backups couldn't be loaded. Please try again.")); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, [retry]);
@@ -65,7 +74,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
         if (!live) return;
         setJob(result);
         if (pending(result)) timer = setTimeout(poll, 1500);
-      } catch (cause) { if (live) setPollError(`Unable to check the operation status: ${message(cause)} It may still be running.`); }
+      } catch (cause) { if (live) setPollError(`${errorMessage(cause, "We couldn't check the operation's status.")} It may still be running.`); }
     };
     timer = setTimeout(poll, 1000);
     return () => { live = false; clearTimeout(timer); };
@@ -80,14 +89,14 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     if (cancelAsked.current !== completedJobId) onSuccess(services.profile.isFixture ? 'Demo operation completed. No server data was changed.'
       : completedKind === 'restore' ? 'Data was restored successfully.' : 'Backup was created successfully.');
     services.profile.history().then((history) => { if (live) apply(history); })
-      .catch((cause) => { if (live) setError(`Backup history could not be refreshed: ${message(cause)}`); });
+      .catch((cause) => { if (live) setError(errorMessage(cause, "The backup history couldn't be refreshed. Reload the page to see the latest backups.")); });
     return () => { live = false; };
   }, [completedJobId, completedKind, onSuccess]);
   const create = async () => {
     if (busy || pending(job)) return;
     setBusy(true); setError('');
     try { setJob(await services.profile.createBackup()); }
-    catch (cause) { setError(message(cause)); }
+    catch (cause) { setError(errorMessage(cause, "The backup couldn't be started. Please try again.", { mutation: true })); }
     finally { setBusy(false); }
   };
   const cancel = async () => {
@@ -102,7 +111,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       if (stillPending() && !pending(result)) setJob(result);
     } catch (cause) {
       if (!stillPending()) return;
-      setActionError(message(cause)); setCancelRequested(null); cancelAsked.current = null;
+      setActionError(errorMessage(cause, "The operation couldn't be stopped. Please try again.", { mutation: true })); setCancelRequested(null); cancelAsked.current = null;
     }
   };
   // Where focus lands when a dialog closes: the row's menu button, else whatever still stands.
@@ -147,7 +156,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       {job!.cancellable && <Button variant="subtle" data-job-cancel disabled={cancelling} onClick={() => job!.kind === 'restore' ? setStopping(true) : void cancel()}>Cancel</Button>}
     </div>}
     {outcome && <div role="status" className="profile-notice">{outcome}</div>}
-    {job?.status === 'failed' && <div role="alert" className="admin-table-error">{job.message || 'The operation failed. Try again.'}</div>}
+    {job?.status === 'failed' && <div role="alert" className="admin-table-error">{jobFailureText(job)}</div>}
     {actionError && <div role="alert" className="admin-table-error">{actionError}</div>}
     {pollError && <div role="alert" className="admin-table-error profile-inline-error">{pollError}<Button variant="subtle" onClick={() => setRetry((n) => n + 1)}>Check Status</Button></div>}
     {error && <div role="alert" className="admin-table-error profile-inline-error">{error}<Button variant="subtle" onClick={() => setRetry((n) => n + 1)}>Retry</Button></div>}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { services } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner } from "../../components/UI";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
@@ -58,7 +59,7 @@ function AppUserDirectory() {
       setPendingDeactivation(null);
     },
     onError: (cause) => {
-      setStatusError(cause instanceof Error ? cause.message : "Unable to update the account's status.");
+      setStatusError(errorMessage(cause, "The account's status couldn't be updated. Please try again.", { mutation: true }));
     },
   });
 

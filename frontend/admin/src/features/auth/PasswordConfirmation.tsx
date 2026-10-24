@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { Field } from "../../components/UI";
 import { services } from "../../services/api";
-import { PasswordConfirmationRequiredError } from "../../services/errors";
+import { errorMessage, PasswordConfirmationRequiredError } from "../../services/errors";
 
 /** What the prompt says about the action it guards; each caller can supply its own. */
 export type PasswordConfirmationWording = {
@@ -51,7 +51,7 @@ export function usePasswordConfirmation(wording: PasswordConfirmationWording = D
       await services.auth.confirmPassword(password);
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Password is incorrect.");
+      setError(errorMessage(cause, "We couldn't check your password. Please try again."));
       return false;
     } finally {
       setConfirming(false);
