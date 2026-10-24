@@ -364,9 +364,9 @@ export function Locations() {
   const matchesFloor = (item: Location) => {
     if (floorId === "All Floors") return true;
     if (selectedFloorRecord) {
-      return (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (item.floor === selectedFloorRecord.name && item.parentId === selectedFloorRecord.parentId);
+      return (item.type === "Floor" && item.id === floorId) || item.parentId === floorId || (indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) && (item.floor || "Unspecified Floor") === selectedFloorRecord.name && item.parentId === selectedFloorRecord.parentId);
     }
-    return (item.type === "Floor" ? item.name : item.floor) === selectedFloorName;
+    return (item.type === "Floor" ? item.name : indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]) ? item.floor || "Unspecified Floor" : undefined) === selectedFloorName;
   };
   const { data, isLoading, isFetching, error: listError } = useQuery({
     queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorName],
@@ -392,18 +392,23 @@ export function Locations() {
 
   useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
-  const hierarchyItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+  const hierarchyFilterItems = useMemo(() => {
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
-      (!normalizedQuery || [item.name, item.code, backendLocationType(item) ?? "", item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
-        .some((value) => value.toLowerCase().includes(normalizedQuery))) &&
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
       (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
       matchesFloor(item)
     );
-  }, [allLocations, query, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  }, [allLocations, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  const hierarchyFilterKeys = useMemo(() => new Set(hierarchyFilterItems.map(locationIdentityKey)), [hierarchyFilterItems]);
+  const hierarchyItems = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return hierarchyFilterItems.filter((item) =>
+      !normalizedQuery || [item.name, item.code, backendLocationType(item) ?? "", item.function ?? "", item.keywords ?? "", item.building ?? "", item.floor ?? ""]
+        .some((value) => value.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [hierarchyFilterItems, query]);
 
   const matchingKeys = useMemo(() => new Set((viewMode === "hierarchy" ? hierarchyItems : items).map(locationIdentityKey)), [hierarchyItems, items, viewMode]);
 
@@ -429,12 +434,12 @@ export function Locations() {
       const childLocations = allLocations.filter((loc) =>
         loc.type !== "Floor" && !isLocationContainer(loc) &&
         loc.parentId === bldg.id &&
-        (rootWasMatched || matchingKeys.has(locationIdentityKey(loc))),
+        (matchingKeys.has(locationIdentityKey(loc)) || (rootWasMatched && hierarchyFilterKeys.has(locationIdentityKey(loc)))),
       );
       const explicitFloors = allLocations.filter((loc) =>
         loc.parentId === bldg.id &&
         loc.type === "Floor" &&
-        (rootWasMatched || childLocations.some((child) =>
+        ((rootWasMatched && type === "All Types" && (status === "All Statuses" || status === "All Status")) || childLocations.some((child) =>
           child.parentId === loc.id ||
           (child.floor === loc.name && child.parentId === bldg.id)
         )),
@@ -467,9 +472,17 @@ export function Locations() {
       if (!bldgCollapsed) {
         childFloors.forEach((flr, flrIndex) => {
           const flrCollapsed = expandByDefault === toggledNodes.has(flr.id);
-          const childRooms = allLocations.filter(
-            (loc) => matchingKeys.has(locationIdentityKey(loc)) && (loc.parentId === flr.id || (loc.parentId === bldg.id && loc.floor === flr.name && loc.type !== "Floor" && !isLocationContainer(loc)))
-          );
+          const childRooms = allLocations.filter((loc) => {
+            const key = locationIdentityKey(loc);
+            // A matching Building exposes its descendants, while explicit filters still apply.
+            const included = matchingKeys.has(key) || (rootWasMatched && hierarchyFilterKeys.has(key));
+            // Blank floors belong to the same fallback group created above.
+            const belongsToFloor = loc.parentId === flr.id || (
+              loc.parentId === bldg.id && (loc.floor || "Unspecified Floor") === flr.name &&
+              loc.type !== "Floor" && !isLocationContainer(loc)
+            );
+            return included && belongsToFloor;
+          });
           family.push({
             item: flr,
             level: 1,
@@ -502,13 +515,15 @@ export function Locations() {
     // If filter produced items not in tree, include them
     const includedKeys = new Set([...nestedKeys, ...result.flat().map((r) => locationIdentityKey(r.item))]);
     for (const item of hierarchyItems) {
+      // Compatibility Floors are grouping rows, never standalone directory records.
+      if (item.type === "Floor") continue;
       if (!includedKeys.has(locationIdentityKey(item))) {
         result.push([{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
       }
     }
 
     return result;
-  }, [items, hierarchyItems, matchingKeys, allLocations, viewMode, toggledNodes, expandByDefault]);
+  }, [items, hierarchyItems, hierarchyFilterKeys, matchingKeys, allLocations, viewMode, toggledNodes, expandByDefault, type, status]);
 
   const hierarchyRows = hierarchyFamilies.flat();
   const hierarchyTotal = hierarchyFamilies.length;
