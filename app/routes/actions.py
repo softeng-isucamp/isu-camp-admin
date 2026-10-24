@@ -2,7 +2,7 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from auth import admin_required, reauth_required
+from auth import admin_required, permission_error, reauth_required
 from extensions import db
 from model.building import (
     CAN_CONTAIN_LOCATIONS,
@@ -287,8 +287,11 @@ def list_locations():
 @actions_bp.route("/buildings/<int:building_id>/rooms", methods=["POST"])
 def add_room_to_building(building_id):
 
-    _, error = admin_required()
+    admin, error = admin_required()
     if error: return error
+
+    if denied := permission_error(admin, "add"):
+        return denied
 
     try:
         records, buildings = _all_locations(), _all_buildings()
@@ -360,8 +363,11 @@ def add_room_to_building(building_id):
 @actions_bp.route("/locations/<int:location_id>", methods=["PUT"])
 def edit_location(location_id):
 
-    _, error = admin_required()
+    admin, error = admin_required()
     if error: return error
+
+    if denied := permission_error(admin, "edit"):
+        return denied
 
     data = _request_payload()
     requested_type = data.get("type")
@@ -552,6 +558,15 @@ def view_gallery_photo(location_id, photo_id):
 
 @actions_bp.route("/locations/<int:location_id>", methods=["DELETE"])
 def delete_location(location_id):
+
+    # The permission first, then the password: an administrator who may not
+    # delete is told so, rather than asked to confirm a password for an answer
+    # that was never going to be yes.
+    admin, error = admin_required()
+    if error: return error
+
+    if denied := permission_error(admin, "delete"):
+        return denied
 
     _, error = reauth_required()
     if error: return error

@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, request, jsonify, session
 from flask_mail import Message
 from dotenv import load_dotenv
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import JSONB
 
 from extensions import db, mail
 from services.audit import log_audit
@@ -165,6 +166,23 @@ class Admin(db.Model):
         default="admin"
     )
 
+    # Which of the four general actions this administrator may take, as
+    # ``{"add": bool, "edit": bool, "delete": bool, "changeUserStatus": bool}``.
+    #
+    # NULL means "every one of them", which is what makes this column safe to
+    # add to a running deployment: rows that predate it keep the access they
+    # had, and a superadmin's switches are NULL because the role already
+    # carries everything. Viewing is not a switch - it is the least-privilege
+    # minimum, and an account that should see nothing is deactivated instead.
+    #
+    # One JSON value rather than four columns because the four are always read
+    # and written together, and the API carries them as one object. See
+    # migrations/20261024_add_admin_permissions.sql.
+    permissions = db.Column(
+        JSONB().with_variant(db.JSON(), "sqlite"),
+        nullable=True
+    )
+
     @property
     def is_active(self):
         return (self.status or "active") == "active"
@@ -172,6 +190,24 @@ class Admin(db.Model):
     @property
     def is_superadmin(self):
         return (self.role or "admin") == "superadmin"
+
+    def permissions_dto(self):
+        """The four switches as every response carries them, or None.
+
+        None is "all four on", and it is what a superadmin and an unconfigured
+        administrator both report: the frontend reads a missing or null
+        ``permissions`` as full access, which is how this field could be added
+        to a live contract without changing what any existing build may do.
+        """
+
+        if self.is_superadmin:
+            return None
+        return granted_permissions(self.permissions)
+
+    def may(self, action):
+        """Whether this account may take ``action``, one of PERMISSION_KEYS."""
+
+        return admin_may(self, action)
 
     def to_profile(self):
         """The account as My Profile reads it.
@@ -191,7 +227,69 @@ class Admin(db.Model):
             "email": self.gmail or "",
             "alternativeEmail": self.alternative_email or None,
             "role": "superadmin" if self.is_superadmin else "admin",
+            # Read off the row on every call, never off the session cookie, so
+            # a switch a superadmin has just turned off takes effect the next
+            # time the portal asks who it is signed in as - without the
+            # administrator signing out and in again.
+            "permissions": self.permissions_dto(),
         }
+
+
+# ==========================================
+# Per-Administrator Permissions
+# ==========================================
+
+# The four general actions a regular administrator can be given or refused.
+# Viewing is deliberately not among them: it is the least-privilege minimum
+# every active account keeps, so restricting someone to nothing is a
+# deactivation, not a permission.
+#
+# The keys are the ones the API carries, camelCase and all, because this object
+# is handed to the frontend unchanged and a second spelling on the way out
+# would be a second thing to keep in step.
+PERMISSION_KEYS = ("add", "edit", "delete", "changeUserStatus")
+
+# The frontend recognises this code, not the message text, so it can re-read
+# the signed-in account's permissions and stop offering an action that has just
+# been taken away.
+PERMISSION_DENIED_CODE = "PERMISSION_DENIED"
+
+PERMISSION_DENIED_MESSAGE = "You don't have permission to do that. Ask a superadmin."
+
+
+def granted_permissions(stored):
+    """A stored permissions value as the four booleans, or None for full access.
+
+    None covers everything that is not a configured set of switches: a NULL
+    column, a row written before the column existed, and anything that is not
+    an object. All of them mean "no restriction recorded", which keeps this
+    column safe to introduce - no deployment loses access by upgrading, and a
+    mangled value fails open rather than locking a campus out of its own map.
+
+    A key missing from a value that *is* an object is a different matter: the
+    set was configured and that switch is not in it, so it reads as off.
+    """
+
+    if not isinstance(stored, dict):
+        return None
+    return {key: stored.get(key) is True for key in PERMISSION_KEYS}
+
+
+def admin_may(admin, action):
+    """Whether ``admin`` may take ``action``.
+
+    Superadmins may do everything - their switches are not configurable, and
+    restricting one means demoting it first. Everyone else is judged by the
+    stored object, with the NULL-means-everything rule above.
+
+    Read with ``getattr`` rather than attribute access so this also answers for
+    a caller that is not a full row.
+    """
+
+    if getattr(admin, "is_superadmin", False):
+        return True
+    granted = granted_permissions(getattr(admin, "permissions", None))
+    return True if granted is None else granted.get(action, False)
 
 
 # ==========================================
@@ -507,6 +605,56 @@ def superadmin_required(locked=None):
         )
 
     return admin, None
+
+
+def permission_denied(message=None):
+    """The 403 a refused action answers with."""
+
+    return (
+        jsonify({
+            "success": False,
+            "code": PERMISSION_DENIED_CODE,
+            "message": message or PERMISSION_DENIED_MESSAGE,
+        }),
+        403
+    )
+
+
+def permission_error(admin, action, message=None):
+    """None when ``admin`` may take ``action``, otherwise the 403 to return.
+
+    The check, separated from the authentication around it, so a route that has
+    already loaded its caller - or has to weigh several changes in one payload,
+    as POST /api/map/save does - can ask about each one without looking the
+    account up again.
+    """
+
+    if action is None or admin_may(admin, action):
+        return None
+    return permission_denied(message)
+
+
+def permission_required(action):
+    """Guard a write route behind one of the four permissions.
+
+    Returns ``(admin, None)`` or ``(None, response)`` like
+    :func:`admin_required`, which it builds on, so routes can chain the two.
+    The switches are read from the row on every request, exactly as
+    :func:`superadmin_required` reads the role, so withdrawing one takes effect
+    on the caller's next request rather than at their next sign-in.
+
+    Checked *before* any password confirmation: an administrator who may not
+    delete is told so outright rather than asked to confirm a password for
+    something the answer was always no to.
+    """
+
+    admin, error = admin_required()
+    if error:
+        return None, error
+
+    denied = permission_error(admin, action)
+    if denied:
+        return None, denied
 
 
 # ==========================================

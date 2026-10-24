@@ -130,6 +130,85 @@ Forgot password and forgot username accept either address. The code is sent **on
 
 Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
 
+## Administrator permissions
+
+A superadmin switches four general actions on or off for each regular administrator. **Viewing is not one of them**: it is the least-privilege minimum every active account keeps, so an administrator who should see nothing is deactivated, not given four off switches.
+
+| Key | Allows |
+| --- | --- |
+| `add` | Creating things: locations, rooms, buildings, route nodes, pathways, path points, entrances, indoor locations, converting a path point to a route node, placing an unpositioned indoor marker for the first time |
+| `edit` | Changing existing things: location details, building footprints, moving or reshaping route nodes, pathways and path points, linking an existing entrance, repositioning or clearing an indoor marker already on the map |
+| `delete` | Deleting locations, buildings, route nodes, pathways, path points |
+| `changeUserStatus` | Activating and deactivating **app users** (`PUT /api/users/:id/status`) |
+
+**Superadmins hold every permission and cannot be configured.** Their stored switches are `NULL` and `PUT /api/admins/:id/permissions` refuses them with 409; to restrict one, demote them first. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
+
+Nobody changes their own permissions.
+
+### Reading them
+
+`POST /api/login`, `GET /api/me` and `GET /api/admins` all carry the same object:
+
+```json
+{"id":"7","username":"registrar","email":"…","role":"admin",
+ "permissions":{"add":true,"edit":false,"delete":false,"changeUserStatus":true}}
+```
+
+**`null` — or a missing key — means all four are on.** That is what makes the column safe to add to a running deployment: a row nobody has configured, and every row written before the migration, keeps the access it had. A superadmin reports `null` for the same reason the role does not need switches.
+
+`GET /api/me` reads them **from the row on every call**, never from the session cookie, and so does every guard below. Withdrawing a permission therefore takes effect on the administrator's **next request** — there is no cached grant to outlive it, and nobody has to sign out and in again.
+
+### Setting them
+
+`PUT /api/admins/:id/permissions`, superadmin-only and behind a recent password confirmation (`/api/confirm-password`), the same pattern as `/role`:
+
+```json
+{"permissions":{"add":true,"edit":true,"delete":false,"changeUserStatus":false}}
+```
+
+All four keys, every time, each a boolean — a body naming two leaves the other two to whatever the reader assumes. Anything else is a 400 with `fields.permissions`.
+
+| Case | Status | Message |
+| --- | --- | --- |
+| The target is the caller | 409 | `You cannot change your own permissions.` |
+| The target is a superadmin | 409 | `Superadmins always have every permission. Demote them first to restrict them.` |
+| A partial or mistyped set | 400 | `Each of the four permissions must be given as true or false.` |
+| Done | 200 | `Permissions updated for <username>.` plus the updated `admin` |
+
+The audit row records what moved — `admin02: add: on -> off; delete: on -> off` — so the Logs page answers "who took that away" without anybody diffing two rows.
+
+**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts and demoted superadmins start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` and `PUT /api/admins/:id/role` both accept an optional `permissions` object; a promotion discards it.
+
+`POST /api/admins` now requires a password confirmation for **every** create, not only a superadmin's — each new account is a new way into the portal whatever its role.
+
+**`DELETE /api/admins/:id` is gone** and answers 405. Removing the row orphaned everything the account had ever done, since the audit trail names an actor by username; `PUT /api/admins/:id/status` does the same job and keeps the history readable.
+
+### The server is the enforcement
+
+The frontend hides what the signed-in administrator may not do, but hiding a button is not authorization. Every write route checks for itself, through `auth.permission_required` (or `auth.permission_error` where a route has already loaded its caller), and a refusal is:
+
+```json
+{"success":false,"code":"PERMISSION_DENIED","message":"You don't have permission to do that. Ask a superadmin."}
+```
+
+with status **403**. The frontend reads the `code`, not the message.
+
+On a delete, the **permission is checked before the password confirmation** — as with `superadmin_required` — so an administrator who may not delete is refused outright rather than asked to confirm a password for an answer that was never going to be yes.
+
+### Operations, not request verbs
+
+Two routes are judged on what the operation *is* rather than on which records it happens to write:
+
+- **`PATCH /api/map/buildings/:id/indoor-locations/:id`** needs `add` to give an indoor location its first marker and `edit` to move or clear one it already has. Which of the two it is comes from the marker's **stored coordinates**, so a client cannot pick the permission it is judged against.
+
+- **`PUT /api/pathways/:id/points`** replaces a pathway's whole point sequence as one `edit`, in one transaction. Reshaping a pathway stores new vertex records and drops old ones; reconciled one vertex at a time it reached the server as an add, an edit and a delete, so an administrator who may edit the network could only drag a shape that kept its vertex count — and a refusal partway through left the pathway with half of its new shape. Creating a pathway carries its vertices in the same request (`POST /api/pathways`), so that stays one `add`, and Create Junction / Convert to Route Node (`POST /api/pathways/:id/convert-point`) is one `add` including the graph rewiring it requires.
+
+`POST /api/map/save` is checked **per change in the payload**, before the first one is applied: one refused change refuses the whole save, and the message names it (`You don't have permission to change the Engineering Hall footprint. Ask a superadmin.`). Everything that route can apply is a change to a record that already exists, so every change in it is an `edit`; an empty draft asks for nothing and needs nothing.
+
+`POST /api/map/publish` is open to every active administrator and none of the four gates it: publishing promotes work that is already saved, and the saving is what each permission was checked on.
+
+Apply `migrations/20261024_add_admin_permissions.sql` before using any of this.
+
 ## Database backups
 
 Backup & Recovery on My Profile takes real `pg_dump` archives. These routes back it, all superadmin-only:

@@ -83,6 +83,9 @@ def test_profile_is_returned_unenveloped_for_the_frontend_schema(app, monkeypatc
         "alternativeEmail": None,
         "email": "admin01@isu.edu.ph",
         "role": "superadmin",
+        # Null for a superadmin, whose permissions are not configurable. The
+        # frontend reads null as full access.
+        "permissions": None,
     }
 
 

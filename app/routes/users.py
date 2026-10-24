@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required
+from auth import admin_required, permission_error
 from extensions import db
 from model.app_user import (
     USER_TYPES,
@@ -93,11 +93,18 @@ def set_user_status(user_id):
     The only field of an app account this portal writes: the profile is the
     User App's, but whether the account may sign in is an administrative
     decision. The User App enforces it at its own sign-in.
+
+    The one route behind the ``changeUserStatus`` permission, which exists
+    because locking a student out of the User App is a different kind of
+    decision from editing the map, and is given to a different set of people.
     """
 
-    _, auth_error = admin_required()
+    admin, auth_error = admin_required()
     if auth_error:
         return auth_error
+
+    if denied := permission_error(admin, "changeUserStatus"):
+        return denied
 
     record = db.session.get(AppUser, user_id)
     if not record:

@@ -3,7 +3,7 @@ import math
 
 from flask import Blueprint, jsonify, request
 
-from auth import admin_required, reauth_required
+from auth import admin_required, permission_error, reauth_required
 from extensions import db
 from model.building import Building
 from model.path_point import PATH_POINT_TYPES, PathPoint
@@ -28,13 +28,28 @@ def _error(message, code=400):
     return jsonify({"success": False, "message": message}), code
 
 
-def _guard():
-    _, error = admin_required()
-    return error
+def _guard(permission=None):
+    """Authenticates, then checks the one permission the route needs.
+
+    ``permission`` is "add", "edit" or "delete" for a write and None for a
+    read: viewing the network is the least-privilege minimum every active
+    administrator keeps.
+    """
+    admin, error = admin_required()
+    if error:
+        return error
+    return permission_error(admin, permission)
 
 
-def _delete_guard():
-    """Deletes also need a password confirmed within the reauth window."""
+def _delete_guard(permission="delete"):
+    """Deletes also need a password confirmed within the reauth window.
+
+    The permission is checked first, as with superadmin_required elsewhere: an
+    administrator who may not delete is refused outright rather than asked to
+    confirm a password for an action they could never take.
+    """
+    if error := _guard(permission):
+        return error
     _, error = reauth_required()
     return error
 
@@ -261,7 +276,7 @@ def _node_values(data, current=None):
 
 @route_node_bp.route("/route-nodes", methods=["POST"])
 def create_route_node():
-    if error := _guard():
+    if error := _guard("add"):
         return error
     try:
         values = _node_values(_body())
@@ -290,7 +305,7 @@ def create_route_node():
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["PUT"])
 def update_route_node(node_id):
-    if error := _guard():
+    if error := _guard("edit"):
         return error
     try:
         record = RouteNode.query.get(node_id)
@@ -463,7 +478,7 @@ def _apply_pathway(record, values):
 @route_node_bp.route("/pathways/<int:pathway_id>/convert-point", methods=["POST"])
 def convert_path_point(pathway_id):
     """Replace one saved interior point with a routable node and two paths."""
-    if error := _guard():
+    if error := _guard("add"):
         return error
     try:
         data = _body()
@@ -559,7 +574,7 @@ def convert_path_point(pathway_id):
 
 @route_node_bp.route("/pathways", methods=["POST"])
 def create_pathway():
-    if error := _guard():
+    if error := _guard("add"):
         return error
     try:
         values = _pathway_values(_body())
@@ -595,7 +610,7 @@ def create_pathway():
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["PUT"])
 def update_pathway(pathway_id):
-    if error := _guard():
+    if error := _guard("edit"):
         return error
     try:
         record = Pathway.query.get(pathway_id)
@@ -621,6 +636,63 @@ def update_pathway(pathway_id):
         return jsonify(
             success=False,
             message="Could not update pathway",
+            error=str(error),
+        ), 500
+
+
+@route_node_bp.route("/pathways/<int:pathway_id>/points", methods=["PUT"])
+def replace_pathway_points(pathway_id):
+    """Replace a Pathway's whole point sequence as one Edit Pathway operation.
+
+    Reshaping a pathway means its vertices move, and usually that there are
+    more or fewer of them than before. Reconciled one vertex at a time - a PUT
+    per surviving point, a POST per new one, a DELETE per dropped one - the
+    same reshape reads as three different operations, so an administrator who
+    may edit the network could only drag a shape that happened to keep its
+    vertex count, and a refusal halfway through would leave the pathway stored
+    with half of its new shape.
+
+    So the whole sequence arrives here instead: authorized once as an edit,
+    applied in one transaction, and either entirely stored or entirely not.
+    Which records the operation may touch is decided here, from the pathway in
+    the URL - the vertices of that pathway and nothing else - rather than taken
+    from a label in the body.
+
+    Creating a pathway with its vertices is the same shape of thing one step
+    earlier, and POST /api/pathways already accepts ``path_points`` for it, so
+    that stays a single "add".
+    """
+    if error := _guard("edit"):
+        return error
+    try:
+        record = db.session.get(Pathway, pathway_id, with_for_update=True)
+        if record is None:
+            return _error("Pathway not found", 404)
+        data = _body()
+        if "path_points" not in data:
+            raise ValidationError("path_points is required")
+        points = _points(data["path_points"])
+        if isinstance(points, tuple):
+            return _error(*points)
+        _replace_points(record, points)
+        log_audit(
+            "Admin", None, "update shape", "Pathway", pathway_id,
+            f"{record.name}; {len(points)} path point(s)",
+        )
+        db.session.commit()
+        return jsonify(
+            success=True,
+            message="Pathway points replaced successfully",
+            pathway=record.to_dict(),
+        )
+    except ValidationError as error:
+        db.session.rollback()
+        return _error(str(error))
+    except Exception as error:
+        db.session.rollback()
+        return jsonify(
+            success=False,
+            message="Could not replace pathway points",
             error=str(error),
         ), 500
 
@@ -742,7 +814,11 @@ def _point_values(data, current=None):
 
 
 def _point_write(point_id=None):
-    if error := _guard():
+    # A standalone point write is judged on its own: creating a vertex is an
+    # add, moving one is an edit. Reshaping a whole pathway is neither - it is
+    # one Edit Pathway operation, and it goes through replace_pathway_points
+    # below rather than through a sequence of these.
+    if error := _guard("edit" if point_id is not None else "add"):
         return error
     try:
         record = PathPoint.query.get(point_id) if point_id is not None else None
@@ -790,7 +866,7 @@ def update_path_point(point_id):
 
 @route_node_bp.route("/path-points/<int:point_id>", methods=["DELETE"])
 def delete_path_point(point_id):
-    if error := _guard():
+    if error := _guard("delete"):
         return error
     try:
         record = PathPoint.query.get(point_id)

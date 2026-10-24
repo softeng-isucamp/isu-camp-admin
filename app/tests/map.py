@@ -164,6 +164,9 @@ def test_indoor_location_position_accepts_polygon_boundary(monkeypatch):
     })()
     location = type("LocationRecord", (), {
         "location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None,
+        # Unpositioned, like every stored indoor location before somebody
+        # places it: the route reads these to tell a first placement from a move.
+        "latitude": None, "longitude": None,
         "to_location_dto": lambda self, building=None, floor=None: {"lat": self.latitude, "lng": self.longitude},
     })()
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
@@ -223,7 +226,10 @@ def test_indoor_location_position_rejects_invalid_marker(monkeypatch, payload, m
         "building_id": 4,
         "polygon_coordinates": [[16.7, 121.6], [16.7, 121.7], [16.8, 121.7], [16.8, 121.6]],
     })()
-    location = type("LocationRecord", (), {"location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None})()
+    location = type("LocationRecord", (), {
+        "location_id": 12, "building_id": 4, "type_id": 1, "floor_id": None,
+        "latitude": None, "longitude": None,
+    })()
     monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "Building", type("BuildingModel", (), {"query": FakeQuery([building])}))
     monkeypatch.setattr(map_module, "Location", type("LocationModel", (), {"query": FakeQuery([location])}))
@@ -394,7 +400,9 @@ def test_map_save_rejects_non_object_json_payload(monkeypatch):
 
 
 def test_delete_map_building_requires_administrator(monkeypatch):
-    monkeypatch.setattr(map_module, "reauth_required", lambda: (None, ({"error": "Authentication required"}, 401)))
+    monkeypatch.setattr(
+        map_module, "admin_required", lambda: (None, ({"error": "Authentication required"}, 401)),
+    )
 
     response = app_with_map_blueprint().test_client().delete("/api/map/buildings/4")
 
@@ -402,6 +410,7 @@ def test_delete_map_building_requires_administrator(monkeypatch):
 
 
 def test_delete_map_building_requires_a_confirmed_password(monkeypatch):
+    monkeypatch.setattr(map_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(map_module, "reauth_required", lambda: (None, (
         {"success": False, "code": "password_confirmation_required", "message": "Confirm your password to delete this record."},
         403,
