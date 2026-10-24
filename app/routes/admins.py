@@ -96,12 +96,19 @@ def _read_permissions(data, *, role, default=None):
     meaningful - it is what a superadmin's row stores - so the two are not
     interchangeable with a falsy check.
 
-    A superadmin's switches are ignored rather than refused: a client may hold
-    one form for both roles, and refusing a field that cannot apply would make
-    promoting somebody fail for a value nothing reads.
+    Only an *absent* field defaults. A field that is present and null is a
+    value the caller chose to send, and the one shape a supplied value may
+    take is the four booleans, so null is refused like any other wrong shape
+    (issue #145). Reading the two the same way meant a client could ask for
+    "no permissions" and silently receive the view-only default instead of
+    being told its request made no sense.
+
+    A superadmin's switches are ignored rather than refused, null included: a
+    client may hold one form for both roles, and refusing a field that cannot
+    apply would make promoting somebody fail for a value nothing reads.
     """
 
-    if not isinstance(data, dict) or "permissions" not in data or data["permissions"] is None:
+    if not isinstance(data, dict) or "permissions" not in data:
         return default, None
 
     if role == "superadmin":
