@@ -142,7 +142,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
   };
 
-  // A restriction locks Resend for the same wait as Verify.
+  // A restriction locks Resend; one reported by a verify locks Verify for the same wait.
   const restrict = (seconds: number) => {
     restrictedWait.current = true;
     setResendLimited(true);
@@ -192,8 +192,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       if (err instanceof RateLimitError) {
         setError(recoveryRateLimitMessage(err));
         if (err.retryAfterSeconds !== undefined) {
+          // Only Resend locks: the code already sent may still be accepted (the request cap refuses new codes, not guesses).
+          // A restriction that covers verifying too is reported by Verify's own 429.
           if (err.restricted) {
-            verifyWait.start(err.retryAfterSeconds);
             restrict(err.retryAfterSeconds);
           } else {
             restrictedWait.current = false;

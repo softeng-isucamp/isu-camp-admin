@@ -7,7 +7,7 @@ vi.hoisted(() => vi.stubEnv("VITE_API_MODE", "real"));
 
 import { AuthProvider } from "./AuthContext";
 import { ForgotPassword } from "./ForgotPassword";
-import { expired, exhausted, issued, jsonResponse, mockBackend, settle, wrongCode } from "./testing/recoveryFetch";
+import { expired, exhausted, issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
 const EMAIL = "admin@isu.edu.ph";
 const REQUEST = "/api/recovery/request";
@@ -669,15 +669,34 @@ describe("code step: recovery restriction", () => {
     expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
   });
 
-  it("locks Verify too when a resend is refused by the restriction", async () => {
+  it("locks only Resend when a resend is refused, so the code already sent can still be verified", async () => {
     useCountdownTimers();
-    mockBackend({ [REQUEST]: [issued(), restricted("900")] });
+    mockBackend({ [REQUEST]: [issued(), restricted("720")], [VERIFY]: [verified()] });
     await openCodeStep();
 
     fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
     await settle();
 
-    const locked = screen.getAllByRole("button", { name: "Try again in 900s" });
+    expect(screen.getByRole("button", { name: "Try again in 720s" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Verify" })).toBeEnabled();
+
+    typeCode("000000");
+    await settle();
+
+    expect(screen.queryByRole("heading", { name: /verification code/i })).toBeNull();
+  });
+
+  it("locks Verify as well once a verify is refused by the restriction after a refused resend", async () => {
+    useCountdownTimers();
+    mockBackend({ [REQUEST]: [issued(), restricted("720")], [VERIFY]: [restricted("700")] });
+    await openCodeStep();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    await settle();
+    typeCode("111111");
+    await settle();
+
+    const locked = screen.getAllByRole("button", { name: "Try again in 700s" });
     expect(locked).toHaveLength(2);
     locked.forEach((button) => expect(button).toBeDisabled());
   });
