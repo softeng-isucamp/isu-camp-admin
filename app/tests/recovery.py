@@ -1,22 +1,46 @@
 """Email-based account recovery: /api/recovery/request, /verify, /reset-password.
 
 Driven through the Flask test client against the contract the admin frontend
-was built to. Nothing here reaches a database or an SMTP server: the account
-lookup, the mail transport and the database session are all fakes.
+was built to. The account lookup and the mail transport are fakes; the database
+is real, because the attempt limits are now rows and a fake store would be a
+test of the fake. SQLite in memory, except where a test needs the counters to
+outlive the process, which is the point of their being rows at all.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import re
 import threading
 from collections import deque
 
 from flask import Flask
+from sqlalchemy import event
 import pytest
 
 import auth as auth_module
 from auth import auth_bp
+from extensions import db
+from model.recovery_attempt import RecoveryAttempt
 from services.security import hash_password, verify_password
+
+# Commits are counted with a session event rather than by standing a fake in
+# front of db.session: the routes need the real one, and Model.query is bound
+# to it when the class is built, so swapping it out afterwards only half works.
+COMMITS = {"count": 0}
+
+# Commits alone no longer say what a test wants to know. Every request commits
+# its attempt counters, so "one commit" stopped meaning "one password was
+# written" - which is what the single-use tests are actually about. A password
+# assignment arms a flag, and the commit that follows it is the one counted.
+WRITES = {"password_pending": False, "password_commits": 0}
+
+
+@event.listens_for(db.session, "after_commit")
+def _count_commit(_session):
+    COMMITS["count"] += 1
+    if WRITES["password_pending"]:
+        WRITES["password_pending"] = False
+        WRITES["password_commits"] += 1
 
 NEW_PASSWORD = "Passw0rd!x"
 GENERIC_MESSAGE = "If an account exists for this email, a code has been sent."
@@ -38,19 +62,41 @@ class FakeAdmin:
     def is_active(self):
         return self.status == "active"
 
+    # A real row's password is only stored by the commit that follows it being
+    # set; this records the setting so a test can tell the two apart.
+    @property
+    def password(self):
+        return self._password
+
+    @password.setter
+    def password(self, value):
+        self._password = value
+        WRITES["password_pending"] = True
+
 
 class Harness:
-    """One app, one inbox and one set of accounts per test."""
+    """One app, one inbox, one database and one set of accounts per test.
 
-    def __init__(self, monkeypatch, admins):
+    The database is a SQLite *file* attached as the "public" schema the models
+    name, not an in-memory one. Two reasons, both of which a test needs: every
+    connection sees the same tables, so the threaded tests below exercise real
+    concurrent requests, and the file outlives the app, so a test can reopen it
+    the way a restarted process would.
+    """
+
+    def __init__(self, monkeypatch, admins, store):
         self.admins = admins
         self.sent = []
-        self.commits = 0
         self.mail_fails = False
 
         auth_module.rate_limit_buckets.clear()
         auth_module.reset_otps.clear()
         auth_module.guessed_recovery_entries.clear()
+        # The sweep runs at most once an interval, and the interval is longer
+        # than a test run, so a test that wants it to run needs it unarmed.
+        auth_module.recovery_swept_at = None
+        COMMITS["count"] = 0
+        WRITES.update(password_pending=False, password_commits=0)
 
         class FakeMessage:
             def __init__(self, **values):
@@ -60,15 +106,6 @@ class Harness:
             if self.mail_fails:
                 raise RuntimeError("smtp is down")
             self.sent.append(message)
-
-        harness = self
-
-        class FakeSession:
-            def commit(self):
-                harness.commits += 1
-
-            def rollback(self):
-                pass
 
         monkeypatch.setattr(auth_module, "Message", FakeMessage)
         monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda _, m: send(m)})())
@@ -84,13 +121,54 @@ class Harness:
             }
         ])
         monkeypatch.setattr(auth_module, "log_audit", lambda *args, **kwargs: None)
-        monkeypatch.setattr(auth_module.db, "session", FakeSession())
 
+        self.store = str(store)
         app = Flask(__name__)
         app.config["SECRET_KEY"] = "test-secret"
+        app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+        app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+        # Writers wait for each other instead of failing: two connections
+        # writing one SQLite file is exactly what the threaded tests do.
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"timeout": 15}}
+        db.init_app(app)
         app.register_blueprint(auth_bp)
         self.app = app
+
+        self.context = app.app_context()
+        self.context.push()
+
+        # Every connection, not just the first: SQLite gives each thread its
+        # own, and a connection that has not attached the file sees no tables
+        # at all.
+        store_path = self.store.replace("'", "''")
+
+        @event.listens_for(db.engine, "connect")
+        def attach_public(dbapi_connection, _record):
+            dbapi_connection.execute(f"ATTACH DATABASE '{store_path}' AS public")
+
+        self.attach_listener = attach_public
+        db.session.execute(db.text("SELECT 1"))
+        db.metadata.create_all(db.engine)
+        db.session.commit()
+        COMMITS["count"] = 0
+        WRITES.update(password_pending=False, password_commits=0)
+
         self.client = app.test_client()
+
+    def close(self):
+        db.session.remove()
+        event.remove(db.engine, "connect", self.attach_listener)
+        db.engine.dispose()
+        self.context.pop()
+
+    @property
+    def commits(self):
+        return COMMITS["count"]
+
+    @property
+    def password_commits(self):
+        """How many commits stored a password. One, for a single-use code."""
+        return WRITES["password_commits"]
 
     def post_from(self, ip, path, **body):
         """A request from another client address, safe to send from a thread."""
@@ -120,10 +198,90 @@ class Harness:
         """Lets the same address ask for another code without waiting a minute."""
         auth_module.rate_limit_buckets.clear()
 
+    # ------------------------------------------
+    # The persistent counters, as a test reads them
+    # ------------------------------------------
+
+    def subject(self, email="admin@isu.edu.ph"):
+        return auth_module.recovery_identity(email)[0]
+
+    def row(self, email="admin@isu.edu.ph"):
+        """The stored counters for an address, or None when none are stored."""
+        db.session.expire_all()
+        return db.session.get(RecoveryAttempt, self.subject(email))
+
+    def failures(self, email="admin@isu.edu.ph"):
+        return self.failures_for(self.subject(email))
+
+    def failures_for(self, subject):
+        """Failures by subject, for a test that cannot resolve one right now.
+
+        The gated tests below hold the account lookup open, and resolving an
+        address goes through it - so a test that has installed a Gate reads its
+        counters by the subject it captured beforehand.
+        """
+        db.session.expire_all()
+        row = db.session.get(RecoveryAttempt, subject)
+        return 0 if row is None else row.failures
+
+    def restricted_for(self, email="admin@isu.edu.ph"):
+        """Seconds of restriction left on an address, or 0."""
+        row = self.row(email)
+        if row is None or row.restricted_until is None:
+            return 0
+        until = auth_module.as_utc(row.restricted_until)
+        return max(0, (until - datetime.now(timezone.utc)).total_seconds())
+
+    def age_the_window(self, seconds, email="admin@isu.edu.ph"):
+        """Moves everything stored for an address ``seconds`` into the past.
+
+        How a test reaches the far side of a window without waiting a quarter
+        of an hour. It writes the row the way the clock would have left it.
+        """
+        row = self.row(email)
+        assert row is not None, "nothing is stored for that address yet"
+        shift = timedelta(seconds=seconds)
+        if row.restricted_until is not None:
+            row.restricted_until = auth_module.as_utc(row.restricted_until) - shift
+        if row.last_failure_at is not None:
+            row.last_failure_at = auth_module.as_utc(row.last_failure_at) - shift
+        row.requested_at = [
+            (auth_module.as_utc(datetime.fromisoformat(value)) - shift).isoformat()
+            for value in row.requested_at or []
+        ]
+        row.updated_at = auth_module.as_utc(row.updated_at) - shift
+        db.session.commit()
+
+    def set_request_ages(self, *seconds, email="admin@isu.edu.ph"):
+        """Rewrites the stored request times to the given ages, oldest first.
+
+        ``age_the_window`` shifts everything by the same amount, which cannot
+        show that only part of the window has passed.
+        """
+        row = self.row(email)
+        assert row is not None, "nothing is stored for that address yet"
+        now = datetime.now(timezone.utc)
+        row.requested_at = [
+            (now - timedelta(seconds=age)).isoformat() for age in sorted(seconds, reverse=True)
+        ]
+        db.session.commit()
+
+    def exhaust_attempts(self, email="admin@isu.edu.ph"):
+        """Spends the whole attempt budget, leaving the address restricted."""
+        responses = [self.verify("999999", email=email) for _ in range(auth_module.RECOVERY_ATTEMPT_LIMIT)]
+        assert responses[-1].status_code == 429
+        return responses
+
 
 @pytest.fixture
-def harness(monkeypatch):
-    return Harness(monkeypatch, [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph")])
+def harness(monkeypatch, tmp_path):
+    built = Harness(
+        monkeypatch,
+        [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph")],
+        store=tmp_path / "recovery.sqlite",
+    )
+    yield built
+    built.close()
 
 
 def kinds(responses):
@@ -254,7 +412,14 @@ def test_request_limits_how_many_addresses_one_client_can_probe(harness):
     assert int(responses[10].headers["Retry-After"]) > 0
 
 
-def test_a_new_request_replaces_the_old_code_and_restores_the_attempts(harness):
+def test_a_new_request_replaces_the_old_code_without_restoring_the_attempts(harness):
+    """The whole point of counting against the account instead of the code.
+
+    A code used to carry its own budget, so asking for another one handed back
+    five more guesses - five a minute, for as long as anybody cared to keep
+    asking.
+    """
+
     harness.request_code()
     old = harness.issued_code()
     harness.verify(harness.wrong_code(old))
@@ -265,23 +430,31 @@ def test_a_new_request_replaces_the_old_code_and_restores_the_attempts(harness):
     new = harness.issued_code()
     fresh_wrong = harness.verify(harness.wrong_code(new))
 
-    assert fresh_wrong.json["attemptsRemaining"] == 4
+    # Two guesses were already spent, so this is the third.
+    assert fresh_wrong.json["attemptsRemaining"] == 2
+    assert harness.failures() == 3
     if old != new:
         assert harness.verify(old).json["code"] == "invalid_code"
+    # The new code still works while attempts remain, and using it clears them.
     assert harness.verify(new).status_code == 200
+    assert harness.failures() == 0
 
 
-def test_a_new_request_revives_an_exhausted_code_for_known_and_unknown_emails(harness):
+def test_a_new_request_cannot_lift_a_restriction_for_known_or_unknown_emails(harness):
+    """Requesting is closed while a restriction stands, so the restriction
+    cannot be waited out by mailing yourself codes until it lifts."""
+
     for email in ("admin@isu.edu.ph", "nobody@isu.edu.ph"):
         harness.request_code(email=email)
-        for _ in range(5):
-            harness.verify("999999", email=email)
-        assert harness.verify("999999", email=email).json["code"] == "code_exhausted"
+        harness.exhaust_attempts(email=email)
         harness.release_cooldown()
 
-        harness.request_code(email=email)
+        asked_again = harness.request_code(email=email)
 
-        assert harness.verify("999999", email=email).json["attemptsRemaining"] == 4
+        assert asked_again.status_code == 429
+        assert asked_again.json["code"] == "recovery_restricted"
+        assert int(asked_again.headers["Retry-After"]) > 0
+        assert harness.verify("999999", email=email).json["code"] == "recovery_restricted"
         harness.release_cooldown()
 
 
@@ -327,7 +500,11 @@ def test_verify_serves_the_username_flow_too(harness):
     assert response.json["username"] == "admin_justine"
 
 
-def test_wrong_codes_count_down_then_the_code_is_dead_even_if_correct(harness):
+def test_wrong_codes_count_down_then_the_fifth_restricts_recovery(harness):
+    """The fifth wrong code is told recovery is restricted, not that this code
+    is used up: being told to request another one is advice that would have led
+    straight back to five more guesses."""
+
     harness.request_code()
     code = harness.issued_code()
     wrong = harness.wrong_code(code)
@@ -340,10 +517,13 @@ def test_wrong_codes_count_down_then_the_code_is_dead_even_if_correct(harness):
         (400, "invalid_code", 3),
         (400, "invalid_code", 2),
         (400, "invalid_code", 1),
-        (400, "code_exhausted", 0),
+        (429, "recovery_restricted", None),
     ]
     assert all(r.json["message"] for r in attempts)
-    assert kinds(after) == [(400, "code_exhausted", 0)] * 2
+    assert int(attempts[-1].headers["Retry-After"]) == 900
+    # The correct code is refused too, which is what makes it a restriction on
+    # recovery rather than on one code.
+    assert kinds(after) == [(429, "recovery_restricted", None)] * 2
 
 
 def test_an_expired_code_is_rejected_even_with_the_right_digits(harness):
@@ -399,7 +579,7 @@ def test_a_code_that_was_never_requested_behaves_like_a_wrong_code(harness):
             (400, "invalid_code", 3),
             (400, "invalid_code", 2),
             (400, "invalid_code", 1),
-            (400, "code_exhausted", 0),
+            (429, "recovery_restricted", None),
         ]
         harness.release_cooldown()
 
@@ -412,12 +592,17 @@ def test_a_password_code_does_not_open_the_username_flow_and_vice_versa(harness)
     username_code = harness.issued_code()
 
     cross = harness.verify(password_code, purpose="username")
-    spent = [harness.verify("999999", purpose="username") for _ in range(4)]
+    spent = [harness.verify("999999", purpose="username") for _ in range(3)]
 
     assert password_code == username_code or cross.json["code"] == "invalid_code"
-    assert spent[-1].json["code"] == "code_exhausted"
-    # Exhausting the username code leaves the password code untouched.
+    # One budget for both pages: four guesses through the username flow leave
+    # one, whichever flow spends it. Both verify the same inbox, so counting
+    # them apart would just double the guesses on offer.
+    assert spent[-1].json["attemptsRemaining"] == 1
+    # The password code still opens the password flow while an attempt remains,
+    # and spending it on the right code clears the count.
     assert harness.verify(password_code, purpose="password").status_code == 200
+    assert harness.failures() == 0
 
 
 def test_verify_keeps_leading_zeros_in_the_code(harness):
@@ -469,16 +654,27 @@ def test_verify_rejects_malformed_requests_with_json(harness):
     assert all(r.is_json and r.json["message"] for r in bad)
 
 
-def test_verify_is_rate_limited_with_retry_after_and_json(harness):
+def test_verify_tells_a_flood_limit_apart_from_a_restriction(harness):
+    """Both are 429 and both carry Retry-After, but they mean different things:
+    one is about how fast this client is going, the other about the account."""
+
     responses = [harness.verify("999999") for _ in range(12)]
 
-    assert [r.status_code for r in responses[:10]] == [400] * 10
-    assert responses[10].status_code == 429
-    assert responses[10].is_json
-    assert int(responses[10].headers["Retry-After"]) > 0
+    assert [r.status_code for r in responses] == [400] * 4 + [429] * 8
+    assert all(r.is_json for r in responses)
+    # The first four spend the budget, the fifth restricts, and the rest are
+    # refused by the restriction until the per-address flood limit of ten
+    # guesses a minute takes over.
+    assert [r.json["code"] for r in responses[4:10]] == ["recovery_restricted"] * 6
+    assert [r.json["code"] for r in responses[10:]] == ["rate_limited"] * 2
+    assert int(responses[4].headers["Retry-After"]) == 900
+    assert 0 < int(responses[10].headers["Retry-After"]) <= 60
 
 
-def test_verify_429_does_not_count_against_the_code(harness, monkeypatch):
+def test_verify_429_does_not_count_against_the_attempts(harness, monkeypatch):
+    """A refused request is not a guess: the flood limit stops it before the
+    code is looked at, so it must not spend one of the five."""
+
     harness.request_code()
     code = harness.issued_code()
     monkeypatch.setattr(auth_module, "RECOVERY_GUESS_LIMIT_PER_EMAIL", 2)
@@ -488,7 +684,8 @@ def test_verify_429_does_not_count_against_the_code(harness, monkeypatch):
     limited = harness.verify(harness.wrong_code(code))
 
     assert (first.status_code, second.status_code, limited.status_code) == (400, 400, 429)
-    assert auth_module.reset_otps[("password", "admin@isu.edu.ph")]["attempts"] == 2
+    assert limited.json["code"] == "rate_limited"
+    assert harness.failures() == 2
 
 
 # ==========================================
@@ -576,10 +773,10 @@ def test_reset_exhausting_the_code_kills_it_for_verify_too(harness):
 
     responses = [harness.reset(wrong) for _ in range(5)]
 
-    assert responses[-1].json["code"] == "code_exhausted"
-    assert responses[-1].json["attemptsRemaining"] == 0
-    assert harness.reset(code).json["code"] == "code_exhausted"
-    assert harness.verify(code).json["code"] == "code_exhausted"
+    assert responses[-1].status_code == 429
+    assert responses[-1].json["code"] == "recovery_restricted"
+    assert harness.reset(code).json["code"] == "recovery_restricted"
+    assert harness.verify(code).json["code"] == "recovery_restricted"
     assert harness.admins[0].password == "old-password"
 
 
@@ -718,20 +915,21 @@ def test_a_code_that_cannot_be_a_code_is_a_counted_wrong_guess_for_every_email(h
         assert outcome(known) == outcome(unknown)
         assert known.status_code == 400 and known.json["code"] == "invalid_code"
 
-    # Two guesses each, counted on the real entry as on the phantom one.
-    assert auth_module.reset_otps[("password", "admin@isu.edu.ph")]["attempts"] == 2
-    assert auth_module.reset_otps[("password", "absent@isu.edu.ph")]["attempts"] == 2
+    # Two guesses each, counted against the real account as against the
+    # address that has none.
+    assert harness.failures() == 2
+    assert harness.failures("absent@isu.edu.ph") == 2
 
 
-def test_a_malformed_code_still_exhausts_the_real_code(harness):
+def test_a_malformed_code_still_spends_the_attempts(harness):
     harness.request_code()
     real = harness.issued_code()
 
     for _ in range(5):
         response = harness.verify("\ud800")
 
-    assert response.json["code"] == "code_exhausted"
-    assert harness.verify(real).json["code"] == "code_exhausted"
+    assert response.json["code"] == "recovery_restricted"
+    assert harness.verify(real).json["code"] == "recovery_restricted"
 
 
 def test_a_wrong_code_does_the_same_account_lookup_for_every_email(harness, monkeypatch):
@@ -931,15 +1129,16 @@ def test_a_right_guess_cannot_win_after_a_concurrent_last_wrong_guess(harness, m
         wrong=wrong_guess,
     )
 
-    assert results["wrong"].json["code"] == "code_exhausted"
-    assert results["right"].status_code == 400
-    assert results["right"].json["code"] == "code_exhausted"
+    assert results["wrong"].json["code"] == "recovery_restricted"
+    assert results["right"].status_code == 429
+    assert results["right"].json["code"] == "recovery_restricted"
 
 
 def test_concurrent_wrong_guesses_each_spend_exactly_one_attempt(harness, monkeypatch):
     harness.request_code()
     wrong = harness.wrong_code(harness.issued_code())
     harness.release_cooldown()
+    subject = harness.subject()
     Gate(monkeypatch, harness.admins, 4)
 
     results = run_threads(**{
@@ -948,7 +1147,7 @@ def test_concurrent_wrong_guesses_each_spend_exactly_one_attempt(harness, monkey
     })
 
     assert sorted(r.json["attemptsRemaining"] for r in results.values()) == [1, 2, 3, 4]
-    assert auth_module.reset_otps[("password", "admin@isu.edu.ph")]["attempts"] == 4
+    assert harness.failures_for(subject) == 4
 
 
 def test_the_same_code_cannot_reset_two_passwords_at_once(harness, monkeypatch):
@@ -979,7 +1178,7 @@ def test_the_same_code_cannot_reset_two_passwords_at_once(harness, monkeypatch):
     assert sorted(r.status_code for r in results.values()) == [200, 400]
     assert results["second"].json["code"] == "code_exhausted"
     assert harness.admins[0].password == "HASH:First!pass1"
-    assert harness.commits == 1
+    assert harness.password_commits == 1
 
 
 def test_a_failed_write_still_consumes_the_code(harness, monkeypatch):
@@ -989,10 +1188,17 @@ def test_a_failed_write_still_consumes_the_code(harness, monkeypatch):
     real = harness.issued_code()
     original_commit = auth_module.db.session.commit
 
-    def broken():
+    # Only the write that stores the password fails. The commit before it
+    # belongs to the attempt counters, and a request that cannot even count
+    # its own attempt is refused before the code is claimed - which is a
+    # different thing from the one being tested here.
+    def broken_after_the_counters(allowed=[0]):
+        allowed[0] += 1
+        if allowed[0] == 1:
+            return original_commit()
         raise RuntimeError("database is down")
 
-    monkeypatch.setattr(auth_module.db.session, "commit", broken)
+    monkeypatch.setattr(auth_module.db.session, "commit", broken_after_the_counters)
     failed = harness.reset(real)
     monkeypatch.setattr(auth_module.db.session, "commit", original_commit)
     harness.release_cooldown()
@@ -1017,10 +1223,14 @@ def test_a_reset_that_committed_reports_success_even_if_the_row_cannot_be_read_a
     username = admin.username
     original_commit = auth_module.db.session.commit
 
-    def commit_then_lose_the_row():
+    def commit_then_lose_the_row(committed=[0]):
         original_commit()
-        # Stands in for the expired row whose refresh fails after COMMIT.
-        del admin.username
+        committed[0] += 1
+        # Stands in for the expired row whose refresh fails after COMMIT. Only
+        # after the password write, which is the second commit: the first one
+        # belongs to the attempt counters.
+        if committed[0] >= 2:
+            del admin.username
 
     monkeypatch.setattr(auth_module.db.session, "commit", commit_then_lose_the_row)
     response = harness.reset(harness.issued_code(), password="Fresh!pass12")
@@ -1065,7 +1275,7 @@ def test_a_failed_old_reset_cannot_bring_its_code_back_after_a_newer_one_was_use
     assert results["old-reset"].status_code == 500
     assert again.status_code == 400 and again.json["code"] == "invalid_code"
     assert verify_password(harness.admins[0].password, "Newer!pass2")[0]
-    assert harness.commits == 1
+    assert harness.password_commits == 1
 
 
 def test_a_reset_that_loses_the_code_to_a_new_request_is_refused(harness, monkeypatch):
@@ -1168,7 +1378,9 @@ def test_a_flood_of_requests_does_not_evict_guessed_entries(harness, monkeypatch
         harness.release_cooldown()
         harness.request_code(f"nobody{n}@isu.edu.ph")
 
-    assert guessed_entries()[("password", "guessed@isu.edu.ph")]["attempts"] == 2
+    # The entry survives the flood; what it no longer holds is a budget.
+    assert ("password", "guessed@isu.edu.ph") in guessed_entries()
+    assert harness.failures("guessed@isu.edu.ph") == 2
     assert len(pending_entries()) == 3
 
 
@@ -1182,7 +1394,7 @@ def test_a_guessed_address_counts_down_exactly_like_a_requested_one(harness):
         assert guessed.json["attemptsRemaining"] == remaining
     harness.release_cooldown()
     assert outcome(harness.verify("000000", email="requested@isu.edu.ph")) == outcome(harness.verify("000000", email="guessed@isu.edu.ph"))
-    assert harness.verify("000000", email="guessed@isu.edu.ph").json["code"] == "code_exhausted"
+    assert harness.verify("000000", email="guessed@isu.edu.ph").json["code"] == "recovery_restricted"
 
 
 def test_a_request_replaces_an_address_guessed_before_it(harness):
@@ -1194,7 +1406,8 @@ def test_a_request_replaces_an_address_guessed_before_it(harness):
     real = harness.issued_code()
 
     assert ("password", "admin@isu.edu.ph") not in guessed_entries()
-    assert harness.verify(harness.wrong_code(real)).json["attemptsRemaining"] == 4
+    # The entry is replaced; the three guesses already made are not.
+    assert harness.verify(harness.wrong_code(real)).json["attemptsRemaining"] == 1
     assert harness.verify(real).status_code == 200
 
 
@@ -1287,12 +1500,16 @@ ALTERNATIVE = "justine.home@gmail.com"
 
 
 @pytest.fixture
-def two_addresses(monkeypatch):
+def two_addresses(monkeypatch, tmp_path):
     """One account reachable at either of its two registered addresses."""
 
-    return Harness(monkeypatch, [
-        FakeAdmin(1, "admin_justine", "admin@isu.edu.ph", alternative_email=ALTERNATIVE),
-    ])
+    built = Harness(
+        monkeypatch,
+        [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph", alternative_email=ALTERNATIVE)],
+        store=tmp_path / "recovery.sqlite",
+    )
+    yield built
+    built.close()
 
 
 @pytest.mark.parametrize("purpose", ("password", "username"))
@@ -1360,3 +1577,538 @@ def test_an_address_two_accounts_hold_between_them_recovers_neither(two_addresse
     assert response.status_code == 200
     assert response.json["message"] == GENERIC_MESSAGE
     assert two_addresses.sent == []
+
+# ==========================================
+# Cumulative, persistent attempt limits
+# ==========================================
+# ==========================================
+# Three codes per fifteen minutes
+# ==========================================
+
+def ask_three_times(harness, email="admin@isu.edu.ph"):
+    """Fills the request cap, waiting out the resend cooldown each time."""
+
+    responses = []
+    for _ in range(auth_module.RECOVERY_REQUEST_LIMIT):
+        harness.release_cooldown()
+        responses.append(harness.request_code(email=email))
+    return responses
+
+
+def test_three_codes_are_allowed_and_the_fourth_is_refused(harness):
+    allowed = ask_three_times(harness)
+    harness.release_cooldown()
+
+    fourth = harness.request_code()
+
+    assert [r.status_code for r in allowed] == [200] * 3
+    assert fourth.status_code == 429
+    assert fourth.json["code"] == "recovery_restricted"
+    assert int(fourth.headers["Retry-After"]) > 0
+    # Three codes went out and the fourth request mailed nothing, which is the
+    # whole point of the cap.
+    assert len(harness.sent) == 3
+
+
+def test_the_fourth_request_is_refused_for_an_unknown_address_too(harness):
+    """Identically, because the counting cannot depend on there being an
+    account - that difference would be the answer to "does this address have
+    one"."""
+
+    known = ask_three_times(harness) + [harness.request_code()]
+    for email in ("nobody@isu.edu.ph",):
+        harness.release_cooldown()
+        unknown = ask_three_times(harness, email=email) + [harness.request_code(email=email)]
+
+    assert [r.status_code for r in unknown] == [r.status_code for r in known]
+    assert [r.json for r in unknown] == [r.json for r in known]
+    assert unknown[-1].headers["Retry-After"] == known[-1].headers["Retry-After"]
+
+
+def test_the_request_cap_is_a_sliding_window_not_a_fixed_one(harness):
+    """Only the requests that have aged out are forgiven. A fixed window would
+    restart on its boundary and hand back the whole cap at once, which is how
+    the cap gets spent twice in a moment."""
+
+    ask_three_times(harness)
+    harness.release_cooldown()
+    assert harness.request_code().status_code == 429
+
+    # The oldest of the three is now outside the window; the other two are not.
+    harness.set_request_ages(auth_module.RECOVERY_WINDOW_SECONDS + 1, 300, 200)
+
+    harness.release_cooldown()
+    assert harness.request_code().status_code == 200
+    harness.release_cooldown()
+    assert harness.request_code().status_code == 429
+
+
+def test_the_request_window_clears_once_every_request_ages_out(harness):
+    ask_three_times(harness)
+    harness.release_cooldown()
+    assert harness.request_code().status_code == 429
+
+    harness.age_the_window(auth_module.RECOVERY_WINDOW_SECONDS + 1)
+
+    assert [r.status_code for r in ask_three_times(harness)] == [200] * 3
+    harness.release_cooldown()
+    assert harness.request_code().status_code == 429
+
+
+def test_the_request_cap_counts_an_accounts_two_addresses_together(two_addresses):
+    """One account, one cap. Otherwise registering a second address would be a
+    way to double how much mail the form can be made to send."""
+
+    two_addresses.release_cooldown()
+    assert two_addresses.request_code(email="admin@isu.edu.ph").status_code == 200
+    two_addresses.release_cooldown()
+    assert two_addresses.request_code(email=ALTERNATIVE).status_code == 200
+    two_addresses.release_cooldown()
+    assert two_addresses.request_code(email="admin@isu.edu.ph").status_code == 200
+
+    two_addresses.release_cooldown()
+    fourth = two_addresses.request_code(email=ALTERNATIVE)
+
+    assert fourth.status_code == 429
+    assert fourth.json["code"] == "recovery_restricted"
+    assert len(two_addresses.sent) == 3
+
+
+def test_the_sixty_second_cooldown_still_applies_under_the_cap(harness):
+    """The two limits are different things: one is how fast, one is how many."""
+
+    assert harness.request_code().status_code == 200
+
+    too_soon = harness.request_code()
+
+    assert too_soon.status_code == 429
+    # A cooldown is a flood limit, not a restriction on the account.
+    assert too_soon.json["code"] == "rate_limited"
+    assert int(too_soon.headers["Retry-After"]) <= 60
+
+
+def test_a_refused_request_never_answers_200(harness):
+    """Every 200 means a code was issued, so the frontend may always start its
+    countdown on one."""
+
+    responses = ask_three_times(harness)
+    for _ in range(3):
+        harness.release_cooldown()
+        responses.append(harness.request_code())
+
+    assert [r.status_code for r in responses] == [200, 200, 200, 429, 429, 429]
+    assert len(harness.sent) == 3
+
+
+def test_every_allowed_request_issues_a_new_code_and_kills_the_old_one(harness):
+    harness.request_code()
+    first = harness.issued_code()
+    harness.release_cooldown()
+
+    harness.request_code()
+    second = harness.issued_code()
+
+    assert len(harness.sent) == 2
+    if first != second:
+        assert harness.verify(first).json["code"] == "invalid_code"
+    assert harness.verify(second).status_code == 200
+
+
+# ==========================================
+# Five wrong codes, counted cumulatively
+# ==========================================
+
+def test_resends_do_not_hand_back_guesses(harness):
+    """Four guesses, a new code, and the fifth guess is still the fifth."""
+
+    harness.request_code()
+    for _ in range(4):
+        harness.verify("999999")
+    harness.release_cooldown()
+    harness.request_code()
+
+    fifth = harness.verify("999999")
+
+    assert fifth.status_code == 429
+    assert fifth.json["code"] == "recovery_restricted"
+
+
+def test_the_attempts_are_counted_across_an_accounts_two_addresses(two_addresses):
+    """Guessing at each address in turn must not buy two budgets."""
+
+    two_addresses.request_code()
+    spent = [two_addresses.verify("999999", email="admin@isu.edu.ph") for _ in range(2)]
+    spent += [two_addresses.verify("999999", email=ALTERNATIVE) for _ in range(2)]
+
+    fifth = two_addresses.verify("999999", email=ALTERNATIVE)
+
+    assert [r.json["attemptsRemaining"] for r in spent] == [4, 3, 2, 1]
+    assert fifth.status_code == 429
+    assert fifth.json["code"] == "recovery_restricted"
+    # And the restriction covers the other address as well, since it is the
+    # same account being restricted.
+    assert two_addresses.verify("999999", email="admin@isu.edu.ph").json["code"] == "recovery_restricted"
+
+
+def test_the_attempts_are_counted_across_both_purposes(harness):
+    harness.request_code(purpose="password")
+    harness.release_cooldown()
+    harness.request_code(purpose="username")
+
+    spent = [harness.verify("999999", purpose="password") for _ in range(2)]
+    spent += [harness.verify("999999", purpose="username") for _ in range(2)]
+    fifth = harness.verify("999999", purpose="username")
+
+    assert [r.json["attemptsRemaining"] for r in spent] == [4, 3, 2, 1]
+    assert fifth.json["code"] == "recovery_restricted"
+
+
+def test_attempts_remaining_counts_down_cumulatively_not_per_code(harness):
+    harness.request_code()
+    remaining = []
+    for _ in range(4):
+        remaining.append(harness.verify("999999").json["attemptsRemaining"])
+        harness.release_cooldown()
+        harness.request_code()
+
+    assert remaining == [4, 3, 2, 1]
+
+
+def test_two_unrelated_addresses_keep_their_own_budgets(harness):
+    """Cumulative does not mean shared: one address running out must not
+    restrict another, or guessing at an invented address would be a way to lock
+    somebody else out."""
+
+    harness.exhaust_attempts(email="nobody@isu.edu.ph")
+    harness.release_cooldown()
+
+    assert harness.verify("999999").json["attemptsRemaining"] == 4
+
+
+def test_the_failure_count_decays_after_the_window(harness):
+    """Five mistakes *in fifteen minutes*, not five in a lifetime: without this
+    an address that mistyped four codes last month would be one slip away from
+    being locked out for ever."""
+
+    harness.request_code()
+    for _ in range(4):
+        harness.verify("999999")
+    assert harness.failures() == 4
+
+    harness.age_the_window(auth_module.RECOVERY_WINDOW_SECONDS + 1)
+
+    assert harness.verify("999999").json["attemptsRemaining"] == 4
+    assert harness.failures() == 1
+
+
+# ==========================================
+# The fifteen-minute restriction
+# ==========================================
+
+def test_every_route_is_refused_while_a_subject_is_restricted(harness):
+    harness.request_code()
+    code = harness.issued_code()
+    harness.exhaust_attempts()
+    harness.release_cooldown()
+
+    responses = [
+        harness.request_code(),
+        harness.verify(code),
+        harness.verify(code, purpose="username"),
+        harness.reset(code),
+    ]
+
+    assert [r.status_code for r in responses] == [429] * 4
+    assert [r.json["code"] for r in responses] == ["recovery_restricted"] * 4
+    assert all(int(r.headers["Retry-After"]) > 0 for r in responses)
+    # Nothing was sent and nothing was changed.
+    assert len(harness.sent) == 1
+    assert harness.admins[0].password == "old-password"
+
+
+def test_the_correct_code_is_refused_while_restricted(harness):
+    """A restriction the right code could walk through would only ever hold up
+    the people who had lost their code."""
+
+    harness.request_code()
+    code = harness.issued_code()
+    harness.exhaust_attempts()
+
+    refused = harness.verify(code)
+
+    assert refused.status_code == 429
+    assert refused.json["code"] == "recovery_restricted"
+
+
+def test_recovery_works_again_once_the_restriction_lifts(harness):
+    harness.request_code()
+    harness.exhaust_attempts()
+    harness.age_the_window(auth_module.RECOVERY_RESTRICTION_SECONDS + 1)
+    harness.release_cooldown()
+
+    asked = harness.request_code()
+    verified = harness.verify(harness.issued_code())
+
+    assert asked.status_code == 200
+    assert verified.status_code == 200
+    assert verified.json["username"] == "admin_justine"
+
+
+def test_a_lifted_restriction_hands_back_the_whole_budget(harness):
+    """Otherwise the next single mistake would restrict the account again, and
+    the next, which is a permanent lockout wearing a fifteen-minute label."""
+
+    harness.request_code()
+    harness.exhaust_attempts()
+    harness.age_the_window(auth_module.RECOVERY_RESTRICTION_SECONDS + 1)
+    harness.release_cooldown()
+    harness.request_code()
+
+    assert harness.verify("999999").json["attemptsRemaining"] == 4
+
+
+def test_the_retry_after_on_a_restriction_is_a_whole_number_of_seconds(harness):
+    harness.request_code()
+    restricted = harness.exhaust_attempts()[-1]
+
+    header = restricted.headers["Retry-After"]
+
+    assert header.isdigit()
+    assert int(header) == auth_module.RECOVERY_RESTRICTION_SECONDS
+
+
+def test_a_restriction_counts_down_rather_than_restarting(harness):
+    harness.request_code()
+    harness.exhaust_attempts()
+
+    harness.age_the_window(600)
+    harness.release_cooldown()
+    refused = harness.request_code()
+
+    assert refused.status_code == 429
+    assert 0 < int(refused.headers["Retry-After"]) <= 300
+
+
+def test_an_unknown_address_is_restricted_exactly_like_a_real_one(harness):
+    known = [harness.verify("999999") for _ in range(6)]
+    harness.release_cooldown()
+    unknown = [harness.verify("999999", email="nobody@isu.edu.ph") for _ in range(6)]
+
+    assert kinds(unknown) == kinds(known)
+    assert [r.json["message"] for r in unknown] == [r.json["message"] for r in known]
+    assert [r.headers.get("Retry-After") for r in unknown] == [r.headers.get("Retry-After") for r in known]
+
+
+# ==========================================
+# What a success clears
+# ==========================================
+
+def test_a_successful_verification_clears_the_failures(harness):
+    """Documented answer to "does a successful username recovery clear the
+    counters": the failures, yes. A correct code proves whoever is asking is
+    reading the inbox, which is the only thing the attempt limit was there to
+    establish."""
+
+    harness.request_code(purpose="username")
+    for _ in range(3):
+        harness.verify("999999", purpose="username")
+    assert harness.failures() == 3
+
+    verified = harness.verify(harness.issued_code(), purpose="username")
+
+    assert verified.status_code == 200
+    assert harness.failures() == 0
+    # And the budget really is back, not just the stored number.
+    assert harness.verify("999999", purpose="username").json["attemptsRemaining"] == 4
+
+
+def test_a_successful_verification_does_not_clear_the_request_window(harness):
+    """The request cap is about how much mail the form may send, which a
+    success does not excuse."""
+
+    ask_three_times(harness)
+    verified = harness.verify(harness.issued_code())
+    harness.release_cooldown()
+
+    asked_again = harness.request_code()
+
+    assert verified.status_code == 200
+    assert asked_again.status_code == 429
+    assert asked_again.json["code"] == "recovery_restricted"
+
+
+def test_a_successful_password_reset_clears_the_failures(harness):
+    harness.request_code()
+    code = harness.issued_code()
+    for _ in range(2):
+        harness.verify("999999")
+
+    reset = harness.reset(code)
+
+    assert reset.status_code == 200
+    assert harness.failures() == 0
+
+
+# ==========================================
+# Surviving a restart
+# ==========================================
+
+def test_the_counters_survive_a_restart(monkeypatch, tmp_path):
+    """The reason they are rows. An in-memory counter is a limit an attacker
+    waits out: a restart used to hand back every budget at once."""
+
+    store = tmp_path / "recovery.sqlite"
+    accounts = [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph")]
+
+    before = Harness(monkeypatch, accounts, store=store)
+    try:
+        before.request_code()
+        for _ in range(3):
+            before.verify("999999")
+        assert before.failures() == 3
+    finally:
+        before.close()
+
+    # A new process: the same database, and nothing at all in memory.
+    auth_module.reset_otps.clear()
+    auth_module.guessed_recovery_entries.clear()
+    after = Harness(monkeypatch, accounts, store=store)
+    try:
+        assert after.failures() == 3
+
+        # Two more guesses, not five: the three from before the restart count.
+        fourth = after.verify("999999")
+        fifth = after.verify("999999")
+
+        assert fourth.json["attemptsRemaining"] == 1
+        assert fifth.status_code == 429
+        assert fifth.json["code"] == "recovery_restricted"
+    finally:
+        after.close()
+
+
+def test_a_restriction_survives_a_restart(monkeypatch, tmp_path):
+    store = tmp_path / "recovery.sqlite"
+    accounts = [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph")]
+
+    before = Harness(monkeypatch, accounts, store=store)
+    try:
+        before.request_code()
+        before.exhaust_attempts()
+    finally:
+        before.close()
+
+    auth_module.reset_otps.clear()
+    auth_module.guessed_recovery_entries.clear()
+    after = Harness(monkeypatch, accounts, store=store)
+    try:
+        asked = after.request_code()
+
+        assert asked.status_code == 429
+        assert asked.json["code"] == "recovery_restricted"
+        assert after.sent == []
+    finally:
+        after.close()
+
+
+def test_the_request_window_survives_a_restart(monkeypatch, tmp_path):
+    store = tmp_path / "recovery.sqlite"
+    accounts = [FakeAdmin(1, "admin_justine", "admin@isu.edu.ph")]
+
+    before = Harness(monkeypatch, accounts, store=store)
+    try:
+        ask_three_times(before)
+    finally:
+        before.close()
+
+    after = Harness(monkeypatch, accounts, store=store)
+    try:
+        refused = after.request_code()
+
+        assert refused.status_code == 429
+        assert refused.json["code"] == "recovery_restricted"
+        assert after.sent == []
+    finally:
+        after.close()
+
+
+# ==========================================
+# What is stored, and what is not
+# ==========================================
+
+def test_an_address_with_no_account_is_not_stored_as_itself(harness):
+    """This table would otherwise become a list of every address anybody has
+    typed into Forgot Password - addresses that by definition belong to people
+    with no account here."""
+
+    harness.verify("999999", email="nobody@isu.edu.ph")
+
+    rows = RecoveryAttempt.query.all()
+
+    assert [row.subject for row in rows] == [harness.subject("nobody@isu.edu.ph")]
+    assert rows[0].subject.startswith("email:")
+    assert "nobody" not in rows[0].subject
+    assert "isu.edu.ph" not in rows[0].subject
+
+
+def test_an_account_is_stored_by_its_id(two_addresses):
+    """Which is what makes one account's two addresses one subject."""
+
+    two_addresses.verify("999999", email=ALTERNATIVE)
+
+    rows = RecoveryAttempt.query.all()
+
+    assert [row.subject for row in rows] == ["admin:1"]
+    assert two_addresses.subject("admin@isu.edu.ph") == "admin:1"
+
+
+def test_no_code_is_ever_written_to_the_counters(harness):
+    """The codes stay in memory. Losing them to a restart costs an attacker
+    nothing, which is exactly why they are the part that may be lost."""
+
+    harness.request_code()
+    code = harness.issued_code()
+    harness.verify("999999")
+
+    stored = [
+        str(value)
+        for row in RecoveryAttempt.query.all()
+        for value in (row.subject, row.failures, row.restricted_until, row.requested_at)
+    ]
+
+    assert code not in " ".join(stored)
+
+
+def test_rows_that_remember_nothing_are_swept(harness):
+    harness.verify("999999", email="nobody@isu.edu.ph")
+    assert RecoveryAttempt.query.count() == 1
+
+    harness.age_the_window(
+        auth_module.RECOVERY_WINDOW_SECONDS + auth_module.RECOVERY_RESTRICTION_SECONDS + 60,
+        email="nobody@isu.edu.ph",
+    )
+    # The sweep runs at most once an interval, so it has to be unarmed first.
+    auth_module.recovery_swept_at = None
+    harness.verify("999999")
+
+    assert [row.subject for row in RecoveryAttempt.query.all()] == [harness.subject()]
+
+
+def test_a_restricted_row_is_not_swept_early(harness):
+    harness.request_code()
+    harness.exhaust_attempts()
+    subject = harness.subject()
+
+    harness.age_the_window(auth_module.RECOVERY_WINDOW_SECONDS + auth_module.RECOVERY_RESTRICTION_SECONDS + 60)
+    # Still restricted despite being old: the row says so, and the sweep must
+    # read the restriction rather than only the age.
+    row = harness.row()
+    row.restricted_until = datetime.now(timezone.utc) + timedelta(seconds=300)
+    db.session.commit()
+    auth_module.recovery_swept_at = None
+
+    harness.release_cooldown()
+    refused = harness.request_code()
+
+    assert refused.status_code == 429
+    assert db.session.get(RecoveryAttempt, subject) is not None
