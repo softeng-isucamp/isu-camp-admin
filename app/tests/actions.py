@@ -259,6 +259,9 @@ def test_actions_location_contract_accepts_restroom_with_canonical_type_id():
 def test_actions_delete_requires_a_confirmed_password(monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(actions_bp)
+    # The permission is checked before the password now, so the caller has to
+    # get through authentication to reach the prompt.
+    monkeypatch.setattr(actions_module, "admin_required", lambda: (object(), None))
     monkeypatch.setattr(actions_module, "reauth_required", lambda: (None, (
         {"success": False, "code": "password_confirmation_required", "message": "Confirm your password to delete this record."},
         403,

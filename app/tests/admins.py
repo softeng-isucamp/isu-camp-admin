@@ -85,16 +85,23 @@ class FakeAdmin:
     role = FakeColumn("role")
 
     # The real properties read plain attributes, so the fake shares them and a
-    # change to what counts as active or superadmin is exercised here too.
+    # change to what counts as active or superadmin is exercised here too. The
+    # same goes for the permission rules: the fake borrows them rather than
+    # restating them, so "NULL means every permission" is tested as written.
     is_active = auth_module.Admin.is_active
     is_superadmin = auth_module.Admin.is_superadmin
+    permissions_dto = auth_module.Admin.permissions_dto
+    may = auth_module.Admin.may
 
     def __init__(self, username=None, password=None, gmail=None, id=None, status="active",
-                 role="admin", alternative_email=None):
+                 role="admin", alternative_email=None, permissions=None):
         self.id = id
         self.username = username
         self.password = password
         self.gmail = gmail
+        # None is "every permission", which is what an account nothing has
+        # restricted holds - and what the migration leaves a superadmin.
+        self.permissions = permissions
         # The second address an account may hold. /api/admins never returns
         # anyone's, but it counts towards the pool these routes check.
         self.alternative_email = alternative_email
@@ -329,13 +336,19 @@ def test_creating_requires_a_signed_in_account():
 
 NEW_ACCOUNT = {"username": "admin03", "email": "admin03@example.com", "password": "Another-secret1!"}
 
+# The two ends of the four switches. ``None`` is a third thing - "no
+# restriction recorded" - and is what a superadmin and an unconfigured
+# administrator both hold, so it is never spelled as four trues here.
+ALL_ON = {key: True for key in auth_module.PERMISSION_KEYS}
+ALL_OFF = {key: False for key in auth_module.PERMISSION_KEYS}
+
 
 def created_accounts():
     return [record for record in FakeAdmin.store if record.id not in (1, 2)]
 
 
 def test_creating_without_a_role_makes_an_administrator(admin_directory):
-    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json=NEW_ACCOUNT)
+    response = signed_in(admins_app()).post("/api/admins", json=NEW_ACCOUNT)
 
     assert response.status_code == 201
     assert response.json["admin"]["role"] == "admin"
@@ -343,14 +356,25 @@ def test_creating_without_a_role_makes_an_administrator(admin_directory):
 
 
 def test_creating_with_a_null_role_makes_an_administrator():
-    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": None})
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": None})
 
     assert response.status_code == 201
     assert response.json["admin"]["role"] == "admin"
 
 
-def test_creating_an_administrator_by_role_needs_no_password_confirmation():
+def test_creating_an_administrator_needs_a_password_confirmation_too():
+    """Every create asks, not only a superadmin's: each one is a new way in."""
+
     response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": "admin"})
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
+    assert response.json["message"] == "Confirm your password to add an administrator."
+    assert created_accounts() == []
+
+
+def test_creating_an_administrator_by_role_with_a_recent_confirmation():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": "admin"})
 
     assert response.status_code == 201
     assert response.json["admin"]["role"] == "admin"
@@ -379,7 +403,7 @@ def test_creating_a_superadmin_without_a_confirmation_is_refused(admin_directory
     assert response.json == {
         "success": False,
         "code": "password_confirmation_required",
-        "message": "Confirm your password to create a superadmin.",
+        "message": "Confirm your password to add an administrator.",
     }
     assert admin_directory.committed is False
     assert created_accounts() == []
@@ -734,70 +758,44 @@ def test_sending_a_reset_code_requires_a_signed_in_account():
     assert admins_app().test_client().post("/api/admins/2/password-reset").status_code == 401
 
 
-def test_deleting_removes_another_administrator(admin_directory):
-    response = signed_in(admins_app(), admin_id=1).delete("/api/admins/2")
+def test_deleting_an_administrator_is_gone():
+    """Removal was replaced by deactivation, so the method answers 405.
 
-    assert response.status_code == 200
-    assert [record.id for record in FakeAdmin.store] == [1]
-    assert admin_directory.committed is True
-
-
-def test_deleting_refuses_the_signed_in_account():
-    response = signed_in(admins_app(), admin_id=1).delete("/api/admins/1")
-
-    assert response.status_code == 409
-    assert response.json["message"] == "You cannot remove your own administrator account."
-    assert len(FakeAdmin.store) == 2
-
-
-def test_deleting_refuses_the_last_administrator(guards_passed):
-    FakeAdmin.reset([FakeAdmin(id=2, username="admin02", password="x", gmail="a@example.com")])
+    The audit trail names an actor by username, and deleting the row left
+    every row it had written pointing at nobody.
+    """
 
     response = signed_in(admins_app(), admin_id=1).delete("/api/admins/2")
 
-    assert response.status_code == 409
-    assert response.json["message"] == "The last administrator account cannot be removed."
-    assert len(FakeAdmin.store) == 1
+    assert response.status_code == 405
+    assert response.json["success"] is False
+    assert response.json["message"] == (
+        "Administrators are no longer removed. Deactivate the account instead."
+    )
+    assert response.json["deactivate"] == "/api/admins/2/status"
+    # The account is still there, which is the whole point.
+    assert [record.id for record in FakeAdmin.store] == [1, 2]
 
 
-def test_deleting_requires_a_confirmed_password():
-    response = signed_in(admins_app(), admin_id=1, confirmed=False).delete("/api/admins/2")
+@pytest.mark.parametrize("admin_id", [1, 2])
+def test_deleting_is_gone_for_every_caller(admin_id):
+    """Including a plain administrator, and including the caller's own row.
 
-    assert response.status_code == 403
-    assert response.json["code"] == "password_confirmation_required"
+    Answered the same way for everybody: the method does not exist, and
+    checking a role first would imply there is somebody it exists for.
+    """
+
+    response = signed_in(admins_app(), admin_id=admin_id).delete(f"/api/admins/{admin_id}")
+
+    assert response.status_code == 405
     assert len(FakeAdmin.store) == 2
-
-
-def test_deleting_requires_a_recent_password_confirmation():
-    client = signed_in(admins_app(), admin_id=1, confirmed=False)
-    with client.session_transaction() as flask_session:
-        flask_session["reauth_at"] = time.time() - auth_module.REAUTH_MAX_AGE_SECONDS - 1
-
-    response = client.delete("/api/admins/2")
-
-    assert response.status_code == 403
-    assert response.json["code"] == "password_confirmation_required"
-    assert len(FakeAdmin.store) == 2
-
-
-@pytest.mark.parametrize("confirmed", [True, False])
-def test_deleting_refuses_a_plain_administrator_before_asking_for_a_password(confirmed):
-    # Even with no confirmation the caller hears about the role, not a prompt.
-    response = signed_in(admins_app(), admin_id=2, confirmed=confirmed).delete("/api/admins/1")
-
-    assert response.status_code == 403
-    assert response.json["code"] == "superadmin_required"
-    assert response.json["message"] == "Superadmin access required"
-    assert len(FakeAdmin.store) == 2
-
-
-def test_deleting_requires_a_signed_in_account():
-    assert admins_app().test_client().delete("/api/admins/2").status_code == 401
 
 
 def test_a_plain_administrator_is_refused_before_the_account_is_looked_up():
     # A missing target must not tell a plain administrator anything.
-    response = signed_in(admins_app(), admin_id=2).delete("/api/admins/99")
+    response = signed_in(admins_app(), admin_id=2).put(
+        "/api/admins/99/permissions", json={"permissions": dict(ALL_ON)},
+    )
 
     assert response.status_code == 403
     assert response.json["code"] == "superadmin_required"
@@ -852,8 +850,11 @@ def test_a_superadmin_promotes_an_administrator(admin_directory):
     assert response.json["admin"] == {
         "id": "2", "username": "admin02", "email": "admin02@example.com",
         "status": "Active", "role": "superadmin", "isCurrent": False,
+        # Promoting discards the switches: the role carries everything.
+        "permissions": None,
     }
     assert role_of(2) == "superadmin"
+    assert next(item for item in FakeAdmin.store if item.id == 2).permissions is None
     assert admin_directory.committed is True
 
 
@@ -938,10 +939,17 @@ def test_the_role_route_asks_for_the_password_even_when_nothing_would_change():
     assert response.json["code"] == "password_confirmation_required"
 
 
-def test_deleting_still_words_the_confirmation_for_a_delete():
-    response = signed_in(admins_app(), admin_id=1, confirmed=False).delete("/api/admins/2")
+def test_the_permissions_route_words_the_confirmation_for_its_own_action():
+    """Not "delete this record": the prompt names what is about to happen."""
 
-    assert response.json["message"] == "Confirm your password to delete this record."
+    response = signed_in(admins_app(), admin_id=1, confirmed=False).put(
+        "/api/admins/2/permissions", json={"permissions": dict(ALL_ON)},
+    )
+
+    assert response.status_code == 403
+    assert response.json["message"] == (
+        "Confirm your password to change this administrator's permissions."
+    )
 
 
 def test_the_role_route_requires_a_signed_in_account():
@@ -1100,15 +1108,6 @@ def test_deactivating_the_last_active_superadmin_is_refused(lone_superadmin, adm
     assert admin_directory.committed is False
 
 
-def test_removing_the_last_active_superadmin_is_refused(lone_superadmin, admin_directory):
-    response = lone_superadmin.delete("/api/admins/1")
-
-    assert response.status_code == 409
-    assert response.json["message"] == LAST_SUPERADMIN_MESSAGE
-    assert [record.id for record in FakeAdmin.store] == [1, 2, 3]
-    assert admin_directory.committed is False
-
-
 def test_a_deactivated_superadmin_does_not_count_as_active(lone_superadmin):
     FakeAdmin.store.append(FakeAdmin(
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
@@ -1116,7 +1115,6 @@ def test_a_deactivated_superadmin_does_not_count_as_active(lone_superadmin):
 
     assert lone_superadmin.put("/api/admins/1/role", json={"role": "admin"}).json["message"] == LAST_SUPERADMIN_MESSAGE
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Inactive"}).json["message"] == LAST_SUPERADMIN_MESSAGE
-    assert lone_superadmin.delete("/api/admins/1").json["message"] == LAST_SUPERADMIN_MESSAGE
 
 
 def test_another_active_superadmin_lets_each_change_through(lone_superadmin):
@@ -1132,17 +1130,23 @@ def test_changing_an_account_that_is_not_an_active_superadmin_ignores_the_rule(l
     # Accounts 2 and 3 are plain administrators, so none of this touches the count.
     assert lone_superadmin.put("/api/admins/3/role", json={"role": "admin"}).status_code == 200
     assert lone_superadmin.put("/api/admins/3/status", json={"status": "Inactive"}).status_code == 200
-    assert lone_superadmin.delete("/api/admins/3").status_code == 200
+    assert lone_superadmin.put(
+        "/api/admins/3/permissions", json={"permissions": dict(ALL_OFF)},
+    ).status_code == 200
 
 
-def test_a_deactivated_last_superadmin_can_be_demoted_or_removed(lone_superadmin):
+def test_a_deactivated_last_superadmin_can_be_demoted_and_configured(lone_superadmin):
     # Already inactive, so it is not an active superadmin whose loss counts.
     FakeAdmin.store.append(FakeAdmin(
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
     ))
 
     assert lone_superadmin.put("/api/admins/4/role", json={"role": "admin"}).status_code == 200
-    assert lone_superadmin.delete("/api/admins/4").status_code == 200
+    # Demoted, so its switches can now be set - the rule that protects the last
+    # active superadmin does not protect a deactivated one from either change.
+    assert lone_superadmin.put(
+        "/api/admins/4/permissions", json={"permissions": dict(ALL_ON)},
+    ).status_code == 200
 
 
 def _start(send, client):
@@ -1185,10 +1189,11 @@ def _peer_superadmins_act_together(monkeypatch, request_for):
     return first_outcome["response"].status_code, second_outcome["response"].status_code
 
 
+# The two ways one superadmin can strip another's access now that removal is
+# gone. Setting permissions is not among them: it refuses a superadmin target.
 PEER_REQUESTS = {
     "demote": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "admin"}),
     "deactivate": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
-    "remove": lambda client, target: client.delete(f"/api/admins/{target}"),
 }
 
 
@@ -1251,13 +1256,13 @@ def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_super
     assert relinquished["response"].status_code in (401, 403)
     # Enabling the target is a write too, so it waits behind the request in flight.
     assert waiting
-    assert enabled["response"].status_code == (404 if operation == "remove" else 200)
+    assert enabled["response"].status_code == 200
 
 
 STALE_CALLER_REQUESTS = {
     "promote": lambda client: client.put("/api/admins/3/role", json={"role": "superadmin"}),
     "deactivate": lambda client: client.put("/api/admins/3/status", json={"status": "Inactive"}),
-    "remove": lambda client: client.delete("/api/admins/3"),
+    "permissions": lambda client: client.put("/api/admins/3/permissions", json={"permissions": dict(ALL_ON)}),
 }
 
 
@@ -1295,13 +1300,15 @@ def test_a_caller_demoted_between_the_guard_and_the_lock_is_refused(monkeypatch,
 LOCKING_REQUESTS = {
     "role": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "superadmin"}),
     "status": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
-    "remove": lambda client, target: client.delete(f"/api/admins/{target}"),
+    "permissions": lambda client, target: client.put(
+        f"/api/admins/{target}/permissions", json={"permissions": dict(ALL_ON)},
+    ),
 }
 
 
 @pytest.mark.parametrize("target", [2, 1, 99], ids=["a plain administrator", "the caller", "a missing account"])
 @pytest.mark.parametrize("operation", sorted(LOCKING_REQUESTS))
-def test_every_role_status_and_remove_request_locks_the_whole_directory_first(monkeypatch, operation, target):
+def test_every_role_status_and_permission_request_locks_the_whole_directory_first(monkeypatch, operation, target):
     locked = []
     original = FakeQuery._matching
 
@@ -1352,7 +1359,406 @@ def test_the_existing_self_rules_still_hold_for_a_superadmin(admin_directory):
     assert client.put("/api/admins/1/status", json={"status": "Inactive"}).json["message"] == (
         "You cannot deactivate your own administrator account."
     )
-    assert client.delete("/api/admins/1").json["message"] == "You cannot remove your own administrator account."
+    assert client.put("/api/admins/1/permissions", json={"permissions": dict(ALL_ON)}).json["message"] == (
+        "You cannot change your own permissions."
+    )
+
+
+# ==========================================
+# PERMISSIONS
+# ==========================================
+
+def permissions_of(admin_id):
+    return next(item for item in FakeAdmin.store if item.id == admin_id).permissions
+
+
+def set_permissions(client, target, permissions):
+    return client.put(f"/api/admins/{target}/permissions", json={"permissions": permissions})
+
+
+def test_the_listing_carries_each_accounts_permissions():
+    FakeAdmin.store[1].permissions = {"add": True, "edit": True, "delete": False, "changeUserStatus": False}
+
+    items = {item["username"]: item["permissions"] for item in signed_in(admins_app()).get("/api/admins").json["items"]}
+
+    assert items["admin02"] == {"add": True, "edit": True, "delete": False, "changeUserStatus": False}
+    # A superadmin's are not configurable, so there is nothing to report.
+    assert items["admin01"] is None
+
+
+def test_an_unconfigured_administrator_is_listed_with_none():
+    """Which the frontend reads as full access - the pre-migration state."""
+
+    items = {item["username"]: item["permissions"] for item in signed_in(admins_app()).get("/api/admins").json["items"]}
+
+    assert items["admin02"] is None
+
+
+def test_a_superadmin_sets_another_administrators_permissions(admin_directory):
+    response = set_permissions(signed_in(admins_app()), 2, {
+        "add": True, "edit": True, "delete": False, "changeUserStatus": False,
+    })
+
+    assert response.status_code == 200
+    assert response.json["success"] is True
+    assert response.json["message"] == "Permissions updated for admin02."
+    assert response.json["admin"]["permissions"] == {
+        "add": True, "edit": True, "delete": False, "changeUserStatus": False,
+    }
+    assert permissions_of(2) == {"add": True, "edit": True, "delete": False, "changeUserStatus": False}
+    assert admin_directory.committed is True
+
+
+def test_setting_permissions_is_audited_as_what_moved(monkeypatch, admin_directory):
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+    FakeAdmin.store[1].permissions = dict(ALL_ON)
+
+    set_permissions(signed_in(admins_app()), 2, {**ALL_ON, "delete": False, "add": False})
+
+    category, actor, action, target, target_id, detail = audits[-1]
+    assert (action, target, target_id) == ("update permissions", "Administrator", 2)
+    # Only the switches that changed, so the row says what somebody did.
+    assert detail == "admin02: add: on -> off; delete: on -> off"
+
+
+def test_setting_the_permissions_an_account_already_has_says_so(monkeypatch):
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+    FakeAdmin.store[1].permissions = dict(ALL_OFF)
+
+    response = set_permissions(signed_in(admins_app()), 2, dict(ALL_OFF))
+
+    assert response.status_code == 200
+    assert audits[-1][-1] == "admin02: no change"
+
+
+def test_configuring_an_unrestricted_account_lands_on_what_was_asked_for():
+    """None is full access, so the first configuration is a change from all on."""
+
+    FakeAdmin.store[1].permissions = None
+
+    response = set_permissions(signed_in(admins_app()), 2, dict(ALL_OFF))
+
+    assert response.status_code == 200
+    assert permissions_of(2) == ALL_OFF
+
+
+@pytest.mark.parametrize("permissions", [
+    {},
+    {"add": True},
+    {"add": True, "edit": True, "delete": True},
+    {"add": True, "edit": True, "delete": True, "changeUserStatus": "yes"},
+    {"add": 1, "edit": 0, "delete": 0, "changeUserStatus": 0},
+    {"add": None, "edit": None, "delete": None, "changeUserStatus": None},
+    "everything",
+    ["add"],
+    42,
+])
+def test_a_partial_or_mistyped_set_is_a_field_error(permissions, admin_directory):
+    """All four, every time: a body that names two leaves the other two to
+    whatever the reader assumes."""
+
+    response = set_permissions(signed_in(admins_app()), 2, permissions)
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert permissions_of(2) is None
+    assert admin_directory.committed is False
+
+
+@pytest.mark.parametrize("body", [{}, {"permissions": None}, ["add"]])
+def test_a_permissions_body_must_carry_the_switches(body, admin_directory):
+    response = signed_in(admins_app()).put("/api/admins/2/permissions", json=body)
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert admin_directory.committed is False
+
+
+def test_an_account_cannot_change_its_own_permissions(admin_directory):
+    """Nobody grants themselves anything, as with their own role."""
+
+    response = set_permissions(signed_in(admins_app(), admin_id=1), 1, dict(ALL_ON))
+
+    assert response.status_code == 409
+    assert response.json["message"] == "You cannot change your own permissions."
+    assert admin_directory.committed is False
+
+
+def test_a_superadmins_permissions_cannot_be_configured(admin_directory):
+    FakeAdmin.store[1].role = "superadmin"
+
+    response = set_permissions(signed_in(admins_app(), admin_id=1), 2, dict(ALL_OFF))
+
+    assert response.status_code == 409
+    assert response.json["message"] == (
+        "Superadmins always have every permission. Demote them first to restrict them."
+    )
+    assert permissions_of(2) is None
+    assert admin_directory.committed is False
+
+
+def test_the_permissions_of_a_missing_administrator_are_not_found():
+    response = set_permissions(signed_in(admins_app()), 99, dict(ALL_ON))
+
+    assert response.status_code == 404
+    assert response.json["message"] == "Administrator not found."
+
+
+def test_setting_permissions_refuses_a_plain_administrator(admin_directory):
+    response = set_permissions(signed_in(admins_app(), admin_id=2), 1, dict(ALL_ON))
+
+    assert response.status_code == 403
+    assert response.json["code"] == "superadmin_required"
+    assert admin_directory.committed is False
+
+
+def test_setting_permissions_requires_a_signed_in_account():
+    response = admins_app().test_client().put("/api/admins/2/permissions", json={"permissions": dict(ALL_ON)})
+
+    assert response.status_code == 401
+
+
+def test_setting_permissions_requires_a_recent_password_confirmation():
+    client = signed_in(admins_app(), confirmed=False)
+    with client.session_transaction() as flask_session:
+        flask_session["reauth_at"] = time.time() - auth_module.REAUTH_MAX_AGE_SECONDS - 1
+
+    response = set_permissions(client, 2, dict(ALL_ON))
+
+    assert response.status_code == 403
+    assert response.json["code"] == "password_confirmation_required"
+    assert permissions_of(2) is None
+
+
+def test_a_failed_permission_write_releases_the_lock(admin_directory, monkeypatch):
+    def broken_commit():
+        raise RuntimeError("database offline")
+
+    monkeypatch.setattr(admin_directory, "commit", broken_commit)
+
+    response = set_permissions(signed_in(admins_app()), 2, dict(ALL_ON))
+
+    assert response.status_code == 500
+    assert response.json["message"] == "Failed to update the administrator's permissions."
+    assert admin_directory.rolled_back is True
+    assert FakeAdmin._lock_owner is None
+
+
+# ==========================================
+# PERMISSIONS ON CREATE AND ON A ROLE CHANGE
+# ==========================================
+
+def test_a_new_administrator_starts_with_nothing(admin_directory):
+    """Not everything: an account being set up has not been given anything."""
+
+    response = signed_in(admins_app()).post("/api/admins", json=NEW_ACCOUNT)
+
+    assert response.status_code == 201
+    assert response.json["admin"]["permissions"] == ALL_OFF
+    assert created_accounts()[0].permissions == ALL_OFF
+
+
+def test_a_new_administrator_can_be_created_with_permissions():
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT,
+        "permissions": {"add": True, "edit": True, "delete": False, "changeUserStatus": False},
+    })
+
+    assert response.status_code == 201
+    assert created_accounts()[0].permissions == {
+        "add": True, "edit": True, "delete": False, "changeUserStatus": False,
+    }
+
+
+def test_a_new_superadmin_stores_no_permissions():
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "role": "superadmin", "permissions": dict(ALL_ON),
+    })
+
+    assert response.status_code == 201
+    assert response.json["admin"]["permissions"] is None
+    # Ignored rather than refused: a client may hold one form for both roles.
+    assert created_accounts()[0].permissions is None
+
+
+def test_creating_with_a_partial_set_is_a_field_error(admin_directory):
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "permissions": {"add": True},
+    })
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert created_accounts() == []
+
+
+def test_a_demoted_superadmin_starts_with_nothing(admin_directory):
+    """There is nothing to carry over - a superadmin's switches were never
+    configured - and carrying over "everything" would make a demotion a
+    formality."""
+
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert response.json["admin"]["permissions"] == ALL_OFF
+    assert permissions_of(3) == ALL_OFF
+
+
+def test_a_demotion_can_name_the_permissions_to_land_on():
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={
+        "role": "admin",
+        "permissions": {"add": True, "edit": True, "delete": False, "changeUserStatus": True},
+    })
+
+    assert response.status_code == 200
+    assert permissions_of(3) == {"add": True, "edit": True, "delete": False, "changeUserStatus": True}
+
+
+def test_a_promotion_discards_the_switches(admin_directory):
+    FakeAdmin.store[1].permissions = dict(ALL_ON)
+
+    response = signed_in(admins_app()).put("/api/admins/2/role", json={"role": "superadmin"})
+
+    assert response.status_code == 200
+    assert response.json["admin"]["permissions"] is None
+    assert permissions_of(2) is None
+
+
+def test_a_role_change_that_changes_nothing_keeps_the_switches():
+    """The no-op reply returns before any write, so a repeated demotion of an
+    account that is already an administrator does not reset it to nothing."""
+
+    FakeAdmin.store[1].permissions = dict(ALL_ON)
+
+    response = signed_in(admins_app()).put("/api/admins/2/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "admin02 is already an administrator."
+    assert permissions_of(2) == ALL_ON
+
+
+def test_a_demotion_with_a_partial_set_is_a_field_error():
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={
+        "role": "admin", "permissions": {"edit": True},
+    })
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert role_of(3) == "superadmin"
+
+
+# ==========================================
+# A SUPPLIED NULL IS A VALUE, NOT AN OMISSION
+# ==========================================
+
+def test_creating_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    """Absent means "default"; present-and-null is a value the caller chose.
+
+    The one shape a supplied value may take is the four booleans, so null is
+    refused like any other wrong shape. Reading the two the same way meant a
+    client asking for "no permissions" silently received the view-only default
+    instead of being told its request made no sense (issue #145).
+    """
+
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "permissions": None})
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_create(admin_directory):
+    """The other half of the same rule, which must not change: an account being
+    set up has not been given anything yet."""
+
+    response = signed_in(admins_app()).post("/api/admins", json=NEW_ACCOUNT)
+
+    assert response.status_code == 201
+    assert created_accounts()[0].permissions == ALL_OFF
+
+
+def test_creating_a_superadmin_with_an_explicit_null_is_still_accepted():
+    """Ignored rather than refused, as documented: a client may hold one form
+    for both roles, and a field that cannot apply must not fail the request."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 201
+    assert response.json["admin"]["permissions"] is None
+    assert created_accounts()[0].permissions is None
+
+
+def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={
+        "role": "admin", "permissions": None,
+    })
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert role_of(3) == "superadmin"
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_a_demotion():
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert permissions_of(3) == ALL_OFF
+
+
+def test_promoting_with_an_explicit_null_permissions_is_accepted():
+    """A promotion discards the switches whatever it was sent."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/role", json={
+        "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 200
+    assert permissions_of(2) is None
+
+
+def test_setting_permissions_to_an_explicit_null_is_still_a_field_error(admin_directory):
+    """This route always refused it; the create and demote paths now agree."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/permissions", json={"permissions": None})
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert permissions_of(2) is None
+
+
+@pytest.mark.parametrize("supplied", [None, "everything", 42, ["add"], {}, {"add": True}])
+def test_every_wrong_shape_is_refused_the_same_way_on_create(supplied, admin_directory):
+    """One answer for every value that is not the four booleans, so a client
+    cannot tell which kind of wrong it was - and null is simply one of them."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "permissions": supplied,
+    })
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
 
 
 # ==========================================

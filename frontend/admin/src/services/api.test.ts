@@ -1131,16 +1131,11 @@ describe("real walking network service boundary", () => {
     })]);
   });
 
-  it("persists path-point edits with PUT, POST, and DELETE operations", async () => {
+  it("replaces a Pathway's whole point sequence in one request", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 6, pathway_id: 9, sequence_no: 3, latitude: 16.74, longitude: 121.71, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [
@@ -1150,18 +1145,18 @@ describe("real walking network service boundary", () => {
       [16.724, 121.694],
     ]);
 
+    // One operation, one request: a reshape is authorized as an edit and
+    // applied in one transaction, never as a PUT/POST/DELETE reconciliation.
     expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
-      ["/api/path-points", undefined],
-      ["/api/path-points/4", "PUT"],
-      ["/api/path-points/5", "PUT"],
-      ["/api/path-points/6", "PUT"],
-      ["/api/path-points", "POST"],
+      ["/api/pathways/9/points", "PUT"],
     ]);
-    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
-      pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active",
-    }));
-    expect(fetchMock.mock.calls[4]?.[1]?.body).toBe(JSON.stringify({
-      pathway_id: 9, sequence_no: 4, latitude: 16.724, longitude: 121.694, node_type: "Waypoint", status: "active",
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      path_points: [
+        { pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 2, latitude: 16.722, longitude: 121.692, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 3, latitude: 16.723, longitude: 121.693, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 4, latitude: 16.724, longitude: 121.694, node_type: "Waypoint", status: "active" },
+      ],
     }));
   });
 
@@ -1170,35 +1165,45 @@ describe("real walking network service boundary", () => {
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Coordinate is outside the campus boundary." }), { status: 422 }));
 
     await expect(httpServices.map.replacePathPoints("9", [[16.721, 121.691]])).rejects.toThrow(
       "Could not persist Path Points for Pathway 9: Coordinate is outside the campus boundary.",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes surplus persisted Path Points after the retained points are updated", async () => {
+  it("drops surplus persisted Path Points by sending the shape that remains", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [[16.721, 121.691]]);
 
+    // Nothing says "delete point 5": the sequence sent is the whole shape, and
+    // whatever is not in it is gone when the request commits.
     expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
-      ["/api/path-points", undefined],
-      ["/api/path-points/4", "PUT"],
-      ["/api/path-points/5", "DELETE"],
+      ["/api/pathways/9/points", "PUT"],
     ]);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      path_points: [
+        { pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" },
+      ],
+    }));
+  });
+
+  it("clears a Pathway's shape by sending an empty sequence", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await httpServices.map.replacePathPoints("9", []);
+
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ path_points: [] }));
   });
 
   it("sends Pathway geometry in the same create request as its metadata", async () => {

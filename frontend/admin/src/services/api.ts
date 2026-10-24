@@ -1787,29 +1787,24 @@ export const services: Services = {
       await apiJson<unknown>(`/api/pathways/${pathwayId}`, { method: "DELETE" });
     },
 
+    // One request, because reshaping a Pathway is one operation. Reconciled
+    // here instead - a PUT per surviving vertex, a POST per new one, a DELETE
+    // per dropped one - the same reshape reached the server as three different
+    // kinds of write, so an administrator who may edit the network but not add
+    // or delete could only drag a shape that kept its vertex count, and a
+    // refusal partway through left the Pathway stored with half of its new
+    // shape. The server replaces the whole sequence in one transaction.
     replacePathPoints: async (pathwayId, points) => {
       if (!USE_HTTP_API) return;
       const numericPathwayId = Number(pathwayId);
       if (!Number.isInteger(numericPathwayId)) throw new Error(`Cannot persist Path Points for Pathway "${pathwayId}". Invalid database ID.`);
       try {
-        const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
-        if (!Array.isArray(existing.path_points)) throw new Error("Backend returned a malformed Path Point response.");
-        const currentPoints = existing.path_points
-          .filter((point) => point.pathway_id === numericPathwayId)
-          .sort((left, right) => left.sequence_no - right.sequence_no);
-
-        for (const [index, point] of points.entries()) {
-          const body = JSON.stringify(pathPointWritePayload(numericPathwayId, index + 1, point));
-          const current = currentPoints[index];
-          if (current) {
-            await apiJson<unknown>(`/api/path-points/${current.point_id}`, { method: "PUT", body });
-          } else {
-            await apiJson<unknown>("/api/path-points", { method: "POST", body });
-          }
-        }
-        for (const point of currentPoints.slice(points.length)) {
-          await apiJson<unknown>(`/api/path-points/${point.point_id}`, { method: "DELETE" });
-        }
+        await apiJson<unknown>(`/api/pathways/${numericPathwayId}/points`, {
+          method: "PUT",
+          body: JSON.stringify({
+            path_points: points.map((point, index) => pathPointWritePayload(numericPathwayId, index + 1, point)),
+          }),
+        });
       } catch (cause) {
         throw actionablePathPointError(pathwayId, cause);
       }
