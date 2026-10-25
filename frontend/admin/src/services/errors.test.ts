@@ -110,6 +110,8 @@ describe("isTechnicalMessage", () => {
     "Traceback (most recent call last):",
     "(psycopg2.errors.UniqueViolation) duplicate key",
     "sqlalchemy.exc.IntegrityError: boom",
+    "pg_restore: error: could not execute query: relation \"building_photo\" already exists",
+    "pg_dump: error: connection to server failed",
   ])("flags %s", (text) => {
     expect(isTechnicalMessage(text)).toBe(true);
   });

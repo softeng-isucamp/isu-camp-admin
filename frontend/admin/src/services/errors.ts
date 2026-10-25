@@ -125,6 +125,7 @@ const TECHNICAL_MESSAGE_PATTERNS: readonly RegExp[] = [
   /psycopg/i,
   /sqlalchemy/i,
   /\(psycopg2\./,
+  /^pg_(dump|restore)\b/,
 ];
 
 /** Developer-oriented text (status codes, validator field names, database errors) no administrator should read. */
