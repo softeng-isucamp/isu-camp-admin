@@ -391,15 +391,13 @@ def test_db():
             "test_query": value
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("DATABASE CONNECTION ERROR:")
-        print(e)
+        app.logger.exception("Database connection failed")
 
         return jsonify({
             "success": False,
-            "message": "Database connection failed",
-            "error": str(e)
+            "message": "Database connection failed"
         }), 500
 
 
@@ -439,15 +437,13 @@ def test_location_table():
             "message": "The public.location table exists."
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOCATION TABLE ERROR:")
-        print(e)
+        app.logger.exception("Could not check location table")
 
         return jsonify({
             "success": False,
-            "message": "Could not check location table",
-            "error": str(e)
+            "message": "Could not check location table"
         }), 500
 
 
@@ -472,15 +468,13 @@ def test_location():
             ]
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOCATION ERROR:")
-        print(e)
+        app.logger.exception("Could not query location table")
 
         return jsonify({
             "success": False,
-            "message": "Could not query location table",
-            "error": str(e)
+            "message": "Could not query location table"
         }), 500
 
 
