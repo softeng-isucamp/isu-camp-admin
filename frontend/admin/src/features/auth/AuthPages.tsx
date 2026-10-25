@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
-import { AuthError } from "../../services/errors";
+import { AuthError, errorMessage } from "../../services/errors";
 import { readLoginPrefill } from "./loginPrefill";
 import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { Button, Card, Field } from "../../components/UI";
@@ -86,7 +86,7 @@ export function Login() {
         setError(RATE_LIMIT_MESSAGE);
         setLoginCountdown(err.retryAfterSeconds ?? LOGIN_RETRY_FALLBACK_SECONDS);
       } else {
-        setError(err instanceof Error ? err.message : "Unable to sign in.");
+        setError(errorMessage(err, "We couldn't sign you in. Please try again."));
       }
     } finally {
       loginInFlight.current = false;

@@ -7,6 +7,7 @@ import type { ActiveToolDraft, EditorMode } from "../types";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
 import type { RouteNodeValidationContext, RouteNodeWorkflow } from "./RouteNodeWorkflow";
+import { reportError } from "../../../services/errors";
 
 export type PlacingNodeType = "Entrance" | "Junction" | "Access Point";
 
@@ -26,7 +27,7 @@ interface UseRouteNodePointToolOptions {
   editorContext: { mode: EditorMode; selected: unknown };
 }
 
-const REFRESH_FAILED = "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.";
+const REFRESH_FAILED = "The route node was saved, but the map could not refresh. Reload the map to see it.";
 const isPlacingNodeType = (value: unknown): value is PlacingNodeType =>
   value === "Entrance" || value === "Junction" || value === "Access Point";
 
@@ -164,7 +165,8 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
         try {
           await refreshMapData();
         } catch (cause) {
-          onError(cause instanceof Error ? cause.message : REFRESH_FAILED);
+          reportError(cause);
+          onError(REFRESH_FAILED);
           saving.endSaving();
           return null;
         }
@@ -207,7 +209,8 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
       setPlacingNodeName("");
       return { node: confirmedNode, draft };
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : REFRESH_FAILED);
+      reportError(cause);
+      onError(REFRESH_FAILED);
       return null;
     } finally {
       saving.endSaving();

@@ -8,6 +8,7 @@ import {
 } from "../mapEditing";
 import type { WorkingOperation } from "../types";
 import { WorkingSessionManager, updateGeometryOperation, updatePropertiesOperation } from "../WorkingSessionManager";
+import { errorMessage } from "../../../services/errors";
 
 export interface PathwayValidationContext {
   nodes: readonly RouteNode[];
@@ -144,7 +145,7 @@ export function createPathwayWorkflow(dependencies: {
         return {
           ok: false,
           reason: "persistence",
-          message: cause instanceof Error ? cause.message : "Pathway could not be saved.",
+          message: errorMessage(cause, "Your pathway changes couldn't be saved. Please try again.", { mutation: true }),
         };
       }
     },

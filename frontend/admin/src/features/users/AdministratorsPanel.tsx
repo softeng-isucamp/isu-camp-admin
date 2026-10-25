@@ -7,7 +7,7 @@ import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
 import { services } from "../../services/api";
-import { SuperadminRequiredError } from "../../services/errors";
+import { errorMessage, SuperadminRequiredError } from "../../services/errors";
 import { firstPasswordIssue } from "../../services/passwordRules";
 import { PERMISSION_ACTIONS, allPermissions, samePermissions, viewOnlyPermissions } from "../../lib/permissions";
 import type { AdminAccount, AdminAccountDraft, AdminPermissions, AdminRole } from "../../types";
@@ -144,7 +144,9 @@ export function AdministratorsPanel({ feedback }: {
   const reportFailure = (cause: unknown, fallback: string) => {
     const fields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
     if (fields && Object.keys(fields).length) setFieldErrors(fields);
-    setError(cause instanceof Error ? cause.message : fallback);
+    const message = errorMessage(cause, fallback, { mutation: true });
+    // A message the form already shows under its field is not repeated in the banner.
+    setError(fields && Object.values(fields).includes(message) ? "" : message);
   };
 
   /**
@@ -171,7 +173,7 @@ export function AdministratorsPanel({ feedback }: {
     },
     onError: (cause) => {
       if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
-      reportFailure(cause, "Unable to save the administrator.");
+      reportFailure(cause, "The administrator couldn't be saved. Please try again.");
     },
   });
 
@@ -185,7 +187,7 @@ export function AdministratorsPanel({ feedback }: {
     },
     onError: (cause) => {
       if (recoverFromSuperadminRefusal(cause)) return;
-      reportFailure(cause, "Unable to update the administrator's status.");
+      reportFailure(cause, "The administrator's status couldn't be updated. Please try again.");
     },
   });
 
@@ -195,7 +197,7 @@ export function AdministratorsPanel({ feedback }: {
       feedback.reportSuccess(message);
       closeDialog();
     },
-    onError: (cause) => reportFailure(cause, "Unable to send the password reset code."),
+    onError: (cause) => reportFailure(cause, "The password reset code couldn't be sent. Please try again."),
   });
 
   const savePermissions = useMutation({
@@ -208,7 +210,7 @@ export function AdministratorsPanel({ feedback }: {
     },
     onError: (cause) => {
       if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
-      reportFailure(cause, "Unable to update the administrator's permissions.");
+      reportFailure(cause, "The administrator's permissions couldn't be updated. Please try again.");
     },
   });
 
@@ -224,7 +226,7 @@ export function AdministratorsPanel({ feedback }: {
     },
     onError: (cause) => {
       if (recoverFromSuperadminRefusal(cause) || passwordConfirmation.handleRejection(cause)) return;
-      reportFailure(cause, "Unable to change the administrator's role.");
+      reportFailure(cause, "The administrator's role couldn't be changed. Please try again.");
     },
   });
 
@@ -301,7 +303,7 @@ export function AdministratorsPanel({ feedback }: {
 
       {listError && !dialog && (
         <div role="alert" className="admin-table-error">
-          Unable to load administrator accounts. {listError instanceof Error ? listError.message : "The service returned an error."}
+          {errorMessage(listError, "Administrator accounts couldn't be loaded. Please try again.")}
         </div>
       )}
 

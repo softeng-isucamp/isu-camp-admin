@@ -70,6 +70,6 @@ test("real mode exposes malformed backend data as a visible failure", async ({ p
   }));
 
   await page.goto("/locations");
-  await expect(page.getByText(/Unable to load campus locations/)).toContainText("malformed location coordinates");
+  await expect(page.getByText(/Campus locations couldn't be loaded/)).not.toContainText("malformed");
   await expect(page.getByText("No campus location records have been created yet.")).toHaveCount(0);
 });

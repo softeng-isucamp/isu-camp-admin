@@ -16,6 +16,7 @@ import {
   type BuildingIdentityInput,
 } from "./buildingFootprint";
 import { createBuildingFootprintWorkflow } from "./BuildingFootprintWorkflow";
+import { reportError } from "../../../services/errors";
 
 const blankBuildingForm = (): BuildingIdentityInput => ({
   name: "",
@@ -295,7 +296,8 @@ export function useBuildingFootprintEditing({
     try {
       await refreshMapData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Building was saved, but the map could not refresh.");
+      reportError(cause);
+      setError("The building was saved, but the map could not refresh. Reload the map to see it.");
     }
     endSaving();
   };

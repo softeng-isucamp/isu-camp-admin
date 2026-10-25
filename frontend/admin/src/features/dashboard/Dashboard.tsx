@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, Badge, Empty, ProgressBar, Spinner } from "../../components/UI";
 import { services, USE_HTTP_API } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import { formatDateTime } from "../../lib/format";
 import type { DashboardRange } from "../../types";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
@@ -116,7 +117,7 @@ export function Dashboard() {
           </div>
           {error && (
             <div className="dashboard-error" role="alert">
-              <span>Unable to load the dashboard. {error instanceof Error ? error.message : "The dashboard service returned an error."}</span>
+              <span>{errorMessage(error, "Dashboard information couldn't be loaded. Please try again.")}</span>
               <button type="button" onClick={() => void refetch()}>Try again</button>
             </div>
           )}

@@ -70,7 +70,7 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
 
   const find = (id: string): FixtureAccount => {
     const record = accounts.find((account) => account.id === id);
-    if (!record) throw new Error("Administrator not found.");
+    if (!record) throw new Error("That administrator no longer exists. Reload the page.");
     return record;
   };
 

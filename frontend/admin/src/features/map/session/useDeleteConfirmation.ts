@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePermissions } from "../../auth/usePermissions";
 import { services } from "../../../services/api";
 import { usePasswordConfirmation } from "../../auth/PasswordConfirmation";
+import { errorMessage } from "../../../services/errors";
 import type { DeleteConfirmation } from "../DeleteConfirmationModal";
 import type { MapOverlay } from "./useMapOverlay";
 
@@ -75,7 +76,7 @@ export function useDeleteConfirmation({ overlay, refreshMapData, onError, onDele
     } catch (cause) {
       if (!allowed.current || dialogVersion.current !== version) return;
       if (passwordConfirmation.handleRejection(cause)) return;
-      onError(cause instanceof Error ? cause.message : `Failed to delete ${requested.name}. Retry when ready.`);
+      onError(errorMessage(cause, `${requested.name} couldn't be deleted. Please try again.`, { mutation: true }));
     } finally {
       busy.current = false;
       setDeleting(false);

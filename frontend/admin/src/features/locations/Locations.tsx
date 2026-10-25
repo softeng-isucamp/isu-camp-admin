@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_MODE, services, setMockFailure } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import {
   Badge,
   Button,
@@ -640,9 +641,7 @@ export function Locations() {
       if (backendFields) {
         setFieldErrors(Object.entries(backendFields).map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
       }
-      setError(
-        cause instanceof Error ? cause.message : "Unable to save location.",
-      );
+      setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
       return null;
     } finally {
       setSaving(false);
@@ -682,7 +681,7 @@ export function Locations() {
       feedback.reportSuccess(`${selected.name} was deleted successfully.`);
     } catch (cause) {
       if (passwordConfirmation.handleRejection(cause)) return;
-      setError(cause instanceof Error ? cause.message : "Unable to delete location.");
+      setError(errorMessage(cause, "The location couldn't be deleted. Please try again.", { mutation: true }));
     } finally {
       setDeleting(false);
     }
@@ -708,7 +707,7 @@ export function Locations() {
     }).catch((cause) => {
       if (sequence === photoLoadSequence.current) {
         setPhotoLoadFailed(true);
-        setError(cause instanceof Error ? cause.message : "Unable to load location photos.");
+        setError(errorMessage(cause, "The location photos couldn't be loaded. Please try again."));
       }
     }).finally(() => {
       if (sequence === photoLoadSequence.current) setLoadingPhotos(false);
@@ -952,7 +951,7 @@ export function Locations() {
 
       {/* Main Table Card */}
       {listError && !dialog && <div className="error" role="alert" style={{ background: "#fee2e2", color: "#991b1b", padding: "10px 16px", borderRadius: "12px", marginBottom: "12px" }}>
-        Unable to load campus locations. {listError instanceof Error ? listError.message : "The Locations service returned an error."}
+        {errorMessage(listError, "Campus locations couldn't be loaded. Please try again.")}
       </div>}
       <Card className="table-card" style={{ background: "#fff", borderRadius: "20px", overflow: "visible" }}>
         <div className="table-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #e5e7eb" }}>

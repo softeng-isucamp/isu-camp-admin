@@ -3,6 +3,7 @@ import type { MapPoint } from "../campusBoundary";
 import { validateRouteNodeDraft, type RouteNodeDraftIssue } from "../mapEditing";
 import type { WorkingOperation } from "../types";
 import { WorkingSessionManager } from "../WorkingSessionManager";
+import { errorMessage } from "../../../services/errors";
 
 export interface RouteNodeValidationContext {
   buildings: readonly Building[];
@@ -111,7 +112,7 @@ export function createRouteNodeWorkflow(dependencies: {
         return {
           ok: false,
           reason: "persistence",
-          message: cause instanceof Error ? cause.message : "Route Node could not be saved.",
+          message: errorMessage(cause, "The route node couldn't be saved. Please try again.", { mutation: true }),
         };
       }
     },

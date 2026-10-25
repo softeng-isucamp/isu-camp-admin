@@ -2,6 +2,7 @@ import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
+import { errorMessage } from "../../services/errors";
 import { recoveryEmailSchema } from "../../services/schemas";
 import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { BackToLogin } from "./RecoveryFrame";
@@ -47,7 +48,7 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
         // Without a Retry-After there is nothing to count down, so the button stays usable.
         if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
-        setError(err instanceof Error ? err.message : "Unable to send the verification code.");
+        setError(errorMessage(err, "We couldn't send the verification code. Please try again."));
       }
     } finally {
       inFlight.current = false;

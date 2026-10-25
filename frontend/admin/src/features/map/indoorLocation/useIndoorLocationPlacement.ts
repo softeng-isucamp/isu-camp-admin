@@ -5,6 +5,7 @@ import type { Building, Location } from "../../../types";
 import { pointInPolygon, type MapPoint } from "../campusBoundary";
 import type { MapOverlay } from "../session/useMapOverlay";
 import { isPositionedLocation } from "./indoorLocations";
+import { errorMessage } from "../../../services/errors";
 
 export interface IndoorPlacement {
   locationId: string;
@@ -130,7 +131,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
       setPlacement(null);
       return positioned;
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : `Could not save ${location.name}'s position.`);
+      onError(errorMessage(cause, `${location.name}'s position couldn't be saved. Please try again.`, { mutation: true }));
       return null;
     } finally {
       setSaving(false);
@@ -153,7 +154,7 @@ export function useIndoorLocationPlacement(overlay: MapOverlay, context: IndoorP
       overlay.putLocation(cleared);
       onError("");
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : `Could not clear ${location.name}'s map marker.`);
+      onError(errorMessage(cause, `${location.name}'s map marker couldn't be cleared. Please try again.`, { mutation: true }));
     }
   };
 

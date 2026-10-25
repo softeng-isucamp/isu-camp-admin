@@ -143,8 +143,8 @@ describe("login attempts left", () => {
     await attemptSignIn();
     await attemptSignIn();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Server error");
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/attempt/i);
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn't sign you in. Please try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Server error|attempt/i);
   });
 });
 

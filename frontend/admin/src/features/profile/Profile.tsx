@@ -4,6 +4,7 @@ import { FeedbackStack, useFeedback } from '../../components/Feedback';
 import { PageIcon } from '../../components/PageIcon';
 import { PasswordChecklist } from '../../components/PasswordChecklist';
 import { services } from '../../services/api';
+import { errorMessage } from '../../services/errors';
 import { firstPasswordIssue } from '../../services/passwordRules';
 import { supportsAlternativeEmail, type AccountProfile } from '../../services/profile';
 import { useAuth } from '../auth/AuthContext';
@@ -12,7 +13,6 @@ import { DialogFocus } from './DialogFocus';
 import profileIcon from '../../assets/figma/navigation/profile-user.svg';
 import './profile.css';
 
-const errorText = (cause: unknown) => cause instanceof Error ? cause.message : 'Something went wrong. Please try again.';
 const roleLabel = (role: AccountProfile['role']) => role === 'superadmin' ? 'Superadmin' : 'Administrator';
 
 export function Profile() {
@@ -26,7 +26,7 @@ export function Profile() {
     let live = true;
     setLoadError('');
     services.profile.get().then((value) => { if (live) setProfile(value); })
-      .catch((cause) => { if (live) setLoadError(errorText(cause)); });
+      .catch((cause) => { if (live) setLoadError(errorMessage(cause, "Your profile couldn't be loaded. Please try again.")); });
     return () => { live = false; };
   }, [attempt]);
   return <div className="page profile-page">
@@ -95,7 +95,7 @@ function DetailsDialog({ profile, onClose, onSaved }: { profile: AccountProfile;
     } catch (cause) {
       const fields = (cause as { fieldErrors?: Partial<Record<DetailsField, string>> } | null)?.fieldErrors;
       // A refusal that names a field shows under it; anything else is the dialog's own error line.
-      if (fields && Object.keys(fields).length) setFieldErrors(fields); else setError(errorText(cause));
+      if (fields && Object.keys(fields).length) setFieldErrors(fields); else setError(errorMessage(cause, "Your changes couldn't be saved. Please try again.", { mutation: true }));
       setSaving(false);
     }
   };
@@ -133,7 +133,7 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
     if (newPassword === currentPassword) { setError('Choose a different new password.'); return; }
     setChanging(true);
     try { await services.profile.changePassword({ currentPassword, newPassword }); onChanged(); }
-    catch (cause) { setError(errorText(cause)); setChanging(false); }
+    catch (cause) { setError(errorMessage(cause, "Your password couldn't be changed. Please try again.", { mutation: true })); setChanging(false); }
   };
   return <DialogFocus busy={changing}><Modal title="Change Password" size="sm" onClose={() => { if (!changing) onClose(); }}>
     <form onSubmit={submit} className="admin-form">

@@ -315,7 +315,7 @@ describe("fixture role changes", () => {
   });
 
   it("reports an unknown account and an unknown role", async () => {
-    expect(await failure(fixture.admins.setRole("missing", "admin"))).toMatchObject({ message: "Administrator not found." });
+    expect(await failure(fixture.admins.setRole("missing", "admin"))).toMatchObject({ message: "That administrator no longer exists. Reload the page." });
     const error = await failure(fixture.admins.setRole("2", "owner" as never));
     expect(error).toMatchObject({
       message: "Role must be Administrator or Superadmin.",
@@ -582,7 +582,7 @@ describe("fixture validation of a new or edited account", () => {
   });
 
   it("reports an unknown account and someone else's account before looking at the details", async () => {
-    expect(await failure(fixture.admins.save({ id: "missing", username: "", email: "" }))).toMatchObject({ message: "Administrator not found." });
+    expect(await failure(fixture.admins.save({ id: "missing", username: "", email: "" }))).toMatchObject({ message: "That administrator no longer exists. Reload the page." });
     expect(await failure(fixture.admins.save({ id: "2", username: "", email: "" })))
       .toMatchObject({ message: "You can only edit your own administrator account." });
   });
@@ -653,7 +653,7 @@ describe("fixture administrator permissions", () => {
   });
 
   it("refuses a missing account and an incomplete set of switches", async () => {
-    expect(await failure(fixture.admins.setPermissions("missing", viewOnlyPermissions()))).toMatchObject({ message: "Administrator not found." });
+    expect(await failure(fixture.admins.setPermissions("missing", viewOnlyPermissions()))).toMatchObject({ message: "That administrator no longer exists. Reload the page." });
     expect(await failure(fixture.admins.setPermissions("2", { add: true } as never))).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
   });
 
@@ -694,7 +694,7 @@ describe("fixture session restore", () => {
     const reloaded = setup(sessionStorage);
 
     await expect(reloaded.adapter.auth.me()).resolves.toBeNull();
-    expect(await failure(reloaded.admins.list())).toMatchObject({ message: "Authentication required" });
+    expect(await failure(reloaded.admins.list())).toMatchObject({ message: "Your session has ended. Sign in again to continue." });
     expect(sessionStorage.getItem("isucamp_local_session")).toBeNull();
   });
 

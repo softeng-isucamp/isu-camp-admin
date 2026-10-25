@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Empty, ProgressBar } from "../../../components/UI";
 import { services } from "../../../services/api";
+import { errorMessage } from "../../../services/errors";
 import type { DashboardRange } from "../../../types";
 import { ActivityKpis } from "./ActivityKpis";
 import { DirectoryCompleteness } from "./DirectoryCompleteness";
@@ -25,7 +26,7 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
   if (error && !data) {
     return (
       <Card className="analytics-unavailable" role="alert">
-        <Empty>Unable to load analytics. {error instanceof Error ? error.message : "The dashboard service returned an error."}</Empty>
+        <Empty>{errorMessage(error, "Analytics couldn't be loaded. Please try again.")}</Empty>
         <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>
           {isFetching ? "Retrying…" : "Try again"}
         </Button>
@@ -38,7 +39,7 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
       <ProgressBar active={isFetching && !isLoading} />
       {error && (
         <div className="dashboard-error" role="alert">
-          <span>The latest refresh of analytics failed, so the numbers shown may be out of date. {error instanceof Error ? error.message : ""}</span>
+          <span>The latest refresh of analytics failed, so the numbers shown may be out of date. {errorMessage(error, "")}</span>
           <button type="button" disabled={isFetching} onClick={() => void refetch()}>
             {isFetching ? "Retrying…" : "Try again"}
           </button>
