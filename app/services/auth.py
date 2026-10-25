@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 import hashlib
 import hmac
+import logging
 import math
 import re
 import threading
@@ -38,6 +39,8 @@ auth_bp = Blueprint(
     __name__,
     url_prefix="/api"
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ==========================================
@@ -464,14 +467,13 @@ def login():
             "admin": admin.to_profile()
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOGIN ERROR:", e)
+        logger.exception("Login failed")
 
         return jsonify({
             "success": False,
-            "message": "Login failed",
-            "error": str(e)
+            "message": "Login failed"
         }), 500
 
 
@@ -873,14 +875,13 @@ def request_reset():
             "message": "Verification code sent to the registered Gmail."
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("PASSWORD RESET EMAIL ERROR:", e)
+        logger.exception("Failed to send a password reset verification code")
 
         return jsonify({
             "success": False,
-            "message": "Failed to send verification code",
-            "error": str(e)
+            "message": "Failed to send verification code"
         }), 500
 
 
@@ -1005,14 +1006,15 @@ def reset_password():
             "message": "Password reset successful"
         }), 200
 
-    except Exception as e:
+    except Exception:
+
+        logger.exception("Password reset failed")
 
         db.session.rollback()
 
         return jsonify({
             "success": False,
-            "message": "Password reset failed",
-            "error": str(e)
+            "message": "Password reset failed"
         }), 500
 
 
@@ -1583,10 +1585,10 @@ ISU-CAMP Admin System
     def deliver():
         try:
             mail.send(message)
-        except Exception as e:
+        except Exception:
             # The caller was already told "if an account exists", so a failure
             # here can only be reported to the operator.
-            print("RECOVERY EMAIL ERROR:", e)
+            logger.exception("Could not send a recovery email")
 
     run_in_background(deliver)
 
@@ -1603,7 +1605,7 @@ def recovery_bad_request(message):
 
 
 def recovery_failure(error):
-    print("RECOVERY ERROR:", error)
+    logger.exception("Account recovery failed", exc_info=error)
     db.session.rollback()
     return jsonify({
         "success": False,

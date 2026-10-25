@@ -545,8 +545,13 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
             command, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True,
         )
-    except Exception as error:
-        ended("failed", f"The operation could not be started: {error}")
+    except Exception:
+        # A job message is read in the admin portal's Backup and Recovery
+        # interface, so it says what happened and nothing about how. The
+        # exception - which carries the tool path, the environment it was given
+        # and the OS error - goes to the log the operator reads instead.
+        logger.exception("Could not start %s", command[0])
+        ended("failed", "The operation could not be started.")
         return
 
     # Published before the wait so a cancel has something to signal, and
@@ -565,8 +570,9 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
         process.communicate()
         ended("failed", "The operation timed out after 10 minutes.")
         return
-    except Exception as error:
-        ended("failed", f"The operation could not be completed: {error}")
+    except Exception:
+        logger.exception("Could not complete %s", command[0])
+        ended("failed", "The operation could not be completed.")
         return
 
     if process.returncode == 0:
@@ -581,12 +587,13 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
         if on_success:
             try:
                 on_success()
-            except Exception as error:
+            except Exception:
                 # Through ``ended``, so a publish that failed before its rename
                 # does not leave the partial file behind. Once the rename has
                 # happened the discard is a no-op and the archive survives a
                 # failure in the bookkeeping after it.
-                ended("failed", f"The archive could not be recorded: {error}")
+                logger.exception("Could not record the archive from %s", command[0])
+                ended("failed", "The archive could not be recorded.")
                 return
         _finish(job_id, "succeeded")
         return

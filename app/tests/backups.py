@@ -1,6 +1,7 @@
 """The Backup & Recovery routes: history, jobs, download, delete and schedule."""
 
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -442,10 +443,41 @@ def test_a_dump_that_cannot_be_published_leaves_no_partial_behind(app, monkeypat
         job = wait_for_terminal(body["id"])
 
         assert job["status"] == "failed"
-        assert "could not be recorded" in job["message"]
+        assert job["message"] == "The archive could not be recorded."
+        # A job message is shown in Backup and Recovery, so the OSError's own
+        # text - which names the directory the archives live in - stays in the
+        # log rather than travelling to the portal.
+        assert "the directory went away" not in job["message"]
         assert app.test_client().get("/api/backups").get_json()["items"] == []
 
     assert list(tmp_path.glob("*.dump*")) == []
+
+
+def test_a_tool_that_cannot_be_started_reports_a_failure_without_the_os_error(app, monkeypatch, caplog):
+    """The message an administrator reads says what failed, not how.
+
+    The exception here carries the tool's path on the server and the OS error
+    behind it; both belong in the log the operator reads, not in a job message
+    the portal renders and any other client can fetch.
+    """
+
+    def refuse(command, env=None, **keywords):
+        raise FileNotFoundError(2, "No such file or directory", "/usr/bin/pg_dump")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        with caplog.at_level(logging.ERROR, logger=backup_jobs.logger.name):
+            body = app.test_client().post("/api/backups").get_json()
+            job = wait_for_terminal(body["id"])
+
+    assert job["status"] == "failed"
+    assert job["message"] == "The operation could not be started."
+    assert "/usr/bin/pg_dump" not in job["message"]
+    # Logged with its traceback, so the operator still has the real reason.
+    assert "No such file or directory" in caplog.text
 
 
 def test_a_missing_pg_dump_is_reported_as_unavailable(app, monkeypatch):

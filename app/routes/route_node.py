@@ -1,4 +1,5 @@
 """Transaction-safe walking-network API."""
+import logging
 import math
 
 from flask import Blueprint, jsonify, request
@@ -13,6 +14,7 @@ from model.route_node import RouteNode
 from services.audit import log_audit
 
 route_node_bp = Blueprint("route_node", __name__, url_prefix="/api")
+logger = logging.getLogger(__name__)
 SHADES = {"Fully Shaded", "Mostly Shaded", "Partial Shade", "Unshaded", "Unknown"}
 MODES = {"Walking", "Vehicle"}
 DIRECTIONS = {"Two-way", "One-way", "Unknown"}
@@ -26,6 +28,24 @@ class ValidationError(ValueError):
 
 def _error(message, code=400):
     return jsonify({"success": False, "message": message}), code
+
+
+def _failed(message):
+    """A 500 that says only what went wrong, with the exception in the log.
+
+    Driver and ORM text names tables, columns, constraints and connection
+    details, so it stays server-side: ``logger.exception`` records it with its
+    traceback where an operator reads it, and the response carries the fixed
+    sentence an administrator is shown. The body keeps the shape every other
+    refusal here has - ``success`` and ``message`` - so there is nothing in
+    developer tools to read past the frontend's own handling.
+
+    Only for an unexpected failure. A ValidationError's text is ours, written
+    for the administrator, and goes out through ``_error`` with a 400.
+    """
+
+    logger.exception(message)
+    return _error(message, 500)
 
 
 def _guard(permission=None):
@@ -212,12 +232,8 @@ def get_route_nodes():
             count=len(records),
             route_nodes=[record.to_dict() for record in records],
         )
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve route nodes",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve route nodes")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["GET"])
@@ -229,12 +245,8 @@ def get_route_node(node_id):
         if not record:
             return _error("Route node not found", 404)
         return jsonify(success=True, route_node=record.to_dict()), 200
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve route node",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve route node")
 
 
 def _node_values(data, current=None):
@@ -294,13 +306,9 @@ def create_route_node():
         ), 201
     except ValidationError as error:
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not create route node",
-            error=str(error),
-        ), 500
+        return _failed("Could not create route node")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["PUT"])
@@ -334,13 +342,9 @@ def update_route_node(node_id):
         )
     except ValidationError as error:
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not update route node",
-            error=str(error),
-        ), 500
+        return _failed("Could not update route node")
 
 
 @route_node_bp.route("/route-nodes/<int:node_id>", methods=["DELETE"])
@@ -362,13 +366,9 @@ def delete_route_node(node_id):
         )
         db.session.commit()
         return jsonify(success=True, message="Route node deleted successfully")
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete route node",
-            error=str(error),
-        ), 500
+        return _failed("Could not delete route node")
 
 
 @route_node_bp.route("/pathways", methods=["GET"])
@@ -382,12 +382,8 @@ def get_pathways():
             count=len(records),
             pathways=[record.to_dict() for record in records],
         )
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve pathways",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve pathways")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["GET"])
@@ -399,12 +395,8 @@ def get_pathway(pathway_id):
         if not record:
             return _error("Pathway not found", 404)
         return jsonify(success=True, pathway=record.to_dict()), 200
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve pathway",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve pathway")
 
 
 def _pathway_values(data, current=None):
@@ -569,7 +561,7 @@ def convert_path_point(pathway_id):
         return _error(str(error))
     except Exception:
         db.session.rollback()
-        return _error("Could not convert Path Point", 500)
+        return _failed("Could not convert Path Point")
 
 
 @route_node_bp.route("/pathways", methods=["POST"])
@@ -599,13 +591,9 @@ def create_pathway():
         ), 201
     except ValidationError as error:
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not create pathway",
-            error=str(error),
-        ), 500
+        return _failed("Could not create pathway")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["PUT"])
@@ -631,13 +619,9 @@ def update_pathway(pathway_id):
         )
     except ValidationError as error:
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not update pathway",
-            error=str(error),
-        ), 500
+        return _failed("Could not update pathway")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>/points", methods=["PUT"])
@@ -688,13 +672,9 @@ def replace_pathway_points(pathway_id):
     except ValidationError as error:
         db.session.rollback()
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not replace pathway points",
-            error=str(error),
-        ), 500
+        return _failed("Could not replace pathway points")
 
 
 @route_node_bp.route("/pathways/<int:pathway_id>", methods=["DELETE"])
@@ -716,13 +696,9 @@ def delete_pathway(pathway_id):
         )
         db.session.commit()
         return jsonify(success=True, message="Pathway deleted successfully")
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete pathway",
-            error=str(error),
-        ), 500
+        return _failed("Could not delete pathway")
 
 
 @route_node_bp.route("/path-points", methods=["GET"])
@@ -736,12 +712,8 @@ def get_path_points():
             count=len(records),
             path_points=[record.to_dict() for record in records],
         )
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve path points",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve path points")
 
 
 @route_node_bp.route("/path-points/<int:point_id>", methods=["GET"])
@@ -753,12 +725,8 @@ def get_path_point(point_id):
         if not record:
             return _error("Path point not found", 404)
         return jsonify(success=True, path_point=record.to_dict()), 200
-    except Exception as error:
-        return jsonify(
-            success=False,
-            message="Could not retrieve path point",
-            error=str(error),
-        ), 500
+    except Exception:
+        return _failed("Could not retrieve path point")
 
 
 def _point_values(data, current=None):
@@ -845,13 +813,9 @@ def _point_write(point_id=None):
         ), code
     except ValidationError as error:
         return _error(str(error))
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message=f"Could not {'update' if point_id else 'create'} path point",
-            error=str(error),
-        ), 500
+        return _failed(f"Could not {'update' if point_id else 'create'} path point")
 
 
 @route_node_bp.route("/path-points", methods=["POST"])
@@ -876,10 +840,6 @@ def delete_path_point(point_id):
         log_audit("Admin", None, "delete", "Path Point", point_id, record.node_type)
         db.session.commit()
         return jsonify(success=True, message="Path point deleted successfully")
-    except Exception as error:
+    except Exception:
         db.session.rollback()
-        return jsonify(
-            success=False,
-            message="Could not delete path point",
-            error=str(error),
-        ), 500
+        return _failed("Could not delete path point")

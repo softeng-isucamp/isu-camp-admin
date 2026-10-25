@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import time
 
 from flask import Flask
@@ -85,6 +86,33 @@ def test_login_refuses_a_deactivated_administrator(monkeypatch):
     # No session was opened, so the refusal is not just cosmetic.
     with client.session_transaction() as flask_session:
         assert "admin_id" not in flask_session
+
+
+def test_a_login_that_crashes_logs_the_exception_and_answers_without_it(monkeypatch, caplog):
+    """A 5xx body reaches developer tools and every non-portal client as sent.
+
+    The lookup's exception can name the admin table, its columns and the
+    database connection, so the response carries only the fixed sentence and
+    the detail goes to the log with its traceback.
+    """
+
+    auth_module.rate_limit_buckets.clear()
+
+    def crash(**_values):
+        raise RuntimeError('relation "admin" does not exist')
+
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(crash)})()
+    }))
+    client = auth_app().test_client()
+
+    with caplog.at_level(logging.ERROR, logger=auth_module.logger.name):
+        response = client.post("/api/login", json={"username": "admin01", "password": "password123"})
+
+    assert response.status_code == 500
+    assert response.json == {"success": False, "message": "Login failed"}
+    assert "does not exist" not in response.get_data(as_text=True)
+    assert 'relation "admin" does not exist' in caplog.text
 
 
 def test_a_session_ends_when_its_account_is_deactivated(monkeypatch):

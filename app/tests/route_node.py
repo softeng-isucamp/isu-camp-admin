@@ -1,3 +1,5 @@
+import logging
+
 from flask import Flask
 import pytest
 
@@ -393,6 +395,50 @@ def test_atomic_pathway_write_rolls_back_everything_when_commit_fails(monkeypatc
     assert response.status_code == 500
     assert session.commits == 1
     assert session.rollbacks == 1
+
+
+def test_a_failed_pathway_write_logs_the_exception_and_answers_without_it(monkeypatch, caplog):
+    """A 5xx body is readable by any client, so the driver's text stays in the log.
+
+    The portal hides a 5xx ``message``, but developer tools and every other
+    caller see the response as sent; ORM and driver text names tables, columns,
+    constraints and the connection, which is reconnaissance rather than
+    something an administrator can act on.
+    """
+
+    session = FakeSession()
+    session.fail_commit = True
+
+    class FakeRouteNode:
+        query = type("Query", (), {"get": staticmethod(lambda _id: object())})()
+
+    class FakePathway:
+        def __init__(self, **values):
+            self.pathway_id = 9
+            self.__dict__.update(values)
+            self.allowed_modes = []
+            self.path_points = []
+
+        def to_dict(self):
+            return {"pathway_id": self.pathway_id}
+
+    monkeypatch.setattr(route_node_module, "RouteNode", FakeRouteNode)
+    monkeypatch.setattr(route_node_module, "Pathway", FakePathway)
+    monkeypatch.setattr(route_node_module, "PathPoint", lambda **values: type("Point", (), values)())
+    monkeypatch.setattr(route_node_module, "PathwayAllowedMode", FakeAllowedMode)
+    monkeypatch.setattr(route_node_module.db, "session", session)
+
+    with caplog.at_level(logging.ERROR, logger=route_node_module.logger.name):
+        response = app_with_route_node_blueprint().test_client().post("/api/pathways", json={
+            "source_node_id": 3, "destination_node_id": 4, "path_type": "Walkway",
+            "path_points": [{"latitude": 16.72, "longitude": 121.69}],
+        })
+
+    assert response.status_code == 500
+    assert response.json == {"success": False, "message": "Could not create pathway"}
+    assert "database write failed" not in response.get_data(as_text=True)
+    # Logged with its traceback, where whoever runs the server reads it.
+    assert "database write failed" in caplog.text
 
 
 def test_route_node_blueprint_exposes_walking_network_routes():
