@@ -14,6 +14,9 @@ import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
 import userIcon from "../../assets/figma/login/login-icon-4.svg";
 import lockIcon from "../../assets/figma/login/login-icon-1.svg";
 import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
+/** How long the sign-in button stays locked when the server rate-limits without saying for how long. */
+const LOGIN_RETRY_FALLBACK_SECONDS = 60;
+
 export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -81,7 +84,7 @@ export function Login() {
         setAttemptsRemaining(err.attemptsRemaining);
       } else if (err instanceof RateLimitError) {
         setError(RATE_LIMIT_MESSAGE);
-        setLoginCountdown(err.retryAfterSeconds);
+        setLoginCountdown(err.retryAfterSeconds ?? LOGIN_RETRY_FALLBACK_SECONDS);
       } else {
         setError(errorMessage(err, "We couldn't sign you in. Please try again."));
       }

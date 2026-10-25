@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { usePermissions } from "../../auth/usePermissions";
+import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { services } from "../../../services/api";
 import type { Building, Pathway, RouteNode } from "../../../types";
 import type { MapPoint } from "../campusBoundary";
@@ -48,6 +50,7 @@ export function usePathwayEditing({
   refreshMapData,
   onError,
 }: UsePathwayEditingOptions) {
+  const { can } = usePermissions();
   const { directoryPathways, directoryNodes, nodes: currentNodes, campusBoundary } = network;
   const { beginSaving, endSaving } = saving;
   const setError = onError;
@@ -60,6 +63,10 @@ export function usePathwayEditing({
   const [pathPoints, setPathPoints] = useState<[number, number][]>([]);
   const [selectedPathPointIndex, setSelectedPathPointIndex] = useState<number | null>(null);
   const [conversionDraft, setConversionDraft] = useState<PathPointConversionDraft | null>(null);
+  const canAdd = can("add");
+  useEffect(() => {
+    if (!canAdd) setConversionDraft(null);
+  }, [canAdd]);
   const [pathPointDragPreview, setPathPointDragPreview] = useState<{
     index: number;
     point: [number, number];
@@ -84,15 +91,20 @@ export function usePathwayEditing({
   );
   const selectedPath = selectedPathId ? currentPathways.find((item) => item.id === selectedPathId) : undefined;
   const activePathway = currentPathways.find((p) => p.id === editingPathId);
+  const targetPathId = editingPathId ?? selectedPathId;
+  const canModify = can(targetPathId && targetPathId !== provisionalPathwayId ? "edit" : "add");
+  const guardedSetter = <T,>(setter: Dispatch<SetStateAction<T>>): Dispatch<SetStateAction<T>> =>
+    (value) => { if (canModify) setter(value); };
 
   const adoptSuggestedPathwayName = (pathway: Pathway | null | undefined) => {
-    if (!pathway) return;
+    if (!canModify || !pathway) return;
     const suggestion = suggestedPathwayName(pathway, currentNodes);
     if (!suggestion) return;
     setPathwayDraft((current) => current && !current.name.trim() ? { ...current, name: suggestion } : current);
   };
 
   const startNew = () => {
+    if (!can("add")) return;
     setEditingPathId(null);
     setPathwayDraft(null);
     setPathwayDraftOriginal(null);
@@ -108,6 +120,7 @@ export function usePathwayEditing({
    * or null when the click was rejected.
    */
   const handleNodeClick = (node: RouteNode, isOverviewZoom: boolean): MapSelection | null => {
+    if (!can("add")) return null;
     if (isOverviewZoom) {
       setError("Zoom in to edit map geometry.");
       return null;
@@ -156,6 +169,7 @@ export function usePathwayEditing({
 
   /** Stages an edited pathway in the overlay unless it would duplicate a connection. */
   const update = (updated: Pathway): boolean => {
+    if (!canModify) return false;
     const connectionError = pathwayConnectionError(
       updated.sourceNodeId,
       updated.destinationNodeId,
@@ -182,20 +196,30 @@ export function usePathwayEditing({
     if (!path) return null;
     setPathwayDraft({ ...path });
     setPathwayDraftOriginal({ ...path });
-    const outcome = path.status === "Open" ? "edit" : "inspect";
-    if (outcome === "edit") {
-      setEditingPathId(path.id);
-      setPathPoints(path.pathPoints || []);
-    } else {
-      setEditingPathId(null);
-      setPathPoints([]);
-    }
+    const outcome = path.status === "Open" && can("edit") ? "edit" : "inspect";
+    // Inspection also loads points so Add-only admins can select a point to convert.
+    // Geometry handlers and drag flags remain gated independently of this read state.
+    setEditingPathId(path.id);
+    setPathPoints(path.pathPoints || []);
     setSelectedPathPointIndex(null);
     return outcome;
   };
 
+  const loadForEditing = (path: Pathway) => {
+    if (!can("edit")) return;
+    if (provisionalPathwayId && provisionalPathwayId !== path.id) overlay.dropPathway(provisionalPathwayId);
+    setProvisionalPathwayId(null);
+    setPathStartNodeId(null);
+    setEditingPathId(path.id);
+    setPathwayDraft({ ...path });
+    setPathwayDraftOriginal({ ...path });
+    setPathPoints([...path.pathPoints]);
+    setSelectedPathPointIndex(null);
+    setPathDraftDirty(false);
+  };
+
   const insertPathPoint = (segmentIndex: number) => {
-    if (!activePathway) return;
+    if (!canModify || !activePathway) return;
     const source = currentNodes.find((node) => node.id === activePathway.sourceNodeId);
     const destination = currentNodes.find((node) => node.id === activePathway.destinationNodeId);
     if (!source || !destination) return;
@@ -211,7 +235,7 @@ export function usePathwayEditing({
   };
 
   const saveShape = async (): Promise<boolean> => {
-    if (!editingPathId) return false;
+    if (!canModify || !editingPathId) return false;
     if (!beginSaving("pathway")) return false;
     const target = overlay.pathways.find((pathway) => pathway.id === editingPathId) || directoryPathways.find((pathway) => pathway.id === editingPathId);
     if (target) {
@@ -263,6 +287,7 @@ export function usePathwayEditing({
     onCreated: (junction: RouteNode) => void,
     crossing: PathwayCrossing,
   ) => {
+    if (!can("add")) return;
     const pathwayA = currentPathways.find((pathway) => pathway.id === crossing.pathwayAId);
     const pathwayB = currentPathways.find((pathway) => pathway.id === crossing.pathwayBId);
     if (!pathwayA || !pathwayB) return;
@@ -312,6 +337,7 @@ export function usePathwayEditing({
     ),
   );
   const startConversion = (currentBuildings: readonly Building[]) => {
+    if (!can("add")) return;
     if (!activePathway || selectedPathPointIndex === null || !pathPoints[selectedPathPointIndex] || pathwayFrameDirty || pathDraftDirty) return;
     const index = selectedPathPointIndex;
     const point = pathPoints[index];
@@ -357,6 +383,7 @@ export function usePathwayEditing({
   });
 
   const saveConversion = async (onConverted: (nodeId: string) => void) => {
+    if (!can("add")) return;
     if (!conversionDraft || !beginSaving("path-point-conversion")) return;
     try {
       const result = await services.map.convertPathPoint({
@@ -387,6 +414,7 @@ export function usePathwayEditing({
   };
 
   const applyFrame = async (): Promise<boolean> => {
+    if (!can(namedPathwayFrame?.id === provisionalPathwayId ? "add" : "edit")) return false;
     if (!namedPathwayFrame || pathwayFrameIssues.length > 0) {
       if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
       return false;
@@ -428,7 +456,7 @@ export function usePathwayEditing({
   };
 
   const switchEndpoints = () => {
-    if (!pathwayFrame) return;
+    if (!canModify || !pathwayFrame) return;
     const reversedPoints = [...pathwayFrame.pathPoints].reverse();
     const currentDraft = pathwayDraft?.id === pathwayFrame.id ? pathwayDraft : pathwayFrame;
     setPathwayDraft({
@@ -472,6 +500,8 @@ export function usePathwayEditing({
       },
       nestedRecords: {
         editingPathId,
+        pathwayDraft,
+        pathwayDraftOriginal,
         selectedPathPointIndex,
         provisionalPathwayId,
         provisionalPathway: provisionalPathwayId
@@ -483,6 +513,8 @@ export function usePathwayEditing({
     activePathway?.destinationNodeId,
     activePathway?.sourceNodeId,
     editingPathId,
+    pathwayDraft,
+    pathwayDraftOriginal,
     overlay.pathways,
     pathDraftDirty,
     pathPoints,
@@ -502,6 +534,10 @@ export function usePathwayEditing({
     setProvisionalPathwayId(null);
     setSelectedPathPointIndex(null);
     setPathDraftDirty(false);
+    setConversionDraft(null);
+    setPathwayDraft(null);
+    setPathwayDraftOriginal(null);
+    setPathPointDragPreview(null);
   };
 
   /**
@@ -509,9 +545,13 @@ export function usePathwayEditing({
    * straight away. Returns the opened pathway, if any.
    */
   const activate = (): Pathway | null => {
+    if (!can("edit")) {
+      if (can("add")) startNew();
+      return null;
+    }
     if (!editingPathId && (directoryPathways.length || overlay.pathways.length)) {
       const first = overlay.pathways[0] || directoryPathways[0];
-      if (first?.status === "Open") {
+      if (first && (first.status === "Open" || !can("add"))) {
         setEditingPathId(first.id);
         setPathwayDraft({ ...first });
         setPathwayDraftOriginal({ ...first });
@@ -532,6 +572,12 @@ export function usePathwayEditing({
       ? { ...records.provisionalPathway, pathPoints: restoredPoints }
       : null;
     setProvisionalPathwayId(typeof records.provisionalPathwayId === "string" ? records.provisionalPathwayId : null);
+    const storedPathway = isPathwayDraft(records.pathwayDraft) ? records.pathwayDraft : null;
+    const storedOriginal = isPathwayDraft(records.pathwayDraftOriginal) ? records.pathwayDraftOriginal : null;
+    const existing = directoryPathways.find((path) => path.id === records.editingPathId)
+      ?? overlay.pathways.find((path) => path.id === records.editingPathId);
+    setPathwayDraft(storedPathway ?? restoredProvisionalPathway ?? existing ?? null);
+    setPathwayDraftOriginal(storedOriginal ?? (restoredProvisionalPathway ? null : existing ?? null));
     if (restoredProvisionalPathway) {
       overlay.putPathways([restoredProvisionalPathway]);
     }
@@ -539,6 +585,7 @@ export function usePathwayEditing({
   };
 
   return {
+    canModify,
     currentPathways,
     pathwayCrossings,
     selectedPath,
@@ -548,30 +595,33 @@ export function usePathwayEditing({
     pathwayFrameIssues,
     pathwayFrameDirty,
     editingPathId,
-    setEditingPathId,
+    setEditingPathId: (id: string | null) => {
+      if (id === provisionalPathwayId ? can("add") : can("edit")) setEditingPathId(id);
+    },
     pathwayDraft,
-    setPathwayDraft,
+    setPathwayDraft: guardedSetter(setPathwayDraft),
     pathwayDraftOriginal,
     setPathwayDraftOriginal,
     provisionalPathwayId,
     setProvisionalPathwayId,
     pathPoints,
-    setPathPoints,
+    setPathPoints: guardedSetter(setPathPoints),
     selectedPathPointIndex,
     setSelectedPathPointIndex,
     pathStartNodeId,
     setPathStartNodeId,
     pathDraftDirty,
-    setPathDraftDirty,
+    setPathDraftDirty: guardedSetter(setPathDraftDirty),
     conversionDraft,
     setConversionDraft,
     pathPointDragPreview,
-    setPathPointDragPreview,
+    setPathPointDragPreview: guardedSetter(setPathPointDragPreview),
     adoptSuggestedPathwayName,
     startNew,
     handleNodeClick,
     update,
     loadForSelection,
+    loadForEditing,
     insertPathPoint,
     saveShape,
     createJunctionAtCrossing,

@@ -1152,16 +1152,11 @@ describe("real walking network service boundary", () => {
     })]);
   });
 
-  it("persists path-point edits with PUT, POST, and DELETE operations", async () => {
+  it("replaces a Pathway's whole point sequence in one request", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 6, pathway_id: 9, sequence_no: 3, latitude: 16.74, longitude: 121.71, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockImplementation(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [
@@ -1171,18 +1166,18 @@ describe("real walking network service boundary", () => {
       [16.724, 121.694],
     ]);
 
+    // One operation, one request: a reshape is authorized as an edit and
+    // applied in one transaction, never as a PUT/POST/DELETE reconciliation.
     expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
-      ["/api/path-points", undefined],
-      ["/api/path-points/4", "PUT"],
-      ["/api/path-points/5", "PUT"],
-      ["/api/path-points/6", "PUT"],
-      ["/api/path-points", "POST"],
+      ["/api/pathways/9/points", "PUT"],
     ]);
-    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({
-      pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active",
-    }));
-    expect(fetchMock.mock.calls[4]?.[1]?.body).toBe(JSON.stringify({
-      pathway_id: 9, sequence_no: 4, latitude: 16.724, longitude: 121.694, node_type: "Waypoint", status: "active",
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      path_points: [
+        { pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 2, latitude: 16.722, longitude: 121.692, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 3, latitude: 16.723, longitude: 121.693, node_type: "Waypoint", status: "active" },
+        { pathway_id: 9, sequence_no: 4, latitude: 16.724, longitude: 121.694, node_type: "Waypoint", status: "active" },
+      ],
     }));
   });
 
@@ -1191,36 +1186,46 @@ describe("real walking network service boundary", () => {
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Coordinate is outside the campus boundary." }), { status: 422 }));
 
     await expect(httpServices.map.replacePathPoints("9", [[16.721, 121.691]])).rejects.toMatchObject({
-      message: "Some of your pathway changes couldn't be saved. Reload the map to check the pathway, then try again.",
+      message: "The pathway's points couldn't be saved, and the pathway was left as it was. Check the points and try again.",
       detail: "Could not persist Path Points for Pathway 9: Coordinate is outside the campus boundary.",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("deletes surplus persisted Path Points after the retained points are updated", async () => {
+  it("drops surplus persisted Path Points by sending the shape that remains", async () => {
     vi.stubEnv("VITE_API_MODE", "real");
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ path_points: [
-        { point_id: 4, pathway_id: 9, sequence_no: 1, latitude: 16.72, longitude: 121.69, building_id: null, node_type: "Waypoint", status: "active" },
-        { point_id: 5, pathway_id: 9, sequence_no: 2, latitude: 16.73, longitude: 121.70, building_id: null, node_type: "Waypoint", status: "active" },
-      ] }), { status: 200 }))
       .mockImplementation(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [[16.721, 121.691]]);
 
+    // Nothing says "delete point 5": the sequence sent is the whole shape, and
+    // whatever is not in it is gone when the request commits.
     expect(fetchMock.mock.calls.map(([url, init]) => [String(url).replace(/^https?:\/\/[^/]+/, ""), init?.method])).toEqual([
-      ["/api/path-points", undefined],
-      ["/api/path-points/4", "PUT"],
-      ["/api/path-points/5", "DELETE"],
+      ["/api/pathways/9/points", "PUT"],
     ]);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      path_points: [
+        { pathway_id: 9, sequence_no: 1, latitude: 16.721, longitude: 121.691, node_type: "Waypoint", status: "active" },
+      ],
+    }));
+  });
+
+  it("clears a Pathway's shape by sending an empty sequence", async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    const { services: httpServices } = await import("./api");
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await httpServices.map.replacePathPoints("9", []);
+
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ path_points: [] }));
   });
 
   it("sends Pathway geometry in the same create request as its metadata", async () => {
@@ -1466,6 +1471,82 @@ describe("real administrators service boundary", () => {
     ]);
   });
 
+  it("reads each administrator's permissions: only for an administrator, and absent stays absent", async () => {
+    const { services: admins } = await httpServices();
+    const account = { email: "", status: "Active", isCurrent: false };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      items: [
+        { id: "1", username: "boss", role: "superadmin", permissions: { add: true, edit: true, delete: true, changeUserStatus: true }, ...account },
+        { id: "2", username: "staff", role: "admin", permissions: { add: true, edit: false, delete: false, changeUserStatus: true }, ...account },
+        { id: "3", username: "legacy", role: "admin", ...account },
+        { id: "4", username: "nulled", role: "admin", permissions: null, ...account },
+        { id: "5", username: "partial", role: "admin", permissions: { add: true }, ...account },
+      ],
+      total: 5,
+    }));
+
+    const [boss, staff, legacy, nulled, partial] = await admins.admins.list();
+    expect(boss).not.toHaveProperty("permissions");
+    expect(staff.permissions).toEqual({ add: true, edit: false, delete: false, changeUserStatus: true });
+    expect(legacy).not.toHaveProperty("permissions");
+    expect(nulled).not.toHaveProperty("permissions");
+    // A switch the server did not state as true is off.
+    expect(partial.permissions).toEqual({ add: true, edit: false, delete: false, changeUserStatus: false });
+  });
+
+  it("puts the signed-in administrator's permissions in the session, from sign-in and from me", async () => {
+    const { services: admins } = await httpServices();
+    const granted = { add: false, edit: true, delete: false, changeUserStatus: false };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json({ success: true, admin: { id: "2", username: "staff", email: "s@isu.edu.ph", role: "admin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "2", username: "staff", role: "admin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "1", username: "boss", role: "superadmin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "3", username: "legacy", role: "admin" } }));
+
+    await expect(admins.auth.login("staff", "x")).resolves.toMatchObject({ role: "admin", permissions: granted });
+    await expect(admins.auth.me()).resolves.toMatchObject({ role: "admin", permissions: granted });
+    expect(await admins.auth.me()).not.toHaveProperty("permissions");
+    expect(await admins.auth.me()).not.toHaveProperty("permissions");
+  });
+
+  it("sends the switches when adding an administrator, never for a superadmin or an edit", async () => {
+    const { services: admins } = await httpServices();
+    const granted = { add: true, edit: false, delete: false, changeUserStatus: false };
+    const reply = { success: true, admin: { id: "9", username: "plain", email: "p@isu.edu.ph", status: "Active", role: "admin", permissions: granted, isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply, 201));
+    const base = { username: "plain", email: "p@isu.edu.ph", password: "A-long-enough-secret1" };
+
+    await expect(admins.admins.save({ ...base, role: "admin", permissions: granted })).resolves.toMatchObject({ permissions: granted });
+    await admins.admins.save({ ...base, role: "superadmin", permissions: granted });
+    await admins.admins.save({ ...base, id: "9", permissions: granted });
+
+    const [first, second, third] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(first.permissions).toEqual(granted);
+    expect(second).not.toHaveProperty("permissions");
+    expect(third).not.toHaveProperty("permissions");
+  });
+
+  it("saves permissions through their own route and returns the updated account", async () => {
+    const { services: admins } = await httpServices();
+    const next = { add: true, edit: true, delete: false, changeUserStatus: false };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      success: true,
+      admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", permissions: next, isCurrent: false },
+    }));
+
+    await expect(admins.admins.setPermissions("2", next)).resolves.toMatchObject({ username: "staff", permissions: next });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/admins\/2\/permissions$/);
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(init?.body))).toEqual({ permissions: next });
+  });
+
+  it("has no administrator removal any more", async () => {
+    const { services: admins } = await httpServices();
+    expect(admins.admins).not.toHaveProperty("remove");
+  });
+
   it("sends the chosen role when adding an administrator, but never when editing one", async () => {
     const { services: admins } = await httpServices();
     const reply = { success: true, admin: { id: "9", username: "boss", email: "b@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false } };
@@ -1503,22 +1584,54 @@ describe("real administrators service boundary", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ role: "superadmin" });
   });
 
+  it("sends the starting switches with a demotion, and none with a promotion", async () => {
+    const { services: admins } = await httpServices();
+    const starting = { add: false, edit: true, delete: false, changeUserStatus: false };
+    const reply = { success: true, admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply));
+
+    await admins.admins.setRole("2", "admin", starting);
+    await admins.admins.setRole("2", "superadmin", starting);
+
+    const [demote, promote] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(demote).toEqual({ role: "admin", permissions: starting });
+    expect(promote).toEqual({ role: "superadmin" });
+  });
+
+  it("announces a coded permission refusal so an open session revalidates", async () => {
+    const { services: http, errors } = await httpServices();
+    const listener = vi.fn();
+    window.addEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    try {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(json({ code: "PERMISSION_DENIED", message: "Permission revoked." }, 403))
+        .mockResolvedValueOnce(json({ message: "Other refusal." }, 403));
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toBeInstanceOf(errors.PermissionDeniedError);
+      expect(listener).toHaveBeenCalledTimes(1);
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toThrow("Other refusal.");
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    }
+  });
+
   it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
     const { services: admins, errors } = await httpServices();
+    const noSwitches = { add: false, edit: false, delete: false, changeUserStatus: false };
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
       .mockResolvedValueOnce(json({ success: false, code: "superadmin_required", message: "Superadmin access required" }, 403))
       .mockResolvedValueOnce(json({ success: false, code: "password_confirmation_required", message: "Confirm your password." }, 403))
       .mockResolvedValueOnce(json({ success: false, message: "Superadmin access required" }, 403));
 
-    const refusal = await admins.admins.remove("2").catch((error: unknown) => error);
+    const refusal = await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(errors.SuperadminRequiredError);
     expect(refusal).toMatchObject({ message: "Superadmin access required" });
 
-    expect(await admins.admins.remove("2").catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
+    expect(await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
 
     // The message alone is not the signal: a 403 without the code stays a plain error.
-    const plain = await admins.admins.remove("2").catch((error: unknown) => error);
+    const plain = await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error);
     expect(plain).not.toBeInstanceOf(errors.SuperadminRequiredError);
     expect(plain).toMatchObject({ message: "Superadmin access required" });
   });

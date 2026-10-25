@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePermissions } from "../../auth/usePermissions";
 import { services } from "../../../services/api";
 import { usePasswordConfirmation } from "../../auth/PasswordConfirmation";
 import { errorMessage } from "../../../services/errors";
@@ -15,36 +16,69 @@ interface UseDeleteConfirmationOptions {
 
 /** Deleting a Building, Route Node or Pathway after confirmation. */
 export function useDeleteConfirmation({ overlay, refreshMapData, onError, onDeleted }: UseDeleteConfirmationOptions) {
-  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  const { can } = usePermissions();
+  const canDelete = can("delete");
+  const allowed = useRef(canDelete);
+  allowed.current = canDelete;
+  const [deleteConfirmation, setConfirmation] = useState<DeleteConfirmation | null>(null);
   const [deleting, setDeleting] = useState(false);
   const passwordConfirmation = usePasswordConfirmation();
+  const currentDialog = useRef<DeleteConfirmation | null>(null);
+  const dialogVersion = useRef(0);
+  const busy = useRef(false);
+  useEffect(() => {
+    allowed.current = canDelete;
+    return () => {
+      dialogVersion.current += 1;
+      currentDialog.current = null;
+      allowed.current = false;
+    };
+  }, []);
+
+
+  const setDeleteConfirmation = (confirmation: DeleteConfirmation | null) => {
+    if (confirmation && !allowed.current) return;
+    dialogVersion.current += 1;
+    currentDialog.current = confirmation;
+    setConfirmation(confirmation);
+    passwordConfirmation.reset();
+  };
+
+  useEffect(() => {
+    if (!canDelete) setDeleteConfirmation(null);
+  }, [canDelete]);
 
   const confirmDelete = async () => {
-    if (!deleteConfirmation || deleting) return;
-    // A permanent delete is re-authenticated: the signed-in admin retypes their password.
-    if (!await passwordConfirmation.confirm()) return;
-    setDeleting(true);
+    const requested = currentDialog.current;
+    if (!allowed.current || !requested || busy.current) return;
+    const version = dialogVersion.current;
+    busy.current = true;
     try {
-      if (deleteConfirmation.kind === "building") {
-        await services.map.removeBuilding(deleteConfirmation.id);
-        overlay.removeBuilding(deleteConfirmation.id);
-        overlay.removeLocation(deleteConfirmation.id);
-      } else if (deleteConfirmation.kind === "route_node") {
-        await services.map.deleteRouteNode(deleteConfirmation.id);
-        overlay.removeNode(deleteConfirmation.id);
+      // Confirmation can outlive the dialog or the permission that opened it.
+      if (!await passwordConfirmation.confirm()) return;
+      if (!allowed.current || dialogVersion.current !== version || currentDialog.current !== requested) return;
+      setDeleting(true);
+      if (requested.kind === "building") {
+        await services.map.removeBuilding(requested.id);
+        overlay.removeBuilding(requested.id);
+        overlay.removeLocation(requested.id);
+      } else if (requested.kind === "route_node") {
+        await services.map.deleteRouteNode(requested.id);
+        overlay.removeNode(requested.id);
       } else {
-        await services.map.deletePathway(deleteConfirmation.id);
-        overlay.deletePathway(deleteConfirmation.id);
+        await services.map.deletePathway(requested.id);
+        overlay.deletePathway(requested.id);
       }
       await refreshMapData();
-      onDeleted(deleteConfirmation);
-      setDeleteConfirmation(null);
-      passwordConfirmation.reset();
+      onDeleted(requested);
+      if (dialogVersion.current === version) setDeleteConfirmation(null);
       onError("");
     } catch (cause) {
+      if (!allowed.current || dialogVersion.current !== version) return;
       if (passwordConfirmation.handleRejection(cause)) return;
-      onError(errorMessage(cause, `${deleteConfirmation.name} couldn't be deleted. Please try again.`, { mutation: true }));
+      onError(errorMessage(cause, `${requested.name} couldn't be deleted. Please try again.`, { mutation: true }));
     } finally {
+      busy.current = false;
       setDeleting(false);
     }
   };
@@ -52,7 +86,6 @@ export function useDeleteConfirmation({ overlay, refreshMapData, onError, onDele
   const closeConfirmation = () => {
     if (deleting) return;
     setDeleteConfirmation(null);
-    passwordConfirmation.reset();
   };
 
   return {

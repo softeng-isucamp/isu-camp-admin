@@ -2,10 +2,20 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, deactivated, given a role and removed, by superadmins only.
-Editing is limited to the signed-in account: every other administrator can be
-deactivated or removed, but not rewritten. Any active administrator can list
-the accounts and send a password reset code.
+they are created, deactivated, given a role and given their permissions, by
+superadmins only. Editing is limited to the signed-in account: every other
+administrator can be deactivated or configured, but not rewritten. Any active
+administrator can list the accounts and send a password reset code.
+
+Administrators are no longer removed. Deactivation does the same job without
+orphaning the audit trail of everything the account did, so the delete route
+answers 405 and points at the status route instead.
+
+Everything here is superadmin-only except the listing and the password-reset
+send, and none of it is grantable through the four permissions: an
+administrator who may add, edit, delete and change user statuses still cannot
+reach another administrator's account. That, and Backup & Recovery, is what
+being a superadmin means.
 """
 
 import re
@@ -13,6 +23,7 @@ import re
 from flask import Blueprint, jsonify, request, session
 
 from auth import (
+    PERMISSION_KEYS,
     Admin,
     admin_required,
     email_taken,
@@ -54,11 +65,83 @@ def _as_dict(admin):
         "email": admin.gmail or "",
         "status": status_label(admin.status),
         "role": "superadmin" if admin.is_superadmin else "admin",
+        # Null for a superadmin, whose switches are not configurable, and for
+        # an administrator nothing has restricted yet. The frontend reads
+        # either as full access. One administrator's switches are not a secret
+        # from another - unlike their recovery addresses, which this never
+        # returns - because the whole directory is already readable here.
+        "permissions": admin.permissions_dto(),
         # The signed-in admin is the only one that can be edited, and the only
-        # one that cannot be deactivated or removed, so the client marks that
-        # row rather than offering actions the server would refuse.
+        # one whose status and permissions cannot be changed, so the client
+        # marks that row rather than offering actions the server would refuse.
         "isCurrent": admin.id == session.get("admin_id"),
     }
+
+
+ALL_PERMISSIONS_OFF = {key: False for key in PERMISSION_KEYS}
+
+PERMISSIONS_SHAPE_MESSAGE = (
+    "Each of the four permissions must be given as true or false."
+)
+
+SUPERADMIN_PERMISSIONS_MESSAGE = (
+    "Superadmins always have every permission. Demote them first to restrict them."
+)
+
+
+def _read_permissions(data, *, role, default=None):
+    """The switches a create/demote body asks for, or ``default``.
+
+    Returns ``(permissions, error_response)``. ``None`` as the permissions is
+    meaningful - it is what a superadmin's row stores - so the two are not
+    interchangeable with a falsy check.
+
+    Only an *absent* field defaults. A field that is present and null is a
+    value the caller chose to send, and the one shape a supplied value may
+    take is the four booleans, so null is refused like any other wrong shape
+    (issue #145). Reading the two the same way meant a client could ask for
+    "no permissions" and silently receive the view-only default instead of
+    being told its request made no sense.
+
+    A superadmin's switches are ignored rather than refused, null included: a
+    client may hold one form for both roles, and refusing a field that cannot
+    apply would make promoting somebody fail for a value nothing reads.
+    """
+
+    if not isinstance(data, dict) or "permissions" not in data:
+        return default, None
+
+    if role == "superadmin":
+        return None, None
+
+    requested = data["permissions"]
+    if not isinstance(requested, dict) or any(
+        not isinstance(requested.get(key), bool) for key in PERMISSION_KEYS
+    ):
+        # All four, every time. A body that names two leaves the other two to
+        # whatever the reader assumes, and the two readers here - this server
+        # and the form - must not be free to assume differently.
+        return None, _error(PERMISSIONS_SHAPE_MESSAGE, field="permissions")
+
+    return {key: requested[key] is True for key in PERMISSION_KEYS}, None
+
+
+def _describe_permissions(before, after):
+    """``add: on -> off`` for each switch that moved, for the audit detail.
+
+    Only the changes, because a row saying all four stayed the same is a row
+    nobody reads. ``None`` on either side is full access, which is what a
+    superadmin and an unconfigured administrator both hold.
+    """
+
+    was = before if before is not None else {key: True for key in PERMISSION_KEYS}
+    now = after if after is not None else {key: True for key in PERMISSION_KEYS}
+    moved = [
+        f"{key}: {'on' if was.get(key) else 'off'} -> {'on' if now.get(key) else 'off'}"
+        for key in PERMISSION_KEYS
+        if bool(was.get(key)) != bool(now.get(key))
+    ]
+    return "; ".join(moved)
 
 
 def _read_identity(data, *, require_password):
@@ -97,9 +180,9 @@ def _read_role(value):
 def _lock_administrators():
     """Locks every administrator row for this transaction and returns them by id.
 
-    Every write that changes who can sign in or manage accounts (role, status,
-    removal) starts here and decides from what this returns, never from rows
-    read earlier. The table holds a handful of accounts, so SELECT ... FOR
+    Every write that changes who can sign in, who can manage accounts, or what
+    an account may do (status, role, permissions) starts here and decides from
+    what this returns, never from rows read earlier. The table holds a handful of accounts, so SELECT ... FOR
     UPDATE over all of it, in id order, is cheap, and it makes these writes
     run one at a time: a second request waits in this query until the first
     commits, rolls back or ends, and then reads the rows as the first left
@@ -120,8 +203,8 @@ def _is_last_active_superadmin(record, directory):
     """True when losing this account's superadmin access would leave nobody with it.
 
     Only an active superadmin counts, so a deactivated one neither blocks the
-    change nor is protected by it. Applies to demoting, deactivating and
-    removing alike. ``directory`` is the locked set from
+    change nor is protected by it. Applies to demoting and deactivating alike.
+    ``directory`` is the locked set from
     :func:`_lock_administrators`. Holding it, the caller is an active
     superadmin and is never the target, so this cannot be true for a real
     request; it stays as the second line of defence.
@@ -165,18 +248,30 @@ def create_admin():
     if role is None:
         return _error("Role must be Administrator or Superadmin.", field="role")
 
+    # Absent means "nothing yet", not "everything": an account being set up has
+    # not been given anything, and the superadmin who creates it decides what it
+    # may do. The migration is the other way round, because an account that
+    # already exists must not silently lose what it could do yesterday.
+    permissions, invalid = _read_permissions(
+        request.get_json(silent=True),
+        role=role,
+        default=None if role == "superadmin" else ALL_PERMISSIONS_OFF,
+    )
+    if invalid:
+        return invalid
+
     if _username_taken(values["username"]):
         return _error("That username is already taken", status=409, field="username")
 
     if email_taken(values["email"]):
         return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
 
-    # Minting a superadmin is as deliberate as promoting one, so it asks for the
-    # password too. A plain administrator is created without the prompt.
-    if role == "superadmin":
-        _, error = reauth_required("Confirm your password to create a superadmin.")
-        if error:
-            return error
+    # Every create asks for the password, not only a superadmin's. A new
+    # account is a new way into the portal whatever its role, and an unattended
+    # session should not be able to mint one.
+    _, error = reauth_required("Confirm your password to add an administrator.")
+    if error:
+        return error
 
     try:
         # public.admin.id is an identity column, so the database assigns it.
@@ -187,6 +282,7 @@ def create_admin():
             password=hash_password(values["password"]),
             gmail=values["email"],
             role=role,
+            permissions=permissions,
         )
         db.session.add(record)
         db.session.flush()
@@ -209,8 +305,9 @@ def update_admin(admin_id):
         return _error("Administrator not found.", status=404)
 
     # An administrator owns only their own sign-in details. Another account's
-    # username, email and password are theirs to change, so the rest of the
-    # directory is remove-only here.
+    # username, email and password are theirs to change, so every other row is
+    # read-only here - a superadmin changes their status, role and permissions
+    # through the routes below, never their details.
     if record.id != session.get("admin_id"):
         return _error(
             "You can only edit your own administrator account.",
@@ -339,6 +436,19 @@ def set_admin_role(admin_id):
     if role is None:
         return _error("Role must be Administrator or Superadmin.", field="role")
 
+    # A demotion has to say what the account may do as a plain administrator,
+    # or it gets nothing: a superadmin's switches were never configured, so
+    # there is nothing to fall back to, and falling back to "everything" would
+    # make a demotion a formality. A promotion discards them, because the role
+    # carries everything and a stored set would be a value nothing reads.
+    permissions, invalid = _read_permissions(
+        data,
+        role=role,
+        default=None if role == "superadmin" else ALL_PERMISSIONS_OFF,
+    )
+    if invalid:
+        return invalid
+
     if record.id == session.get("admin_id"):
         return _error("You cannot change your own role.", status=409)
 
@@ -355,6 +465,7 @@ def set_admin_role(admin_id):
 
     try:
         record.role = role
+        record.permissions = permissions
         action = "promote" if role == "superadmin" else "demote"
         log_audit("Admin", None, action, "Administrator", record.id, record.username)
         db.session.commit()
@@ -367,6 +478,78 @@ def set_admin_role(admin_id):
     except Exception:
         db.session.rollback()
         return _error("Failed to update the administrator's role.", status=500)
+
+
+@admins_bp.put("/<int:admin_id>/permissions")
+def set_admin_permissions(admin_id):
+    """Switches one administrator's four general permissions on or off.
+
+    Shaped like the role route, and deliberate for the same reason: this is the
+    difference between a colleague who can delete a building and one who
+    cannot, so it needs a recent password confirmation, and nobody configures
+    their own switches.
+
+    Taking a permission away takes effect on the target's next request. Nothing
+    is stored in their session, so there is no cached grant to outlive this.
+    """
+
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
+    _, error = reauth_required(
+        "Confirm your password to change this administrator's permissions."
+    )
+    if error:
+        return error
+
+    # Locked for the same reason the role route locks: a promotion landing
+    # between the target's role being read and the write would leave a
+    # superadmin holding a configured set of switches, which is a state
+    # nothing reads.
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    if record.id == session.get("admin_id"):
+        return _error("You cannot change your own permissions.", status=409)
+
+    if record.is_superadmin:
+        return _error(SUPERADMIN_PERMISSIONS_MESSAGE, status=409)
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("permissions") is None:
+        return _error(PERMISSIONS_SHAPE_MESSAGE, field="permissions")
+
+    permissions, invalid = _read_permissions(data, role="admin")
+    if invalid:
+        return invalid
+
+    # The detail says what moved, so the Logs page answers "who took that
+    # away" without anybody diffing two audit rows.
+    moved = _describe_permissions(record.permissions_dto(), permissions)
+
+    try:
+        record.permissions = permissions
+        log_audit(
+            "Admin", None, "update permissions", "Administrator", record.id,
+            f"{record.username}: {moved or 'no change'}",
+        )
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"Permissions updated for {record.username}.",
+            "admin": _as_dict(record),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return _error("Failed to update the administrator's permissions.", status=500)
 
 
 @admins_bp.post("/<int:admin_id>/password-reset")
@@ -417,41 +600,21 @@ def send_password_reset(admin_id):
 
 @admins_bp.delete("/<int:admin_id>")
 def delete_admin(admin_id):
-    # Superadmin is checked before the password so a plain administrator is
-    # refused outright rather than asked to confirm something they may not do.
-    _, error = superadmin_required()
-    if error:
-        return error
+    """Gone. Administrators are deactivated now, not removed.
 
-    # Removing an administrator is destructive, so it needs a recent password
-    # confirmation like every other delete in the portal.
-    _, error = reauth_required()
-    if error:
-        return error
+    Removing the row orphaned everything the account had ever done: the audit
+    trail names an actor by username, and a reader looking up who that was
+    found nothing. Deactivation answers the same need - the account can no
+    longer sign in - and keeps the history readable, so it replaced this.
 
-    directory, error = _lock_administrators()
-    if error:
-        return error
+    Answered here rather than left to Flask's own 405 so the reply carries the
+    usual envelope and names the route that took over. Registered for every
+    caller, superadmin or not: the method does not exist for anybody, and
+    checking a role first would imply there is a caller for whom it does.
+    """
 
-    record = directory.get(admin_id)
-    if not record:
-        return _error("Administrator not found.", status=404)
-
-    if record.id == session.get("admin_id"):
-        return _error("You cannot remove your own administrator account.", status=409)
-
-    if len(directory) <= 1:
-        return _error("The last administrator account cannot be removed.", status=409)
-
-    if _is_last_active_superadmin(record, directory):
-        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
-
-    try:
-        username = record.username
-        db.session.delete(record)
-        log_audit("Admin", None, "delete", "Administrator", admin_id, username)
-        db.session.commit()
-        return jsonify({"success": True, "message": "Administrator removed successfully."}), 200
-    except Exception:
-        db.session.rollback()
-        return _error("Failed to remove the administrator.", status=500)
+    return jsonify({
+        "success": False,
+        "message": "Administrators are no longer removed. Deactivate the account instead.",
+        "deactivate": f"/api/admins/{admin_id}/status",
+    }), 405

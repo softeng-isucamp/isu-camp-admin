@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { signInAs } from "../../test/session";
+import { viewOnlyPermissions } from "../../lib/permissions";
 import { MapIssuesTray } from "./MapIssuesTray";
 import type { MapIssue } from "./session/mapIssues";
 
@@ -29,13 +31,21 @@ const outside = (id: string): MapIssue => ({
   selection: { type: "node", id },
 });
 
-const renderTray = (issues: MapIssue[], activeIssueId: string | null = null, onFocusIssue = vi.fn()) => {
+const renderTray = (
+  issues: MapIssue[],
+  activeIssueId: string | null = null,
+  onFocusIssue = vi.fn(),
+  session: Parameters<typeof signInAs> = ["admin"],
+) => {
+  signInAs(...session);
   const view = render(<MapIssuesTray issues={issues} activeIssueId={activeIssueId} onFocusIssue={onFocusIssue} />);
   return { ...view, onFocusIssue };
 };
 const openTray = () => fireEvent.click(screen.getByRole("button", { name: /^Show map issues/ }));
 
 describe("MapIssuesTray", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("renders nothing without issues", () => {
     const { container } = renderTray([]);
     expect(container).toBeEmptyDOMElement();
@@ -176,5 +186,21 @@ describe("MapIssuesTray", () => {
 
     expect(screen.queryByRole("region", { name: "Map issues" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show map issues (1)" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("leaves out the fix button without the Add switch, since a fix creates geometry, and keeps the locate icon", () => {
+    const { onFocusIssue } = renderTray([crossing("a")], null, vi.fn(), ["admin", { permissions: viewOnlyPermissions() }]);
+    openTray();
+
+    expect(screen.queryByRole("button", { name: /Create Junction/ })).toBe(null);
+    fireEvent.click(screen.getByRole("button", { name: "Crossing a, Not routable" }));
+    expect(onFocusIssue).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+  });
+
+  it("shows the fix button with the Add switch", () => {
+    renderTray([crossing("a")], null, vi.fn(), ["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+    openTray();
+
+    expect(screen.getByRole("button", { name: /Create Junction/ })).toBeInTheDocument();
   });
 });

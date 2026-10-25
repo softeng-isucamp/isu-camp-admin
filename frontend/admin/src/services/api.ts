@@ -3,6 +3,7 @@ import type {
   AccountStatus,
   AdminAccount,
   AdminAccountDraft,
+  AdminPermissions,
   AdminRole,
   AuditEntry,
   Building,
@@ -31,6 +32,9 @@ import {
   InvalidResponseError,
   isTechnicalMessage,
   PASSWORD_CONFIRMATION_REQUIRED,
+  PERMISSION_DENIED,
+  PERMISSION_DENIED_EVENT,
+  PermissionDeniedError,
   PasswordConfirmationRequiredError,
   RateLimitError,
   RequestError,
@@ -56,6 +60,7 @@ import {
 import { createLocalAdapter } from "./localAdapter";
 import { createLocalAdmins } from "./localAdmins";
 import { parseAccountType } from "../lib/accountType";
+import { readPermissions } from "../lib/permissions";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
@@ -487,11 +492,11 @@ const pathPointWritePayload = (pathwayId: number, sequenceNo: number, [latitude,
   status: "active",
 });
 
-/** Path Points are written one request at a time, so a failure part-way may leave some saved. */
+/** Path Points are replaced in one request that commits or rolls back whole, so a refusal leaves the pathway as it was. */
 const actionablePathPointError = (pathwayId: string, cause: unknown) => {
-  if (cause instanceof RequestError && cause.kind === "session") return cause;
-  return new RequestError("outcome_unknown", {
-    message: "Some of your pathway changes couldn't be saved. Reload the map to check the pathway, then try again.",
+  if (cause instanceof RequestError && (cause.kind === "session" || cause.kind === "outcome_unknown" || cause.kind === "invalid_response")) return cause;
+  return new RequestError(cause instanceof RequestError ? cause.kind : "server", {
+    message: "The pathway's points couldn't be saved, and the pathway was left as it was. Check the points and try again.",
     detail: `Could not persist Path Points for Pathway ${pathwayId}: ${cause instanceof Error ? cause.message : String(cause)}`,
     cause,
   });
@@ -597,6 +602,10 @@ const apiJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
     const confirmationMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
     if (response.status === 403 && envelope?.code === PASSWORD_CONFIRMATION_REQUIRED) {
       throw new PasswordConfirmationRequiredError(confirmationMessage);
+    }
+    if (response.status === 403 && envelope?.code === PERMISSION_DENIED) {
+      if (typeof window !== "undefined") window.dispatchEvent(new Event(PERMISSION_DENIED_EVENT));
+      throw new PermissionDeniedError(confirmationMessage);
     }
     if (response.status === 403 && envelope?.code === SUPERADMIN_REQUIRED) {
       throw new SuperadminRequiredError(confirmationMessage);
@@ -761,17 +770,56 @@ export interface Services {
     setStatus(id: string, status: AccountStatus): Promise<UserAccount>;
   };
 
-  /** Administrator accounts for the portal itself. */
+  /**
+   * Administrator accounts for the portal itself.
+   *
+   * Backend contract for general permissions. A regular administrator has four
+   * switches, `{ add, edit, delete, changeUserStatus }` (viewing is always on and has
+   * none). `add`/`edit`/`delete` cover Locations, Buildings, Route Nodes and Pathways
+   * (including entrances, indoor markers and moving or reshaping); `changeUserStatus`
+   * covers `PUT /api/users/:id/status`. A superadmin can do everything and has none.
+   * The portal only decides what to offer; the server must enforce the same switches
+   * on the matching endpoints.
+   * - `GET /api/admins` items carry `permissions` for role `admin`, and none (absent
+   *   or null) for a superadmin. The `admin` object in the login and `me` responses
+   *   carries the signed-in admin's own `permissions` the same way. Inside the object
+   *   only an explicit `true` grants; a response without the field is read as
+   *   "everything allowed", so today's behaviour holds until it is sent.
+   * - `POST /api/admins` accepts `permissions` (only read for role `admin`; a new
+   *   administrator without it is view only).
+   * - `PUT /api/admins/:id/permissions` takes `{ permissions }` (all four booleans) and
+   *   returns `{ admin }`; 409 for oneself or a superadmin.
+   * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin` (view only
+   *   when omitted); promoting discards the stored switches.
+   * `GET /api/me` must read permissions from the database each time. The portal
+   * refreshes on window focus/visibility (at most once per 30s), and immediately
+   * after a write returns 403 with `code: "PERMISSION_DENIED"`. Every write must
+   * enforce its action server-side, including each change in a map save.
+   * Adding any administrator, saving permissions and changing a role are superadmin
+   * only (`superadmin_required`) and re-authenticated like the other password-guarded
+   * actions: the portal calls `POST /api/confirm-password` first, and the endpoint
+   * refuses with `password_confirmation_required` (the `reauth_required` guard) when
+   * that confirmation is missing or has expired. No password travels in these bodies.
+   * `DELETE /api/admins/:id` is no longer called; deactivating (`PUT
+   * /api/admins/:id/status`) replaces removal so the account and its audit trail
+   * survive. Record permission changes in System Logs ("Created Administrator",
+   * "Promoted Administrator", "Demoted Administrator", "Updated Administrator
+   * Permissions").
+   */
   admins: {
     list(): Promise<AdminAccount[]>;
     save(draft: AdminAccountDraft): Promise<AdminAccount>;
     /** Activates or deactivates an administrator's access to the portal. */
     setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
-    /** Promotes an administrator to superadmin or demotes a superadmin; returns the updated account. */
-    setRole(id: string, role: AdminRole): Promise<AdminAccount>;
+    /**
+     * Promotes an administrator to superadmin or demotes a superadmin; returns the updated account.
+     * `permissions` only applies when demoting: the switches the account starts with (view only when omitted).
+     */
+    setRole(id: string, role: AdminRole, permissions?: AdminPermissions): Promise<AdminAccount>;
+    /** Replaces a regular administrator's permissions; returns the updated account. */
+    setPermissions(id: string, permissions: AdminPermissions): Promise<AdminAccount>;
     /** Emails a password reset code to that account's own address. */
     sendPasswordReset(id: string): Promise<string>;
-    remove(id: string): Promise<void>;
   };
 
   logs: {
@@ -856,9 +904,29 @@ const localUsers: UserAccount[] = createMockUsers();
 const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId) =>
   addAudit(action, target, "Admin", targetId));
 
-/** A missing or unrecognized role means a plain administrator, never a superadmin. */
-const normalizeAdmin = (account: AdminAccount): AdminAccount =>
-  ({ ...account, role: account.role === "superadmin" ? "superadmin" : "admin" });
+/**
+ * A missing or unrecognized role means a plain administrator, never a superadmin.
+ * Permissions only belong to an administrator; a missing record stays missing.
+ */
+const normalizeAdmin = (account: AdminAccount): AdminAccount => {
+  const { permissions: reported, ...rest } = account;
+  const role = account.role === "superadmin" ? "superadmin" : "admin";
+  const permissions = role === "admin" ? readPermissions(reported) : undefined;
+  return { ...rest, role, ...(permissions ? { permissions } : {}) };
+};
+
+/** The signed-in admin as the login and `me` responses describe them. */
+const sessionFromAdmin = (admin: { id: string; username: string; email?: unknown; role?: unknown; permissions?: unknown }): Session => {
+  const role = admin.role === "admin" || admin.role === "superadmin" ? admin.role : undefined;
+  const permissions = role === "admin" ? readPermissions(admin.permissions) : undefined;
+  return {
+    id: admin.id,
+    username: admin.username,
+    ...(typeof admin.email === "string" ? { email: admin.email } : {}),
+    ...(role ? { role } : {}),
+    ...(permissions ? { permissions } : {}),
+  };
+};
 
 const locationAuditActions = new Set([
   "Updated Location", "Positioned Location", "Deleted Location",
@@ -879,12 +947,17 @@ enrichLegacyLocationAuditIds();
 // Services
 // ==========================================
 
-function checkRateLimit(response: Response, message?: string): void {
+function checkRateLimit(response: Response, message?: string, code?: unknown): void {
   if (response.status === 429) {
-    const retryAfter = response.headers.get("Retry-After");
-    const parsedSeconds = retryAfter ? Number.parseInt(retryAfter, 10) : NaN;
-    const seconds = Number.isFinite(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : 60;
-    throw new RateLimitError(seconds, message);
+    // Only whole seconds count: "60abc", "15.5" or an HTTP-date is no duration at all.
+    const retryAfter = response.headers.get("Retry-After")?.trim();
+    const parsedSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
+    // A missing or invalid header stays undefined; the sign-in screen applies its own fallback.
+    throw new RateLimitError(
+      Number.isSafeInteger(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : undefined,
+      message,
+      code === "recovery_restricted",
+    );
   }
 }
 
@@ -915,8 +988,8 @@ async function recoveryPost(path: string, body: Record<string, unknown>, dataCha
     body: JSON.stringify(body),
   }, dataChange);
   const data = await readJsonObject(response);
-  // A rate limit needs only the status and Retry-After, so it must not depend on the body.
-  checkRateLimit(response, data?.message);
+  // A rate limit needs only the status and Retry-After, so it must not depend on the body; `code` only sharpens the wording.
+  checkRateLimit(response, data?.message, data?.code);
   if (!data) throw unreadableReply(response);
   if (!response.ok) {
     if (typeof data.code === "string" && recoveryErrorKinds.has(data.code)) {
@@ -1090,12 +1163,7 @@ export const services: Services = {
         );
       }
 
-      return {
-        id: data.admin.id,
-        username: data.admin.username,
-        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
-        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
-      };
+      return sessionFromAdmin(data.admin);
     },
 
 
@@ -1175,12 +1243,7 @@ export const services: Services = {
         return null;
       }
 
-      return {
-        id: data.admin.id,
-        username: data.admin.username,
-        ...(typeof data.admin.email === "string" ? { email: data.admin.email } : {}),
-        ...(["admin", "superadmin"].includes(data.admin.role) ? { role: data.admin.role } : {}),
-      };
+      return sessionFromAdmin(data.admin);
     },
 
     // --------------------------------------
@@ -1579,6 +1642,8 @@ export const services: Services = {
           ...(draft.password ? { password: draft.password } : {}),
           // A role is only chosen when adding; the edit route is for one's own sign-in details.
           ...(!draft.id && draft.role ? { role: draft.role } : {}),
+          // Only an administrator has switches, and only when adding; a superadmin never sends any.
+          ...(!draft.id && draft.role !== "superadmin" && draft.permissions ? { permissions: draft.permissions } : {}),
         });
         const response = await apiJson<{ admin: AdminAccount }>(
           draft.id ? `/api/admins/${encodeURIComponent(draft.id)}` : "/api/admins",
@@ -1600,15 +1665,27 @@ export const services: Services = {
       return wait(await localAdmins.setStatus(id, status));
     },
 
-    setRole: async (id, role) => {
+    setRole: async (id, role, permissions) => {
       if (USE_HTTP_API) {
         const response = await apiJson<{ admin: AdminAccount }>(
           `/api/admins/${encodeURIComponent(id)}/role`,
-          { method: "PUT", body: JSON.stringify({ role }) },
+          // The switches only travel with a demotion; promoting discards them.
+          { method: "PUT", body: JSON.stringify({ role, ...(role === "admin" && permissions ? { permissions } : {}) }) },
         );
         return normalizeAdmin(response.admin);
       }
-      return wait(await localAdmins.setRole(id, role));
+      return wait(await localAdmins.setRole(id, role, permissions));
+    },
+
+    setPermissions: async (id, permissions) => {
+      if (USE_HTTP_API) {
+        const response = await apiJson<{ admin: AdminAccount }>(
+          `/api/admins/${encodeURIComponent(id)}/permissions`,
+          { method: "PUT", body: JSON.stringify({ permissions }) },
+        );
+        return normalizeAdmin(response.admin);
+      }
+      return wait(await localAdmins.setPermissions(id, permissions));
     },
 
     sendPasswordReset: async (id) => {
@@ -1620,15 +1697,6 @@ export const services: Services = {
         return response.message ?? "A password reset code was sent.";
       }
       return wait(await localAdmins.sendPasswordReset(id));
-    },
-
-    remove: async (id) => {
-      if (USE_HTTP_API) {
-        await apiJson<unknown>(`/api/admins/${encodeURIComponent(id)}`, { method: "DELETE" });
-        return;
-      }
-      await localAdmins.remove(id);
-      return wait(undefined);
     },
   },
 
@@ -1871,29 +1939,24 @@ export const services: Services = {
       await apiJson<unknown>(`/api/pathways/${pathwayId}`, { method: "DELETE" });
     },
 
+    // One request, because reshaping a Pathway is one operation. Reconciled
+    // here instead - a PUT per surviving vertex, a POST per new one, a DELETE
+    // per dropped one - the same reshape reached the server as three different
+    // kinds of write, so an administrator who may edit the network but not add
+    // or delete could only drag a shape that kept its vertex count, and a
+    // refusal partway through left the Pathway stored with half of its new
+    // shape. The server replaces the whole sequence in one transaction.
     replacePathPoints: async (pathwayId, points) => {
       if (!USE_HTTP_API) return;
       const numericPathwayId = Number(pathwayId);
       if (!Number.isInteger(numericPathwayId)) throw unsavedRecordError("pathway", pathwayId);
       try {
-        const existing = await apiJson<{ path_points: BackendPathPoint[] }>("/api/path-points");
-        if (!Array.isArray(existing.path_points)) throw new InvalidResponseError("Backend returned a malformed Path Point response.");
-        const currentPoints = existing.path_points
-          .filter((point) => point.pathway_id === numericPathwayId)
-          .sort((left, right) => left.sequence_no - right.sequence_no);
-
-        for (const [index, point] of points.entries()) {
-          const body = JSON.stringify(pathPointWritePayload(numericPathwayId, index + 1, point));
-          const current = currentPoints[index];
-          if (current) {
-            await apiJson<unknown>(`/api/path-points/${current.point_id}`, { method: "PUT", body });
-          } else {
-            await apiJson<unknown>("/api/path-points", { method: "POST", body });
-          }
-        }
-        for (const point of currentPoints.slice(points.length)) {
-          await apiJson<unknown>(`/api/path-points/${point.point_id}`, { method: "DELETE" });
-        }
+        await apiJson<unknown>(`/api/pathways/${numericPathwayId}/points`, {
+          method: "PUT",
+          body: JSON.stringify({
+            path_points: points.map((point, index) => pathPointWritePayload(numericPathwayId, index + 1, point)),
+          }),
+        });
       } catch (cause) {
         throw actionablePathPointError(pathwayId, cause);
       }

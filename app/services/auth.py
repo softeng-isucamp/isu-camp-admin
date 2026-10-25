@@ -1,4 +1,6 @@
 from collections import defaultdict, deque
+import hashlib
+import hmac
 import math
 import re
 import threading
@@ -8,8 +10,11 @@ from flask import Blueprint, current_app, request, jsonify, session
 from flask_mail import Message
 from dotenv import load_dotenv
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
 
 from extensions import db, mail
+from model.recovery_attempt import RecoveryAttempt
 from services.audit import log_audit
 from services.password_rules import first_password_issue
 from services.security import (
@@ -19,7 +24,7 @@ from services.security import (
 )
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 
@@ -96,7 +101,11 @@ def rate_limited(scope, key, limit, message):
         else:
             bucket.append(now)
             return None
-    response = jsonify({"success": False, "message": message})
+    # The code says which kind of 429 this is. A flood limit is about how fast
+    # this client is going and lifts in seconds; an account restriction is
+    # about the account and lasts minutes, so the frontend must be able to tell
+    # them apart without reading the message.
+    response = jsonify({"success": False, "code": RATE_LIMITED_CODE, "message": message})
     response.headers["Retry-After"] = str(retry_after)
     return response, 429
 
@@ -165,6 +174,32 @@ class Admin(db.Model):
         default="admin"
     )
 
+    # Which of the four general actions this administrator may take, as
+    # ``{"add": bool, "edit": bool, "delete": bool, "changeUserStatus": bool}``.
+    #
+    # NULL means "every one of them", which is what makes this column safe to
+    # add to a running deployment: rows that predate it keep the access they
+    # had, and a superadmin's switches are NULL because the role already
+    # carries everything. Viewing is not a switch - it is the least-privilege
+    # minimum, and an account that should see nothing is deactivated instead.
+    #
+    # One JSON value rather than four columns because the four are always read
+    # and written together, and the API carries them as one object. See
+    # migrations/20261024_add_admin_permissions.sql.
+    #
+    # ``none_as_null`` on both variants, because a JSON column has two
+    # different nothings and only one of them is the one meant here. Left to
+    # its default, assigning Python None stores the JSON scalar ``null`` - a
+    # value - rather than SQL NULL, and the migration's shape constraint
+    # rejects it: jsonb_typeof('null') is 'null', not 'object'. That made
+    # creating a superadmin and promoting an administrator fail with a check
+    # violation, since both assign None deliberately (issue #145). SQLite has
+    # no such constraint, which is why only PostgreSQL showed it.
+    permissions = db.Column(
+        JSONB(none_as_null=True).with_variant(db.JSON(none_as_null=True), "sqlite"),
+        nullable=True
+    )
+
     @property
     def is_active(self):
         return (self.status or "active") == "active"
@@ -172,6 +207,24 @@ class Admin(db.Model):
     @property
     def is_superadmin(self):
         return (self.role or "admin") == "superadmin"
+
+    def permissions_dto(self):
+        """The four switches as every response carries them, or None.
+
+        None is "all four on", and it is what a superadmin and an unconfigured
+        administrator both report: the frontend reads a missing or null
+        ``permissions`` as full access, which is how this field could be added
+        to a live contract without changing what any existing build may do.
+        """
+
+        if self.is_superadmin:
+            return None
+        return granted_permissions(self.permissions)
+
+    def may(self, action):
+        """Whether this account may take ``action``, one of PERMISSION_KEYS."""
+
+        return admin_may(self, action)
 
     def to_profile(self):
         """The account as My Profile reads it.
@@ -191,7 +244,69 @@ class Admin(db.Model):
             "email": self.gmail or "",
             "alternativeEmail": self.alternative_email or None,
             "role": "superadmin" if self.is_superadmin else "admin",
+            # Read off the row on every call, never off the session cookie, so
+            # a switch a superadmin has just turned off takes effect the next
+            # time the portal asks who it is signed in as - without the
+            # administrator signing out and in again.
+            "permissions": self.permissions_dto(),
         }
+
+
+# ==========================================
+# Per-Administrator Permissions
+# ==========================================
+
+# The four general actions a regular administrator can be given or refused.
+# Viewing is deliberately not among them: it is the least-privilege minimum
+# every active account keeps, so restricting someone to nothing is a
+# deactivation, not a permission.
+#
+# The keys are the ones the API carries, camelCase and all, because this object
+# is handed to the frontend unchanged and a second spelling on the way out
+# would be a second thing to keep in step.
+PERMISSION_KEYS = ("add", "edit", "delete", "changeUserStatus")
+
+# The frontend recognises this code, not the message text, so it can re-read
+# the signed-in account's permissions and stop offering an action that has just
+# been taken away.
+PERMISSION_DENIED_CODE = "PERMISSION_DENIED"
+
+PERMISSION_DENIED_MESSAGE = "You don't have permission to do that. Ask a superadmin."
+
+
+def granted_permissions(stored):
+    """A stored permissions value as the four booleans, or None for full access.
+
+    None covers everything that is not a configured set of switches: a NULL
+    column, a row written before the column existed, and anything that is not
+    an object. All of them mean "no restriction recorded", which keeps this
+    column safe to introduce - no deployment loses access by upgrading, and a
+    mangled value fails open rather than locking a campus out of its own map.
+
+    A key missing from a value that *is* an object is a different matter: the
+    set was configured and that switch is not in it, so it reads as off.
+    """
+
+    if not isinstance(stored, dict):
+        return None
+    return {key: stored.get(key) is True for key in PERMISSION_KEYS}
+
+
+def admin_may(admin, action):
+    """Whether ``admin`` may take ``action``.
+
+    Superadmins may do everything - their switches are not configurable, and
+    restricting one means demoting it first. Everyone else is judged by the
+    stored object, with the NULL-means-everything rule above.
+
+    Read with ``getattr`` rather than attribute access so this also answers for
+    a caller that is not a full row.
+    """
+
+    if getattr(admin, "is_superadmin", False):
+        return True
+    granted = granted_permissions(getattr(admin, "permissions", None))
+    return True if granted is None else granted.get(action, False)
 
 
 # ==========================================
@@ -507,6 +622,56 @@ def superadmin_required(locked=None):
         )
 
     return admin, None
+
+
+def permission_denied(message=None):
+    """The 403 a refused action answers with."""
+
+    return (
+        jsonify({
+            "success": False,
+            "code": PERMISSION_DENIED_CODE,
+            "message": message or PERMISSION_DENIED_MESSAGE,
+        }),
+        403
+    )
+
+
+def permission_error(admin, action, message=None):
+    """None when ``admin`` may take ``action``, otherwise the 403 to return.
+
+    The check, separated from the authentication around it, so a route that has
+    already loaded its caller - or has to weigh several changes in one payload,
+    as POST /api/map/save does - can ask about each one without looking the
+    account up again.
+    """
+
+    if action is None or admin_may(admin, action):
+        return None
+    return permission_denied(message)
+
+
+def permission_required(action):
+    """Guard a write route behind one of the four permissions.
+
+    Returns ``(admin, None)`` or ``(None, response)`` like
+    :func:`admin_required`, which it builds on, so routes can chain the two.
+    The switches are read from the row on every request, exactly as
+    :func:`superadmin_required` reads the role, so withdrawing one takes effect
+    on the caller's next request rather than at their next sign-in.
+
+    Checked *before* any password confirmation: an administrator who may not
+    delete is told so outright rather than asked to confirm a password for
+    something the answer was always no to.
+    """
+
+    admin, error = admin_required()
+    if error:
+        return None, error
+
+    denied = permission_error(admin, action)
+    if denied:
+        return None, denied
 
 
 # ==========================================
@@ -863,6 +1028,9 @@ def reset_password():
 
 RECOVERY_PURPOSES = ("password", "username")
 RECOVERY_RESEND_SECONDS = RATE_LIMIT_WINDOW_SECONDS
+
+# Wrong codes one account may guess before recovery is restricted. Counted
+# against the account, not against the code: see the subject section below.
 RECOVERY_ATTEMPT_LIMIT = 5
 RECOVERY_REQUEST_MESSAGE = "If an account exists for this email, a code has been sent."
 
@@ -900,9 +1068,18 @@ RECOVERY_CODE_PATTERN = re.compile(r"[0-9]{6}")
 # whether or not the entry holds a code.
 PHANTOM_CODE = "000000"
 
-# Check, count and decide on a code entry happen under this lock, and so does
-# every change to the recovery entries. It is never held across a database call
-# or a mail send.
+# Check, count and decide happen under this lock: the stored code, the
+# subject's attempt counters and the verdict are one decision, and guesses
+# arriving together must not each see a budget the others are about to spend.
+#
+# It is therefore held across the counter's own database calls - a locked read,
+# an update and a commit - which is deliberate, and the reason that section is
+# kept to exactly those statements. It is never held across a mail send, a
+# password hash, or the account lookup.
+#
+# Within one process this lock is what serializes recovery; across processes
+# the row lock in recovery_attempt_row does the same job, so a deployment with
+# several workers counts once per guess rather than once per worker.
 recovery_lock = threading.Lock()
 
 
@@ -940,6 +1117,350 @@ def find_recovery_admin(email):
     if len(matches) == 1 and matches[0].is_active:
         return matches[0]
     return None
+
+
+# ==========================================
+# WHAT RECOVERY REMEMBERS BETWEEN REQUESTS
+# ==========================================
+#
+# Two account-scoped limits, both persistent, both measured over the same
+# fifteen-minute window:
+#
+#   * at most RECOVERY_REQUEST_LIMIT codes may be asked for, so the form cannot
+#     be used to mail somebody repeatedly, and
+#   * at most RECOVERY_ATTEMPT_LIMIT wrong codes may be guessed, after which
+#     recovery is restricted for RECOVERY_RESTRICTION_SECONDS.
+#
+# The counts belong to a *subject* rather than to a code. A code used to carry
+# its own budget, which meant asking for a new one restored it: five guesses a
+# code and a code a minute is five guesses a minute, indefinitely, which is not
+# a limit. They are also not per address - an account's two addresses are one
+# account, and guessing at each in turn must not buy two budgets - and not per
+# purpose, since the forgot-password and forgot-username pages verify the same
+# inbox.
+#
+# They live in the database because an in-memory counter is a limit an attacker
+# can wait out: a restart cleared every one of them, and a second worker ran a
+# second set alongside the first. The codes themselves stay in memory, so a
+# restart still invalidates outstanding codes - losing those costs an attacker
+# nothing, which is exactly why they are the part that may be lost.
+
+# The window both limits are measured over, and how long a restriction lasts.
+# One number for all three so the rule is sayable in a sentence: five wrong
+# codes in fifteen minutes, then fifteen minutes off.
+RECOVERY_WINDOW_SECONDS = 900
+RECOVERY_RESTRICTION_SECONDS = 900
+
+# Codes one subject may ask for inside the window. Three is enough for a
+# mistyped address and a lost email without becoming a way to fill an inbox.
+RECOVERY_REQUEST_LIMIT = 3
+
+# The frontend reads these codes, not the message text. A restriction is about
+# the account and lasts minutes; a rate limit is about how fast this client is
+# going and lasts seconds, so they must not look the same.
+RECOVERY_RESTRICTED_CODE = "recovery_restricted"
+RATE_LIMITED_CODE = "rate_limited"
+
+RECOVERY_RESTRICTED_MESSAGE = (
+    "Too many attempts. Account recovery is locked for a short while. "
+    "Please try again later."
+)
+RECOVERY_REQUEST_LIMIT_MESSAGE = (
+    "Too many codes have been requested for this email. Please try again later."
+)
+
+# Rows that remember nothing are deleted, and the sweep runs at most this often
+# so a flood of requests does not turn into a flood of DELETEs.
+RECOVERY_SWEEP_INTERVAL_SECONDS = 900
+recovery_swept_at = None
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def as_utc(value):
+    """A stored timestamp as an aware UTC one.
+
+    SQLite hands back a naive datetime even for a column declared with a
+    timezone, so a value read back from the database cannot be compared with an
+    aware one without this. Naive values are read as UTC, which is what every
+    writer here stores.
+    """
+
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def recovery_digest(email):
+    """``email`` as a keyed digest, for a subject that has no account.
+
+    Keyed with SECRET_KEY rather than hashed plainly. Without a key this table
+    would be a list of every address anybody has typed into Forgot Password -
+    addresses that by definition belong to people with no account here - and an
+    email address is guessable enough that a bare digest is a dictionary away
+    from the address itself.
+
+    Rotating SECRET_KEY abandons these counters. That is acceptable: rotating
+    it already signs every session out, and the counters are at most fifteen
+    minutes of history.
+    """
+
+    key = str(current_app.config.get("SECRET_KEY") or "").encode("utf-8")
+    return hmac.new(key, email.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def recovery_identity(email):
+    """``(subject, admin)`` for a submitted address, from one lookup.
+
+    The subject is who the counters belong to: ``admin:<id>`` when the address
+    belongs to exactly one account, so that account's primary and alternative
+    addresses share one budget, and ``email:<digest>`` otherwise. Note that a
+    *deactivated* account still gives its own subject - it cannot be recovered
+    into, but its two addresses are still one thing being guessed at.
+
+    The admin is who may be recovered, which is None for a deactivated account
+    and for an address several accounts share, exactly as
+    :func:`find_recovery_admin` decides it.
+    """
+
+    matches = admins_with_email(email)
+    if len(matches) == 1:
+        admin = matches[0] if matches[0].is_active else None
+        return f"admin:{matches[0].id}", admin
+    return f"email:{recovery_digest(email)}", None
+
+
+def sweep_recovery_attempts():
+    """Deletes rows that no longer remember anything, at most once an interval.
+
+    A row is touched on every request and every guess, so one untouched for
+    longer than the window plus a whole restriction holds a failure count that
+    has already decayed and a restriction that has already lifted. Deleting it
+    changes no verdict, and it is what keeps a flood of invented addresses from
+    growing this table past the addresses actually seen in the last few
+    minutes.
+    """
+
+    global recovery_swept_at
+
+    now = time.monotonic()
+    if recovery_swept_at is not None and 0 <= now - recovery_swept_at < RECOVERY_SWEEP_INTERVAL_SECONDS:
+        return
+    recovery_swept_at = now
+
+    cutoff = utc_now() - timedelta(seconds=RECOVERY_WINDOW_SECONDS + RECOVERY_RESTRICTION_SECONDS)
+    try:
+        (
+            RecoveryAttempt.query
+            .filter(RecoveryAttempt.updated_at < cutoff)
+            .filter(db.or_(
+                RecoveryAttempt.restricted_until.is_(None),
+                RecoveryAttempt.restricted_until <= utc_now(),
+            ))
+            .delete(synchronize_session=False)
+        )
+    except Exception:
+        # Housekeeping. A recovery attempt must not fail because the tidying
+        # did, and the next request tries again.
+        db.session.rollback()
+
+
+def recovery_attempt_row(subject):
+    """The subject's row, created if new, locked until this request commits.
+
+    ``FOR UPDATE`` is what makes the counts mean anything under concurrency:
+    guesses sent together queue here instead of each reading a budget that the
+    others are about to spend. The lock is released by the commit or rollback
+    at the end of the request, so every route loads this *before* it writes
+    anything else and holds it to the end.
+
+    Two requests racing to create the same row is normal - an address nobody
+    has asked about before is the common case - so the insert is attempted in a
+    savepoint and the loser reads the winner's row.
+    """
+
+    row = db.session.get(RecoveryAttempt, subject, with_for_update=True)
+    if row is not None:
+        settle_recovery_row(row)
+        return row
+
+    try:
+        with db.session.begin_nested():
+            row = RecoveryAttempt(subject=subject, failures=0, requested_at=[])
+            db.session.add(row)
+    except IntegrityError:
+        row = db.session.get(RecoveryAttempt, subject, with_for_update=True)
+        if row is None:
+            # Lost the insert and cannot see the winner's row: without a
+            # counter there is nothing to judge against, so refuse rather than
+            # let the request through uncounted.
+            raise
+        settle_recovery_row(row)
+    return row
+
+
+def settle_recovery_row(row):
+    """Clears what the clock has already undone.
+
+    Done on read rather than by a job, so a restriction lifts and a failure
+    count decays at the moment they are next looked at, whether or not anything
+    has swept in the meantime.
+
+    A lifted restriction takes the failures with it. Leaving them at the limit
+    would restrict the subject again on its very next mistake, for ever, which
+    is a permanent lockout wearing a fifteen-minute label.
+    """
+
+    now = utc_now()
+    restricted_until = as_utc(row.restricted_until)
+
+    if restricted_until is not None and now >= restricted_until:
+        row.restricted_until = None
+        row.failures = 0
+        row.last_failure_at = None
+        return
+
+    if restricted_until is not None:
+        return
+
+    last_failure = as_utc(row.last_failure_at)
+    if last_failure is not None and (now - last_failure).total_seconds() >= RECOVERY_WINDOW_SECONDS:
+        # The window passed with no new failure. Counting a mistake made an
+        # hour ago against the next one would make five lifetime slips enough
+        # to lock an address out of its own account.
+        row.failures = 0
+        row.last_failure_at = None
+
+
+def recovery_restriction_seconds(row):
+    """Whole seconds until this subject may try again, or 0 when it may now."""
+
+    restricted_until = as_utc(row.restricted_until)
+    if restricted_until is None:
+        return 0
+    remaining = (restricted_until - utc_now()).total_seconds()
+    return max(1, math.ceil(remaining)) if remaining > 0 else 0
+
+
+def recovery_request_times(row):
+    """The stored request times still inside the window, oldest first.
+
+    Anything unparseable is dropped rather than raised on: the column is
+    written only by the function below, and a value that is not a timestamp
+    cannot be weighed against one.
+    """
+
+    cutoff = utc_now() - timedelta(seconds=RECOVERY_WINDOW_SECONDS)
+    times = []
+    for value in row.requested_at or []:
+        try:
+            moment = as_utc(datetime.fromisoformat(str(value)))
+        except (TypeError, ValueError):
+            continue
+        if moment > cutoff:
+            times.append(moment)
+    return sorted(times)
+
+
+def recovery_request_wait(row):
+    """Whole seconds until another code may be asked for, or 0 when one may.
+
+    The window slides: the wait is until the oldest of the requests that fill
+    the cap leaves it, not until some fixed period restarts. A fixed window
+    would let the cap be spent twice in a moment by straddling its boundary.
+    """
+
+    times = recovery_request_times(row)
+    if len(times) < RECOVERY_REQUEST_LIMIT:
+        return 0
+    oldest = times[-RECOVERY_REQUEST_LIMIT]
+    remaining = RECOVERY_WINDOW_SECONDS - (utc_now() - oldest).total_seconds()
+    return max(1, math.ceil(remaining))
+
+
+def record_recovery_request(row):
+    """Counts one issued code against the window.
+
+    Assigns a new list: a JSON column does not notice one mutated in place, so
+    appending would be a write the session never sends.
+    """
+
+    times = recovery_request_times(row) + [utc_now()]
+    row.requested_at = [moment.isoformat() for moment in times[-RECOVERY_REQUEST_LIMIT:]]
+    row.updated_at = utc_now()
+
+
+def record_recovery_failure(row):
+    """Spends one attempt. Returns the restriction in seconds, or 0.
+
+    The limit is reached *on* this failure, not after it: the fifth wrong code
+    is told recovery is restricted, rather than being told to request another
+    one it could then spend five more guesses against.
+    """
+
+    now = utc_now()
+    row.failures = (row.failures or 0) + 1
+    row.last_failure_at = now
+    row.updated_at = now
+
+    if row.failures >= RECOVERY_ATTEMPT_LIMIT:
+        row.restricted_until = now + timedelta(seconds=RECOVERY_RESTRICTION_SECONDS)
+        return RECOVERY_RESTRICTION_SECONDS
+    return 0
+
+
+def recovery_attempts_remaining(row):
+    return max(0, RECOVERY_ATTEMPT_LIMIT - (row.failures or 0))
+
+
+def clear_recovery_failures(row):
+    """Forgets the wrong guesses, because the right code has just arrived.
+
+    A correct code proves the person reading the inbox is the one asking, which
+    is the whole thing the attempt limit exists to establish - so holding four
+    earlier typos against them afterwards protects nothing. This is the answer
+    to "does a successful username recovery clear the counters": it clears the
+    failures, and deliberately not the request window, which is about how much
+    mail the form may send and is not excused by a success.
+    """
+
+    row.failures = 0
+    row.last_failure_at = None
+    row.updated_at = utc_now()
+
+
+def recovery_restricted_response(seconds):
+    """The 429 every route answers with while a subject is restricted."""
+
+    response = jsonify({
+        "success": False,
+        "code": RECOVERY_RESTRICTED_CODE,
+        "message": RECOVERY_RESTRICTED_MESSAGE,
+    })
+    # Whole seconds: the header is read with parseInt, and a fractional value
+    # would be read as the integer before the point or not at all.
+    response.headers["Retry-After"] = str(max(1, int(seconds)))
+    return response, 429
+
+
+def recovery_request_limited_response(seconds):
+    """The 429 for a subject that has asked for its codes too often.
+
+    Account-scoped like the restriction, and carries the same code, because to
+    the caller it is the same kind of answer: this account's recovery is closed
+    for a while, come back later. A flood limit says something different - that
+    this client is going too fast - and keeps its own code.
+    """
+
+    response = jsonify({
+        "success": False,
+        "code": RECOVERY_RESTRICTED_CODE,
+        "message": RECOVERY_REQUEST_LIMIT_MESSAGE,
+    })
+    response.headers["Retry-After"] = str(max(1, int(seconds)))
+    return response, 429
 
 
 def recovery_key(purpose, email):
@@ -981,20 +1502,30 @@ def store_recovery_entry(pool, cap, key, entry):
 
 
 def new_recovery_entry(otp=None, admin=None):
+    """One issued code, or a codeless stand-in for an address with no account.
+
+    No attempt count: the budget belongs to the subject and lives in the
+    database, so there is nothing per code to reset. That is the whole point -
+    an entry that carried its own budget made asking for a new code the way to
+    get more guesses.
+    """
+
     return {
         "otp": otp,
         "admin_id": admin.id if admin else None,
         "expires_at": otp_expiry(),
-        "attempts": 0,
     }
 
 
 def issue_recovery_code(purpose, email, admin):
     """Stores a fresh code state for ``(purpose, email)`` and returns the code.
 
-    Replaces any earlier code and restores the full attempt budget. With no
-    ``admin`` the entry holds no code, but still counts guesses and expires like
-    one that does, so asking about an unknown address changes nothing visible.
+    Replaces any earlier code, which is what makes a resend invalidate the one
+    before it. It restores no attempts: the budget is the subject's and is
+    untouched here, so a resend buys a new code and not new guesses. With no
+    ``admin`` the entry holds no code, but still expires and is guessed against
+    like one that does, so asking about an unknown address changes nothing
+    visible.
     """
     otp = generate_otp() if admin else None
     with recovery_lock:
@@ -1109,25 +1640,82 @@ def recovery_code_matches(entry, code):
     return digits_match and entry["otp"] is not None
 
 
-def check_recovery_code(purpose, email, code):
-    """Judges a submitted code against the one issued for ``(purpose, email)``.
+def authorize_recovery_request(email):
+    """Counts one code request against the subject, or refuses it.
 
-    Returns ``(admin, None)`` when it is right, or ``(None, response)`` with the
-    contract's refusal. Checks expiry, then exhaustion, then correctness; each
-    wrong guess spends one of the attempts and the last one kills the code, so
-    the right code is refused from then on. An address with no account, or no
-    code ever requested, is judged against a codeless entry and fails the same
-    way. A correct code does not consume anything.
+    Returns ``(admin, None)`` when a code may be issued - having recorded that
+    it was - or ``(None, response)`` with what to send instead. ``admin`` is
+    who the code is for, which is None for an address with no account, so the
+    caller does not look the address up a second time.
 
-    The account is looked up first, for every address, outside the lock. The
-    entry is then read, counted and decided in one step under the lock, so
-    guesses sent together cannot each see budget left, and a right guess cannot
-    be accepted after the wrong one that used the last attempt.
+    Both account-scoped limits are checked here: a restriction earned by
+    guessing closes requesting too, because otherwise the way to sit out a
+    restriction would be to keep mailing yourself codes until it lifted.
+
+    Recorded and committed before the code is issued, so a crash between the
+    two costs a request rather than leaving a code that nothing counted.
     """
-    key = recovery_key(purpose, email)
-    admin = find_recovery_admin(email)
+
+    subject, admin = recovery_identity(email)
 
     with recovery_lock:
+        sweep_recovery_attempts()
+        row = recovery_attempt_row(subject)
+
+        restriction = recovery_restriction_seconds(row)
+        if restriction:
+            db.session.commit()
+            return None, recovery_restricted_response(restriction)
+
+        wait = recovery_request_wait(row)
+        if wait:
+            # Nothing is issued and nothing is sent: the point of the cap is
+            # that the inbox stops receiving.
+            db.session.commit()
+            return None, recovery_request_limited_response(wait)
+
+        record_recovery_request(row)
+        db.session.commit()
+    return admin, None
+
+
+def check_recovery_code(purpose, email, code):
+    """Judges a submitted code, spending one of the subject's attempts if wrong.
+
+    Returns ``(admin, None)`` when it is right, or ``(None, response)`` with the
+    contract's refusal.
+
+    The order is restriction, then expiry, then correctness. A restriction is
+    checked before the code is even looked at, so it refuses the right code as
+    well as a wrong one - a restriction the correct code walked through would
+    only ever restrict people who had lost their code. There is no "exhausted"
+    state left: the attempt that reaches the limit is answered with the
+    restriction itself, rather than being told to request a new code as a way
+    out of having run out of guesses.
+
+    A correct code clears the failures; see
+    :func:`clear_recovery_failures`. An address with no account, or no code
+    ever requested, is judged against a codeless entry and fails the same way,
+    spending the same attempt.
+
+    The account and the subject are looked up first, for every address, outside
+    the lock. Everything that decides the verdict then happens inside it, so
+    guesses sent together cannot each see budget left, and a right guess cannot
+    be accepted after the wrong one that spent the last attempt.
+    """
+
+    key = recovery_key(purpose, email)
+    subject, admin = recovery_identity(email)
+
+    with recovery_lock:
+        sweep_recovery_attempts()
+        row = recovery_attempt_row(subject)
+
+        restriction = recovery_restriction_seconds(row)
+        if restriction:
+            db.session.commit()
+            return None, recovery_restricted_response(restriction)
+
         entry = find_recovery_entry(key)
         if entry is None:
             sweep_recovery_codes()
@@ -1135,19 +1723,21 @@ def check_recovery_code(purpose, email, code):
             store_recovery_entry(guessed_recovery_entries, RECOVERY_MAX_GUESSED_ENTRIES, key, entry)
 
         if datetime.utcnow() >= entry["expires_at"]:
+            db.session.commit()
             return None, recovery_error("code_expired", "This code has expired. Request a new one.")
 
-        if entry["attempts"] >= RECOVERY_ATTEMPT_LIMIT:
-            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
-
         if recovery_code_matches(entry, code) and admin is not None and admin.id == entry["admin_id"]:
+            clear_recovery_failures(row)
+            db.session.commit()
             return admin, None
 
-        entry["attempts"] += 1
-        remaining = RECOVERY_ATTEMPT_LIMIT - entry["attempts"]
-        if remaining <= 0:
-            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
-        return None, recovery_error("invalid_code", "Incorrect verification code", remaining)
+        restriction = record_recovery_failure(row)
+        remaining = recovery_attempts_remaining(row)
+        db.session.commit()
+
+    if restriction:
+        return None, recovery_restricted_response(restriction)
+    return None, recovery_error("invalid_code", "Incorrect verification code", remaining)
 
 
 def claim_recovery_code(purpose, email, code, admin):
@@ -1165,8 +1755,9 @@ def claim_recovery_code(purpose, email, code, admin):
             return None, recovery_error("code_exhausted", "This code can no longer be used. Request a new one.", 0)
         if datetime.utcnow() >= entry["expires_at"]:
             return None, recovery_error("code_expired", "This code has expired. Request a new one.")
-        if entry["attempts"] >= RECOVERY_ATTEMPT_LIMIT:
-            return None, recovery_error("code_exhausted", "Too many incorrect codes. Request a new one.", 0)
+        # Nothing about attempts here. The subject's row is locked by this
+        # request from before the code was checked until after this commits, so
+        # no guess can have spent the budget in between.
         del reset_otps[key]
         return entry, None
 
@@ -1228,7 +1819,10 @@ def recovery_request():
         if purpose not in RECOVERY_PURPOSES:
             return recovery_bad_request("Choose whether to recover a password or a username.")
 
-        admin = find_recovery_admin(email)
+        admin, refused = authorize_recovery_request(email)
+        if refused:
+            return refused
+
         otp = issue_recovery_code(purpose, email, admin)
         if admin:
             send_recovery_otp(admin, purpose, otp, email)

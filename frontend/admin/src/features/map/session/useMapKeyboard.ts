@@ -1,3 +1,4 @@
+import { usePermissions } from "../../auth/usePermissions";
 import { useEffect } from "react";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
 import { nudgePoint } from "../pointInteractions";
@@ -16,9 +17,11 @@ interface UsePointMoveKeysOptions {
 
 /** Keyboard control of a Route Node move: Escape cancels, Enter saves, arrows nudge. */
 export function usePointMoveKeys({ mode, pointTool, campusBoundary, onCancel, onSave }: UsePointMoveKeysOptions) {
+  const { can } = usePermissions();
+  const canEdit = can("edit");
   useEffect(() => {
     const position = pointTool.position;
-    if (mode !== "move" || !position) return;
+    if (!canEdit || mode !== "move" || !position) return;
     const handlePointMoveKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -46,7 +49,7 @@ export function usePointMoveKeys({ mode, pointTool, campusBoundary, onCancel, on
     };
     window.addEventListener("keydown", handlePointMoveKey);
     return () => window.removeEventListener("keydown", handlePointMoveKey);
-  }, [campusBoundary, mode, pointTool.position]);
+  }, [campusBoundary, mode, pointTool.position, canEdit]);
 }
 
 interface UseEscapeShortcutOptions {

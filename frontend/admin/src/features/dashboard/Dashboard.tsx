@@ -11,10 +11,12 @@ import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
 import { AccountTypeSplit } from "./AccountTypeSplit";
 import { AnalyticsTab, dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
+import { usePermissions } from "../auth/usePermissions";
 import type { DashboardTab } from "./dashboardTabs";
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [range, setRange] = useState<DashboardRange>("week");
   const { data, error, isLoading, isFetching, refetch } = useQuery({
@@ -53,9 +55,11 @@ export function Dashboard() {
             map configuration, and recent administrative activity.
           </p>
         </div>
-        <Link className="btn btn-primary" to="/locations">
-          ＋ New Location
-        </Link>
+        {can("add") && (
+          <Link className="btn btn-primary" to="/locations">
+            ＋ New Location
+          </Link>
+        )}
         <div className="hero-toolbar">
           <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
             {(["overview", "analytics"] as const).map((key) => (

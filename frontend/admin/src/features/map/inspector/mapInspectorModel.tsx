@@ -1,3 +1,4 @@
+import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { buildingInspectorModel } from "../building/buildingInspectorModel";
 import type { SelectedBuildingView } from "../building/selectedBuilding";
@@ -39,6 +40,8 @@ interface MapInspectorOptions {
   buildingAssociationOptions: Building[];
   savingAction: SaveAction | null;
   linkingEntrance: boolean;
+  /** The signed-in administrator's permission check; inspector actions they may not take are left out. */
+  can: CanPerform;
   actions: {
     /** The Building actions, bound to the selected Building. */
     building: (view: SelectedBuildingView) => Parameters<typeof buildingInspectorModel>[0]["actions"];
@@ -65,6 +68,7 @@ export function mapInspectorModel({
   buildingAssociationOptions,
   savingAction,
   linkingEntrance,
+  can,
   actions,
 }: MapInspectorOptions): InspectorCardModel | null {
   if (!selected) return null;
@@ -75,6 +79,7 @@ export function mapInspectorModel({
       contentLocations: current.contentLocations,
       nodes: current.nodes,
       linkingEntrance,
+      can,
       actions: actions.building(selection.building),
     });
   }
@@ -83,12 +88,14 @@ export function mapInspectorModel({
       location: selection.location,
       buildings: current.buildings,
       locations: current.locations,
+      can,
       onEditDetails: actions.onEditLocationDetails,
     });
   }
   if (selection.node) {
     return routeNodeInspectorModel({
       node: selection.node,
+      can,
       frame: nodeFrame,
       workflow: routeNodeWorkflow,
       nodes: current.nodes,
@@ -111,6 +118,7 @@ export function mapInspectorModel({
       nodes: current.nodes,
       buildings: current.buildings,
       savingAction,
+      can,
       onSelect: actions.onSelect,
       onApply: actions.onApplyPathway,
       onCancel: actions.onCancelPathway,
@@ -124,6 +132,7 @@ export function mapInspectorModel({
       id: selected.id,
       nodes: current.nodes,
       savingAction,
+      can,
       onSelect: actions.onSelect,
       onApply: actions.onApplyPathway,
       onCancel: actions.onCancelPathway,

@@ -62,7 +62,7 @@ Open the frontend at `http://127.0.0.1:5173`, which is where the runners serve i
 | Mode | Linux/macOS | Windows CMD | PowerShell | Data and login |
 | --- | --- | --- | --- | --- |
 | Real (default) | `./dev.sh --real` | `dev.bat --real` | `.\dev.ps1 --real` | Starts Flask and the frontend. Requires backend/database configuration and a real backend account. |
-| Fixture | `./dev.sh --fixture` | `dev.bat --fixture` | `.\dev.ps1 --fixture` | Starts only the frontend with the local adapter and OSM fixture. No Flask or database required. Logins, all with `password123`: `admin_justine` and `admin_dean` (superadmins), `admin_registrar` (administrator). |
+| Fixture | `./dev.sh --fixture` | `dev.bat --fixture` | `.\dev.ps1 --fixture` | Starts only the frontend with the local adapter and OSM fixture. No Flask or database required. Logins, all with `password123`: `admin_justine` and `admin_dean` (superadmins), `admin_registrar` (administrator with every permission) and `admin_viewer` (administrator with view-only permissions). |
 
 The runners print the selected mode and login guidance. Fixture credentials apply only to fixture mode. Fixture edits stay in the local adapter and do not update the backend database.
 
@@ -129,6 +129,154 @@ A conflict never names the account that holds the address. Several fields can be
 Forgot password and forgot username accept either address. The code is sent **only to the address that was typed** — mailing the primary instead would tell whoever typed the alternative that the two belong together — and the response is identical whether or not an account matches. Codes are keyed per purpose and typed address, so a code requested for one address does not verify through the other. An address two accounts hold between them recovers neither, the same as an ambiguous primary always has.
 
 Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
+
+## Recovery attempt limits
+
+Two limits guard `/api/recovery/*`, both persistent and both measured over the same **15-minute sliding window**:
+
+| Limit | Value | What happens past it |
+| --- | --- | --- |
+| Codes requested | 3 per window | 429 `recovery_restricted`, and **nothing is mailed** |
+| Wrong codes guessed | 5 per window | 15-minute restriction, starting with the 5th guess itself |
+
+Unchanged: a code still expires after **10 minutes** and a resend is still refused for **60 seconds**.
+
+### The counts belong to an account, not to a code
+
+A code used to carry its own budget of five guesses, which made asking for a new one the way to get five more — five guesses a minute, indefinitely, which is not a limit. The counts are now kept against a **subject**:
+
+- an **account**, when the submitted address belongs to exactly one, so its primary and alternative addresses share a single budget and a single request cap; or
+- the **address itself** otherwise — unknown, or shared by several accounts.
+
+So the five guesses are cumulative **across resends, across both of an account's addresses, and across the password and username flows** (both verify the same inbox, so counting them apart would only double the guesses on offer). Two unrelated addresses keep their own budgets — otherwise guessing at an invented address would be a way to lock somebody else out.
+
+### The restriction
+
+The **5th wrong code is itself answered with the restriction**, not with `code_exhausted`. Being told "request a new one" was advice that led straight back to five more guesses.
+
+While a subject is restricted, **every** recovery route answers 429 `recovery_restricted` with an integer `Retry-After` — including a request for a new code, so the restriction cannot be waited out by mailing yourself codes until it lifts, and **including a request carrying the correct code**. A restriction the right code could walk through would only ever hold up the people who had lost their code.
+
+When it lifts, the whole budget comes back. Leaving the failures at the limit would restrict the account again on its very next mistake, and the next — a permanent lockout wearing a fifteen-minute label.
+
+The failure count also **decays** once the window passes with no new failure. Five mistakes *in fifteen minutes*, not five in a lifetime: without that, an address that mistyped four codes last month would be one slip away from being locked out for good.
+
+### What a success clears
+
+A correct code **clears the failures** — it proves whoever is asking is reading the inbox, which is the only thing the attempt limit was there to establish, so holding four earlier typos against them afterwards protects nothing. This applies to a successful username recovery as much as to a password reset.
+
+It deliberately **does not clear the request window**: that cap is about how much mail the form may send, and a success does not excuse it.
+
+### Telling the two kinds of 429 apart
+
+Both carry `Retry-After`; the frontend reads the `code`, not the message.
+
+| `code` | Means | Scope | Typical wait |
+| --- | --- | --- | --- |
+| `recovery_restricted` | This account's recovery is closed for a while | the subject | minutes |
+| `rate_limited` | This client is going too fast | per IP, or per IP and address | seconds |
+
+The 60-second resend cooldown and the per-IP flood limits are `rate_limited`. The 3-per-window request cap and the 5-failure restriction are `recovery_restricted`.
+
+`invalid_code` still carries `attemptsRemaining`, and it is now the **cumulative** figure rather than what is left on one code.
+
+### Unknown addresses
+
+An address with no account is counted, capped and restricted exactly like one that has an account, and receives the same status codes, bodies and `Retry-After` values. Any difference would be the answer to "does this address have an account here", which is the question the whole flow is built not to answer.
+
+### What is stored
+
+`public.recovery_attempt`, one row per subject, holding only counters: the failures, when the newest one landed, what the restriction runs until, and the times of the last few requests.
+
+**No code and no password hash is ever written there.** The codes stay in process memory, so a restart still invalidates outstanding codes and the admin asks for another — losing those costs an attacker nothing, which is exactly why they are the part that may be lost. What survives a restart is the part an attacker benefits from losing, which is why it moved into the database in the first place: a restart used to clear every counter, and a second worker ran a second set of budgets alongside the first.
+
+An address with **no account** is stored as `email:` followed by an HMAC of it keyed with `SECRET_KEY`, never as the address. The table would otherwise become a list of every address anybody has ever typed into Forgot Password, sitting in the admin database — addresses that by definition belong to people with no account here. A plain hash would not do: an email address is guessable enough that an unkeyed digest is a dictionary away from the address. Rotating `SECRET_KEY` abandons those counters, which is acceptable because rotating it already signs every session out.
+
+Rows untouched for longer than both windows remember nothing and are deleted, which is also what keeps a flood of invented addresses from growing the table past the addresses actually seen in the last few minutes.
+
+Within one process a lock serializes the read-decide-write; across processes `SELECT … FOR UPDATE` on the subject's row does the same, so a deployment with several workers counts once per guess rather than once per worker.
+
+Apply `migrations/20261024_add_recovery_attempt.sql` before using any of this.
+
+## Administrator permissions
+
+A superadmin switches four general actions on or off for each regular administrator. **Viewing is not one of them**: it is the least-privilege minimum every active account keeps, so an administrator who should see nothing is deactivated, not given four off switches.
+
+| Key | Allows |
+| --- | --- |
+| `add` | Creating things: locations, rooms, buildings, route nodes, pathways, path points, entrances, indoor locations, converting a path point to a route node, placing an unpositioned indoor marker for the first time |
+| `edit` | Changing existing things: location details, building footprints, moving or reshaping route nodes, pathways and path points, linking an existing entrance, repositioning or clearing an indoor marker already on the map |
+| `delete` | Deleting locations, buildings, route nodes, pathways, path points |
+| `changeUserStatus` | Activating and deactivating **app users** (`PUT /api/users/:id/status`) |
+
+**Superadmins hold every permission and cannot be configured.** Their stored switches are SQL `NULL` — the column is declared `none_as_null` so that assigning nothing stores SQL NULL and not the JSON scalar `null`, which the migration's shape constraint rejects — and `PUT /api/admins/:id/permissions` refuses them with 409; to restrict one, demote them first. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
+
+Nobody changes their own permissions.
+
+### Reading them
+
+`POST /api/login`, `GET /api/me` and `GET /api/admins` all carry the same object:
+
+```json
+{"id":"7","username":"registrar","email":"…","role":"admin",
+ "permissions":{"add":true,"edit":false,"delete":false,"changeUserStatus":true}}
+```
+
+**`null` — or a missing key — means all four are on.** That is what makes the column safe to add to a running deployment: a row nobody has configured, and every row written before the migration, keeps the access it had. A superadmin reports `null` for the same reason the role does not need switches.
+
+`GET /api/me` reads them **from the row on every call**, never from the session cookie, and so does every guard below. Withdrawing a permission therefore takes effect on the administrator's **next request** — there is no cached grant to outlive it, and nobody has to sign out and in again.
+
+### Setting them
+
+`PUT /api/admins/:id/permissions`, superadmin-only and behind a recent password confirmation (`/api/confirm-password`), the same pattern as `/role`:
+
+```json
+{"permissions":{"add":true,"edit":true,"delete":false,"changeUserStatus":false}}
+```
+
+All four keys, every time, each a boolean — a body naming two leaves the other two to whatever the reader assumes. Anything else is a 400 with `fields.permissions`.
+
+**Absent and null are different things.** Leaving `permissions` out of a create or a demotion takes the default (all four off); sending it as `null` is a value the caller chose, and the only shape a supplied value may take is the four booleans, so it is refused like any other wrong shape. Reading the two the same way meant a client asking for "no permissions" silently got the view-only default instead of being told its request made no sense. A supplied value is still **ignored** for a superadmin target, `null` included — a client may hold one form for both roles, and a field that cannot apply must not fail the request.
+
+| Case | Status | Message |
+| --- | --- | --- |
+| The target is the caller | 409 | `You cannot change your own permissions.` |
+| The target is a superadmin | 409 | `Superadmins always have every permission. Demote them first to restrict them.` |
+| A partial or mistyped set | 400 | `Each of the four permissions must be given as true or false.` |
+| Done | 200 | `Permissions updated for <username>.` plus the updated `admin` |
+
+The audit row records what moved — `admin02: add: on -> off; delete: on -> off` — so the Logs page answers "who took that away" without anybody diffing two rows.
+
+**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts and demoted superadmins start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` and `PUT /api/admins/:id/role` both accept an optional `permissions` object; a promotion discards it.
+
+`POST /api/admins` now requires a password confirmation for **every** create, not only a superadmin's — each new account is a new way into the portal whatever its role.
+
+**`DELETE /api/admins/:id` is gone** and answers 405. Removing the row orphaned everything the account had ever done, since the audit trail names an actor by username; `PUT /api/admins/:id/status` does the same job and keeps the history readable.
+
+### The server is the enforcement
+
+The frontend hides what the signed-in administrator may not do, but hiding a button is not authorization. Every write route checks for itself, through `auth.permission_required` (or `auth.permission_error` where a route has already loaded its caller), and a refusal is:
+
+```json
+{"success":false,"code":"PERMISSION_DENIED","message":"You don't have permission to do that. Ask a superadmin."}
+```
+
+with status **403**. The frontend reads the `code`, not the message.
+
+On a delete, the **permission is checked before the password confirmation** — as with `superadmin_required` — so an administrator who may not delete is refused outright rather than asked to confirm a password for an answer that was never going to be yes.
+
+### Operations, not request verbs
+
+Two routes are judged on what the operation *is* rather than on which records it happens to write:
+
+- **`PATCH /api/map/buildings/:id/indoor-locations/:id`** needs `add` to give an indoor location its first marker and `edit` to move or clear one it already has. Which of the two it is comes from the marker's **stored coordinates**, so a client cannot pick the permission it is judged against.
+
+- **`PUT /api/pathways/:id/points`** replaces a pathway's whole point sequence as one `edit`, in one transaction. Reshaping a pathway stores new vertex records and drops old ones; reconciled one vertex at a time it reached the server as an add, an edit and a delete, so an administrator who may edit the network could only drag a shape that kept its vertex count — and a refusal partway through left the pathway with half of its new shape. Creating a pathway carries its vertices in the same request (`POST /api/pathways`), so that stays one `add`, and Create Junction / Convert to Route Node (`POST /api/pathways/:id/convert-point`) is one `add` including the graph rewiring it requires.
+
+`POST /api/map/save` is checked **per change in the payload**, before the first one is applied: one refused change refuses the whole save, and the message names it (`You don't have permission to change the Engineering Hall footprint. Ask a superadmin.`). Everything that route can apply is a change to a record that already exists, so every change in it is an `edit`; an empty draft asks for nothing and needs nothing.
+
+`POST /api/map/publish` is open to every active administrator and none of the four gates it: publishing promotes work that is already saved, and the saving is what each permission was checked on.
+
+Apply `migrations/20261024_add_admin_permissions.sql` before using any of this.
 
 ## Database backups
 

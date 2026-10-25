@@ -9,6 +9,8 @@ import { generateDashboardAnalytics } from "../../services/fixtures/dashboardAna
 import { locations } from "../../services/mockData";
 import type { DashboardAnalytics, DashboardRange, DashboardSummary } from "../../types";
 import { formatDateTime } from "../../lib/format";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 import { Dashboard } from "./Dashboard";
 
 const summary: DashboardSummary = {
@@ -37,7 +39,8 @@ beforeAll(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 });
 
-function renderDashboard() {
+function renderDashboard(session: Parameters<typeof signInAs> = ["admin"]) {
+  signInAs(...session);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -189,5 +192,32 @@ describe("Dashboard backend boundary", () => {
     request.mockImplementation(async (range) => analytics(range));
     await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+});
+
+describe("Dashboard quick add for a restricted administrator", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const loadCards = () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+  };
+
+  it("hides New Location without the Add switch but keeps every card and section", async () => {
+    loadCards();
+    renderDashboard(["admin", { permissions: { ...allPermissions(), add: false } }]);
+
+    expect(await screen.findByText("12")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /new location/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Registered Users")).toBeInTheDocument();
+    expect(screen.getByText("Campus Map Preview")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Analytics" })).toBeInTheDocument();
+  });
+
+  it("shows New Location with the Add switch", async () => {
+    loadCards();
+    renderDashboard(["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+
+    expect(await screen.findByRole("link", { name: /new location/i })).toBeInTheDocument();
   });
 });

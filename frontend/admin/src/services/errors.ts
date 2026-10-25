@@ -27,14 +27,20 @@ export class SuperadminRequiredError extends Error {
   }
 }
 
-/** The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number. */
+/**
+ * The server asked the caller to wait; `retryAfterSeconds` drives the countdown, so the default message names no number.
+ * It is absent when the server sent no valid `Retry-After`: callers must not invent a wait.
+ */
 export class RateLimitError extends Error {
-  readonly retryAfterSeconds: number;
+  readonly retryAfterSeconds?: number;
+  /** The server sent `code: "recovery_restricted"`: recovery as a whole is locked, not just this one request. */
+  readonly restricted: boolean;
 
-  constructor(retryAfterSeconds: number, message?: string) {
+  constructor(retryAfterSeconds?: number, message?: string, restricted = false) {
     super(message ?? "Too many requests. Try again shortly.");
     this.name = "RateLimitError";
-    this.retryAfterSeconds = retryAfterSeconds;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
+    this.restricted = restricted;
   }
 }
 
@@ -165,4 +171,14 @@ export function errorMessage(cause: unknown, fallback: string, options: { mutati
   if (cause instanceof Error && cause.message.trim()) return cause.message;
   reportError(cause);
   return fallback;
+}
+
+/** A permission refusal refreshes the session as well as reporting the failed action. */
+export const PERMISSION_DENIED = "PERMISSION_DENIED";
+export const PERMISSION_DENIED_EVENT = "isu-camp:permission-denied";
+export class PermissionDeniedError extends Error {
+  constructor(message?: string) {
+    super(message ?? "You don't have permission to do that. Ask a superadmin.");
+    this.name = "PermissionDeniedError";
+  }
 }

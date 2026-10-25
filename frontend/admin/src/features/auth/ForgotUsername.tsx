@@ -22,7 +22,7 @@ function UsernameResult({ verified }: { verified: VerifiedRecovery }) {
       <div className="recovery-success">
         <SuccessIcon />
         <h2>Your username</h2>
-        <p className="muted recovery-copy">Use this username to sign in to the admin console.</p>
+        <p className="muted recovery-copy">Your username has been recovered. Use it to sign in to the admin console.</p>
       </div>
       <p className="recovery-username">{verified.username}</p>
       <Button className="recovery-primary" onClick={() => returnToLogin(verified.username)}>

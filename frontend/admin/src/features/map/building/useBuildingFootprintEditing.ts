@@ -1,3 +1,4 @@
+import { usePermissions } from "../../auth/usePermissions";
 import { isPlaceClassification } from "../../../lib/locationPolicy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { services } from "../../../services/api";
@@ -62,6 +63,7 @@ export function useBuildingFootprintEditing({
   onError,
   onFinished,
 }: UseBuildingFootprintEditingOptions) {
+  const { can } = usePermissions();
   const {
     sessionBuildings,
     locations: currentLocations,
@@ -101,6 +103,7 @@ export function useBuildingFootprintEditing({
     setClassificationError("");
   };
   const [editingBuildingId, setEditingBuildingId] = useState<string | null>(null);
+  const canModify = can(editingBuildingId ? "edit" : "add");
   const polygonInvalid = polygonSelfIntersects(points) || !polygonIsNonDegenerate(points);
 
   const currentBuildings = useMemo(() => {
@@ -135,7 +138,7 @@ export function useBuildingFootprintEditing({
   const canSaveBuilding = canFinishFootprint && buildingIdentityIssues.length === 0 && Boolean(buildingName.trim()) && Boolean(buildingCode.trim());
 
   const closePolygon = useCallback(() => {
-    if (!drawing || points.length < 3) return;
+    if (!canModify || !drawing || points.length < 3) return;
     const geometryIssues = validateBuildingFootprintGeometry(points, campusBoundary);
     if (geometryIssues.length > 0) {
       setError(geometryIssues[0].message);
@@ -145,7 +148,7 @@ export function useBuildingFootprintEditing({
     setPolygonInteraction("draw");
     setBuildingDetailsModalOpen(true);
     setError("");
-  }, [campusBoundary, drawing, points]);
+  }, [campusBoundary, drawing, points, canModify]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -156,6 +159,7 @@ export function useBuildingFootprintEditing({
   }, [closePolygon]);
 
   const updatePolygonVertex = (index: number, point: [number, number]) => {
+    if (!canModify) return;
     setPoints((current) => {
       const next = current.map((candidate, candidateIndex) => candidateIndex === index ? point : candidate);
       if (!geometryOnCampus(next, campusBoundary)) {
@@ -168,6 +172,7 @@ export function useBuildingFootprintEditing({
   };
 
   const insertPolygonVertex = (index: number) => {
+    if (!canModify) return;
     setPoints((current) => {
       const next = current[(index + 1) % current.length];
       const point: [number, number] = [(current[index][0] + next[0]) / 2, (current[index][1] + next[1]) / 2];
@@ -176,11 +181,13 @@ export function useBuildingFootprintEditing({
   };
 
   const deletePolygonVertex = (index: number) => {
+    if (!canModify) return;
     if (points.length <= 3) return;
     setPoints((current) => current.filter((_, candidateIndex) => candidateIndex !== index));
   };
 
   const movePolygon = (point: [number, number]) => {
+    if (!canModify) return;
     if (!points.length) return;
     const anchor = polygonFeatureAnchor(points);
     const delta: [number, number] = [point[0] - anchor[0], point[1] - anchor[1]];
@@ -210,6 +217,7 @@ export function useBuildingFootprintEditing({
   };
 
   const saveBuilding = async () => {
+    if (!canModify) return;
     if (editingBuildingId) {
       if (!canFinishFootprint) return;
       if (!beginSaving("building")) return;
@@ -256,6 +264,7 @@ export function useBuildingFootprintEditing({
   };
 
   const createBuilding = async () => {
+    if (!can("add")) return;
     if (!canSaveBuilding) {
       setError(buildingIdentityIssues[0]?.message ?? "Complete the required Building details.");
       setClassificationError(buildingIdentityIssues.find((issue) => issue.field === "classification")?.message ?? "");
@@ -297,6 +306,7 @@ export function useBuildingFootprintEditing({
     building: Building,
     interaction: "draw" | "reshape" | "move" = "draw",
   ) => {
+    if (!can("edit")) return;
     setEditingBuildingId(building.id);
     setBuildingForm({
       name: building.name,

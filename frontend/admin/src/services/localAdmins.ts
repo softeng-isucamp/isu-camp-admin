@@ -1,11 +1,13 @@
-import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminRole } from "../types";
+import type { AccountStatus, AdminAccount, AdminAccountDraft, AdminPermissions, AdminRole } from "../types";
 import { PasswordConfirmationRequiredError, SuperadminRequiredError, fieldError } from "./errors";
 import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
 import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
+import { viewOnlyPermissions } from "../lib/permissions";
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const ROLE_MESSAGE = "Role must be Administrator or Superadmin.";
+const PERMISSIONS_MESSAGE = "Permissions must be Add, Edit, Delete and Change app user status, each on or off.";
 const LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first.";
 
 type Directory = ReturnType<typeof createLocalAdapter>["directory"];
@@ -25,6 +27,8 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
     email: record.email,
     status: record.status,
     role: record.role,
+    // A superadmin has everything and no switches to report.
+    ...(record.role === "admin" && record.permissions ? { permissions: { ...record.permissions } } : {}),
     isCurrent: record.id === viewer()?.id,
   });
 
@@ -38,6 +42,16 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
   /** Asked for right after the superadmin guard, before the account or the request is looked at. */
   const requireConfirmation = (message?: string) => {
     if (!recentlyConfirmed()) throw new PasswordConfirmationRequiredError(message);
+  };
+
+  /** Whole switch sets only: an administrator is never left with a switch undecided. */
+  const readPermissions = (value: unknown): AdminPermissions => {
+    const record = value as Record<string, unknown> | null | undefined;
+    const keys = Object.keys(viewOnlyPermissions()) as Array<keyof AdminPermissions>;
+    if (!record || typeof record !== "object" || keys.some((key) => typeof record[key] !== "boolean")) {
+      throw fieldError("permissions", PERMISSIONS_MESSAGE);
+    }
+    return Object.fromEntries(keys.map((key) => [key, record[key] as boolean])) as unknown as AdminPermissions;
   };
 
   /** The server's identity checks, in its order; the password is only checked when given or required. */
@@ -92,9 +106,14 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
         if (role !== "admin" && role !== "superadmin") throw fieldError("role", ROLE_MESSAGE);
         ensureUsernameFree(username);
         ensureEmailFree(email);
+        // A new administrator is view only unless the caller turned something on; a superadmin has no switches.
+        const permissions = role === "admin" ? (draft.permissions ? readPermissions(draft.permissions) : viewOnlyPermissions()) : undefined;
         // Reported after the field errors above, as the server does, so the form can show them before asking for a password.
-        if (role === "superadmin") requireConfirmation("Confirm your password to create a superadmin.");
-        const created: FixtureAccount = { id: `admin-${Date.now()}`, username, email, role, status: "Active", password, alternativeEmail: null };
+        requireConfirmation(role === "superadmin" ? "Confirm your password to create a superadmin." : "Confirm your password to add an administrator.");
+        const created: FixtureAccount = {
+          id: `admin-${Date.now()}`, username, email, role, status: "Active", password, alternativeEmail: null,
+          ...(permissions ? { permissions } : {}),
+        };
         accounts.push(created);
         audit("Created Administrator", username, created.id);
         return asAccount(created);
@@ -130,8 +149,12 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       return asAccount(record);
     },
 
-    /** Setting the role an account already holds succeeds without a change or a log entry. */
-    setRole: async (id: string, role: AdminRole): Promise<AdminAccount> => {
+    /**
+     * Setting the role an account already holds succeeds without a change or a log entry.
+     * Demoting takes the switches the account starts with (view only when omitted);
+     * promoting discards them.
+     */
+    setRole: async (id: string, role: AdminRole, permissions?: AdminPermissions): Promise<AdminAccount> => {
       const caller = requireSuperadmin();
       requireConfirmation("Confirm your password to change this administrator's role.");
       const record = find(id);
@@ -139,7 +162,10 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       if (record.id === caller.id) throw new Error("You cannot change your own role.");
       if (record.role === role) return asAccount(record);
       if (role === "admin" && isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
+      const demotedWith = role === "admin" ? (permissions ? readPermissions(permissions) : viewOnlyPermissions()) : undefined;
       record.role = role;
+      if (demotedWith) record.permissions = demotedWith;
+      else delete record.permissions;
       audit(role === "superadmin" ? "Promoted Administrator" : "Demoted Administrator", record.username, record.id);
       return asAccount(record);
     },
@@ -153,15 +179,16 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       return `A password reset code was sent to ${record.email}.`;
     },
 
-    remove: async (id: string): Promise<void> => {
+    /** Replaces a regular administrator's switches. Not for oneself, and not for a superadmin, who has everything. */
+    setPermissions: async (id: string, permissions: AdminPermissions): Promise<AdminAccount> => {
       const caller = requireSuperadmin();
-      requireConfirmation();
+      requireConfirmation("Confirm your password to change this administrator's permissions.");
       const record = find(id);
-      if (record.id === caller.id) throw new Error("You cannot remove your own administrator account.");
-      if (accounts.length <= 1) throw new Error("The last administrator account cannot be removed.");
-      if (isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
-      accounts.splice(accounts.indexOf(record), 1);
-      audit("Deleted Administrator", record.username, record.id);
+      if (record.id === caller.id) throw new Error("You cannot change your own permissions.");
+      if (record.role === "superadmin") throw new Error("Superadmins have every permission. Make them an administrator first to restrict them.");
+      record.permissions = readPermissions(permissions);
+      audit("Updated Administrator Permissions", record.username, record.id);
+      return asAccount(record);
     },
   };
 };

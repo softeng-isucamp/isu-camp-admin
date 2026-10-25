@@ -1,5 +1,7 @@
+import { usePermissions } from "../../auth/usePermissions";
+import { draftPermission } from "./draftPermissions";
 import { useEffect, useMemo, useState } from "react";
-import type { Pathway } from "../../../types";
+import type { AdminPermissionAction, Pathway } from "../../../types";
 import type { useBuildingFootprintEditing } from "../building/useBuildingFootprintEditing";
 import type { usePathwayEditing } from "../pathway/usePathwayEditing";
 import type { useRouteNodePointTool } from "../routeNode/useRouteNodePointTool";
@@ -26,6 +28,7 @@ interface UseToolSessionOptions {
   /** Null until an administrator is signed in; nothing is recovered or journaled without it. */
   key: WorkingSessionKey | null;
   activeTool: ToolType;
+  activeAction: AdminPermissionAction | null;
   tools: SessionTools;
   /** The tool was activated with a fresh draft; the caller moves to its editor mode. */
   onToolActivated: (toolType: ToolType, openedPathway: Pathway | null) => void;
@@ -45,12 +48,17 @@ export function useToolSession({
   journal,
   key,
   activeTool,
+  activeAction,
   tools,
   onToolActivated,
   onDraftRestored,
   onOpenNetworkBrowser,
 }: UseToolSessionOptions) {
+  const { can } = usePermissions();
   const { point, polygon, pathway } = tools;
+  const [permissionNotice, setPermissionNotice] = useState("");
+  const canUseTool = (tool: ToolType) => tool === "select" || (tool === "pathway" ? can("add") || can("edit") : can("add"));
+  const canResume = (draft: ActiveToolDraft) => can(draftPermission(draft));
   const [, setRevision] = useState(0);
   const [pendingToolRequest, setPendingToolRequest] = useState<PendingToolRequest | null>(null);
 
@@ -119,6 +127,7 @@ export function useToolSession({
   };
 
   const activateTool = (toolType: ToolType) => {
+    if (!canUseTool(toolType)) return;
     const activationHandlers: Record<ToolType, () => Pathway | null> = {
       select: () => {
         point.reset();
@@ -138,6 +147,12 @@ export function useToolSession({
   };
 
   function restoreDraft(draft: ActiveToolDraft) {
+    if (!canResume(draft)) {
+      manager.discardActiveDraft();
+      onToolActivated("select", null);
+      setPermissionNotice("Draft discarded because its action is no longer permitted.");
+      return;
+    }
     const restoredPoints = (draft.provisionalGeometry.points ?? []).map((draftPoint) => [
       draftPoint.lat ?? draftPoint.y,
       draftPoint.lng ?? draftPoint.x,
@@ -154,12 +169,18 @@ export function useToolSession({
   }
 
   const restoreSuspendedDraft = (draftId: string) => {
+    const suspended = manager.getSuspendedDrafts().find((draft) => draft.id === draftId);
+    if (!suspended || !canResume(suspended)) return;
     const draft = manager.resumeSuspendedDraft(draftId);
     if (draft) restoreDraft(draft);
   };
 
   /** Runs the request now, or asks the administrator first when a Tool Draft is active. */
   const requestTool = (request: PendingToolRequest) => {
+    if (request.resumeDraftId) {
+      const draft = manager.getSuspendedDrafts().find((item) => item.id === request.resumeDraftId);
+      if (!draft || !canResume(draft)) return;
+    } else if (!canUseTool(request.toolType)) return;
     if (manager.hasActiveDraft()) {
       setPendingToolRequest(request);
       return;
@@ -171,7 +192,7 @@ export function useToolSession({
 
   const requestDraftResume = (draftId: string) => {
     const draft = manager.getSuspendedDrafts().find((item) => item.id === draftId);
-    if (!draft) return;
+    if (!draft || !canResume(draft)) return;
     requestTool({ toolType: draft.toolType, resumeDraftId: draftId });
   };
 
@@ -188,7 +209,20 @@ export function useToolSession({
     if (request.openNetworkBrowser) onOpenNetworkBrowser();
   };
 
+  useEffect(() => {
+    const activeDraft = manager.getActiveDraft();
+    const snapshot = draftSnapshot ?? activeDraft;
+    const allowed = snapshot ? can(draftPermission(snapshot)) : activeAction === null || can(activeAction);
+    if (allowed) return;
+    if (activeTool !== "select") clearDraftGeometry(activeTool);
+    manager.discardActiveDraft();
+    setPendingToolRequest(null);
+    onToolActivated("select", null);
+    setPermissionNotice("Draft discarded because its action is no longer permitted.");
+  }, [can("add"), can("edit"), activeTool, activeAction, draftSnapshot, manager]);
+
   return {
+    permissionNotice,
     state: manager.getState(),
     pendingToolRequest,
     activateTool,

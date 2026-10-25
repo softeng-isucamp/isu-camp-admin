@@ -1567,6 +1567,14 @@ td small {
   font-weight: 600;
   color: var(--green-2);
 }
+/* The live code lifetime; tabular digits keep the text from shifting as it ticks. */
+.recovery-modal .recovery-expiry {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
 .recovery-modal .recovery-username {
   margin: 0;
   padding: 12px 14px;
@@ -3839,6 +3847,103 @@ td small {
   font-size: 13px;
   line-height: 1.5;
 }
+/* Permissions editor: the switches of a regular administrator */
+.permissions-editor {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.permissions-editor-label {
+  padding: 0;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #3f4941;
+}
+.permissions-editor-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.permissions-editor-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.permissions-editor-option:last-child {
+  border-bottom: 0;
+}
+.permissions-editor-option input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.permissions-editor-option input:disabled {
+  cursor: not-allowed;
+}
+.permissions-editor:disabled .permissions-editor-option {
+  background: #f4f7f5;
+  color: var(--muted);
+}
+.permissions-editor:disabled .permissions-editor-option label {
+  cursor: not-allowed;
+}
+.permissions-editor-option label {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+.permissions-editor-option strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.permissions-editor-option small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.permissions-editor-locked {
+  background: #f4f7f5;
+}
+.permissions-editor-locked label {
+  cursor: default;
+}
+.permissions-editor-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Add Administrator with the editor: identity on the left, permissions and the password on the right. */
+.admin-form-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.admin-form-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .admin-form-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .users-page .table-heading {
   display: flex;
   align-items: center;
