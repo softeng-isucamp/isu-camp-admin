@@ -68,11 +68,11 @@ test("fixing a middle digit with the mouse and keyboard sends nothing until Veri
   await expectInvalid(page, false);
   await expect(box(page, 4)).toBeFocused();
   await quiet(page);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
 
   await page.getByRole("button", { name: "Verify" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   expect(await boxValues(page)).toBe("127456");
 });
 
@@ -86,15 +86,15 @@ for (const [name, retyped] of [
 
     await page.keyboard.type(retyped.slice(0, 5));
     await quiet(page);
-    await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+    await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
     expect(await boxValues(page)).toBe(retyped.slice(0, 5) + "6");
     await expect(box(page, 6)).toBeFocused();
 
     await page.keyboard.type(retyped[5]);
 
-    await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+    await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
     await quiet(page);
-    await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+    await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
     expect(await boxValues(page)).toBe(retyped);
   });
 }
@@ -106,33 +106,33 @@ test("digits delivered by insertText, with no key events, edit and submit like t
   // One input event per digit, with no key events. Each digit equals the one it replaces.
   for (const digit of "12345") await page.keyboard.insertText(digit);
   await quiet(page);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
   await expectInvalid(page, false);
   await expect(box(page, 6)).toBeFocused();
 
   await page.keyboard.insertText("6");
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   await quiet(page);
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   expect(await boxValues(page)).toBe("123456");
 
   // A different code inserted whole into one box is a paste.
   await box(page, 3).click();
   await page.keyboard.insertText("654321");
-  await expect(page.getByRole("alert")).toContainText("2 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 2 attempts remaining.");
   expect(await boxValues(page)).toBe("654321");
 });
 
 test("pasting the same rejected code again, or a different one, is checked again", async ({ page }) => {
   await reachCodeStep(page);
   await pasteWrongCode(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
 
   await ctrlV(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   expect(await boxValues(page)).toBe("123456");
   await ctrlV(page, "654321");
-  await expect(page.getByRole("alert")).toContainText("2 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 2 attempts remaining.");
   expect(await boxValues(page)).toBe("654321");
   await expectInvalid(page, true);
 });
@@ -151,7 +151,7 @@ for (const [state, prepare] of [
   test(`clicking box 1 that already has focus, then typing six digits, replaces them all and sends once (${state})`, async ({ page }) => {
     await reachCodeStep(page);
     await prepare(page);
-    const attemptsBefore = state === "a rejected code" ? "4 attempts left." : null;
+    const attemptsBefore = state === "a rejected code" ? "You have 4 attempts remaining." : null;
 
     // A real click on the focused box collapses its selection to a caret; typing must still replace the digit.
     await box(page, 1).click();
@@ -164,9 +164,9 @@ for (const [state, prepare] of [
 
     await page.keyboard.type("1");
 
-    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "3 attempts left." : "4 attempts left.");
+    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "You have 3 attempts remaining." : "You have 4 attempts remaining.");
     await quiet(page);
-    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "3 attempts left." : "4 attempts left.");
+    await expect(page.getByRole("alert")).toContainText(state === "a rejected code" ? "You have 3 attempts remaining." : "You have 4 attempts remaining.");
     expect(await boxValues(page)).toBe("654321");
   });
 }
@@ -183,7 +183,7 @@ test("clicking a middle box that already has focus, then typing one digit, repla
   await expect(box(page, 4)).toBeFocused();
   await expectInvalid(page, false);
   await quiet(page);
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
 });
 
 test("typing the digit a box already holds, after clicking it, still replaces it and moves on", async ({ page }) => {
@@ -201,11 +201,11 @@ test("typing the digit a box already holds, after clicking it, still replaces it
 /** Rejects 123456, then rejects 123459 typed into box 6, so the boxes hold a rejected code and 3 attempts are left. */
 async function rejectThenReplaceDigitSix(page: Page) {
   await pasteWrongCode(page, "123456");
-  await expect(page.getByRole("alert")).toContainText("4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 4 attempts remaining.");
   await box(page, 6).click();
   await page.keyboard.press("ArrowLeft");
   await page.keyboard.type("9");
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   expect(await boxValues(page)).toBe("123459");
 }
 
@@ -222,6 +222,6 @@ test("Ctrl+Z in box 6 of a rejected code sends nothing and does not cost an atte
   await quiet(page);
 
   expect(requests).toBe(0);
-  await expect(page.getByRole("alert")).toContainText("3 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("You have 3 attempts remaining.");
   expect(await boxValues(page)).toBe("123459");
 });
