@@ -3,10 +3,10 @@ import { Button } from "../../components/UI";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { resetSchema } from "../../services/schemas";
-import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { OtpInput, type OtpInputHandle } from "./OtpInput";
 import { BackToLogin } from "./RecoveryFrame";
-import { useCountdown } from "./useCountdown";
+import { formatClock, useCountdown } from "./useCountdown";
 
 /** Where the admin is in entering a code. `exhausted` and `expired` mean the code is dead and only a resend helps. */
 type CodeStepState = "entering" | "verifying" | "exhausted" | "expired";
@@ -32,16 +32,15 @@ interface RecoveryCodeStepProps {
 }
 
 const CODE_INCOMPLETE = "Enter the 6-digit verification code.";
-const EXHAUSTED_MESSAGE = "You have used all your attempts. Request a new code to continue.";
-const EXPIRED_MESSAGE = "This code has expired. Request a new code to continue.";
+const EXHAUSTED_MESSAGE = "You've used all verification attempts for this code. Request a new code to continue.";
+const EXPIRED_MESSAGE = "This verification code has expired. Request a new code to continue.";
+const EXPIRED_WHILE_RESTRICTED_MESSAGE = "This verification code has expired. You can request a new code when the restriction ends.";
+const INCORRECT_MESSAGE = "The verification code is incorrect. Please try again.";
+const INCORRECT_WITH_COUNT_MESSAGE = "Incorrect verification code.";
+const RESENT_MESSAGE = "A new verification code has been sent. Your previous code is no longer valid.";
 
-const deadMessage = (dead: DeadCode) => (dead === "exhausted" ? EXHAUSTED_MESSAGE : EXPIRED_MESSAGE);
-
-/** "The code expires in 10 minutes.", rounded to whole minutes and never below one. */
-const expiryText = (seconds: number) => {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `The code expires in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
-};
+const deadMessage = (dead: DeadCode, restricted = false) =>
+  dead === "exhausted" ? EXHAUSTED_MESSAGE : restricted ? EXPIRED_WHILE_RESTRICTED_MESSAGE : EXPIRED_MESSAGE;
 
 /** Collects the 6-digit code, submits it when an entry completes it, and offers a manual Verify (or Enter) and Resend. */
 export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead }: RecoveryCodeStepProps) {
@@ -55,34 +54,31 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const [resending, setResending] = useState(false);
   // The resend wait came from a rate limit rather than the normal cooldown, so its button reads "Try again".
   const [resendLimited, setResendLimited] = useState(false);
+  // The server restricted recovery as a whole, so Verify and Resend share one wait and the typed code is never sent on its own.
+  const restrictedWait = useRef(false);
   const otp = useRef<OtpInputHandle>(null);
   const inFlight = useRef(false);
   // The issued code can no longer be accepted. Set the moment that is known, ahead of any render, so no timer's callback can still send it.
   const unusable = useRef(initialDead !== undefined);
   const verifyWait = useCountdown();
   const resendWait = useCountdown(issued.resendAfterSeconds ?? 0);
-  // The code currently issued; a resend replaces it. Its lifetime is stated in the copy and tracked silently.
-  const [current, setCurrent] = useState(issued);
   const [lapsed, setLapsed] = useState(false);
+  // The issued code's lifetime, as the server reported it; only an issued code (the request or a resend) restarts it.
+  const expiry = useCountdown(issued.expiresInSeconds ?? 0, () => {
+    unusable.current = true;
+    setLapsed(true);
+  });
 
   // The code is dead: stop accepting digits and leave Resend as the way forward.
   const retire = (dead: DeadCode) => {
     unusable.current = true;
     otp.current?.clear();
     setState(dead);
-    setError(deadMessage(dead));
+    setError(deadMessage(dead, restrictedWait.current && resendWait.seconds > 0));
     setAttemptsRemaining(undefined);
     setResendMessage("");
+    expiry.start(0);
   };
-
-  useEffect(() => {
-    if (current.expiresInSeconds === undefined) return;
-    const timer = setTimeout(() => {
-      unusable.current = true;
-      setLapsed(true);
-    }, current.expiresInSeconds * 1000);
-    return () => clearTimeout(timer);
-  }, [current]);
 
   useEffect(() => {
     if (lapsed && state === "entering") retire("expired");
@@ -118,8 +114,13 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setState("entering");
       if (err instanceof RateLimitError) {
         // Not a wrong code: keep what was typed and let the button count down.
-        setError(RATE_LIMIT_MESSAGE);
-        verifyWait.start(err.retryAfterSeconds);
+        setError(recoveryRateLimitMessage(err));
+        // Without a Retry-After there is nothing to count down, so Verify stays usable.
+        if (err.retryAfterSeconds !== undefined) {
+          verifyWait.start(err.retryAfterSeconds);
+          if (err.restricted) restrict(err.retryAfterSeconds);
+          else restrictedWait.current = false;
+        }
       } else {
         if (err instanceof AuthError && err.kind === "invalid_code") {
           // The digits stay as editable values, marked invalid, so the admin can fix one or retype them.
@@ -128,8 +129,10 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           otp.current?.clear();
         }
         if (err instanceof AuthError && err.kind === "invalid_code" && err.attemptsRemaining !== undefined) {
-          setError("Incorrect code.");
+          setError(INCORRECT_WITH_COUNT_MESSAGE);
           setAttemptsRemaining(err.attemptsRemaining);
+        } else if (err instanceof AuthError && err.kind === "invalid_code") {
+          setError(INCORRECT_MESSAGE);
         } else {
           setError(err instanceof Error ? err.message : "Unable to verify the code.");
         }
@@ -139,7 +142,14 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
   };
 
-  // A complete code held in the boxes while a rate-limit wait runs is sent once when the wait ends. That is the code which was rate
+  // A restriction locks Resend; one reported by a verify locks Verify for the same wait.
+  const restrict = (seconds: number) => {
+    restrictedWait.current = true;
+    setResendLimited(true);
+    resendWait.start(seconds);
+  };
+
+  // A complete code held in the boxes while a flood-limit wait runs is sent once when the wait ends. That is the code which was rate
   // limited, one entered during the wait, or a rejected code the admin explicitly sent again with Verify and got a 429 for. A rejected
   // code that was only left on screen is never sent: the wait only starts from a verify, and nothing but a verify starts one.
   const waited = useRef(false);
@@ -150,6 +160,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
     }
     if (!waited.current) return;
     waited.current = false;
+    // After a restriction the held code may be the guess that caused it, so the admin sends it again or not.
+    if (restrictedWait.current) return;
     if (state === "entering" && code.length === 6) void verify(code);
     // Only the end of the wait matters; later renders must never resend.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -170,15 +182,26 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setError("");
       setState("entering");
       setLapsed(false);
-      setCurrent(next);
-      setResendMessage("A new code has been sent.");
+      expiry.start(next.expiresInSeconds ?? 0);
+      setResendMessage(RESENT_MESSAGE);
       setResendLimited(false);
+      restrictedWait.current = false;
       resendWait.start(next.resendAfterSeconds ?? 0);
     } catch (err) {
+      // A failed resend issued no code, so the current code's expiry and the digits are left alone.
       if (err instanceof RateLimitError) {
-        setError(RATE_LIMIT_MESSAGE);
-        setResendLimited(true);
-        resendWait.start(err.retryAfterSeconds);
+        setError(recoveryRateLimitMessage(err));
+        if (err.retryAfterSeconds !== undefined) {
+          // Only Resend locks: the code already sent may still be accepted (the request cap refuses new codes, not guesses).
+          // A restriction that covers verifying too is reported by Verify's own 429.
+          if (err.restricted) {
+            restrict(err.retryAfterSeconds);
+          } else {
+            restrictedWait.current = false;
+            setResendLimited(true);
+            resendWait.start(err.retryAfterSeconds);
+          }
+        }
       } else {
         setError(err instanceof Error ? err.message : "Failed to resend code.");
       }
@@ -193,7 +216,11 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const rateLimited = verifyWait.seconds > 0 || (resendLimited && resendWait.seconds > 0);
   const resendLabel =
     resendWait.seconds > 0 ? (resendLimited ? tryAgainLabel(resendWait.seconds) : `Resend code in ${resendWait.seconds}s`) : "Resend code";
+  // The normal cooldown reads as a sentence; a rate limit keeps a disabled "Try again" button.
+  const coolingDown = resendWait.seconds > 0 && !resendLimited;
   const resendBlocked = resendWait.seconds > 0 || resending || verifying;
+  // Once the restriction is over, the expired code needs only the ordinary instruction.
+  const shownError = error === EXPIRED_WHILE_RESTRICTED_MESSAGE && resendWait.seconds === 0 ? EXPIRED_MESSAGE : error;
 
   return (
     <form
@@ -207,13 +234,22 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       <h2 aria-describedby={sentId}>Enter verification code</h2>
       <p className="muted recovery-copy">
         <span id={sentId}>
-          If an account exists for <strong>{email}</strong>, we sent a <span className="nowrap">6-digit</span> code to it.
-          {current.expiresInSeconds !== undefined && !dead && ` ${expiryText(current.expiresInSeconds)}`}
+          If an account exists for <strong>{email}</strong>, a <span className="nowrap">6-digit</span> verification code has been sent to
+          that address.
         </span>{" "}
         <button type="button" className="recovery-link" onClick={onChangeEmail} disabled={verifying || resending}>
           Change email
         </button>
       </p>
+      <p className="muted recovery-copy">
+        Only the most recently sent code will work. Requesting a new code will invalidate your previous code.
+      </p>
+      {/* role="timer" is not a live region, so the ticking is not announced; the expired alert is. */}
+      {expiry.seconds > 0 && !dead && (
+        <p className="recovery-expiry" role="timer">
+          Code expires in {formatClock(expiry.seconds)}
+        </p>
+      )}
       <div className="field">
         <span className="recovery-label">Verification code</span>
         <OtpInput
@@ -228,10 +264,14 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           onComplete={(complete) => void verify(complete)} />
         {!dead && (
           <p className="recovery-resend">
-            <span>Didn't receive the code?</span>
-            <Button type="button" variant="subtle" pill={false} onClick={() => void resend()} loading={resending} disabled={resendBlocked}>
-              {resendLabel}
-            </Button>
+            <span>Didn't receive the code?</span>{" "}
+            {coolingDown ? (
+              <span>Resend available in {resendWait.seconds}s.</span>
+            ) : (
+              <Button type="button" variant="subtle" pill={false} onClick={() => void resend()} loading={resending} disabled={resendBlocked}>
+                {resendLabel}
+              </Button>
+            )}
           </p>
         )}
         <p className="recovery-status" role="status">
@@ -239,8 +279,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </p>
       </div>
       {error && (
-        <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} urgent={state === "exhausted" || rateLimited}>
-          {error}
+        <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} attemptsWording="remaining" urgent={state === "exhausted" || rateLimited}>
+          {shownError}
         </AuthAlert>
       )}
       {dead ? (

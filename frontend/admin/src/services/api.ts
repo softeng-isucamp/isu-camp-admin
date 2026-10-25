@@ -862,12 +862,17 @@ enrichLegacyLocationAuditIds();
 // Services
 // ==========================================
 
-function checkRateLimit(response: Response, message?: string): void {
+function checkRateLimit(response: Response, message?: string, code?: unknown): void {
   if (response.status === 429) {
-    const retryAfter = response.headers.get("Retry-After");
-    const parsedSeconds = retryAfter ? Number.parseInt(retryAfter, 10) : NaN;
-    const seconds = Number.isFinite(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : 60;
-    throw new RateLimitError(seconds, message);
+    // Only whole seconds count: "60abc", "15.5" or an HTTP-date is no duration at all.
+    const retryAfter = response.headers.get("Retry-After")?.trim();
+    const parsedSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
+    // A missing or invalid header stays undefined; the sign-in screen applies its own fallback.
+    throw new RateLimitError(
+      Number.isSafeInteger(parsedSeconds) && parsedSeconds > 0 ? parsedSeconds : undefined,
+      message,
+      code === "recovery_restricted",
+    );
   }
 }
 
@@ -898,8 +903,8 @@ async function recoveryPost(path: string, body: Record<string, unknown>): Promis
     body: JSON.stringify(body),
   });
   const data = await readJsonObject(response);
-  // A rate limit needs only the status and Retry-After, so it must not depend on the body.
-  checkRateLimit(response, data?.message);
+  // A rate limit needs only the status and Retry-After, so it must not depend on the body; `code` only sharpens the wording.
+  checkRateLimit(response, data?.message, data?.code);
   if (!data) throw new Error("Unable to connect to the backend.");
   if (!response.ok) {
     const message = data.message || "Account recovery failed.";

@@ -81,7 +81,7 @@ test("password recovery reaches verification step", async ({ page }) => {
     page.getByRole("heading", { name: /enter verification code/i }),
   ).toBeVisible();
   await page.getByLabel("Digit 1 of 6").fill("123456");
-  await expect(page.getByRole("alert")).toContainText("Incorrect code. 4 attempts left.");
+  await expect(page.getByRole("alert")).toContainText("Incorrect verification code. You have 4 attempts remaining.");
   await expect(page).toHaveScreenshot("password-recovery-code-error.png", {
     animations: "disabled",
   });
