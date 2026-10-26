@@ -48,12 +48,16 @@ function AppUserDirectory() {
 
   // The search waits for typing to pause so a word is one request, not one per key.
   const searchQ = useDebouncedValue(q);
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isPlaceholderData } = useQuery({
     queryKey: ["users", searchQ, createdRange, userType, page],
     queryFn: () => services.users.list(searchQ, page, pageSize, createdRange, userType),
     placeholderData: (previous) => previous,
   });
-  useEffect(() => setPage(1), [q, createdRange, userType]);
+  // Reset on the settled search too: a page chosen while it settled belongs to the old results.
+  useEffect(() => setPage(1), [q, searchQ, createdRange, userType]);
+  useEffect(() => {
+    if (data && !isPlaceholderData) setPage((current) => Math.min(current, Math.max(1, Math.ceil(data.total / pageSize))));
+  }, [data, isPlaceholderData]);
   const result = data ?? { items: [], total: 0, page: 1, pageSize };
 
   useEffect(() => {

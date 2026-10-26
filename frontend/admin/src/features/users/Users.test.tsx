@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -270,11 +270,29 @@ describe("Users search requests", () => {
     const list = vi.spyOn(services.users, "list").mockResolvedValue(page);
     renderUsers();
     await screen.findByText("maria.santos1");
+    const search = screen.getByPlaceholderText("Search by username...");
 
-    await userEvent.type(screen.getByPlaceholderText("Search by username..."), "maria");
+    // Synchronous changes land well inside the pause, so the count is deterministic.
+    for (const value of ["m", "ma", "mar", "mari", "maria"]) fireEvent.change(search, { target: { value } });
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
     const searched = list.mock.calls.map((call) => call[0]).filter(Boolean);
     expect(searched).toEqual(["maria"]);
+  });
+
+  it("shows the first page of a new search even when Next is pressed while it settles", async () => {
+    const maria = page.items[0];
+    vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? { items: pageNumber === 1 ? [maria] : [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
+    expect(screen.queryByText("No users found.")).not.toBeInTheDocument();
   });
 });

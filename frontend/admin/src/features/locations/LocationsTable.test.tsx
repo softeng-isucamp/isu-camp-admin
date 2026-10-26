@@ -1373,6 +1373,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
     });
 
+    it("filters the hierarchy view by STATUS from the loaded directory", async () => {
+      const place = (id: string, name: string, status: "Active" | "Inactive") => services.locations.save({ id, name, code: id.toUpperCase(), type: "Place", classification: "College", parentId: null, status, lat: null, lng: null, positioned: false });
+      await place("hierarchy-status-live", "Hierarchy Status Live", "Active");
+      await place("hierarchy-status-dormant", "Hierarchy Status Dormant", "Inactive");
+      renderLocations(["/locations?q=Hierarchy%20Status"]);
+      expect(await screen.findByText("Hierarchy Status Live")).toBeInTheDocument();
+      expect(screen.getByText("Hierarchy Status Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "Inactive");
+      await waitFor(() => expect(screen.queryByText("Hierarchy Status Live")).not.toBeInTheDocument());
+      expect(screen.getByText("Hierarchy Status Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "All Statuses");
+      expect(await screen.findByText("Hierarchy Status Live")).toBeInTheDocument();
+    });
+
     it("filters by FLOOR through the same dropdown", async () => {
       await services.locations.save({ id: "floor-dd-building", name: "Floor Dropdown Hall", code: "FLOOR-DD", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
       await services.locations.save({ id: "floor-dd-ground", name: "Floor Dropdown Ground Room", code: "FLOOR-DD-G", type: "Room", parentId: "floor-dd-building", building: "Floor Dropdown Hall", floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false });
