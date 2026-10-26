@@ -7,12 +7,15 @@ import { FilterCombobox } from "../../components/FilterCombobox";
 import { formatDateTime } from "../../lib/format";
 import type { AuditEntry } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 const dates=[{id:"today",name:"Today"},{id:"7d",name:"Last 7 days"},{id:"30d",name:"Last 30 days"}];
 export function Logs() {
  // User Management links here with ?q=<username>&category=User to show one account's activity.
  const [searchParams]=useSearchParams();
  const [q,setQ]=useState(()=>searchParams.get("q")??""),[category,setCategory]=useState(()=>{const requested=searchParams.get("category");return requested==="Admin"||requested==="User"?requested:"all";}),[date,setDate]=useState("all"),[page,setPage]=useState(1),[detail,setDetail]=useState<AuditEntry|null>(null); const pageSize=10;
- const {data,isFetching}=useQuery({queryKey:["logs",category,q,date,page],queryFn:()=>services.logs.list(category==="all"?"All":category,q,"All Actors",date,page,pageSize)});
+ // The search waits for typing to pause so a word is one request, not one per key.
+ const searchQ=useDebouncedValue(q);
+ const {data,isFetching}=useQuery({queryKey:["logs",category,searchQ,date,page],queryFn:()=>services.logs.list(category==="all"?"All":category,searchQ,"All Actors",date,page,pageSize),placeholderData:previous=>previous});
  useEffect(()=>setPage(1),[q,category,date]); const result=data??{items:[],total:0,page:1,pageSize};
  return <div className="page"><div className="page-hero"><PageIcon name="logs" /><div><h1>System Logs</h1><p>Review administrator changes and user activity across KUMPAS.</p></div></div>
  <Card className="filters logs-filters"><Field label="" placeholder="Search actions, actors, or targets..." value={q} onChange={e=>setQ(e.target.value)}/><FilterCombobox label="DATE" noun="dates" allLabel="All Dates" searchable={false} options={dates} value={date==="all"?null:date} onChange={id=>setDate(id??"all")}/></Card>

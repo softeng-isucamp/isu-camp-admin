@@ -259,3 +259,22 @@ describe("Users page for a restricted administrator", () => {
     expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeInTheDocument();
   });
 });
+
+describe("Users search requests", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("asks the server once typing pauses, not for every keystroke", async () => {
+    const list = vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    await userEvent.type(screen.getByPlaceholderText("Search by username..."), "maria");
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    const searched = list.mock.calls.map((call) => call[0]).filter(Boolean);
+    expect(searched).toEqual(["maria"]);
+  });
+});

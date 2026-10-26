@@ -28,6 +28,7 @@ import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { ParentBuildingField } from "./ParentBuildingField";
 import { usePermissions } from "../auth/usePermissions";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 
 /** The locationKey deep link; old bookmarks use "Building:12" or "Facility:12". */
 const keyParam = (params: URLSearchParams) => {
@@ -265,7 +266,7 @@ export function Locations() {
     };
   }, [activeOverlay]);
 
-  const { data: directory } = useQuery({
+  const directoryQuery = useQuery({
     queryKey: ["locations", "directory"],
     queryFn: async () => {
       const first = await services.locations.list("", 1, 100);
@@ -277,6 +278,7 @@ export function Locations() {
       return [first, ...remaining].flatMap((result) => result.items);
     },
   });
+  const directory = directoryQuery.data;
 
   const { data: history } = useQuery({
     queryKey: ["logs", "location-history", selected ? locationIdentityKey(selected) : null],
@@ -394,16 +396,24 @@ export function Locations() {
     }
     return (item.type === "Floor" ? item.name : item.floor) === selectedFloorName;
   };
-  const { data, isLoading, isFetching, error: listError } = useQuery({
-    queryKey: ["locations", "page", query, page, type, status, buildingId, selectedFloorName],
-    queryFn: () => services.locations.list(query, page, pageSize, {
+  // Only the flat view pages through the server. The hierarchy view filters the
+  // directory loaded above, so searching there sends no request at all; in the
+  // flat view the search waits for typing to pause rather than asking per key.
+  const debouncedQuery = useDebouncedValue(query);
+  const pageQuery = useQuery({
+    queryKey: ["locations", "page", debouncedQuery, page, type, status, buildingId, selectedFloorName],
+    queryFn: () => services.locations.list(debouncedQuery, page, pageSize, {
       type: type === "All Types" ? undefined : type as BackendLocationType,
       status: status === "All Statuses" || status === "All Status" ? undefined : status as Location["status"],
       buildingId: selectedBuildingRecord?.id,
       floor: selectedFloorName,
     }),
     placeholderData: (previous) => previous,
+    enabled: viewMode === "flat",
   });
+  const { data } = pageQuery;
+  const shownQuery = viewMode === "flat" ? pageQuery : directoryQuery;
+  const { isLoading, isFetching, error: listError } = shownQuery;
   const rawItems = data?.items ?? [];
   const items = useMemo(() => {
     return rawItems.filter(
@@ -978,7 +988,7 @@ export function Locations() {
         <ProgressBar active={isFetching && !isLoading} />
 
         <div className="table-wrap" style={{ overflow: "visible", minHeight: "220px" }}>
-          {isLoading && !data ? (
+          {isLoading && !shownQuery.data ? (
             <LoadingState size={22}>Loading campus locations…</LoadingState>
           ) : listError ? (
             <div role="alert" style={{ padding: "48px 24px", textAlign: "center", color: "#991b1b" }}>
@@ -1185,7 +1195,7 @@ export function Locations() {
             </tbody>
           </table>
           )}
-          {!isLoading && !listError && data && !items.length && (
+          {!isLoading && !listError && (viewMode === "flat" ? data && !items.length : directory && !hierarchyFamilies.length) && (
             <Empty>{query ? "No campus location records matching filter criteria." : "No campus location records have been created yet."}</Empty>
           )}
         </div>

@@ -153,3 +153,22 @@ describe("Logs DATE filter", () => {
     expect(await screen.findByText("login")).toBeInTheDocument();
   });
 });
+
+describe("Logs search requests", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("asks the server once typing pauses, not for every keystroke", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "", "All Actors", "all", 1, 10));
+
+    await userEvent.type(screen.getByPlaceholderText(/search actions/i), "create");
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "create", "All Actors", "all", 1, 10));
+    const searched = list.mock.calls.map((call) => call[1]).filter(Boolean);
+    expect(searched).toEqual(["create"]);
+  });
+});
