@@ -1857,3 +1857,43 @@ def test_self_editing_keeps_an_address_that_is_already_a_duplicate():
 
     assert response.status_code == 200
     assert FakeAdmin.store[0].username == "admin_renamed"
+
+
+def test_two_accounts_cannot_claim_one_unused_email_at_the_same_time(admin_directory):
+    """Both requests check the shared pool before either commits; only one may
+    end up holding the address."""
+
+    app = admins_app()
+    original = admins_module.email_taken
+    other_checked = threading.Event()
+    responses = {}
+    first_call = threading.Lock()
+
+    def create(name):
+        responses[name] = signed_in(app).post("/api/admins", json={
+            "username": name, "email": "shared@example.com", "password": "Another-secret1!",
+        })
+
+    def email_taken_while_another_claims(email, excluding_id=None):
+        taken = original(email, excluding_id=excluding_id)
+        if first_call.acquire(blocking=False):
+            other = threading.Thread(target=create, args=("admin04",))
+            other.start()
+            # Gives the other request every chance to check and commit in this
+            # gap; if a lock keeps it out, the wait simply times out.
+            other_checked.wait(0.5)
+            responses["other_thread"] = other
+        else:
+            other_checked.set()
+        return taken
+
+    admins_module.email_taken = email_taken_while_another_claims
+    try:
+        create("admin03")
+        responses["other_thread"].join(5)
+    finally:
+        admins_module.email_taken = original
+
+    holders = [record.username for record in FakeAdmin.store if record.gmail == "shared@example.com"]
+    assert len(holders) == 1
+    assert sorted(response.status_code for name, response in responses.items() if name != "other_thread") == [201, 409]

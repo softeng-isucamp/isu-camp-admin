@@ -49,7 +49,15 @@ logger = logging.getLogger(__name__)
 
 # Keyed by username for the legacy /api/reset/* routes and the admin-triggered
 # reset, and by (purpose, email) for /api/recovery/*, so the two never collide.
+# Every read and write holds ``recovery_lock``: the recovery sweep iterates this
+# dict, and the API serves requests on several threads.
 reset_otps = {}
+
+# Serializes the legacy username-keyed flow from issuing a code to committing
+# the password it redeems, so a code replaced while its request was hashing can
+# no longer be redeemed, and no new code is issued between a redemption's check
+# and its commit. Taken before ``recovery_lock``, never while holding it.
+legacy_reset_lock = threading.Lock()
 
 OTP_LIFETIME_SECONDS = 600
 
@@ -370,6 +378,15 @@ def email_taken(email, *, excluding_id=None):
     """Whether any other administrator already holds ``email`` as either address."""
 
     return bool(admins_holding_email(email, excluding_id=excluding_id, limit=1))
+
+
+# Checking the shared email pool (and usernames) and committing a claim on it
+# are one step: nothing in the schema makes an address unique, so two requests
+# that each saw it free would both commit. Every writer of a username, gmail or
+# alternative_email re-checks under this lock and holds it through its commit,
+# and does slow work such as hashing before taking it. One process serves the
+# API, so a process lock is enough; several would need a database advisory lock.
+identity_claim_lock = threading.Lock()
 
 
 # ==========================================
@@ -790,10 +807,11 @@ def send_password_reset_otp(admin):
 
     otp = generate_otp()
 
-    reset_otps[admin.username] = {
-        "otp": otp,
-        "expires_at": otp_expiry()
-    }
+    with legacy_reset_lock, recovery_lock:
+        reset_otps[admin.username] = {
+            "otp": otp,
+            "expires_at": otp_expiry()
+        }
 
     message = Message(
         subject="ISU-CAMP Password Reset OTP",
@@ -908,15 +926,31 @@ def verify_reset_code():
     if not username or not otp:
         return jsonify({"success": False, "message": "Username and verification code are required"}), 400
 
-    reset = reset_otps.get(username)
-    if not reset or datetime.utcnow() > reset["expires_at"]:
-        reset_otps.pop(username, None)
-        return jsonify({"success": False, "message": "Verification code has expired"}), 400
-
-    if not secrets.compare_digest(str(reset["otp"]), otp):
-        return jsonify({"success": False, "message": "Invalid verification code"}), 400
+    verdict = legacy_reset_code_verdict(username, otp)
+    if verdict:
+        return verdict
 
     return jsonify({"success": True, "message": "Verification code accepted"}), 200
+
+
+def legacy_reset_code_verdict(username, otp, consume=False):
+    """A refusal for a legacy reset code, or None when it is good.
+
+    Read, judged and (with ``consume``) removed as one step under
+    ``recovery_lock``, so an expired entry dropped here is the one that was
+    read, never a newer code issued meanwhile.
+    """
+
+    with recovery_lock:
+        reset = reset_otps.get(username)
+        if not reset or datetime.utcnow() > reset["expires_at"]:
+            reset_otps.pop(username, None)
+            return jsonify({"success": False, "message": "Verification code has expired"}), 400
+        if not secrets.compare_digest(str(reset["otp"]), str(otp)):
+            return jsonify({"success": False, "message": "Invalid verification code"}), 400
+        if consume:
+            del reset_otps[username]
+    return None
 
 
 # ==========================================
@@ -962,44 +996,37 @@ def reset_password():
                 "message": weakness
             }), 400
 
-        reset = reset_otps.get(username)
+        # Checked first so a wrong code is refused before the slow hash, and
+        # checked again, and spent, once the hash is done: the code may have
+        # been replaced or redeemed while it ran.
+        verdict = legacy_reset_code_verdict(username, otp)
+        if verdict:
+            return verdict
 
-        if not reset or datetime.utcnow() > reset["expires_at"]:
+        password_hash = hash_password(password)
 
-            reset_otps.pop(username, None)
+        with legacy_reset_lock:
+            admin = Admin.query.filter_by(
+                username=username
+            ).first()
 
-            return jsonify({
-                "success": False,
-                "message": "Verification code has expired"
-            }), 400
+            if not admin:
 
-        if not secrets.compare_digest(
-            str(reset["otp"]),
-            str(otp)
-        ):
-            return jsonify({
-                "success": False,
-                "message": "Invalid verification code"
-            }), 400
+                with recovery_lock:
+                    reset_otps.pop(username, None)
 
-        admin = Admin.query.filter_by(
-            username=username
-        ).first()
+                return jsonify({
+                    "success": False,
+                    "message": "Admin account not found"
+                }), 404
 
-        if not admin:
+            verdict = legacy_reset_code_verdict(username, otp, consume=True)
+            if verdict:
+                return verdict
 
-            reset_otps.pop(username, None)
+            admin.password = password_hash
 
-            return jsonify({
-                "success": False,
-                "message": "Admin account not found"
-            }), 404
-
-        admin.password = hash_password(password)
-
-        db.session.commit()
-
-        reset_otps.pop(username, None)
+            db.session.commit()
 
         return jsonify({
             "success": True,
@@ -1751,15 +1778,22 @@ def claim_recovery_code(purpose, email, code, admin):
     Nothing is counted here; the guess was already judged right.
     """
     key = recovery_key(purpose, email)
+    subject, _ = recovery_identity(email)
     with recovery_lock:
+        # The check committed and released the subject's row, and the password
+        # was hashed since, so wrong guesses may have restricted the subject in
+        # between. Re-read it: a restriction refuses the right code here too.
+        # Locked again from here, the row is released by the password's commit.
+        row = recovery_attempt_row(subject)
+        restriction = recovery_restriction_seconds(row)
+        if restriction:
+            db.session.commit()
+            return None, recovery_restricted_response(restriction)
         entry = reset_otps.get(key)
         if entry is None or entry["otp"] is None or entry["admin_id"] != admin.id or not recovery_code_matches(entry, code):
             return None, recovery_error("code_exhausted", "This code can no longer be used. Request a new one.", 0)
         if datetime.utcnow() >= entry["expires_at"]:
             return None, recovery_error("code_expired", "This code has expired. Request a new one.")
-        # Nothing about attempts here. The subject's row is locked by this
-        # request from before the code was checked until after this commits, so
-        # no guess can have spent the budget in between.
         del reset_otps[key]
         return entry, None
 

@@ -512,3 +512,45 @@ def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
     assert custom.json["message"] == "Confirm your password to do the thing."
     # The code is what the frontend reads, so wording never changes it.
     assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE
+
+
+def test_a_superseded_reset_code_cannot_overwrite_a_newer_reset(monkeypatch):
+    """Request A holds code X and is still hashing when a newer code Y is issued
+    and redeemed. A must be refused, and the password must stay B's."""
+
+    auth_module.rate_limit_buckets.clear()
+    auth_module.reset_otps.clear()
+    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin01@example.com", "password": "old"})()
+    committed = []
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {"query": type("Query", (), {
+        "filter_by": staticmethod(lambda **values: type("Result", (), {"first": lambda self: admin})()),
+    })()}))
+    monkeypatch.setattr(auth_module, "db", type("Db", (), {"session": type("Session", (), {
+        "commit": staticmethod(lambda: committed.append(admin.password)),
+        "rollback": staticmethod(lambda: None),
+    })()})())
+    monkeypatch.setattr(auth_module, "Message", lambda **values: type("Message", (), values)())
+    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda self, message: None})())
+    codes = iter(["111111", "222222"])
+    monkeypatch.setattr(auth_module, "generate_otp", lambda: next(codes))
+    client = auth_app().test_client()
+    auth_module.send_password_reset_otp(admin)  # code X
+
+    newer = {}
+
+    def hash_while_a_newer_reset_lands(password):
+        if password == "PasswordA!1" and not newer:
+            auth_module.send_password_reset_otp(admin)  # code Y replaces X
+            newer["response"] = client.post("/api/reset-password", json={
+                "username": "admin01", "code": "222222", "password": "PasswordB!2"})
+        return f"hash:{password}"
+
+    monkeypatch.setattr(auth_module, "hash_password", hash_while_a_newer_reset_lands)
+
+    first = client.post("/api/reset-password", json={
+        "username": "admin01", "code": "111111", "password": "PasswordA!1"})
+
+    assert newer["response"].status_code == 200
+    assert first.status_code == 400
+    assert admin.password == "hash:PasswordB!2"
+    assert committed == ["hash:PasswordB!2"]
