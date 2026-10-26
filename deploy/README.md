@@ -73,7 +73,7 @@ docker run --rm --user 0:0 \
 
 The volume is external so Compose will fail clearly if it is missing and release-specific project names cannot create separate histories. It protects archives from container replacement, not host or disk loss; maintain an off-host copy. Verify a write as UID 10001 before starting the staged API.
 
-Nginx listens on port 8080, preserves `/api` when proxying to `admin-api:5000`, provides SPA fallback, and allows a 64 MiB request body for ten 5 MiB photos plus multipart overhead. Gunicorn uses one sync worker because OTPs and rate-limit buckets are process-local.
+Nginx listens on port 8080, preserves `/api` when proxying to `admin-api:5000`, provides SPA fallback, and allows a 64 MiB request body for ten 5 MiB photos plus multipart overhead. Gunicorn runs one process because OTPs, rate-limit buckets, backup jobs and the backup scheduler are process-local; that process serves requests on four threads (`gthread`) so a slow database round trip does not queue every other request behind it.
 
 The default network is `<compose-project-name>_network`. For Cloudflare Tunnel, explicitly attach the authorized connector to this release network, persist the attachment in its maintained Compose configuration, and route to this project's web service. Use the DevOps skill's staging, login verification, traffic-switching, and rollback procedure. This recipe does not switch production traffic.
 
