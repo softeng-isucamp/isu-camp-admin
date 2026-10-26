@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -257,5 +257,63 @@ describe("Users page for a restricted administrator", () => {
     expect(screen.getByRole("button", { name: "Administrators" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
     expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeInTheDocument();
+  });
+});
+
+describe("Users search requests", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("asks the server once typing pauses, not for every keystroke", async () => {
+    const list = vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    const search = screen.getByPlaceholderText("Search by username...");
+
+    // Synchronous changes land well inside the pause, so the count is deterministic.
+    for (const value of ["m", "ma", "mar", "mari", "maria"]) fireEvent.change(search, { target: { value } });
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    const searched = list.mock.calls.map((call) => call[0]).filter(Boolean);
+    expect(searched).toEqual(["maria"]);
+  });
+
+  it("shows the first page of a new search even when Next is pressed while it settles", async () => {
+    const maria = page.items[0];
+    vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? { items: pageNumber === 1 ? [maria] : [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
+    expect(screen.queryByText("No users found.")).not.toBeInTheDocument();
+  });
+
+  it("returns to the first page when Next is pressed while a new search is loading", async () => {
+    const maria = page.items[0];
+    let resolveFirstPage: (value: typeof page) => void = () => {};
+    const firstPage = new Promise<typeof page>((resolve) => { resolveFirstPage = resolve; });
+    const list = vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? pageNumber === 1 ? firstPage : { items: [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    // The previous results are still showing, so Next is still enabled.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 2, 10, "all", "all"));
+    resolveFirstPage({ items: [maria], total: 1, page: 1, pageSize: 10 });
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
   });
 });

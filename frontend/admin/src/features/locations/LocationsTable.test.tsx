@@ -111,7 +111,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.queryByText("Not positioned")).not.toBeInTheDocument();
     expect(screen.queryByText("Positioned")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /toggle view mode/i }));
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(10);
+    // The flat view pages through the server, so its first page loads on switching.
+    await waitFor(() => expect(container.querySelectorAll("tbody tr")).toHaveLength(10));
   });
 
   it("keeps derived Floor Levels available without exposing Floor as a record filter", async () => {
@@ -849,6 +850,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       { label: "Locations", options: ["Room", "Office", "Laboratory", "Restroom"] },
     ]);
 
+    // Only the flat view filters on the server; the hierarchy view filters its loaded directory.
+    fireEvent.click(screen.getByRole("button", { name: /toggle view mode/i }));
     for (const value of ["College", "Campus Services", "Food", "Parking", "Facility", "Room", "Restroom"]) {
       chooseFilterOption("TYPE", value);
       await waitFor(() => expect(list).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ type: value })));
@@ -1355,6 +1358,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       renderLocations(["/locations?q=Status%20Probe"]);
       expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
       expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+      // Only the flat view filters on the server; the hierarchy view filters its loaded directory.
+      fireEvent.click(screen.getByRole("button", { name: /toggle view mode/i }));
+      expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
 
       chooseFilterOption("STATUS", "Inactive");
       expect(screen.getByLabelText("STATUS")).toHaveTextContent("Inactive");
@@ -1365,6 +1371,22 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       chooseFilterOption("STATUS", "All Statuses");
       expect(await screen.findByText("Status Probe Live")).toBeInTheDocument();
       expect(screen.getByText("Status Probe Dormant")).toBeInTheDocument();
+    });
+
+    it("filters the hierarchy view by STATUS from the loaded directory", async () => {
+      const place = (id: string, name: string, status: "Active" | "Inactive") => services.locations.save({ id, name, code: id.toUpperCase(), type: "Place", classification: "College", parentId: null, status, lat: null, lng: null, positioned: false });
+      await place("hierarchy-status-live", "Hierarchy Status Live", "Active");
+      await place("hierarchy-status-dormant", "Hierarchy Status Dormant", "Inactive");
+      renderLocations(["/locations?q=Hierarchy%20Status"]);
+      expect(await screen.findByText("Hierarchy Status Live")).toBeInTheDocument();
+      expect(screen.getByText("Hierarchy Status Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "Inactive");
+      await waitFor(() => expect(screen.queryByText("Hierarchy Status Live")).not.toBeInTheDocument());
+      expect(screen.getByText("Hierarchy Status Dormant")).toBeInTheDocument();
+
+      chooseFilterOption("STATUS", "All Statuses");
+      expect(await screen.findByText("Hierarchy Status Live")).toBeInTheDocument();
     });
 
     it("filters by FLOOR through the same dropdown", async () => {
@@ -1382,6 +1404,44 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       chooseFilterOption("FLOOR", "All Floors");
       expect(await screen.findByText("Floor Dropdown Ground Room")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Locations search requests", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const searchedQueries = (list: { mock: { calls: Array<[query?: string, ...rest: unknown[]]> } }) =>
+    list.mock.calls.map(([query]) => query).filter(Boolean);
+
+  it("filters the hierarchy view from the loaded directory without asking the server", async () => {
+    const list = vi.spyOn(services.locations, "list");
+    renderLocations();
+    await screen.findByText("Administration Building", undefined, { timeout: 4000 });
+
+    fireEvent.change(screen.getByLabelText("Search locations"), { target: { value: "Laboratory 107" } });
+
+    await screen.findByText("Administration Building 2nd Floor Laboratory 107");
+    await waitFor(() => expect(screen.getByText("1 locations")).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
+    // Let any debounced request fire before asserting none was sent.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(searchedQueries(list)).toEqual([]);
+  });
+
+  it("asks the server once typing pauses in the flat view", async () => {
+    const list = vi.spyOn(services.locations, "list");
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle view mode" }, { timeout: 4000 }));
+    const search = screen.getByLabelText("Search locations");
+
+    fireEvent.change(search, { target: { value: "L" } });
+    fireEvent.change(search, { target: { value: "La" } });
+    fireEvent.change(search, { target: { value: "Lab" } });
+
+    await waitFor(() => expect(searchedQueries(list)).toEqual(["Lab"]));
   });
 });
 

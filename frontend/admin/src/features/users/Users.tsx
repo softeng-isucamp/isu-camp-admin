@@ -12,6 +12,7 @@ import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
 import { AdministratorsPanel } from "./AdministratorsPanel";
 import { usePermissions } from "../auth/usePermissions";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 
 const rangeOptions = [{ id: "7d", name: "Last 7 days" }, { id: "30d", name: "Last 30 days" }, { id: "90d", name: "Last 90 days" }];
 const accountTypeOptions = accountTypes.map((type) => ({ id: type.key, name: type.label }));
@@ -45,11 +46,18 @@ function AppUserDirectory() {
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
-  const { data, isFetching } = useQuery({
-    queryKey: ["users", q, createdRange, userType, page],
-    queryFn: () => services.users.list(q, page, pageSize, createdRange, userType),
+  // The search waits for typing to pause so a word is one request, not one per key.
+  const searchQ = useDebouncedValue(q);
+  const { data, isFetching, isPlaceholderData } = useQuery({
+    queryKey: ["users", searchQ, createdRange, userType, page],
+    queryFn: () => services.users.list(searchQ, page, pageSize, createdRange, userType),
+    placeholderData: (previous) => previous,
   });
-  useEffect(() => setPage(1), [q, createdRange, userType]);
+  // Reset on the settled search too: a page chosen while it settled belongs to the old results.
+  useEffect(() => setPage(1), [q, searchQ, createdRange, userType]);
+  useEffect(() => {
+    if (data && !isPlaceholderData) setPage((current) => Math.min(current, Math.max(1, Math.ceil(data.total / pageSize))));
+  }, [data, isPlaceholderData]);
   const result = data ?? { items: [], total: 0, page: 1, pageSize };
 
   useEffect(() => {
