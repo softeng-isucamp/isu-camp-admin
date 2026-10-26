@@ -30,7 +30,10 @@ from auth import (
     Admin,
     admin_required,
     email_taken,
+    identity_changed_since,
     identity_claim_lock,
+    identity_snapshot,
+    STALE_IDENTITY_MESSAGE,
     normalized_email,
     rate_limited,
 )
@@ -171,6 +174,7 @@ def update_profile():
     if invalid:
         return _refusals(invalid, 400)
 
+    loaded = identity_snapshot(admin)
     stored_email = normalized_email(admin.gmail)
     stored_alternative = normalized_email(admin.alternative_email)
     email_changed = normalized_email(email) != stored_email
@@ -240,6 +244,8 @@ def update_profile():
 
     try:
         with identity_claim_lock:
+            if identity_changed_since(admin, loaded):
+                return _error(STALE_IDENTITY_MESSAGE, status=409)
             # Checked again now that no other claim can commit in between.
             found = conflicts()
             if found:

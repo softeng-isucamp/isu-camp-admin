@@ -775,3 +775,66 @@ def test_password_change_is_rate_limited(app, monkeypatch):
 
         assert response.status_code == 429
         assert db.session.get(Admin, 1).password == before
+
+
+class LockWithAGap:
+    """The real identity lock, with other requests let in before its first entry."""
+
+    def __init__(self, real, before_first_entry):
+        self.real = real
+        self.before_first_entry = before_first_entry
+
+    def __enter__(self):
+        if self.before_first_entry:
+            run, self.before_first_entry = self.before_first_entry, None
+            run()
+        return self.real.__enter__()
+
+    def __exit__(self, *details):
+        return self.real.__exit__(*details)
+
+
+def test_a_save_made_from_a_stale_account_is_refused(app, monkeypatch):
+    """A loaded the account before B moved its address and C took the old one.
+
+    A's change flags came from that old snapshot, so its re-check under the
+    lock would compare the wrong thing; it must be refused, not committed.
+    """
+
+    first = add_admin(identifier=1, username="admin01", email="shared@isu.edu.ph")
+    add_admin(identifier=2, username="admin02", email="admin02@isu.edu.ph")
+    signed_in = {"id": 1}
+    monkeypatch.setattr(profile_route, "admin_required",
+                        lambda: (db.session.get(Admin, signed_in["id"]), None))
+    client = app.test_client()
+    others = {}
+
+    def others_save_meanwhile():
+        # Separate app contexts: each request gets its own ORM session, as two
+        # requests on two threads would.
+        with app.app_context():
+            signed_in["id"] = 1
+            others["moved"] = client.patch("/api/profile", json={
+                "username": "admin01", "email": "moved@isu.edu.ph",
+                "currentPassword": CURRENT_PASSWORD})
+        with app.app_context():
+            signed_in["id"] = 2
+            others["taken"] = client.patch("/api/profile", json={
+                "username": "admin02", "email": "shared@isu.edu.ph",
+                "currentPassword": CURRENT_PASSWORD})
+        signed_in["id"] = 1
+
+    monkeypatch.setattr(profile_route, "identity_claim_lock",
+                        LockWithAGap(profile_route.identity_claim_lock, others_save_meanwhile))
+
+    # A rename that still carries the address A loaded: written as-is, it would
+    # move the account back to shared@ without the password an email change needs.
+    stale = client.patch("/api/profile", json={"username": "admin01-renamed", "email": "shared@isu.edu.ph"})
+
+    assert others["moved"].status_code == 200
+    assert others["taken"].status_code == 200
+    assert stale.status_code == 409
+    db.session.expire_all()
+    holders = Admin.query.filter(db.func.lower(Admin.gmail) == "shared@isu.edu.ph").all()
+    assert [holder.id for holder in holders] == [2]
+    assert first.id == 1

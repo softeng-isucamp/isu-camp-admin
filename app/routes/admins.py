@@ -27,7 +27,10 @@ from auth import (
     Admin,
     admin_required,
     email_taken,
+    identity_changed_since,
     identity_claim_lock,
+    identity_snapshot,
+    STALE_IDENTITY_MESSAGE,
     rate_limited,
     reauth_required,
     send_password_reset_otp,
@@ -327,6 +330,8 @@ def update_admin(admin_id):
     if invalid:
         return invalid
 
+    loaded = identity_snapshot(record)
+
     if _username_taken(values["username"], excluding_id=admin_id):
         return _error("That username is already taken", status=409, field="username")
 
@@ -345,6 +350,8 @@ def update_admin(admin_id):
 
     try:
         with identity_claim_lock:
+            if identity_changed_since(record, loaded):
+                return _error(STALE_IDENTITY_MESSAGE, status=409)
             # Checked again now that no other claim can commit in between.
             if _username_taken(values["username"], excluding_id=admin_id):
                 return _error("That username is already taken", status=409, field="username")

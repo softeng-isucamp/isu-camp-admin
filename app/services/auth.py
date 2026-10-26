@@ -388,6 +388,30 @@ def email_taken(email, *, excluding_id=None):
 # API, so a process lock is enough; several would need a database advisory lock.
 identity_claim_lock = threading.Lock()
 
+STALE_IDENTITY_MESSAGE = (
+    "This account was changed somewhere else while you were editing it. "
+    "Reload the page and try again."
+)
+
+
+def identity_snapshot(admin):
+    """The identity fields a save's decisions were made from."""
+
+    return (admin.username, admin.gmail, admin.alternative_email)
+
+
+def identity_changed_since(admin, snapshot):
+    """Re-reads ``admin`` and reports whether its identity moved since ``snapshot``.
+
+    The caller holds ``identity_claim_lock``. A save decides what changed, and
+    whether that needs a password, from the account as it loaded it; if
+    another save has committed since, those decisions are stale and repeating
+    only the uniqueness queries would not catch it.
+    """
+
+    db.session.refresh(admin)
+    return identity_snapshot(admin) != snapshot
+
 
 # ==========================================
 # LOGIN
