@@ -510,6 +510,62 @@ def test_only_one_job_runs_at_a_time(app, monkeypatch):
         wait_for_terminal(first.get_json()["id"])
 
 
+def test_two_requests_arriving_together_start_only_one_job(app, monkeypatch):
+    """Admission is one decision: both requests cannot see "nothing running".
+
+    The barrier holds each request at the old check-then-insert gap, so if
+    admission still checked and reserved in separate steps both would pass.
+    """
+
+    captured = fake_tool(monkeypatch, runtime=5)
+    gap = threading.Barrier(2, timeout=1)
+    original = backup_jobs.active_job
+
+    def active_job_at_the_gap():
+        found = original()
+        try:
+            gap.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return found
+
+    monkeypatch.setattr(backup_jobs, "active_job", active_job_at_the_gap)
+    outcomes = []
+
+    def start():
+        try:
+            outcomes.append(backup_jobs.start_backup("admin01")["id"])
+        except backup_jobs.BackupError as refusal:
+            outcomes.append(refusal.status)
+
+    threads = [threading.Thread(target=start) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+
+    started = [outcome for outcome in outcomes if isinstance(outcome, str)]
+    assert len(started) == 1
+    assert 409 in outcomes
+    running_tool(captured).terminate()
+    wait_for_terminal(started[0])
+
+
+def test_a_job_whose_thread_cannot_start_does_not_block_the_next(app, monkeypatch):
+    fake_tool(monkeypatch)
+    real_start = threading.Thread.start
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    with pytest.raises(RuntimeError):
+        backup_jobs.start_backup("admin01")
+    monkeypatch.setattr(threading.Thread, "start", real_start)
+
+    assert backup_jobs.active_job() is None
+
+
 def test_a_manual_backup_applies_the_saved_retention(app, monkeypatch, tmp_path):
     """Retention is about disk, so it does not care who pressed the button."""
 
@@ -694,6 +750,81 @@ def test_cancelling_a_restore_leaves_the_database_as_it_was(app, monkeypatch, tm
     assert job["kind"] == "restore"
     assert job["status"] == "cancelled"
     assert "--single-transaction" in captured["command"]
+
+
+def test_a_restore_is_not_admitted_for_an_archive_being_deleted(app, monkeypatch, tmp_path):
+    """Deleting and admitting a restore of the same archive cannot interleave.
+
+    The restore request arrives while the delete is between finding the archive
+    and removing it. Either the delete refuses or the restore does; never a
+    restore accepted for a file that then disappears under pg_restore.
+    """
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "true")
+    archive_id = store_archive(tmp_path)
+    fake_tool(monkeypatch, runtime=0)
+    original_find = backup_jobs.find_archive
+    restore = {}
+
+    def restore_now():
+        try:
+            restore["view"] = backup_jobs.start_restore(archive_id, "admin02")
+        except backup_jobs.BackupError as refusal:
+            restore["status"] = refusal.status
+
+    def find_while_a_restore_arrives(backup_id):
+        found = original_find(backup_id)
+        if "thread" not in restore:
+            restore["thread"] = threading.Thread(target=restore_now)
+            restore["thread"].start()
+            restore["thread"].join(0.3)
+        return found
+
+    monkeypatch.setattr(backup_jobs, "find_archive", find_while_a_restore_arrives)
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        deleted = app.test_client().delete(f"/api/backups/{archive_id}")
+    restore["thread"].join(5)
+
+    if deleted.status_code == 204:
+        assert restore.get("status") == 404, "a restore was admitted for a deleted archive"
+    else:
+        assert "view" in restore
+        assert (tmp_path / f"{archive_id}.dump").exists()
+    if "view" in restore:
+        wait_for_terminal(restore["view"]["id"])
+
+
+def test_an_automatic_run_never_removes_a_running_backup_s_partial_file(app, monkeypatch, tmp_path):
+    """Leftover .partial files are swept only when no job could own them."""
+
+    from services import backup_schedule
+
+    captured = fake_tool(monkeypatch, runtime=5)
+    manual = backup_jobs.start_backup("admin01")
+    process = running_tool(captured)
+    partials = list(tmp_path.glob("*.dump.partial"))
+    assert len(partials) == 1
+
+    assert backup_schedule.run_backup_now(app=None, keep=7) is None
+
+    assert partials[0].exists(), "the automatic run deleted a live backup's partial file"
+    process.terminate()
+    wait_for_terminal(manual["id"])
+
+
+def test_an_automatic_run_still_sweeps_partials_nobody_owns(app, monkeypatch, tmp_path):
+    from services import backup_schedule
+
+    abandoned = tmp_path / "20261011-075702Z.dump.partial"
+    abandoned.write_bytes(b"PGDMP-abandoned")
+    fake_tool(monkeypatch)
+
+    job = backup_schedule.run_backup_now(app=None, keep=7)
+
+    assert job["status"] == "succeeded"
+    assert not abandoned.exists()
 
 
 def test_cancelling_an_unknown_job_is_not_found(app, monkeypatch):

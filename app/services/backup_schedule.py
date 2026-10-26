@@ -51,7 +51,6 @@ from services.backup_jobs import (
     job_retention,
     list_backups,
     start_backup,
-    sweep_unfinished,
 )
 
 # The campus is in one place, so the schedule runs on one clock. Stored on the
@@ -470,10 +469,8 @@ def run_backup_now(app=None, keep=None):
     one this module started - the disk does not care who pressed the button.
     """
 
-    swept = sweep_unfinished()
-    if swept:
-        logger.info("Removed %d unfinished archive(s) from an earlier run", swept)
-
+    # Leftover .partial files are swept by start_backup once it is admitted,
+    # never here: while another job runs, a .partial is that job's live file.
     if keep is None:
         keep = _default_keep()
 

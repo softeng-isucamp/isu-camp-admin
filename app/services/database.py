@@ -22,7 +22,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
-from extensions import db, mail
+from extensions import db, engine_options, mail
 from auth import auth_bp
 from model.location import Location
 from model.app_user import AppUser
@@ -240,6 +240,8 @@ print("Database URL loaded:", safe_database_url)
 
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options(database_url)
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
