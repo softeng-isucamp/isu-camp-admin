@@ -295,4 +295,25 @@ describe("Users search requests", () => {
     expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
     expect(screen.queryByText("No users found.")).not.toBeInTheDocument();
   });
+
+  it("returns to the first page when Next is pressed while a new search is loading", async () => {
+    const maria = page.items[0];
+    let resolveFirstPage: (value: typeof page) => void = () => {};
+    const firstPage = new Promise<typeof page>((resolve) => { resolveFirstPage = resolve; });
+    const list = vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? pageNumber === 1 ? firstPage : { items: [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    // The previous results are still showing, so Next is still enabled.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 2, 10, "all", "all"));
+    resolveFirstPage({ items: [maria], total: 1, page: 1, pageSize: 10 });
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
+  });
 });
