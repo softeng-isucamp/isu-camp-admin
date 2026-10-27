@@ -47,8 +47,14 @@ def _matches(dto, query, type_filter, status_filter, building_id_filter, floor_f
         str(dto["id"]) if dto["type"] in PLACE_CLASSIFICATIONS else "",
     }:
         return False
-    if floor_filter and str(dto.get("floor") or "").lower() != floor_filter:
-        return False
+    if floor_filter:
+        floor = str(dto.get("floor") or "").lower()
+        unspecified_indoor = (
+            floor_filter == "unspecified floor" and not floor
+            and dto["type"] in {"Room", "Office", "Laboratory", "Restroom"}
+        )
+        if floor != floor_filter and not unspecified_indoor:
+            return False
     return True
 
 

@@ -1405,7 +1405,10 @@ export const services: Services = {
           (!filters.type || backendLocationType(location) === filters.type) &&
           (!filters.status || location.status === filters.status) &&
           (!filters.buildingId || location.parentId === filters.buildingId || (isPlace(location) && location.id === filters.buildingId)) &&
-          (!filters.floor || location.floor === filters.floor)
+          (!filters.floor || location.floor === filters.floor || (
+            filters.floor === "Unspecified Floor" && !location.floor &&
+            indoorLocationTypes.includes(location.type as typeof indoorLocationTypes[number])
+          ))
         );
       const resolvedPageSize = pageSize ?? Math.max(filtered.length, 1);
 

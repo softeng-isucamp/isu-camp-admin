@@ -209,6 +209,16 @@ def test_list_locations_applies_relationship_filters_before_pagination(monkeypat
     assert [item["id"] for item in response.json["items"]] == ["2"]
 
 
+def test_unspecified_floor_filter_includes_only_indoor_records_without_a_floor(monkeypatch):
+    client = make_client(monkeypatch)
+    location_module.Location.query.records[0].floor_id = None
+    response = client.get("/api/locations?floor=Unspecified%20Floor")
+
+    assert response.status_code == 200
+    assert response.json["total"] == 1
+    assert [item["id"] for item in response.json["items"]] == ["2"]
+
+
 def test_list_locations_composes_buildings_and_uses_database_location_types(monkeypatch):
     client = make_client(monkeypatch)
 

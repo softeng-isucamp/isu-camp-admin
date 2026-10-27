@@ -6,6 +6,7 @@ import { Locations } from "./Locations";
 import { services, setMockFailure } from "../../services/api";
 import { PasswordConfirmationRequiredError } from "../../services/errors";
 import { chooseFilterOption, filterOptionIds, filterOptionNames, selectedFilterOptionId } from "../../test/filterCombobox";
+import type { Location } from "../../types";
 import { signInAs } from "../../test/session";
 import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 
@@ -422,6 +423,73 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     fireEvent.click(expandBuilding);
     fireEvent.click(await screen.findByRole("button", { name: "Expand 2nd Floor" }));
     expect(await tableBody().findByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
+  });
+
+  it.each([undefined, "", "Ground Floor"].flatMap((floor) => [false, true].map((filtered) => ({ floor, filtered }))))("keeps the floor arrow available for floor $floor (filtered: $filtered)", async ({ floor, filtered }) => {
+    const building: Location = { id: "floor-arrow-building", name: "Floor Arrow Building", code: "ARROW-B", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false };
+    const room: Location = { id: "floor-arrow-room", name: "Arrow Room", code: "ARROW-R", type: "Room", parentId: building.id, building: building.name, floor, status: "Active", lat: null, lng: null, positioned: false };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 100 });
+    renderLocations();
+    const expandBuilding = await screen.findByRole("button", { name: "Expand Floor Arrow Building" });
+    if (filtered) {
+      chooseFilterOption("BUILDING", building.name);
+    } else {
+      fireEvent.click(expandBuilding);
+    }
+    const floorName = floor || "Unspecified Floor";
+    await screen.findByText(floorName, { selector: "strong" });
+    if (!filtered) {
+      fireEvent.click(screen.getByRole("button", { name: `Expand ${floorName}` }));
+    }
+    const collapse = await screen.findByRole("button", { name: `Collapse ${floorName}` });
+    expect(screen.getByText("Arrow Room")).toBeInTheDocument();
+    fireEvent.click(collapse);
+    expect(screen.queryByText("Arrow Room")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Expand ${floorName}` }));
+    expect(screen.getByText("Arrow Room")).toBeInTheDocument();
+  });
+
+  it("keeps a populated named floor expandable when searching by building code", async () => {
+    const building: Location = { id: "code-search-building", name: "Code Search Building", code: "BLDG-UNIQUE-CODE", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false };
+    const room: Location = { id: "code-search-room", name: "Existing Room", code: "ROOM-ONLY", type: "Room", parentId: building.id, building: building.name, floor: "Second Floor", status: "Active", lat: null, lng: null, positioned: false };
+    const inactiveRoom: Location = { ...room, id: "code-search-inactive-room", name: "Inactive Room", code: "INACTIVE-ONLY", status: "Inactive" };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room, inactiveRoom], total: 3, page: 1, pageSize: 100 });
+    renderLocations(["/locations?q=BLDG-UNIQUE-CODE"]);
+    await screen.findByText("Second Floor", { selector: "strong" });
+    const collapse = screen.getByRole("button", { name: "Collapse Second Floor" });
+    expect(screen.getByText("Existing Room")).toBeInTheDocument();
+    fireEvent.click(collapse);
+    expect(screen.queryByText("Existing Room")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Second Floor" }));
+    expect(screen.getByText("Existing Room")).toBeInTheDocument();
+    expect(screen.getByText("Inactive Room")).toBeInTheDocument();
+    chooseFilterOption("STATUS", "Active");
+    expect(screen.getByText("Existing Room")).toBeInTheDocument();
+    expect(screen.queryByText("Inactive Room")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Second Floor" })).toBeInTheDocument();
+  });
+
+  it("floor edge case: selecting Unspecified Floor retains its rooms", async () => {
+    const building: Location = { id: "unspecified-filter-building", name: "Unspecified Filter Building", code: "UFB", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false };
+    const room: Location = { ...building, id: "unspecified-filter-room", name: "Legacy Blank Floor Room", code: "UFROOM", type: "Room", parentId: building.id, building: building.name };
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: [building, room], total: 2, page: 1, pageSize: 100 });
+    renderLocations();
+    await screen.findByRole("button", { name: `Expand ${building.name}` });
+    chooseFilterOption("FLOOR", "Unspecified Floor");
+    expect(await screen.findByText(room.name)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Unspecified Floor" })).toBeInTheDocument();
+  });
+
+  it.each([false, true])("floor edge case: hides floors whose rooms are excluded by status (stored floor: %s)", async (storedFloor) => {
+    const building: Location = { id: "status-floor-building", name: "Status Floor Building", code: "SFB", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false };
+    const room: Location = { ...building, id: "status-floor-room", name: "Inactive Floor Room", code: "SFR", type: "Room", parentId: building.id, building: building.name, floor: "Third Floor", status: "Inactive" };
+    const floor: Location = { ...building, id: "status-floor-record", name: "Third Floor", code: "SFF", type: "Floor", parentId: building.id };
+    const records = storedFloor ? [building, floor, room] : [building, room];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+    renderLocations();
+    await screen.findByRole("button", { name: `Expand ${building.name}` });
+    chooseFilterOption("STATUS", "Active");
+    expect(screen.queryByText("Third Floor", { selector: "strong" })).not.toBeInTheDocument();
   });
 
   it("keeps collapsed nested locations out of the top-level rows", async () => {

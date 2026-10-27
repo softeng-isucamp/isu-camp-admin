@@ -550,6 +550,9 @@ describe("mock service contracts", () => {
       id: legacy.id,
       parentId: "osm-location-c5fb7a267a8ca63d",
     });
+    const filtered = await services.locations.list("", 1, 100, { floor: "Unspecified Floor" });
+    expect(filtered.items.map((item) => item.id)).toContain(legacy.id);
+    expect(filtered.items.every((item) => indoorLocationTypes.includes(item.type as typeof indoorLocationTypes[number]))).toBe(true);
   });
 
   it("permanently deletes a building, its connected children, and audits each record", async () => {
