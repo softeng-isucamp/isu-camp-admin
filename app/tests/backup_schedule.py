@@ -1,6 +1,7 @@
 """The automatic backup: when it runs, what it keeps, and what it cleans up."""
 
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
@@ -378,6 +379,43 @@ def test_a_claim_outlives_the_process_that_made_it(app, tmp_path):
     assert backup_jobs.list_backups() == []
 
 
+def _age_the_claim(tmp_path, hours=1):
+    marker = next(tmp_path.glob(".claimed-*"))
+    old = time.time() - hours * 3600
+    os.utime(marker, (old, old))
+
+
+def test_a_claim_with_no_archive_behind_it_is_taken_over(app, tmp_path):
+    """The owner was killed mid-dump, or its dump failed: the night is not
+    taken, and a restart that finds the marker must not skip it for ever."""
+
+    due = datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+    assert backup_schedule.claim(due) is True
+    _age_the_claim(tmp_path)
+
+    assert backup_schedule.claim(due) is True
+    # And it is a claim again, so a third caller is still turned away.
+    assert backup_schedule.claim(due) is False
+
+
+def test_a_claim_with_an_archive_taken_since_is_kept(app, tmp_path):
+    due = datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+    backup_schedule.claim(due)
+    _age_the_claim(tmp_path)
+    taken = datetime.now(timezone.utc) - timedelta(minutes=30)
+    store_archive(tmp_path, "20261012-183100Z", backup_jobs.iso_utc(taken))
+
+    assert backup_schedule.claim(due) is False
+
+
+def test_a_claim_is_respected_while_its_dump_may_still_be_running(app, tmp_path):
+    due = datetime(2026, 10, 12, 18, 30, tzinfo=timezone.utc)
+    backup_schedule.claim(due)
+    _age_the_claim(tmp_path, hours=0.1)
+
+    assert backup_schedule.claim(due) is False
+
+
 # ==========================================
 # WHEN A RUN IS OWED
 # ==========================================
@@ -624,3 +662,62 @@ def test_switching_it_off_stops_the_runs(app, monkeypatch, recorded):
     time.sleep(0.3)
 
     assert len(backup_jobs.list_backups()) == settled
+
+def _strictly_after(due):
+    """``next_run_after`` for one fixed slot, with the real one's contract:
+    the answer is strictly after the moment asked about, so the slot itself is
+    never the answer once the clock has reached it."""
+
+    return lambda moment, schedule=None: (
+        due if moment < due else due + timedelta(days=1)
+    )
+
+
+def test_a_run_is_taken_when_the_clock_reaches_it(app, monkeypatch, tmp_path, recorded):
+    """The timer sleeps up to the due minute and must still take that run.
+
+    Asking for the next run again after waking names tomorrow, so a timer that
+    does that sleeps through every night and only ever backs up on a restart.
+    """
+
+    save(app, enabled=True)
+    fake_dump(monkeypatch)
+    due = datetime.now(timezone.utc) + timedelta(seconds=0.3)
+    monkeypatch.setattr(backup_schedule, "SLEEP_SLICE_SECONDS", 0.01)
+    monkeypatch.setattr(backup_schedule, "is_overdue", lambda: False)
+    monkeypatch.setattr(backup_schedule, "next_run_after", _strictly_after(due))
+
+    assert backup_jobs.active_job() is None
+
+    backup_schedule.start_scheduler(app)
+
+    assert waited_for(lambda: backup_jobs.list_backups(), TIMER_PATIENCE_SECONDS)
+    assert (tmp_path / backup_schedule._claim_path(due).name).exists()
+
+
+def test_a_run_that_falls_due_during_an_outage_is_taken_afterwards(app, monkeypatch, recorded):
+    """A schedule that cannot be read is usually the database being away. The
+    night that came due meanwhile is still owed when it comes back."""
+
+    save(app, enabled=True)
+    fake_dump(monkeypatch)
+    due = datetime.now(timezone.utc) + timedelta(seconds=0.4)
+    monkeypatch.setattr(backup_schedule, "SLEEP_SLICE_SECONDS", 0.01)
+    monkeypatch.setattr(backup_schedule, "is_overdue", lambda: False)
+    monkeypatch.setattr(backup_schedule, "next_run_after", _strictly_after(due))
+
+    real = backup_schedule.current_schedule
+    outage_from = due - timedelta(seconds=0.2)
+    outage_until = due + timedelta(seconds=0.2)
+
+    def flaky(application):
+        now = datetime.now(timezone.utc)
+        return None if outage_from <= now < outage_until else real(application)
+
+    monkeypatch.setattr(backup_schedule, "current_schedule", flaky)
+
+    assert backup_jobs.active_job() is None
+
+    backup_schedule.start_scheduler(app)
+
+    assert waited_for(lambda: backup_jobs.list_backups(), TIMER_PATIENCE_SECONDS)
