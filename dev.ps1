@@ -30,6 +30,18 @@ Write-Host "==========================================" -ForegroundColor Cyan
 
 $PortOwners = @{ 5000 = "Flask backend"; 5173 = "Vite frontend" }
 
+function Invoke-Taskkill {
+    param([int]$ProcessId)
+
+    # Run through cmd so taskkill's stderr is swallowed by cmd and never reaches
+    # PowerShell. Redirecting a native command's stderr here instead wraps each
+    # line in a NativeCommandError, which this script's
+    # $ErrorActionPreference = "Stop" promotes to a terminating error: a kill
+    # that merely reports "process not found" would abort the whole run before
+    # anything started. The exit code is left in $LASTEXITCODE for the caller.
+    cmd /c "taskkill /PID $ProcessId /T /F >nul 2>nul"
+}
+
 function Get-PortOwnerId {
     param([int]$Port)
 
@@ -37,8 +49,9 @@ function Get-PortOwnerId {
         Select-Object -First 1
     if ($connection) { return [int]$connection.OwningProcess }
 
-    # Hosts without the NetTCPIP module still have netstat.
-    $line = netstat -ano 2>$null | Select-String ":$Port\s+.*LISTENING" | Select-Object -First 1
+    # Hosts without the NetTCPIP module still have netstat. Through cmd for the
+    # same reason as Invoke-Taskkill: its stderr must not reach PowerShell.
+    $line = cmd /c "netstat -ano 2>nul" | Select-String ":$Port\s+.*LISTENING" | Select-Object -First 1
     if ($line) { return [int](($line.Line -split '\s+') | Where-Object { $_ } | Select-Object -Last 1) }
 
     return $null
@@ -86,13 +99,17 @@ function Stop-ProjectDevProcess {
 
     $stopped = 0
     foreach ($process in Get-ProjectDevProcess) {
+        # /T kills the tree. Stopping only the parent is what left a reloader
+        # child alive holding port 5000 under a pid that no longer existed - and
+        # it is also why a pid listed here is routinely gone by the time its turn
+        # comes, having been taken as a descendant of an earlier one. Expected,
+        # so it is skipped without a line of its own.
+        if (-not (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) { continue }
         if (-not $Quiet) {
             Write-Host "[PORTS] Stopping leftover pid $($process.ProcessId) ($($process.Name))" -ForegroundColor Yellow
         }
-        # /T kills the tree. Stopping only the parent is what left a reloader
-        # child alive holding port 5000 under a pid that no longer existed.
-        taskkill /PID $process.ProcessId /T /F 2>$null | Out-Null
-        $stopped++
+        Invoke-Taskkill -ProcessId $process.ProcessId
+        if ($LASTEXITCODE -eq 0) { $stopped++ }
     }
     if ($stopped -gt 0) { Start-Sleep -Milliseconds 1200 }
     return $stopped
@@ -203,8 +220,9 @@ try {
     if ($BackendProcess) {
         # taskkill /T rather than Stop-Process: Flask's reloader runs the app in
         # a child process that inherits the listening socket, and stopping only
-        # the parent left that child holding port 5000.
-        taskkill /PID $BackendProcess.Id /T /F 2>$null | Out-Null
+        # the parent left that child holding port 5000. A backend that has
+        # already exited is not an error to report on the way out.
+        Invoke-Taskkill -ProcessId $BackendProcess.Id
     }
     # A sweep as well, because the pid above is only a starting point: if the
     # parent has already gone, its children are no longer reachable through it.

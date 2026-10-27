@@ -92,7 +92,7 @@ describe("code step: expiry", () => {
 
     // The description joins the bold address with a space, so match around it.
     expect(codeHeading()).toHaveAccessibleDescription(
-      /^If an account exists for admin@isu\.edu\.ph ?, a 6-digit verification code has been sent to that address\.$/,
+      /^A 6-digit verification code has been sent to admin@isu\.edu\.ph ?\.$/,
     );
     expect(
       screen.getByText("Only the most recently sent code will work. Requesting a new code will invalidate your previous code."),
@@ -130,7 +130,7 @@ describe("code step: expiry", () => {
     mockBackend({ [REQUEST]: [issued()] });
     await openCodeStep();
 
-    expect(codeHeading()).toHaveAccessibleDescription(/has been sent to that address\.$/);
+    expect(codeHeading()).toHaveAccessibleDescription(/A 6-digit verification code has been sent to/);
     expect(screen.queryByRole("timer")).toBeNull();
     expect(screen.queryByText(/expires in/i)).toBeNull();
     await tickSeconds(5);
@@ -379,7 +379,7 @@ describe("code step: change email", () => {
       { email: EMAIL, purpose: "password" },
       { email: "other@isu.edu.ph", purpose: "password" },
     ]);
-    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent("other@isu.edu.ph");
+    expect(screen.getByText(/verification code has been sent to/i)).toHaveTextContent("other@isu.edu.ph");
     expectBoxes("");
   });
 
@@ -444,7 +444,7 @@ describe("code step: assistive technology", () => {
 
     const heading = screen.getByRole("heading", { name: /verification code/i });
     expect(heading).toHaveFocus();
-    expect(heading).toHaveAccessibleDescription(/has been sent to that address\.$/);
+    expect(heading).toHaveAccessibleDescription(/A 6-digit verification code has been sent to/);
   });
 
   it("keeps the blurred login preview behind the modal out of reach", async () => {

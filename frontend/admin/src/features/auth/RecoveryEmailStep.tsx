@@ -1,6 +1,6 @@
 import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
-import { RateLimitError, services } from "../../services/api";
+import { AuthError, RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
 import { errorMessage } from "../../services/errors";
 import { recoveryEmailSchema } from "../../services/schemas";
@@ -49,6 +49,9 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
         if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
         setError(errorMessage(err, "We couldn't send the verification code. Please try again."));
+        // An address on no account is the field's own problem, like a malformed
+        // one: mark it, so the message clears when the address is corrected.
+        if (err instanceof AuthError && err.kind === "email_not_found") setInvalid(true);
       }
     } finally {
       inFlight.current = false;
@@ -60,8 +63,9 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
     <form onSubmit={submit} noValidate>
       <h2>{title}</h2>
       <p className="muted recovery-copy">
-        Enter the primary or alternative email associated with your administrator account. If the account is eligible for
-        recovery, we'll send a <span className="nowrap">6-digit</span> verification code.
+        Enter the primary or alternative email associated with your administrator account. We'll send a{" "}
+        <span className="nowrap">6-digit</span> verification code to that address. An email that is not on an
+        administrator account is refused.
       </p>
       <label className="field">
         <span className="recovery-label">Admin email</span>

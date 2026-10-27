@@ -126,7 +126,17 @@ A conflict never names the account that holds the address. Several fields can be
 
 ### Recovery
 
-Forgot password and forgot username accept either address. The code is sent **only to the address that was typed** — mailing the primary instead would tell whoever typed the alternative that the two belong together — and the response is identical whether or not an account matches. Codes are keyed per purpose and typed address, so a code requested for one address does not verify through the other. An address two accounts hold between them recovers neither, the same as an ambiguous primary always has.
+Forgot password and forgot username accept either address. The code is sent **only to the address that was typed** — mailing the primary instead would tell whoever typed the alternative that the two belong together. Codes are keyed per purpose and typed address, so a code requested for one address does not verify through the other.
+
+**A submitted address must already be on record, and is refused if it is not.** `POST /api/recovery/request` looks the address up against `gmail` and `alternative_email` across all accounts, and answers `400` `email_not_found` — *"That email is not registered to an administrator account. Check the address and try again."* — unless it resolves to exactly one **active** account. One code and one message cover all three refusals: no account holds the address, the account holding it is deactivated, or two accounts hold it between them. The differences are about an account the sender may have no business knowing exists.
+
+Refused before anything is counted or stored: a mistyped address spends none of the account's three-per-window request budget and leaves no code entry behind.
+
+> **This answer confirms which addresses are administrator accounts.** Anyone can submit addresses one at a time and learn which ones exist. That is a deliberate trade for telling an administrator that they mistyped their own address, instead of leaving them waiting for a code that was never sent. What remains of the brake is the per-client cap — 10 requests a minute per IP — and the 60-second resend cooldown per client and address. An earlier design answered every well-formed address with an identical *"if an account exists"* reply precisely to prevent this; if that property is wanted back, this refusal is the thing to remove.
+
+Verification is unchanged and does not depend on this: `verify` and `reset-password` still require the account the code was issued for, so a code never reaches an account the address does not belong to.
+
+User Management's password-reset send issues through this same flow: the colleague receives a code keyed to their own address, redeems it on the forgot-password page, and it comes out of that account's own request budget. It is refused when the account's address is one recovery could not resolve — shared with another account, or absent — because a code for such an address could not be redeemed there.
 
 Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
 
@@ -174,6 +184,7 @@ Both carry `Retry-After`; the frontend reads the `code`, not the message.
 | --- | --- | --- | --- |
 | `recovery_restricted` | This account's recovery is closed for a while | the subject | minutes |
 | `rate_limited` | This client is going too fast | per IP, or per IP and address | seconds |
+| `email_not_found` | The address is on no active account, so nothing was sent | the submitted address | n/a — fix the address |
 
 The 60-second resend cooldown and the per-IP flood limits are `rate_limited`. The 3-per-window request cap and the 5-failure restriction are `recovery_restricted`.
 

@@ -235,8 +235,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       <h2 aria-describedby={sentId}>Enter verification code</h2>
       <p className="muted recovery-copy">
         <span id={sentId}>
-          If an account exists for <strong>{email}</strong>, a <span className="nowrap">6-digit</span> verification code has been sent to
-          that address.
+          A <span className="nowrap">6-digit</span> verification code has been sent to <strong>{email}</strong>.
         </span>{" "}
         <button type="button" className="recovery-link" onClick={onChangeEmail} disabled={verifying || resending}>
           Change email

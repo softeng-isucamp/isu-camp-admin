@@ -52,8 +52,12 @@ describe("fixture username recovery", () => {
     await expect(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE)).resolves.toEqual({ username: USERNAME });
   });
 
-  it("gives an unknown email the same invalid-code answer, revealing nothing", async () => {
-    await adapter.auth.requestRecovery("nobody@example.com", "username");
+  it("refuses a username request for an address on no account", async () => {
+    expect(await failure(adapter.auth.requestRecovery("nobody@example.com", "username")))
+      .toMatchObject({ kind: "email_not_found" });
+  });
+
+  it("still answers a guess at an unknown email with invalid_code", async () => {
     expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "username", TEST_CODE))).toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });
   });
 });

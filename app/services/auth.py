@@ -47,17 +47,12 @@ logger = logging.getLogger(__name__)
 # Temporary Password Reset OTP Storage
 # ==========================================
 
-# Keyed by username for the legacy /api/reset/* routes and the admin-triggered
-# reset, and by (purpose, email) for /api/recovery/*, so the two never collide.
+# Keyed by (purpose, email) throughout: every code is issued and redeemed by
+# address, including the one User Management sends a colleague. A username-keyed
+# flow used to share this dict and was removed with the routes that redeemed it.
 # Every read and write holds ``recovery_lock``: the recovery sweep iterates this
 # dict, and the API serves requests on several threads.
 reset_otps = {}
-
-# Serializes the legacy username-keyed flow from issuing a code to committing
-# the password it redeems, so a code replaced while its request was hashing can
-# no longer be redeemed, and no new code is issued between a redemption's check
-# and its commit. Taken before ``recovery_lock``, never while holding it.
-legacy_reset_lock = threading.Lock()
 
 OTP_LIFETIME_SECONDS = 600
 
@@ -818,258 +813,6 @@ def reauth_required(message=REAUTH_DEFAULT_MESSAGE):
 
 
 # ==========================================
-# PASSWORD RESET OTP DELIVERY
-# ==========================================
-
-def send_password_reset_otp(admin):
-    """Issues a reset code for ``admin`` and emails it to their address.
-
-    Shared by the sign-in page's own request and by User Management, so a
-    locked-out administrator is helped without anyone else seeing the code: it
-    only ever reaches the account's registered address.
-    """
-
-    otp = generate_otp()
-
-    with legacy_reset_lock, recovery_lock:
-        reset_otps[admin.username] = {
-            "otp": otp,
-            "expires_at": otp_expiry()
-        }
-
-    message = Message(
-        subject="ISU-CAMP Password Reset OTP",
-        recipients=[admin.gmail]
-    )
-
-    message.body = f"""
-Hello {admin.username},
-
-You requested to reset your ISU-CAMP admin password.
-
-Your verification code is:
-
-{otp}
-
-This code will expire in 10 minutes.
-
-If you did not request this password reset, please ignore this email.
-
-ISU-CAMP Admin System
-"""
-
-    mail.send(message)
-
-
-# ==========================================
-# REQUEST PASSWORD RESET OTP
-# ==========================================
-
-@auth_bp.route("/reset/request", methods=["POST"])
-def request_reset():
-
-    try:
-
-        data = request.get_json(silent=True)
-        username = str(data.get("username") or "") if isinstance(data, dict) else ""
-
-        limited = rate_limited(
-            "reset-request",
-            f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
-            1,
-            "Too many password reset requests. Please wait before requesting another code.",
-        )
-        if limited:
-            return limited
-
-        if not isinstance(data, dict) or not data:
-            return jsonify({
-                "success": False,
-                "message": "Request body is required"
-            }), 400
-
-        if not username:
-            return jsonify({
-                "success": False,
-                "message": "Username is required"
-            }), 400
-
-        admin = Admin.query.filter_by(
-            username=username
-        ).first()
-
-        if not admin:
-            return jsonify({
-                "success": False,
-                "message": "Admin account not found"
-            }), 404
-
-        if not admin.gmail:
-            return jsonify({
-                "success": False,
-                "message": "No Gmail address is registered for this account"
-            }), 400
-
-        send_password_reset_otp(admin)
-
-        return jsonify({
-            "success": True,
-            "message": "Verification code sent to the registered Gmail."
-        }), 200
-
-    except Exception:
-
-        logger.exception("Failed to send a password reset verification code")
-
-        return jsonify({
-            "success": False,
-            "message": "Failed to send verification code"
-        }), 500
-
-
-# ==========================================
-# VERIFY PASSWORD RESET OTP
-# ==========================================
-
-@auth_bp.route("/reset/verify", methods=["POST"])
-def verify_reset_code():
-
-    data = request.get_json(silent=True)
-    username = str(data.get("username") or "") if isinstance(data, dict) else ""
-    otp = str(data.get("code") or "") if isinstance(data, dict) else ""
-
-    limited = rate_limited(
-        "reset-verify",
-        f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
-        5,
-        "Too many verification attempts. Please try again later.",
-    )
-    if limited:
-        return limited
-
-    if not username or not otp:
-        return jsonify({"success": False, "message": "Username and verification code are required"}), 400
-
-    verdict = legacy_reset_code_verdict(username, otp)
-    if verdict:
-        return verdict
-
-    return jsonify({"success": True, "message": "Verification code accepted"}), 200
-
-
-def legacy_reset_code_verdict(username, otp, consume=False):
-    """A refusal for a legacy reset code, or None when it is good.
-
-    Read, judged and (with ``consume``) removed as one step under
-    ``recovery_lock``, so an expired entry dropped here is the one that was
-    read, never a newer code issued meanwhile.
-    """
-
-    with recovery_lock:
-        reset = reset_otps.get(username)
-        if not reset or datetime.utcnow() > reset["expires_at"]:
-            reset_otps.pop(username, None)
-            return jsonify({"success": False, "message": "Verification code has expired"}), 400
-        if not secrets.compare_digest(str(reset["otp"]), str(otp)):
-            return jsonify({"success": False, "message": "Invalid verification code"}), 400
-        if consume:
-            del reset_otps[username]
-    return None
-
-
-# ==========================================
-# RESET PASSWORD
-# ==========================================
-
-@auth_bp.route("/reset-password", methods=["POST"])
-def reset_password():
-
-    try:
-
-        data = request.get_json(silent=True)
-        username = str(data.get("username") or "") if isinstance(data, dict) else ""
-
-        limited = rate_limited(
-            "reset-password",
-            f"{request.remote_addr or 'unknown'}:{username.strip().lower()}",
-            5,
-            "Too many password reset attempts. Please try again later.",
-        )
-        if limited:
-            return limited
-
-        if not isinstance(data, dict) or not data:
-            return jsonify({
-                "success": False,
-                "message": "Request body is required"
-            }), 400
-
-        otp = data.get("code")
-        password = data.get("password")
-
-        if not username or not otp or not password:
-            return jsonify({
-                "success": False,
-                "message": "Username, verification code, and new password are required"
-            }), 400
-
-        weakness = first_password_issue(password)
-        if weakness:
-            return jsonify({
-                "success": False,
-                "message": weakness
-            }), 400
-
-        # Checked first so a wrong code is refused before the slow hash, and
-        # checked again, and spent, once the hash is done: the code may have
-        # been replaced or redeemed while it ran.
-        verdict = legacy_reset_code_verdict(username, otp)
-        if verdict:
-            return verdict
-
-        password_hash = hash_password(password)
-
-        with legacy_reset_lock:
-            admin = Admin.query.filter_by(
-                username=username
-            ).first()
-
-            if not admin:
-
-                with recovery_lock:
-                    reset_otps.pop(username, None)
-
-                return jsonify({
-                    "success": False,
-                    "message": "Admin account not found"
-                }), 404
-
-            verdict = legacy_reset_code_verdict(username, otp, consume=True)
-            if verdict:
-                return verdict
-
-            admin.password = password_hash
-
-            db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "message": "Password reset successful"
-        }), 200
-
-    except Exception:
-
-        logger.exception("Password reset failed")
-
-        db.session.rollback()
-
-        return jsonify({
-            "success": False,
-            "message": "Password reset failed"
-        }), 500
-
-
-# ==========================================
 # ACCOUNT RECOVERY BY EMAIL
 # ==========================================
 #
@@ -1085,7 +828,9 @@ RECOVERY_RESEND_SECONDS = RATE_LIMIT_WINDOW_SECONDS
 # Wrong codes one account may guess before recovery is restricted. Counted
 # against the account, not against the code: see the subject section below.
 RECOVERY_ATTEMPT_LIMIT = 5
-RECOVERY_REQUEST_MESSAGE = "If an account exists for this email, a code has been sent."
+# Said only once the address has been found on an account, so it states what
+# happened rather than hedging about whether an account exists.
+RECOVERY_REQUEST_MESSAGE = "A verification code has been sent to this email."
 
 # Rate limits, per minute. Requests are limited per address as the resend
 # cooldown and per client across addresses so the form cannot be used to flood
@@ -1213,6 +958,21 @@ RECOVERY_REQUEST_LIMIT = 3
 # going and lasts seconds, so they must not look the same.
 RECOVERY_RESTRICTED_CODE = "recovery_restricted"
 RATE_LIMITED_CODE = "rate_limited"
+
+# The submitted address is not one recovery can act on. One code and one message
+# for all three reasons - no account holds the address, the account holding it is
+# deactivated, or two accounts hold it between them - because the differences are
+# about an account the sender may have no business knowing exists.
+#
+# Answering this at all tells whoever asked whether an address has an
+# administrator account, which the generic "if an account exists" reply used to
+# withhold. That is the accepted trade: an administrator who mistypes their own
+# address is told so, instead of waiting for a code that was never coming.
+RECOVERY_UNKNOWN_EMAIL_CODE = "email_not_found"
+RECOVERY_UNKNOWN_EMAIL_MESSAGE = (
+    "That email is not registered to an administrator account. "
+    "Check the address and try again."
+)
 
 RECOVERY_RESTRICTED_MESSAGE = (
     "Too many attempts. Account recovery is locked for a short while. "
@@ -1549,8 +1309,7 @@ def store_recovery_entry(pool, cap, key, entry):
     if len(pool) <= cap:
         return
     sweep_recovery_codes()
-    excess = sum(1 for k in list(pool) if isinstance(k, tuple)) - cap
-    for oldest in [k for k in list(pool) if isinstance(k, tuple)][:max(excess, 0)]:
+    for oldest in list(pool)[:max(len(pool) - cap, 0)]:
         pool.pop(oldest, None)
 
 
@@ -1644,6 +1403,42 @@ ISU-CAMP Admin System
     run_in_background(deliver)
 
 
+def send_password_reset_otp(admin):
+    """Mails ``admin`` a reset code they can redeem on the forgot-password page.
+
+    How User Management helps a locked-out colleague: the code goes to the
+    account's own inbox, never to the caller's screen, and the colleague
+    redeems it by entering that same address like any other password reset.
+    Returns None once a code is on its way, or the response to send instead.
+
+    It issues through the same store, key and budget as a request the colleague
+    would have made themselves. A separate code store used to back this, which
+    meant the colleague received a code with nowhere to type it and a second,
+    different code waiting once they used the page anyway.
+    """
+
+    address = normalized_email(admin.gmail)
+    subject, owner = recovery_identity(address)
+
+    # The page refuses an address no single active account holds, so a code
+    # for one could not be redeemed there. Refusing here instead keeps the
+    # promise that a code this route reports as sent is a code that works.
+    if owner is None or owner.id != admin.id:
+        return jsonify({
+            "success": False,
+            "message": "That account's email address cannot be used for recovery. "
+                       "Give the account an address of its own first.",
+        }), 409
+
+    refused = authorize_recovery_subject(subject)
+    if refused:
+        return refused
+
+    otp = issue_recovery_code("password", address, admin)
+    send_recovery_otp(admin, "password", otp, admin.gmail)
+    return None
+
+
 def recovery_error(code, message, attempts_remaining=None):
     body = {"success": False, "code": code, "message": message}
     if attempts_remaining is not None:
@@ -1693,13 +1488,13 @@ def recovery_code_matches(entry, code):
     return digits_match and entry["otp"] is not None
 
 
-def authorize_recovery_request(email):
-    """Counts one code request against the subject, or refuses it.
+def authorize_recovery_subject(subject):
+    """Counts one code request against ``subject``, or what to send instead.
 
-    Returns ``(admin, None)`` when a code may be issued - having recorded that
-    it was - or ``(None, response)`` with what to send instead. ``admin`` is
-    who the code is for, which is None for an address with no account, so the
-    caller does not look the address up a second time.
+    Returns None when a code may be issued - having recorded that it was - and
+    a response when it may not. Shared by the forgot-password pages and by the
+    colleague send in User Management, so one account's codes come out of one
+    budget however they were asked for.
 
     Both account-scoped limits are checked here: a restriction earned by
     guessing closes requesting too, because otherwise the way to sit out a
@@ -1709,8 +1504,6 @@ def authorize_recovery_request(email):
     two costs a request rather than leaving a code that nothing counted.
     """
 
-    subject, admin = recovery_identity(email)
-
     with recovery_lock:
         sweep_recovery_attempts()
         row = recovery_attempt_row(subject)
@@ -1718,18 +1511,18 @@ def authorize_recovery_request(email):
         restriction = recovery_restriction_seconds(row)
         if restriction:
             db.session.commit()
-            return None, recovery_restricted_response(restriction)
+            return recovery_restricted_response(restriction)
 
         wait = recovery_request_wait(row)
         if wait:
             # Nothing is issued and nothing is sent: the point of the cap is
             # that the inbox stops receiving.
             db.session.commit()
-            return None, recovery_request_limited_response(wait)
+            return recovery_request_limited_response(wait)
 
         record_recovery_request(row)
         db.session.commit()
-    return admin, None
+    return None
 
 
 def check_recovery_code(purpose, email, code):
@@ -1879,13 +1672,19 @@ def recovery_request():
         if purpose not in RECOVERY_PURPOSES:
             return recovery_bad_request("Choose whether to recover a password or a username.")
 
-        admin, refused = authorize_recovery_request(email)
+        # The address must already be on record, as either of an account's two
+        # addresses. Checked before anything is counted or stored, so a mistyped
+        # address spends none of the account's budget and leaves no entry.
+        subject, admin = recovery_identity(email)
+        if admin is None:
+            return recovery_error(RECOVERY_UNKNOWN_EMAIL_CODE, RECOVERY_UNKNOWN_EMAIL_MESSAGE)
+
+        refused = authorize_recovery_subject(subject)
         if refused:
             return refused
 
         otp = issue_recovery_code(purpose, email, admin)
-        if admin:
-            send_recovery_otp(admin, purpose, otp, email)
+        send_recovery_otp(admin, purpose, otp, email)
 
         return jsonify({
             "success": True,

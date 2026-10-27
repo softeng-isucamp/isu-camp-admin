@@ -126,13 +126,14 @@ describe("forgot-username: same instructions and feedback as forgot password", (
     mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
     renderFrom("/forgot-username");
     expect(screen.getByText(/primary or alternative email associated with your administrator account/i)).toBeInTheDocument();
+    expect(screen.getByText(/An email that is not on an administrator account is refused\./)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
-    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(
-      `If an account exists for ${EMAIL}, a 6-digit verification code has been sent to that address.`,
+    expect(screen.getByText(/verification code has been sent to/i)).toHaveTextContent(
+      `A 6-digit verification code has been sent to ${EMAIL}.`,
     );
     expect(screen.getByText(/Only the most recently sent code will work/)).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
