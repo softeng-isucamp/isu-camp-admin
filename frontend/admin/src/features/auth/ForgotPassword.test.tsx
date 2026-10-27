@@ -574,6 +574,93 @@ describe("forgot-password: new password and return to login", () => {
   });
 });
 
+describe("forgot-password: a code already received", () => {
+  const haveCodeFor = (email = EMAIL) => {
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: email } });
+    fireEvent.click(screen.getByRole("button", { name: "I already have a code" }));
+  };
+
+  const resetWith = async (code: string) => {
+    typeCode(code);
+    await screen.findByRole("heading", { name: /create a new password/i });
+    fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Passw0rd!x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    await screen.findByRole("heading", { name: /password reset successful/i });
+  };
+
+  // A code a colleague sent from User Management: asking for another would replace it, so nothing is requested.
+  it("goes to code entry without requesting, then verifies and resets with the code already received", async () => {
+    const { sent } = mockBackend({ [VERIFY]: [verified()], [RESET]: [verified()] });
+    renderForgotPassword();
+
+    haveCodeFor(` ${EMAIL} `);
+
+    expect(await screen.findByRole("heading", { name: /verification code/i })).toHaveAccessibleDescription(
+      /^Enter the 6-digit verification code that was sent to admin@isu\.edu\.ph/,
+    );
+    // Nothing was issued here, so there is no expiry to count and Resend is open at once.
+    expect(screen.queryByRole("timer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled();
+    await resetWith("123456");
+    expect(sent[REQUEST]).toBeUndefined();
+    expect(sent[VERIFY]).toEqual([{ email: EMAIL, purpose: "password", code: "123456" }]);
+    expect(sent[RESET]).toEqual([{ email: EMAIL, code: "123456", password: "Passw0rd!x" }]);
+  });
+
+  it("still reaches code entry once the account's request budget is spent", async () => {
+    const { sent } = mockBackend({
+      [REQUEST]: [
+        jsonResponse(
+          { success: false, code: "recovery_restricted", message: "Too many codes have been requested for this email." },
+          429,
+          { "Retry-After": "900" },
+        ),
+      ],
+      [VERIFY]: [verified()],
+      [RESET]: [verified()],
+    });
+    renderForgotPassword();
+
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    expect(await screen.findByRole("button", { name: /try again in/i })).toBeDisabled();
+
+    // The refusal is about new codes; the one already in the inbox is still good.
+    fireEvent.click(screen.getByRole("button", { name: "I already have a code" }));
+    await screen.findByRole("heading", { name: /verification code/i });
+    await resetWith("654321");
+    expect(sent[REQUEST]).toHaveLength(1);
+    expect(sent[RESET]).toEqual([{ email: EMAIL, code: "654321", password: "Passw0rd!x" }]);
+  });
+
+  it("checks the address first and requests nothing for a malformed one", () => {
+    const { sent } = mockBackend({});
+    renderForgotPassword();
+
+    haveCodeFor("not-an-email");
+
+    expect(screen.getByLabelText("Admin email")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByRole("heading", { name: /verification code/i })).toBeNull();
+    expect(sent).toEqual({});
+  });
+
+  it("says a code was sent, not received, once the admin asks for a new one from code entry", async () => {
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
+    renderForgotPassword();
+    haveCodeFor();
+    await screen.findByRole("heading", { name: /verification code/i });
+
+    fireEvent.click(screen.getByRole("button", { name: "Resend code" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("A new verification code has been sent.");
+    expect(screen.getByRole("heading", { name: /verification code/i })).toHaveAccessibleDescription(
+      /^A 6-digit verification code has been sent to admin@isu\.edu\.ph/,
+    );
+    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+  });
+});
+
 describe("old reset-password links", () => {
   it("open the forgot-password flow", async () => {
     mockBackend({});

@@ -17,7 +17,9 @@ from flask import Flask
 from sqlalchemy import event
 import pytest
 
+import admins as admins_module
 import auth as auth_module
+from admins import admins_bp
 from auth import auth_bp
 from extensions import db
 from model.recovery_attempt import RecoveryAttempt
@@ -137,6 +139,8 @@ class Harness:
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"connect_args": {"timeout": 15}}
         db.init_app(app)
         app.register_blueprint(auth_bp)
+        # User Management's colleague send, which issues into this same store.
+        app.register_blueprint(admins_bp)
         self.app = app
 
         self.context = app.app_context()
@@ -925,6 +929,123 @@ def test_the_old_username_keyed_reset_routes_are_gone(harness):
 
     harness.request_code()
     assert all(isinstance(key, tuple) for key in auth_module.reset_otps)
+
+
+# ==========================================
+# A code a colleague sent from User Management
+# ==========================================
+#
+# The real route and the real helper, into the same store, budget and inbox as
+# the pages above. Only who is signed in, the account lookup by id and the
+# audit trail are stood in for.
+
+@pytest.fixture
+def colleague(harness, monkeypatch):
+    caller = FakeAdmin(2, "admin_helper", "helper@isu.edu.ph")
+    audits = []
+
+    class Directory:
+        """``db.session`` as the admins route sees it: accounts by id, the rest real."""
+
+        def get(self, model, ident, **kwargs):
+            if model is auth_module.Admin:
+                return next((a for a in harness.admins if a.id == ident), None)
+            return db.session.get(model, ident, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(db.session, name)
+
+    monkeypatch.setattr(admins_module, "db", SimpleNamespace(session=Directory()))
+    monkeypatch.setattr(admins_module, "admin_required", lambda: (caller, None))
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args, **kwargs: audits.append(args))
+
+    def send(admin_id=1):
+        return harness.client.post(f"/api/admins/{admin_id}/password-reset")
+
+    return SimpleNamespace(send=send, audits=audits)
+
+
+def requests_counted(harness):
+    row = harness.row()
+    return 0 if row is None else len(auth_module.recovery_request_times(row))
+
+
+def test_a_colleague_sent_code_is_redeemed_without_asking_for_another(harness, colleague):
+    response = colleague.send()
+
+    assert response.status_code == 200
+    assert len(colleague.audits) == 1
+    message = harness.sent[-1]
+    assert message.recipients == ["admin@isu.edu.ph"]
+    # The recipient did not ask for it, so the email says how to use it
+    # without requesting one that would replace it.
+    assert "I already have a code" in message.body
+    code = harness.issued_code()
+
+    assert harness.verify(code).status_code == 200
+    reset = harness.reset(code)
+    assert reset.status_code == 200
+    assert verify_password(harness.admins[0].password, NEW_PASSWORD)[0]
+
+
+def test_a_colleague_sent_code_still_works_once_the_request_budget_is_spent(harness, colleague):
+    harness.request_code()
+    harness.release_cooldown()
+    harness.request_code()
+    harness.release_cooldown()
+    assert colleague.send().status_code == 200
+    code = harness.issued_code()
+    assert requests_counted(harness) == auth_module.RECOVERY_REQUEST_LIMIT
+
+    # The forgot-password page can no longer ask, and neither can User
+    # Management, but the code already in the inbox is untouched by either.
+    harness.release_cooldown()
+    refused = harness.request_code()
+    assert refused.status_code == 429 and refused.json["code"] == "recovery_restricted"
+    harness.release_cooldown()
+    assert colleague.send().status_code == 429
+    assert len(colleague.audits) == 1
+
+    assert harness.reset(code).status_code == 200
+
+
+def test_a_colleague_send_the_mail_server_refuses_is_reported_and_costs_nothing(harness, colleague):
+    """502, no audit, the budget given back, and the colleague's code kept.
+
+    The code is stored only after the mail server takes it, so a failed send
+    cannot replace a code the colleague already holds with one that never
+    reached them.
+    """
+
+    harness.request_code()
+    held = harness.issued_code()
+    harness.mail_fails = True
+
+    failed = colleague.send()
+
+    assert failed.status_code == 502
+    assert failed.json["success"] is False
+    assert colleague.audits == []
+    assert requests_counted(harness) == 1
+    assert len(harness.sent) == 1
+    assert harness.verify(held).status_code == 200
+
+    # Retried at once: the minute's limit was given back with the budget.
+    harness.mail_fails = False
+    retried = colleague.send()
+    assert retried.status_code == 200
+    assert len(colleague.audits) == 1
+    assert requests_counted(harness) == 2
+    assert harness.reset(harness.issued_code()).status_code == 200
+
+
+def test_a_code_requested_from_the_page_stays_asynchronous_when_mail_fails(harness, colleague):
+    """The unauthenticated page still answers before the mail server does."""
+
+    harness.mail_fails = True
+
+    assert harness.request_code().status_code == 200
+    assert requests_counted(harness) == 1
 
 
 # ==========================================

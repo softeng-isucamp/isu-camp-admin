@@ -26,7 +26,8 @@ interface RecoveryFlowProps {
 
 type FlowStep =
   | { step: "email"; email: string }
-  | { step: "code"; email: string; issued: CodeRequestResult; dead?: DeadCode }
+  // `received`: the admin came with a code already in their inbox, so nothing was requested and no timing is known.
+  | { step: "code"; email: string; issued: CodeRequestResult; dead?: DeadCode; received?: boolean }
   | { step: "final"; verified: VerifiedRecovery };
 
 /**
@@ -54,6 +55,7 @@ export function RecoveryFlow({ purpose, title, renderFinal }: RecoveryFlowProps)
             title={title}
             initialEmail={flow.email}
             onSent={(email, issued) => setFlow({ step: "code", email, issued })}
+            onHaveCode={(email) => setFlow({ step: "code", email, issued: {}, received: true })}
           />
         )}
         {flow.step === "code" && (
@@ -62,6 +64,7 @@ export function RecoveryFlow({ purpose, title, renderFinal }: RecoveryFlowProps)
             purpose={purpose}
             issued={flow.issued}
             dead={flow.dead}
+            received={flow.received}
             onVerified={(verified) => setFlow({ step: "final", verified: { email: flow.email, ...verified } })}
             onChangeEmail={() => setFlow({ step: "email", email: flow.email })}
           />

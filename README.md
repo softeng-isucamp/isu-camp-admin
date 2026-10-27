@@ -138,6 +138,10 @@ Verification is unchanged and does not depend on this: `verify` and `reset-passw
 
 User Management's password-reset send issues through this same flow: the colleague receives a code keyed to their own address, redeems it on the forgot-password page, and it comes out of that account's own request budget. It is refused when the account's address is one recovery could not resolve — shared with another account, or absent — because a code for such an address could not be redeemed there.
 
+The colleague redeems it with **I already have a code** on the email step, which goes straight to code entry and requests nothing. *Send code* would replace the code they hold and spend one of their three requests; once the budget is spent it is the only way to reach code entry at all. The email they receive says so.
+
+Unlike the pages, that send is **synchronous** — the caller is signed in and already knows the account exists, so waiting reveals nothing. When the mail server refuses, `POST /api/admins/:id/password-reset` answers `502` and records no audit entry, and the send leaves no trace: the request is withdrawn from the account's budget, the one-a-minute send limit is given back so the sender can retry at once, and the code is never stored, so a code the colleague already holds keeps working. A code is stored only after the mail server has taken it. The recovery pages still send in the background and answer `200` whatever the mail server does.
+
 Apply `migrations/20261023_add_admin_alternative_email.sql` before using any of this.
 
 ## Recovery attempt limits
