@@ -116,6 +116,18 @@ def rate_limited(scope, key, limit, message):
     return response, 429
 
 
+def release_rate_limit(scope, key):
+    """Gives back the newest hit ``rate_limited`` took for ``(scope, key)``.
+
+    For an action that was let through but then did nothing, so a retry is not
+    told it is going too fast.
+    """
+    with rate_limit_lock:
+        bucket = rate_limit_buckets.get((scope, key))
+        if bucket:
+            bucket.pop()
+
+
 # ==========================================
 # Admin Model
 # ==========================================
@@ -1339,7 +1351,16 @@ def issue_recovery_code(purpose, email, admin):
     like one that does, so asking about an unknown address changes nothing
     visible.
     """
-    otp = generate_otp() if admin else None
+    return store_recovery_code(purpose, email, admin, generate_otp() if admin else None)
+
+
+def store_recovery_code(purpose, email, admin, otp):
+    """Makes ``otp`` the one live code for ``(purpose, email)`` and returns it.
+
+    Split from :func:`issue_recovery_code` for the colleague send, which mails
+    its code first and stores it only once the mail server has taken it, so a
+    failed send leaves the code already in the colleague's inbox working.
+    """
     with recovery_lock:
         sweep_recovery_codes()
         key = recovery_key(purpose, email)
@@ -1348,7 +1369,18 @@ def issue_recovery_code(purpose, email, admin):
     return otp
 
 
-def send_recovery_otp(admin, purpose, otp, address):
+class RecoveryDeliveryError(Exception):
+    """The mail server would not take a recovery email that had to be confirmed sent."""
+
+
+def recovery_message(admin, purpose, otp, address, *, sent_by_colleague=False):
+    """The one recovery email, for every way a code is sent.
+
+    ``sent_by_colleague`` is User Management's send: the recipient did not ask
+    for it, and has to be told how to redeem a code they did not request from
+    the page.
+    """
+
     if purpose == "username":
         subject = "ISU-CAMP Username Recovery Code"
         body = f"""
@@ -1363,6 +1395,27 @@ Your verification code is:
 This code will expire in {OTP_LIFETIME_SECONDS // 60} minutes.
 
 If you did not make this request, please ignore this email.
+
+ISU-CAMP Admin System
+"""
+    elif sent_by_colleague:
+        subject = "ISU-CAMP Password Reset Code"
+        body = f"""
+Hello {admin.username},
+
+Another ISU-CAMP administrator sent you a code to reset your admin password.
+
+Your verification code is:
+
+{otp}
+
+To use it, open Forgot Password on the ISU-CAMP admin sign-in page, choose
+"I already have a code", and enter this email address and the code. Sending a
+new code from that page replaces this one.
+
+This code will expire in {OTP_LIFETIME_SECONDS // 60} minutes.
+
+If you do not need to reset your password, you can ignore this email.
 
 ISU-CAMP Admin System
 """
@@ -1391,16 +1444,42 @@ ISU-CAMP Admin System
     # inbox nobody asked about.
     message = Message(subject=subject, recipients=[address])
     message.body = body
+    return message
+
+
+def send_recovery_otp(admin, purpose, otp, address):
+    """Mails a code requested from the recovery pages, off the request thread.
+
+    The page has already answered by the time the mail server does, and a send
+    that waited would let response times say which addresses have accounts, so
+    a failure here can only be reported to the operator.
+    """
+
+    message = recovery_message(admin, purpose, otp, address)
 
     def deliver():
         try:
             mail.send(message)
         except Exception:
-            # The caller was already told "if an account exists", so a failure
-            # here can only be reported to the operator.
             logger.exception("Could not send a recovery email")
 
     run_in_background(deliver)
+
+
+def withdraw_recovery_request(subject):
+    """Takes back one request counted against ``subject``.
+
+    For a colleague send the mail server refused: no email went out, so nothing
+    the request cap protects an inbox from happened, and an outage must not
+    spend the recipient's own budget for the forgot-password page.
+    """
+
+    with recovery_lock:
+        row = recovery_attempt_row(subject)
+        times = recovery_request_times(row)[:-1]
+        row.requested_at = [moment.isoformat() for moment in times]
+        row.updated_at = utc_now()
+        db.session.commit()
 
 
 def send_password_reset_otp(admin):
@@ -1408,13 +1487,21 @@ def send_password_reset_otp(admin):
 
     How User Management helps a locked-out colleague: the code goes to the
     account's own inbox, never to the caller's screen, and the colleague
-    redeems it by entering that same address like any other password reset.
-    Returns None once a code is on its way, or the response to send instead.
+    redeems it by entering that same address and choosing "I already have a
+    code" on the forgot-password page - asking for a code there would replace
+    this one. Returns None once the mail server has accepted the code, or the
+    response to send instead.
 
     It issues through the same store, key and budget as a request the colleague
-    would have made themselves. A separate code store used to back this, which
-    meant the colleague received a code with nowhere to type it and a second,
-    different code waiting once they used the page anyway.
+    would have made themselves, so it comes out of that account's three per
+    window.
+
+    Unlike the recovery pages, the send is synchronous: the caller is signed in
+    and already knows the account exists, so waiting reveals nothing, and the
+    route must not report a code as sent when none was. When the mail server
+    refuses it raises :class:`RecoveryDeliveryError`, having put everything
+    back: the request is withdrawn from the budget and the code is never stored,
+    so a code the colleague already holds keeps working.
     """
 
     address = normalized_email(admin.gmail)
@@ -1434,8 +1521,17 @@ def send_password_reset_otp(admin):
     if refused:
         return refused
 
-    otp = issue_recovery_code("password", address, admin)
-    send_recovery_otp(admin, "password", otp, admin.gmail)
+    otp = generate_otp()
+    try:
+        mail.send(recovery_message(admin, "password", otp, admin.gmail, sent_by_colleague=True))
+    except Exception as error:
+        logger.exception("Could not send a password reset code from User Management")
+        withdraw_recovery_request(subject)
+        raise RecoveryDeliveryError() from error
+
+    # Stored only now that it is on its way. Storing first would have replaced
+    # the colleague's current code with one that never reached them.
+    store_recovery_code("password", address, admin, otp)
     return None
 
 

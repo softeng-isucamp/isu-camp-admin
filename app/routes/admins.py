@@ -33,6 +33,7 @@ from auth import (
     STALE_IDENTITY_MESSAGE,
     rate_limited,
     reauth_required,
+    release_rate_limit,
     send_password_reset_otp,
     superadmin_required,
 )
@@ -611,6 +612,12 @@ def send_password_reset(admin_id):
     try:
         refused = send_password_reset_otp(record)
     except Exception:
+        # Nothing reached the colleague and nothing is audited. On a refused
+        # delivery the helper has already given back the account's budget and
+        # left their current code in place; the minute's hit is returned here,
+        # so the sender can try again at once.
+        release_rate_limit("admin-reset", str(record.id))
+        db.session.rollback()
         return _error("Failed to send the password reset code.", status=502)
 
     # The account's own recovery budget, so sending from here cannot hand out
