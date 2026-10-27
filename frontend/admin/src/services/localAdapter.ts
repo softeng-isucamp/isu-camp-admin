@@ -291,6 +291,10 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         return account;
       },
       recentlyConfirmed,
+      /** User Management's send: issues the account's password code, as the backend does, so it can be redeemed on Forgot Password. */
+      issuePasswordReset: (record: FixtureAccount): void => {
+        issueCode(record.email, "password");
+      },
     },
     locations: {
       saveIndoorPosition: (id: string, buildingId: string, lat: number | null, lng: number | null): Location => {

@@ -30,6 +30,8 @@ interface RecoveryCodeStepProps {
   onChangeEmail: () => void;
   /** Open already dead, for an admin sent back because a later step found the code used up or expired. */
   dead?: DeadCode;
+  /** Opened for a code already received rather than one just requested; the copy says so until a resend. */
+  received?: boolean;
 }
 
 const CODE_INCOMPLETE = "Enter the 6-digit verification code.";
@@ -44,7 +46,7 @@ const deadMessage = (dead: DeadCode, restricted = false) =>
   dead === "exhausted" ? EXHAUSTED_MESSAGE : restricted ? EXPIRED_WHILE_RESTRICTED_MESSAGE : EXPIRED_MESSAGE;
 
 /** Collects the 6-digit code, submits it when an entry completes it, and offers a manual Verify (or Enter) and Resend. */
-export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead }: RecoveryCodeStepProps) {
+export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeEmail, dead: initialDead, received: initialReceived = false }: RecoveryCodeStepProps) {
   const sentId = useId();
   const alertId = useId();
   const [state, setState] = useState<CodeStepState>(initialDead ?? "entering");
@@ -55,6 +57,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const [resending, setResending] = useState(false);
   // The resend wait came from a rate limit rather than the normal cooldown, so its button reads "Try again".
   const [resendLimited, setResendLimited] = useState(false);
+  const [received, setReceived] = useState(initialReceived);
   // The server restricted recovery as a whole, so Verify and Resend share one wait and the typed code is never sent on its own.
   const restrictedWait = useRef(false);
   const otp = useRef<OtpInputHandle>(null);
@@ -185,6 +188,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setLapsed(false);
       expiry.start(next.expiresInSeconds ?? 0);
       setResendMessage(RESENT_MESSAGE);
+      setReceived(false);
       setResendLimited(false);
       restrictedWait.current = false;
       resendWait.start(next.resendAfterSeconds ?? 0);
@@ -235,7 +239,15 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       <h2 aria-describedby={sentId}>Enter verification code</h2>
       <p className="muted recovery-copy">
         <span id={sentId}>
-          A <span className="nowrap">6-digit</span> verification code has been sent to <strong>{email}</strong>.
+          {received ? (
+            <>
+              Enter the <span className="nowrap">6-digit</span> verification code that was sent to <strong>{email}</strong>.
+            </>
+          ) : (
+            <>
+              A <span className="nowrap">6-digit</span> verification code has been sent to <strong>{email}</strong>.
+            </>
+          )}
         </span>{" "}
         <button type="button" className="recovery-link" onClick={onChangeEmail} disabled={verifying || resending}>
           Change email

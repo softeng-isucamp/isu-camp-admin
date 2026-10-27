@@ -61,7 +61,7 @@ def test_sending_a_reset_code_mails_only_the_accounts_own_address(monkeypatch):
         "id": 7, "username": "admin01", "gmail": "admin01@example.com", "is_active": True,
     })()
     monkeypatch.setattr(auth_module, "admins_with_email", lambda email: [admin])
-    monkeypatch.setattr(auth_module, "authorize_recovery_subject", lambda subject: None)
+    monkeypatch.setattr(auth_module, "authorize_recovery_subject", lambda subject, **kwargs: None)
 
     assert auth_module.send_password_reset_otp(admin) is None
 

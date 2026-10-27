@@ -20,7 +20,7 @@ type Audit = (action: string, target: string, targetId: string) => void;
  * self rules and its messages. The records are the adapter's sign-in accounts,
  * so who is "current" and what they may do follow whoever signed in.
  */
-export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, recentlyConfirmed }: Directory, audit: Audit) => {
+export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, recentlyConfirmed, issuePasswordReset }: Directory, audit: Audit) => {
   const asAccount = (record: FixtureAccount): AdminAccount => ({
     id: record.id,
     username: record.username,
@@ -175,6 +175,7 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       activeCaller();
       const record = find(id);
       if (!record.email) throw new Error("That account has no email address on file, so a reset code cannot be sent.");
+      issuePasswordReset(record);
       audit("Sent Password Reset", record.username, record.id);
       return `A password reset code was sent to ${record.email}.`;
     },
