@@ -609,9 +609,15 @@ def send_password_reset(admin_id):
         return limited
 
     try:
-        send_password_reset_otp(record)
+        refused = send_password_reset_otp(record)
     except Exception:
         return _error("Failed to send the password reset code.", status=502)
+
+    # The account's own recovery budget, so sending from here cannot hand out
+    # more codes than the colleague could have asked for themselves. The refusal
+    # arrives already committed, with nothing of this request left to undo.
+    if refused:
+        return refused
 
     # Audited because it is an action taken against someone else's account.
     log_audit("Admin", None, "send password reset", "Administrator", record.id, record.username)

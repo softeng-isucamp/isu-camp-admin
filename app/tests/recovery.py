@@ -43,7 +43,12 @@ def _count_commit(_session):
         WRITES["password_commits"] += 1
 
 NEW_PASSWORD = "Passw0rd!x"
-GENERIC_MESSAGE = "If an account exists for this email, a code has been sent."
+# Said only to an address found on an account; an address on none is refused.
+SENT_MESSAGE = "A verification code has been sent to this email."
+UNKNOWN_EMAIL_MESSAGE = (
+    "That email is not registered to an administrator account. "
+    "Check the address and try again."
+)
 
 
 class FakeAdmin:
@@ -298,7 +303,7 @@ def test_request_for_an_account_emails_a_six_digit_code_to_its_address(harness):
     assert response.status_code == 200
     assert response.json == {
         "success": True,
-        "message": GENERIC_MESSAGE,
+        "message": SENT_MESSAGE,
         "expiresInSeconds": 600,
         "resendAfterSeconds": 60,
     }
@@ -316,36 +321,53 @@ def test_request_matches_the_email_case_insensitively_and_ignores_padding(harnes
     assert harness.verify(harness.issued_code(), email="ADMIN@isu.edu.ph").status_code == 200
 
 
-def test_request_answers_an_unknown_email_exactly_like_a_known_one(harness):
+def test_request_refuses_an_email_on_no_account(harness):
+    """The submitted address must be on an account before a code is sent.
+
+    This is the answer that makes the portal able to confirm which addresses
+    are administrator accounts; it is the accepted cost of telling an
+    administrator that they mistyped their own.
+    """
+
     known = harness.request_code()
     unknown = harness.request_code(email="nobody@isu.edu.ph")
 
-    assert unknown.status_code == known.status_code == 200
-    assert unknown.json == known.json
+    assert known.status_code == 200
+    assert unknown.status_code == 400
+    assert unknown.json["code"] == "email_not_found"
+    assert unknown.json["message"] == UNKNOWN_EMAIL_MESSAGE
+    # Only the account's own request was mailed.
     assert len(harness.sent) == 1
 
 
-def test_request_sends_nothing_and_answers_the_same_for_a_deactivated_administrator(harness):
+def test_request_refuses_a_deactivated_administrator(harness):
+    """One message for every address recovery cannot act on.
+
+    A deactivated account is not named as deactivated: that would confirm the
+    account exists to whoever asked, which is more than the refusal needs to
+    say in order to stop the request.
+    """
+
     harness.admins[0].status = "inactive"
 
     response = harness.request_code()
 
-    assert response.status_code == 200
-    assert response.json["message"] == GENERIC_MESSAGE
-    assert response.json["expiresInSeconds"] == 600
+    assert response.status_code == 400
+    assert response.json["code"] == "email_not_found"
+    assert response.json["message"] == UNKNOWN_EMAIL_MESSAGE
     assert harness.sent == []
 
 
-def test_request_sends_nothing_when_an_email_belongs_to_more_than_one_account(harness):
+def test_request_refuses_an_email_more_than_one_account_holds(harness):
     """The database does not enforce one email per account, so an ambiguous
-    address is refused quietly rather than picking someone's username."""
+    address is refused rather than picking someone's username."""
 
     harness.admins.append(FakeAdmin(2, "admin_other", "Admin@isu.edu.ph"))
 
     response = harness.request_code()
 
-    assert response.status_code == 200
-    assert response.json["message"] == GENERIC_MESSAGE
+    assert response.status_code == 400
+    assert response.json["code"] == "email_not_found"
     assert harness.sent == []
 
 
@@ -355,7 +377,7 @@ def test_request_still_answers_200_when_the_mail_cannot_be_delivered(harness):
     response = harness.request_code()
 
     assert response.status_code == 200
-    assert response.json["message"] == GENERIC_MESSAGE
+    assert response.json["message"] == SENT_MESSAGE
 
 
 def test_username_code_email_does_not_name_the_account(harness):
@@ -391,12 +413,18 @@ def test_request_without_a_json_body_is_a_json_400(harness):
 
 
 def test_request_enforces_the_resend_cooldown_for_known_and_unknown_emails(harness):
+    """The cooldown is keyed on client and address, and is spent before the
+    address is looked up - so asking twice about the same unregistered address
+    is throttled like any other repeat, rather than answered twice."""
+
     first = harness.request_code()
     again = harness.request_code()
     unknown_first = harness.request_code(email="nobody@isu.edu.ph")
     unknown_again = harness.request_code(email="nobody@isu.edu.ph")
 
-    assert (first.status_code, unknown_first.status_code) == (200, 200)
+    assert first.status_code == 200
+    assert unknown_first.status_code == 400
+    assert unknown_first.json["code"] == "email_not_found"
     for limited in (again, unknown_again):
         assert limited.status_code == 429
         assert limited.is_json
@@ -405,9 +433,13 @@ def test_request_enforces_the_resend_cooldown_for_known_and_unknown_emails(harne
 
 
 def test_request_limits_how_many_addresses_one_client_can_probe(harness):
+    """The per-client cap is what remains of the brake on probing, now that the
+    answer itself says whether an address has an account."""
+
     responses = [harness.request_code(email=f"person{n}@isu.edu.ph") for n in range(12)]
 
-    assert [r.status_code for r in responses[:10]] == [200] * 10
+    assert [r.status_code for r in responses[:10]] == [400] * 10
+    assert {r.json["code"] for r in responses[:10]} == {"email_not_found"}
     assert responses[10].status_code == 429
     assert int(responses[10].headers["Retry-After"]) > 0
 
@@ -440,22 +472,37 @@ def test_a_new_request_replaces_the_old_code_without_restoring_the_attempts(harn
     assert harness.failures() == 0
 
 
-def test_a_new_request_cannot_lift_a_restriction_for_known_or_unknown_emails(harness):
+def test_a_new_request_cannot_lift_a_restriction(harness):
     """Requesting is closed while a restriction stands, so the restriction
     cannot be waited out by mailing yourself codes until it lifts."""
 
-    for email in ("admin@isu.edu.ph", "nobody@isu.edu.ph"):
-        harness.request_code(email=email)
-        harness.exhaust_attempts(email=email)
-        harness.release_cooldown()
+    harness.request_code()
+    harness.exhaust_attempts()
+    harness.release_cooldown()
 
-        asked_again = harness.request_code(email=email)
+    asked_again = harness.request_code()
 
-        assert asked_again.status_code == 429
-        assert asked_again.json["code"] == "recovery_restricted"
-        assert int(asked_again.headers["Retry-After"]) > 0
-        assert harness.verify("999999", email=email).json["code"] == "recovery_restricted"
-        harness.release_cooldown()
+    assert asked_again.status_code == 429
+    assert asked_again.json["code"] == "recovery_restricted"
+    assert int(asked_again.headers["Retry-After"]) > 0
+    assert harness.verify("999999").json["code"] == "recovery_restricted"
+
+
+def test_an_unregistered_address_is_refused_before_any_restriction_is_consulted(harness):
+    """Guessing at an address with no account still earns that address a
+    restriction, and verifying keeps reporting it - but requesting is refused
+    for not being on an account, which is true whatever the counters say and
+    costs no account's budget to answer."""
+
+    email = "nobody@isu.edu.ph"
+    harness.exhaust_attempts(email=email)
+    harness.release_cooldown()
+
+    asked = harness.request_code(email=email)
+
+    assert asked.status_code == 400
+    assert asked.json["code"] == "email_not_found"
+    assert harness.verify("999999", email=email).json["code"] == "recovery_restricted"
 
 
 def test_unexpected_errors_are_json_and_do_not_leak_the_cause(harness, monkeypatch):
@@ -858,26 +905,51 @@ def test_the_new_password_is_what_signs_in(harness, monkeypatch):
     assert not verify_password(harness.admins[0].password, "Old!pass123")[0]
 
 
-def test_the_old_reset_routes_still_use_their_own_store(harness):
-    """Recovery codes live under (purpose, email) keys, apart from username keys."""
+def test_the_old_username_keyed_reset_routes_are_gone(harness):
+    """Every code is now issued and redeemed by address.
 
-    auth_module.reset_otps["admin_justine"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() + timedelta(minutes=1),
-    }
+    The routes these replaced keyed codes by username, answered an unknown one
+    with 404 "Admin account not found" - naming which accounts exist - and
+    never consulted ``alternative_email``. Nothing may answer there again.
+    """
 
-    legacy = harness.client.post("/api/reset/verify", json={"username": "admin_justine", "code": "123456"})
+    for path, body in (
+        ("/api/reset/request", {"username": "admin_justine"}),
+        ("/api/reset/verify", {"username": "admin_justine", "code": "123456"}),
+        ("/api/reset-password", {"username": "admin_justine", "code": "123456", "password": NEW_PASSWORD}),
+    ):
+        response = harness.client.post(path, json=body)
+        assert response.status_code == 404, path
+        # Flask's own 404, not a JSON refusal from a route that still exists.
+        assert response.get_json() is None, path
 
-    assert legacy.status_code == 200
-    assert harness.verify("123456").json["code"] == "invalid_code"
+    harness.request_code()
+    assert all(isinstance(key, tuple) for key in auth_module.reset_otps)
 
 
 # ==========================================
 # Review round 1
 # ==========================================
 
+def many_accounts(harness, count, start=2):
+    """Registers ``count`` more accounts and returns their addresses.
+
+    The store tests below need a lot of *requested* entries, and a request only
+    stores one for an address that is on an account - an address on none is
+    refused before anything is stored.
+    """
+
+    emails = []
+    for offset in range(count):
+        identifier = start + offset
+        email = f"person{identifier}@isu.edu.ph"
+        harness.admins.append(FakeAdmin(identifier, f"admin_{identifier}", email))
+        emails.append(email)
+    return emails
+
+
 def pending_entries():
-    """Entries /request created, real or codeless."""
+    """Entries /request created. Every one is a code for a real account."""
     return {k: v for k, v in auth_module.reset_otps.items() if isinstance(k, tuple)}
 
 
@@ -964,43 +1036,61 @@ def test_the_email_is_bounded_before_any_state_is_created(harness):
     assert all(len(str(key)) < 64 for key in auth_module.rate_limit_buckets)
 
 
-def test_an_email_at_the_column_width_is_still_accepted(harness):
+def test_an_email_at_the_column_width_is_still_read(harness):
+    """An address as long as the column holds is measured, not truncated: it
+    reaches the account lookup and is answered for not being on an account,
+    rather than being rejected as malformed."""
+
     email = "a" * (auth_module.EMAIL_MAX_LENGTH - len("@isu.edu.ph")) + "@isu.edu.ph"
     assert len(email) == auth_module.EMAIL_MAX_LENGTH
 
-    assert harness.request_code(email=email).status_code == 200
+    requested = harness.request_code(email=email)
+
+    assert requested.status_code == 400
+    assert requested.json["code"] == "email_not_found"
     assert harness.verify("000000", email=email).json["code"] == "invalid_code"
+
+
+def test_an_account_at_the_column_width_recovers(harness):
+    """The same length, on an account: nothing about the width blocks a code."""
+
+    email = "a" * (auth_module.EMAIL_MAX_LENGTH - len("@isu.edu.ph")) + "@isu.edu.ph"
+    harness.admins.append(FakeAdmin(2, "admin_long", email))
+
+    assert harness.request_code(email=email).status_code == 200
+    assert harness.verify(harness.issued_code(), email=email).status_code == 200
 
 
 def test_request_entries_are_capped_and_keep_the_newest(harness, monkeypatch):
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 5)
+    emails = many_accounts(harness, 20)
 
-    for n in range(20):
+    for email in emails:
         harness.release_cooldown()
-        harness.request_code(f"nobody{n}@isu.edu.ph")
+        harness.request_code(email)
 
     assert len(pending_entries()) == 5
-    assert ("password", "nobody19@isu.edu.ph") in pending_entries()
-    assert ("password", "nobody0@isu.edu.ph") not in pending_entries()
+    assert ("password", emails[-1]) in pending_entries()
+    assert ("password", emails[0]) not in pending_entries()
 
 
-def test_an_evicted_real_code_looks_like_an_evicted_codeless_one(harness, monkeypatch):
-    """Eviction restarts both kinds of request entry alike, so it cannot tell them apart."""
+def test_an_evicted_real_code_behaves_like_one_never_requested(harness, monkeypatch):
+    """Eviction leaves nothing behind, so the code it dropped is as dead as a
+    code for an address that never asked for one."""
 
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
     harness.request_code()
     real = harness.issued_code()
-    harness.request_code("absent@isu.edu.ph")
-    for n in range(3):
+    for email in many_accounts(harness, 3):
         harness.release_cooldown()
-        harness.request_code(f"nobody{n}@isu.edu.ph")
+        harness.request_code(email)
 
     harness.release_cooldown()
-    known = harness.verify(real)
-    unknown = harness.verify("000000", email="absent@isu.edu.ph")
+    evicted = harness.verify(real)
+    never_asked = harness.verify("000000", email="absent@isu.edu.ph")
 
-    assert known.json == unknown.json
-    assert known.json["attemptsRemaining"] == 4
+    assert evicted.json == never_asked.json
+    assert evicted.json["attemptsRemaining"] == 4
 
 
 def test_the_rate_limiter_drops_idle_buckets(monkeypatch):
@@ -1356,7 +1446,6 @@ def test_guessed_entries_have_their_own_cap_and_evict_only_each_other(harness, m
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 3)
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_GUESSED_ENTRIES", 5)
     harness.request_code()
-    harness.request_code("absent@isu.edu.ph")
 
     for n in range(20):
         harness.release_cooldown()
@@ -1365,7 +1454,9 @@ def test_guessed_entries_have_their_own_cap_and_evict_only_each_other(harness, m
     assert len(guessed_entries()) == 5
     assert ("password", "nobody19@isu.edu.ph") in guessed_entries()
     assert ("password", "nobody0@isu.edu.ph") not in guessed_entries()
-    assert set(pending_entries()) == {("password", "admin@isu.edu.ph"), ("password", "absent@isu.edu.ph")}
+    # Guesses never add to the requested pool, which only the account's own
+    # request put anything in.
+    assert set(pending_entries()) == {("password", "admin@isu.edu.ph")}
 
 
 def test_a_flood_of_requests_does_not_evict_guessed_entries(harness, monkeypatch):
@@ -1374,9 +1465,9 @@ def test_a_flood_of_requests_does_not_evict_guessed_entries(harness, monkeypatch
     harness.verify("000000", email="guessed@isu.edu.ph")
     harness.verify("000000", email="guessed@isu.edu.ph")
 
-    for n in range(10):
+    for email in many_accounts(harness, 10):
         harness.release_cooldown()
-        harness.request_code(f"nobody{n}@isu.edu.ph")
+        harness.request_code(email)
 
     # The entry survives the flood; what it no longer holds is a budget.
     assert ("password", "guessed@isu.edu.ph") in guessed_entries()
@@ -1415,9 +1506,9 @@ def test_a_flood_of_requests_that_evicts_a_real_code_leaves_a_fresh_guessed_entr
     monkeypatch.setattr(auth_module, "RECOVERY_MAX_ENTRIES", 2)
     harness.request_code()
     real = harness.issued_code()
-    for n in range(2):
+    for email in many_accounts(harness, 2):
         harness.release_cooldown()
-        harness.request_code(f"nobody{n}@isu.edu.ph")
+        harness.request_code(email)
 
     harness.release_cooldown()
     refused = harness.verify(real)
@@ -1574,9 +1665,47 @@ def test_an_address_two_accounts_hold_between_them_recovers_neither(two_addresse
 
     response = two_addresses.request_code(email=ALTERNATIVE)
 
-    assert response.status_code == 200
-    assert response.json["message"] == GENERIC_MESSAGE
+    assert response.status_code == 400
+    assert response.json["code"] == "email_not_found"
     assert two_addresses.sent == []
+
+
+def test_an_address_matching_neither_column_never_recovers_an_account(two_addresses):
+    """The rule the whole flow rests on, in one place.
+
+    An address that is neither any account's ``gmail`` nor any account's
+    ``alternative_email`` is answered like one that is - same status, same
+    message - but no code is ever mailed for it and none can be redeemed with
+    it. So typing a stranger's address, or one nobody holds, reaches no
+    account's password while telling the sender nothing either way.
+    """
+
+    stranger = "someone.else@example.com"
+
+    requested = two_addresses.request_code(email=stranger)
+
+    assert requested.status_code == 400
+    assert requested.json["code"] == "email_not_found"
+    assert requested.json["message"] == UNKNOWN_EMAIL_MESSAGE
+    # Nothing was mailed, so there is no code for this address to read anywhere.
+    assert two_addresses.sent == []
+
+    stored = two_addresses.admins[0].password
+    attempts = [
+        two_addresses.reset(code, email=stranger)
+        for code in ("000000", "123456", "111111", "999999", "654321")
+    ]
+
+    assert [a.status_code for a in attempts] == [400, 400, 400, 400, 429]
+    # Not one of them reset anything, including "000000" - the value a codeless
+    # entry is compared against so an unknown address answers in the same time.
+    assert two_addresses.admins[0].password == stored
+    assert two_addresses.password_commits == 0
+    # And the account itself is still recoverable by its own address.
+    two_addresses.release_cooldown()
+    two_addresses.request_code(email=ALTERNATIVE)
+    assert two_addresses.reset(two_addresses.issued_code(), email=ALTERNATIVE).status_code == 200
+
 
 # ==========================================
 # Cumulative, persistent attempt limits
@@ -1610,19 +1739,22 @@ def test_three_codes_are_allowed_and_the_fourth_is_refused(harness):
     assert len(harness.sent) == 3
 
 
-def test_the_fourth_request_is_refused_for_an_unknown_address_too(harness):
-    """Identically, because the counting cannot depend on there being an
-    account - that difference would be the answer to "does this address have
-    one"."""
+def test_an_unregistered_address_spends_no_accounts_request_budget(harness):
+    """Probing costs the accounts nothing. The cap belongs to a subject, and an
+    address on no account is refused before a subject is counted against - so
+    the account's own three requests are still there afterwards."""
 
-    known = ask_three_times(harness) + [harness.request_code()]
-    for email in ("nobody@isu.edu.ph",):
+    for n in range(5):
         harness.release_cooldown()
-        unknown = ask_three_times(harness, email=email) + [harness.request_code(email=email)]
+        refused = harness.request_code(email=f"nobody{n}@isu.edu.ph")
+        assert refused.json["code"] == "email_not_found"
 
-    assert [r.status_code for r in unknown] == [r.status_code for r in known]
-    assert [r.json for r in unknown] == [r.json for r in known]
-    assert unknown[-1].headers["Retry-After"] == known[-1].headers["Retry-After"]
+    harness.release_cooldown()
+    mine = ask_three_times(harness)
+
+    assert [r.status_code for r in mine] == [200, 200, 200]
+    harness.release_cooldown()
+    assert harness.request_code().json["code"] == "recovery_restricted"
 
 
 def test_the_request_cap_is_a_sliding_window_not_a_fixed_one(harness):

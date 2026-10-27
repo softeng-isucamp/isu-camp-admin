@@ -9,7 +9,7 @@ import { App } from "../../App";
 import { AuthProvider } from "./AuthContext";
 import { ForgotPassword } from "./ForgotPassword";
 import { Login } from "./AuthPages";
-import { issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
+import { emailNotFound, issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
 const RECOVERY_RATE_LIMIT_MESSAGE = "Too many attempts. Please try again when the restriction ends.";
 
@@ -61,16 +61,48 @@ afterEach(() => {
 });
 
 describe("forgot-password: email step", () => {
-  it("answers an unregistered address with the same generic copy, never saying whether it exists", async () => {
-    // The backend answers every well-formed address identically; the page must not add anything of its own.
-    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
+  it("refuses an address on no administrator account and stays on the email step", async () => {
+    const { sent } = mockBackend({ [REQUEST]: [emailNotFound()] });
     renderForgotPassword();
-    expect(screen.getByText(/If the account is eligible for recovery, we'll send a/)).toBeInTheDocument();
+    // The rule is stated before the address is typed, and again as the refusal if it is wrong.
+    expect(screen.getByText(/An email that is not on an administrator account is refused\./)).toBeInTheDocument();
+    const email = screen.getByLabelText("Admin email");
 
-    await sendCodeTo("nobody@isu.edu.ph");
+    fireEvent.change(email, { target: { value: "nobody@isu.edu.ph" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
 
-    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent("nobody@isu.edu.ph");
-    expect(document.body).not.toHaveTextContent(/not (found|registered)|no account|does not exist|unknown/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That email is not registered to an administrator account. Check the address and try again.",
+    );
+    expect(sent[REQUEST]).toEqual([{ email: "nobody@isu.edu.ph", purpose: "password" }]);
+    // No code was sent, so there is no code step to advance to.
+    expect(screen.queryByRole("heading", { name: /verification code/i })).toBeNull();
+    // The address is the field's own problem, like a malformed one.
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(email).toHaveAccessibleDescription(/not registered to an administrator account/);
+  });
+
+  it("clears the refusal once the address is corrected", async () => {
+    mockBackend({ [REQUEST]: [emailNotFound()] });
+    renderForgotPassword();
+    const email = screen.getByLabelText("Admin email");
+
+    fireEvent.change(email, { target: { value: "nobody@isu.edu.ph" } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+    await screen.findByRole("alert");
+
+    fireEvent.change(email, { target: { value: EMAIL } });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(email).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("states what the email step will do with a registered address", () => {
+    mockBackend({});
+    renderForgotPassword();
+
+    expect(screen.getByText(/primary or alternative email associated with your administrator account/i)).toBeInTheDocument();
+    expect(screen.getByText(/We'll send a/)).toBeInTheDocument();
   });
 
   it("names no wait and keeps Send code usable when a 429 has no Retry-After", async () => {
@@ -121,7 +153,7 @@ describe("forgot-password: email step", () => {
     await sendCodeTo(`  ${EMAIL} `);
 
     expect(sent[REQUEST]).toEqual([{ email: EMAIL, purpose: "password" }]);
-    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(EMAIL);
+    expect(screen.getByText(/verification code has been sent to/i)).toHaveTextContent(EMAIL);
     expect(box(1)).toHaveValue("");
   });
 
@@ -566,6 +598,6 @@ describe("recovery by alternative email", () => {
     await sendCodeTo(ALTERNATIVE);
 
     expect(sent[REQUEST]).toEqual([{ email: ALTERNATIVE, purpose: "password" }]);
-    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent(ALTERNATIVE);
+    expect(screen.getByText(/verification code has been sent to/i)).toHaveTextContent(ALTERNATIVE);
   });
 });

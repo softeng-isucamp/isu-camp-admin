@@ -156,10 +156,14 @@ describe("fixture account recovery", () => {
     vi.useRealTimers();
   });
 
-  it("reports the expiry and resend cooldown on every request, known email or not", async () => {
+  it("reports the expiry and resend cooldown for an address on an account", async () => {
     const timing = { expiresInSeconds: 600, resendAfterSeconds: 60 };
     await expect(adapter.auth.requestRecovery(EMAIL, "password")).resolves.toEqual(timing);
-    await expect(adapter.auth.requestRecovery("nobody@example.com", "password")).resolves.toEqual(timing);
+  });
+
+  it("refuses a request for an address on no account, as the real backend does", async () => {
+    expect(await failure(adapter.auth.requestRecovery("nobody@example.com", "password")))
+      .toMatchObject({ kind: "email_not_found" });
   });
 
   it("returns the username for the test code, matching the email without case or spacing", async () => {
@@ -194,8 +198,8 @@ describe("fixture account recovery", () => {
     await adapter.auth.login(USERNAME, PASSWORD);
     await adapter.auth.updateProfile({ username: USERNAME, email: EMAIL, alternativeEmail: null, currentPassword: PASSWORD });
     await adapter.auth.logout();
-    await adapter.auth.requestRecovery("justine.home@gmail.com", "username");
-    expect(await failure(adapter.auth.verifyRecovery("justine.home@gmail.com", "username", TEST_CODE))).toMatchObject({ kind: "invalid_code" });
+    expect(await failure(adapter.auth.requestRecovery("justine.home@gmail.com", "username")))
+      .toMatchObject({ kind: "email_not_found" });
   });
 
   it("counts wrong codes down from five, then invalidates the code even for the right one", async () => {
@@ -229,9 +233,7 @@ describe("fixture account recovery", () => {
     expect(await failure(adapter.auth.verifyRecovery(EMAIL, "password", TEST_CODE))).toMatchObject({ kind: "code_expired" });
   });
 
-  it("answers an unknown email like a known one: same timing, same counting, never the test code", async () => {
-    await adapter.auth.requestRecovery("nobody@example.com", "password");
-
+  it("counts guesses at an unknown email down without ever accepting the test code", async () => {
     expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", TEST_CODE)))
       .toMatchObject({ kind: "invalid_code", attemptsRemaining: 4 });
     expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", "111111")))
@@ -360,12 +362,11 @@ describe("fixture code lifetime", () => {
     await expect(adapter.auth.login("admin_justine", "NewPassw0rd!")).rejects.toBeInstanceOf(AuthError);
   });
 
-  it("treats an unknown email's code the same way: it expires and is invalidated like a real one", async () => {
-    await adapter.auth.requestRecovery("nobody@example.com", "password");
+  it("expires and exhausts a guessed entry for an unknown email like a real code", async () => {
     for (let i = 0; i < 5; i += 1) await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", "111111"));
     expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "password", "111111"))).toMatchObject({ kind: "code_exhausted" });
 
-    await adapter.auth.requestRecovery("nobody@example.com", "username");
+    await failure(adapter.auth.verifyRecovery("nobody@example.com", "username", "111111"));
     vi.advanceTimersByTime(600_000);
     expect(await failure(adapter.auth.verifyRecovery("nobody@example.com", "username", "111111"))).toMatchObject({ kind: "code_expired" });
   });

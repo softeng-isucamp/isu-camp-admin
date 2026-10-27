@@ -1,9 +1,7 @@
-from datetime import datetime, timedelta
 import logging
 import time
 
 from flask import Flask
-import pytest
 
 import auth as auth_module
 from auth import auth_bp
@@ -41,7 +39,11 @@ def test_login_rate_limits_invalid_request_bodies():
 
 
 def test_sending_a_reset_code_mails_only_the_accounts_own_address(monkeypatch):
-    """The seam User Management's reset action shares with the sign-in page."""
+    """The seam User Management's reset action shares with the recovery pages.
+
+    The code is stored under the account's address, not its username, so the
+    colleague redeems it on the forgot-password page like any other reset.
+    """
 
     auth_module.reset_otps.clear()
     sent = []
@@ -54,15 +56,46 @@ def test_sending_a_reset_code_mails_only_the_accounts_own_address(monkeypatch):
     monkeypatch.setattr(auth_module, "mail", type("Mail", (), {
         "send": lambda self, message: sent.append((message.recipients, message.body)),
     })())
-    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin01@example.com"})()
+    monkeypatch.setattr(auth_module, "run_in_background", lambda deliver: deliver())
+    admin = type("AdminRecord", (), {
+        "id": 7, "username": "admin01", "gmail": "admin01@example.com", "is_active": True,
+    })()
+    monkeypatch.setattr(auth_module, "admins_with_email", lambda email: [admin])
+    monkeypatch.setattr(auth_module, "authorize_recovery_subject", lambda subject: None)
 
-    auth_module.send_password_reset_otp(admin)
+    assert auth_module.send_password_reset_otp(admin) is None
 
-    stored = auth_module.reset_otps["admin01"]["otp"]
+    stored = auth_module.reset_otps[("password", "admin01@example.com")]["otp"]
     assert len(stored) == 6 and stored.isdigit()
     recipients, body = sent[0]
     assert recipients == ["admin01@example.com"]
     assert stored in body
+
+
+def test_a_colleague_send_is_refused_for_an_address_recovery_cannot_resolve(monkeypatch):
+    """An address two accounts share recovers neither, so no code is mailed for it.
+
+    Reporting one as sent would leave the colleague holding a code the
+    forgot-password page is bound to refuse.
+    """
+
+    auth_module.reset_otps.clear()
+    sent = []
+    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {
+        "send": lambda self, message: sent.append(message),
+    })())
+    admin = type("AdminRecord", (), {
+        "id": 7, "username": "admin01", "gmail": "shared@example.com", "is_active": True,
+    })()
+    other = type("AdminRecord", (), {"id": 9, "is_active": True})()
+    monkeypatch.setattr(auth_module, "admins_with_email", lambda email: [admin, other])
+
+    with auth_app().app_context():
+        response, status = auth_module.send_password_reset_otp(admin)
+
+    assert status == 409
+    assert response.get_json()["success"] is False
+    assert sent == [] and auth_module.reset_otps == {}
 
 
 def test_login_refuses_a_deactivated_administrator(monkeypatch):
@@ -133,176 +166,6 @@ def test_a_session_ends_when_its_account_is_deactivated(monkeypatch):
     assert response.status_code == 401
     with client.session_transaction() as flask_session:
         assert "admin_id" not in flask_session
-
-
-def test_reset_request_enforces_resend_cooldown(monkeypatch):
-    auth_module.rate_limit_buckets.clear()
-    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin@example.com"})()
-    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {"query": type("Query", (), {"filter_by": staticmethod(lambda **values: type("Result", (), {"first": lambda self: admin})() )})()}))
-    class FakeMessage:
-        def __init__(self, **values):
-            self.__dict__.update(values)
-
-    monkeypatch.setattr(auth_module, "Message", FakeMessage)
-    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda self, message: None})())
-    client = auth_app().test_client()
-
-    first = client.post("/api/reset/request", json={"username": "admin01"})
-    resend = client.post("/api/reset/request", json={"username": "admin01"})
-
-    assert first.status_code == 200
-    assert resend.status_code == 429
-    assert resend.json["message"] == "Too many password reset requests. Please wait before requesting another code."
-
-
-def test_reset_request_rate_limits_invalid_request_bodies():
-    auth_module.rate_limit_buckets.clear()
-    client = auth_app().test_client()
-
-    first = client.post("/api/reset/request", json={})
-    second = client.post("/api/reset/request", json={})
-
-    assert first.status_code == 400
-    assert second.status_code == 429
-
-
-def test_password_reset_endpoint_is_rate_limited(monkeypatch):
-    auth_module.rate_limit_buckets.clear()
-    client = auth_app().test_client()
-
-    responses = [client.post("/api/reset-password", json={"username": "admin01", "code": "000000", "password": "Passw0rd!123"}) for _ in range(6)]
-
-    assert [response.status_code for response in responses[:5]] == [400] * 5
-    assert responses[5].status_code == 429
-    assert responses[5].json["message"] == "Too many password reset attempts. Please try again later."
-
-
-def test_password_reset_rate_limits_invalid_request_bodies():
-    auth_module.rate_limit_buckets.clear()
-    client = auth_app().test_client()
-
-    responses = [client.post("/api/reset-password", json={}) for _ in range(6)]
-
-    assert [response.status_code for response in responses[:5]] == [400] * 5
-    assert responses[5].status_code == 429
-
-
-def test_reset_code_verification_rejects_wrong_and_expired_codes_without_consuming_a_valid_code():
-    auth_module.rate_limit_buckets.clear()
-    auth_module.reset_otps.clear()
-    client = auth_app().test_client()
-    auth_module.reset_otps["admin01"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() + timedelta(minutes=1),
-    }
-
-    wrong = client.post("/api/reset/verify", json={"username": "admin01", "code": "000000"})
-    correct = client.post("/api/reset/verify", json={"username": "admin01", "code": "123456"})
-
-    assert wrong.status_code == 400
-    assert wrong.json["message"] == "Invalid verification code"
-    assert correct.status_code == 200
-    assert auth_module.reset_otps["admin01"]["otp"] == "123456"
-
-    auth_module.reset_otps["admin01"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() - timedelta(seconds=1),
-    }
-    expired = client.post("/api/reset/verify", json={"username": "admin01", "code": "123456"})
-    assert expired.status_code == 400
-    assert expired.json["message"] == "Verification code has expired"
-
-
-def test_reset_code_verification_is_rate_limited_with_retry_after():
-    auth_module.rate_limit_buckets.clear()
-    auth_module.reset_otps.clear()
-    client = auth_app().test_client()
-    auth_module.reset_otps["admin01"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() + timedelta(minutes=1),
-    }
-
-    responses = [
-        client.post("/api/reset/verify", json={"username": "admin01", "code": "000000"})
-        for _ in range(6)
-    ]
-
-    assert [response.status_code for response in responses[:5]] == [400] * 5
-    assert responses[5].status_code == 429
-    assert int(responses[5].headers["Retry-After"]) > 0
-
-
-def test_final_reset_remains_authoritative_after_non_consuming_verification(monkeypatch):
-    auth_module.rate_limit_buckets.clear()
-    auth_module.reset_otps.clear()
-    admin = type("AdminRecord", (), {"username": "admin01", "password": "old-password"})()
-    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
-        "query": type("Query", (), {"filter_by": staticmethod(
-            lambda **values: type("Result", (), {"first": lambda self: admin})()
-        )})()
-    }))
-    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
-    client = auth_app().test_client()
-    auth_module.reset_otps["admin01"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() + timedelta(minutes=1),
-    }
-
-    verified = client.post("/api/reset/verify", json={"username": "admin01", "code": "123456"})
-    wrong_final = client.post("/api/reset-password", json={
-        "username": "admin01", "code": "000000", "password": "Passw0rd!123",
-    })
-
-    assert verified.status_code == 200
-    assert wrong_final.status_code == 400
-    assert wrong_final.json["message"] == "Invalid verification code"
-    assert auth_module.reset_otps["admin01"]["otp"] == "123456"
-
-    correct_final = client.post("/api/reset-password", json={
-        "username": "admin01", "code": "123456", "password": "Passw0rd!123",
-    })
-    assert correct_final.status_code == 200
-    # Stored as a hash now, not as the password itself, so the assertion is
-    # that the new password verifies rather than that it is readable.
-    assert admin.password != "Passw0rd!123"
-    assert verify_password(admin.password, "Passw0rd!123")[0]
-    assert "admin01" not in auth_module.reset_otps
-
-
-@pytest.mark.parametrize(
-    "password,message",
-    [
-        ("Abcde1!", "Password must be at least 8 characters."),
-        ("abcdefg1!", "Password must include an uppercase letter."),
-        ("ABCDEFG1!", "Password must include a lowercase letter."),
-        ("Abcdefgh!", "Password must include a number."),
-        ("Abcdefg12", "Password must include a symbol."),
-    ],
-)
-def test_final_reset_enforces_the_shared_password_rules(monkeypatch, password, message):
-    auth_module.rate_limit_buckets.clear()
-    auth_module.reset_otps.clear()
-    admin = type("AdminRecord", (), {"username": "admin01", "password": "old-password"})()
-    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
-        "query": type("Query", (), {"filter_by": staticmethod(
-            lambda **values: type("Result", (), {"first": lambda self: admin})()
-        )})()
-    }))
-    monkeypatch.setattr(auth_module.db, "session", type("Session", (), {"commit": lambda self: None})())
-    auth_module.reset_otps["admin01"] = {
-        "otp": "123456",
-        "expires_at": datetime.utcnow() + timedelta(minutes=1),
-    }
-
-    response = auth_app().test_client().post("/api/reset-password", json={
-        "username": "admin01", "code": "123456", "password": password,
-    })
-
-    assert response.status_code == 400
-    assert response.json["message"] == message
-    assert admin.password == "old-password"
-    # The code is not spent by a refused password, so the user can pick another.
-    assert "admin01" in auth_module.reset_otps
 
 
 def test_an_account_with_a_weak_stored_password_still_signs_in(monkeypatch):
@@ -514,43 +377,3 @@ def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
     assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE
 
 
-def test_a_superseded_reset_code_cannot_overwrite_a_newer_reset(monkeypatch):
-    """Request A holds code X and is still hashing when a newer code Y is issued
-    and redeemed. A must be refused, and the password must stay B's."""
-
-    auth_module.rate_limit_buckets.clear()
-    auth_module.reset_otps.clear()
-    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin01@example.com", "password": "old"})()
-    committed = []
-    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {"query": type("Query", (), {
-        "filter_by": staticmethod(lambda **values: type("Result", (), {"first": lambda self: admin})()),
-    })()}))
-    monkeypatch.setattr(auth_module, "db", type("Db", (), {"session": type("Session", (), {
-        "commit": staticmethod(lambda: committed.append(admin.password)),
-        "rollback": staticmethod(lambda: None),
-    })()})())
-    monkeypatch.setattr(auth_module, "Message", lambda **values: type("Message", (), values)())
-    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda self, message: None})())
-    codes = iter(["111111", "222222"])
-    monkeypatch.setattr(auth_module, "generate_otp", lambda: next(codes))
-    client = auth_app().test_client()
-    auth_module.send_password_reset_otp(admin)  # code X
-
-    newer = {}
-
-    def hash_while_a_newer_reset_lands(password):
-        if password == "PasswordA!1" and not newer:
-            auth_module.send_password_reset_otp(admin)  # code Y replaces X
-            newer["response"] = client.post("/api/reset-password", json={
-                "username": "admin01", "code": "222222", "password": "PasswordB!2"})
-        return f"hash:{password}"
-
-    monkeypatch.setattr(auth_module, "hash_password", hash_while_a_newer_reset_lands)
-
-    first = client.post("/api/reset-password", json={
-        "username": "admin01", "code": "111111", "password": "PasswordA!1"})
-
-    assert newer["response"].status_code == 200
-    assert first.status_code == 400
-    assert admin.password == "hash:PasswordB!2"
-    assert committed == ["hash:PasswordB!2"]

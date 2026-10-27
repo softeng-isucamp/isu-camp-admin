@@ -975,7 +975,13 @@ async function readJsonObject(response: Response): Promise<Record<string, any> |
 const parseAttemptsRemaining = (data: Record<string, any>): number | undefined =>
   Number.isInteger(data.attemptsRemaining) && data.attemptsRemaining >= 0 ? data.attemptsRemaining : undefined;
 
-const recoveryErrorKinds: ReadonlySet<string> = new Set(["invalid_code", "code_exhausted", "code_expired", "weak_password"]);
+const recoveryErrorKinds: ReadonlySet<string> = new Set([
+  "invalid_code",
+  "code_exhausted",
+  "code_expired",
+  "weak_password",
+  "email_not_found",
+]);
 
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && (value as number) > 0;
 

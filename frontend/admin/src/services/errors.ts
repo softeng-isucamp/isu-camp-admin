@@ -48,7 +48,14 @@ export class RateLimitError extends Error {
  * Why an auth request failed, for pages to branch on instead of parsing text.
  * Rate limits are not a kind: they stay `RateLimitError`.
  */
-export type AuthErrorKind = "invalid_credentials" | "invalid_code" | "code_exhausted" | "code_expired" | "weak_password";
+export type AuthErrorKind =
+  | "invalid_credentials"
+  | "invalid_code"
+  | "code_exhausted"
+  | "code_expired"
+  | "weak_password"
+  /** The submitted address is on no administrator account, so no code was sent. */
+  | "email_not_found";
 
 /** A failed sign-in or recovery step, with the attempts the server says remain. */
 export class AuthError extends Error {

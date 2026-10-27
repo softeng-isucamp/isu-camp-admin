@@ -251,9 +251,18 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         confirmedAt = Date.now();
       },
       recentlyConfirmed,
-      // Always succeeds and reports the same timing, so the response never says whether the email has an account.
+      // The address must be on an account, as the real backend requires: an
+      // address nobody holds is refused here rather than issuing a code that
+      // could never verify.
       requestRecovery: async (email: string, purpose: RecoveryPurpose): Promise<CodeRequestResult> => {
-        issueCode(email, purpose);
+        const issued = issueCode(email, purpose);
+        if (!issued.account) {
+          issuedCodes.delete(`${purpose}:${normalizeEmail(email)}`);
+          throw new AuthError(
+            "email_not_found",
+            "That email is not registered to an administrator account. Check the address and try again.",
+          );
+        }
         return { expiresInSeconds: RECOVERY_EXPIRES_SECONDS, resendAfterSeconds: RECOVERY_RESEND_SECONDS };
       },
       verifyRecovery: async (email: string, purpose: RecoveryPurpose, code: string): Promise<RecoveryResult> => {

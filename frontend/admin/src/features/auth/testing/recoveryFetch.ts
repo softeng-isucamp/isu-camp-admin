@@ -28,7 +28,7 @@ export const mockBackend = (queues: Partial<Record<string, Reply[]>>) => {
 };
 
 export const issued = (timing: { expiresInSeconds?: number; resendAfterSeconds?: number } = {}) =>
-  jsonResponse({ success: true, message: "If an account exists, a code has been sent.", ...timing });
+  jsonResponse({ success: true, message: "A verification code has been sent to this email.", ...timing });
 export const verified = (username = "admin_justine") => jsonResponse({ success: true, username });
 export const wrongCode = (attemptsRemaining?: number) =>
   jsonResponse(
@@ -38,6 +38,16 @@ export const wrongCode = (attemptsRemaining?: number) =>
 export const exhausted = () =>
   jsonResponse({ success: false, code: "code_exhausted", message: "Too many incorrect codes.", attemptsRemaining: 0 }, 400);
 export const expired = () => jsonResponse({ success: false, code: "code_expired", message: "Code expired." }, 400);
+/** The address is on no administrator account, so the request step refuses it and sends nothing. */
+export const emailNotFound = () =>
+  jsonResponse(
+    {
+      success: false,
+      code: "email_not_found",
+      message: "That email is not registered to an administrator account. Check the address and try again.",
+    },
+    400,
+  );
 
 /** Lets pending promises resolve; waitFor cannot poll under fake timers. */
 export const settle = async () => {
