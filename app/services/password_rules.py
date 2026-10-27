@@ -19,7 +19,7 @@ PasswordRule = namedtuple("PasswordRule", "id message test")
 # JavaScript's \s, which the frontend's symbol rule excludes. Python's own
 # str.isspace differs (it counts U+001C-U+001F and U+0085, and not U+FEFF).
 _WHITESPACE = frozenset(
-    "\t\n\v\f\r       　﻿"
+    "\t\n\v\f\r     　﻿"
     + "".join(chr(code) for code in range(0x2000, 0x200B))
 )
 _ASCII_DIGIT = re.compile("[0-9]")

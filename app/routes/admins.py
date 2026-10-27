@@ -27,6 +27,10 @@ from auth import (
     Admin,
     admin_required,
     email_taken,
+    identity_changed_since,
+    identity_claim_lock,
+    identity_snapshot,
+    STALE_IDENTITY_MESSAGE,
     rate_limited,
     reauth_required,
     send_password_reset_otp,
@@ -96,12 +100,19 @@ def _read_permissions(data, *, role, default=None):
     meaningful - it is what a superadmin's row stores - so the two are not
     interchangeable with a falsy check.
 
-    A superadmin's switches are ignored rather than refused: a client may hold
-    one form for both roles, and refusing a field that cannot apply would make
-    promoting somebody fail for a value nothing reads.
+    Only an *absent* field defaults. A field that is present and null is a
+    value the caller chose to send, and the one shape a supplied value may
+    take is the four booleans, so null is refused like any other wrong shape
+    (issue #145). Reading the two the same way meant a client could ask for
+    "no permissions" and silently receive the view-only default instead of
+    being told its request made no sense.
+
+    A superadmin's switches are ignored rather than refused, null included: a
+    client may hold one form for both roles, and refusing a field that cannot
+    apply would make promoting somebody fail for a value nothing reads.
     """
 
-    if not isinstance(data, dict) or "permissions" not in data or data["permissions"] is None:
+    if not isinstance(data, dict) or "permissions" not in data:
         return default, None
 
     if role == "superadmin":
@@ -266,21 +277,29 @@ def create_admin():
     if error:
         return error
 
+    # Hashed on the way in, so a new account never adds a plaintext row to the
+    # ones already there - and before the claim lock, because it is slow.
+    password_hash = hash_password(values["password"])
+
     try:
-        # public.admin.id is an identity column, so the database assigns it.
-        record = Admin(
-            username=values["username"],
-            # Hashed on the way in, so a new account never adds a
-            # plaintext row to the ones already there.
-            password=hash_password(values["password"]),
-            gmail=values["email"],
-            role=role,
-            permissions=permissions,
-        )
-        db.session.add(record)
-        db.session.flush()
-        log_audit("Admin", None, "create", "Administrator", record.id, record.username)
-        db.session.commit()
+        with identity_claim_lock:
+            # Checked again now that no other claim can commit in between.
+            if _username_taken(values["username"]):
+                return _error("That username is already taken", status=409, field="username")
+            if email_taken(values["email"]):
+                return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
+            # public.admin.id is an identity column, so the database assigns it.
+            record = Admin(
+                username=values["username"],
+                password=password_hash,
+                gmail=values["email"],
+                role=role,
+                permissions=permissions,
+            )
+            db.session.add(record)
+            db.session.flush()
+            log_audit("Admin", None, "create", "Administrator", record.id, record.username)
+            db.session.commit()
         return jsonify({"success": True, "message": "Administrator added successfully.", "admin": _as_dict(record)}), 201
     except Exception:
         db.session.rollback()
@@ -311,6 +330,8 @@ def update_admin(admin_id):
     if invalid:
         return invalid
 
+    loaded = identity_snapshot(record)
+
     if _username_taken(values["username"], excluding_id=admin_id):
         return _error("That username is already taken", status=409, field="username")
 
@@ -319,19 +340,29 @@ def update_admin(admin_id):
     # an address (issue #108), and a rule about new values must not stop those
     # accounts saving a rename. This route edits the caller's own account only,
     # so the pool excludes it.
-    if (values["email"] or "").strip().lower() != (record.gmail or "").strip().lower():
-        if email_taken(values["email"], excluding_id=admin_id):
-            return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
+    email_moved = (values["email"] or "").strip().lower() != (record.gmail or "").strip().lower()
+    if email_moved and email_taken(values["email"], excluding_id=admin_id):
+        return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
+
+    # A blank password leaves the existing one alone; the reset flow is the
+    # other way to change it. Hashed before the claim lock, because it is slow.
+    password_hash = hash_password(values["password"]) if values["password"] else None
 
     try:
-        record.username = values["username"]
-        record.gmail = values["email"]
-        # A blank password leaves the existing one alone; the reset flow is the
-        # other way to change it.
-        if values["password"]:
-            record.password = hash_password(values["password"])
-        log_audit("Admin", None, "update", "Administrator", record.id, record.username)
-        db.session.commit()
+        with identity_claim_lock:
+            if identity_changed_since(record, loaded):
+                return _error(STALE_IDENTITY_MESSAGE, status=409)
+            # Checked again now that no other claim can commit in between.
+            if _username_taken(values["username"], excluding_id=admin_id):
+                return _error("That username is already taken", status=409, field="username")
+            if email_moved and email_taken(values["email"], excluding_id=admin_id):
+                return _error(EMAIL_TAKEN_MESSAGE, status=409, field="email")
+            record.username = values["username"]
+            record.gmail = values["email"]
+            if password_hash:
+                record.password = password_hash
+            log_audit("Admin", None, "update", "Administrator", record.id, record.username)
+            db.session.commit()
         return jsonify({"success": True, "message": "Administrator updated successfully.", "admin": _as_dict(record)}), 200
     except Exception:
         db.session.rollback()

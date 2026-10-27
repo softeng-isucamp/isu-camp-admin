@@ -129,6 +129,19 @@ export interface UserAccount {
 }
 /** What an administrator account may do in the portal; a missing or unrecognized value means "admin". */
 export type AdminRole = "admin" | "superadmin";
+/**
+ * What a regular administrator may change, portal-wide. Viewing is implicit and
+ * always on, so it has no switch. Superadmins are not configurable: they can do
+ * everything, and the backend reports no permissions for them.
+ */
+export interface AdminPermissions {
+  add: boolean;
+  edit: boolean;
+  delete: boolean;
+  /** Activating or deactivating app user accounts. */
+  changeUserStatus: boolean;
+}
+export type AdminPermissionAction = keyof AdminPermissions;
 /** An administrator account for the portal itself, owned by this app. */
 export interface AdminAccount {
   id: string;
@@ -136,7 +149,9 @@ export interface AdminAccount {
   email: string;
   status: AccountStatus;
   role: AdminRole;
-  /** True for the signed-in admin, who cannot deactivate or remove their own account. */
+  /** Only for role `admin`. Absent for a superadmin, and while the backend does not send it. */
+  permissions?: AdminPermissions;
+  /** True for the signed-in admin, who cannot deactivate their own account or edit their own permissions. */
   isCurrent: boolean;
 }
 export interface AdminAccountDraft {
@@ -147,6 +162,8 @@ export interface AdminAccountDraft {
   password?: string;
   /** Only read when creating; a new account is an administrator unless this says otherwise. */
   role?: AdminRole;
+  /** Only read when creating an administrator; omitted means view only. */
+  permissions?: AdminPermissions;
 }
 export interface AuditEntry {
   id: string;
@@ -164,6 +181,11 @@ export interface Session {
   email?: string;
   /** Missing or unrecognized roles never grant superadmin access. */
   role?: AdminRole;
+  /**
+   * The signed-in administrator's own switches. Ignored for a superadmin. Missing
+   * means "not reported", which the portal treats as everything allowed.
+   */
+  permissions?: AdminPermissions;
 }
 export type DashboardRange = "week" | "month" | "all";
 export interface DashboardSummary {

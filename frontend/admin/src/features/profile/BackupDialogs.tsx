@@ -2,12 +2,12 @@ import { FormEvent, useState } from 'react';
 import { Button, Field, Modal } from '../../components/UI';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
+import { errorMessage } from '../../services/errors';
 import type { BackupDownload, BackupJob, SystemBackup } from '../../services/profile';
 import { DELETE_CONFIRMATION_WORDING, PasswordConfirmationField, usePasswordConfirmation } from '../auth/PasswordConfirmation';
 import { origin, sizeText } from './backupFormat';
 import { DialogFocus, type FocusReturn } from './DialogFocus';
 
-const message = (cause: unknown) => cause instanceof Error ? cause.message : 'Unable to complete the request. Try again.';
 const BACKUP_DELETE_WORDING = { ...DELETE_CONFIRMATION_WORDING, expired: 'Your password confirmation expired. Enter it again to delete this backup.' };
 const subtitle = (backup: SystemBackup) => `Created ${formatDateTime(backup.createdAt)} by ${origin(backup)}`;
 
@@ -28,7 +28,7 @@ export function DownloadDialog({ backup, returnTo, onClose, onStarted }: { backu
     if (busy || !password) return;
     setBusy(true); setError('');
     try { startDownload(await services.profile.download(backup.id, password)); onStarted(); }
-    catch (cause) { setError(message(cause)); setBusy(false); }
+    catch (cause) { setError(errorMessage(cause, "The download couldn't be started. Please try again.")); setBusy(false); }
   };
   return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Download this backup?" subtitle={`${subtitle(backup)} · ${sizeText(backup.sizeBytes)}`} size="sm" onClose={() => { if (!busy) onClose(); }}>
@@ -55,7 +55,7 @@ export function RestoreDialog({ backup, returnTo, onClose, onStarted }: { backup
     if (busy || confirmation !== 'RESTORE' || !password) return;
     setBusy(true); setError('');
     try { onStarted(await services.profile.restore(backup.id, password)); }
-    catch (cause) { setError(message(cause)); setBusy(false); }
+    catch (cause) { setError(errorMessage(cause, "The restore couldn't be started. Please try again.", { mutation: true })); setBusy(false); }
   };
   return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Restore this backup?" subtitle={subtitle(backup)} size="sm" variant="danger" onClose={() => { if (!busy) onClose(); }}>
@@ -85,7 +85,7 @@ export function DeleteDialog({ backup, returnTo, onlyRestorable, onClose, onDele
     if (!await confirmation.confirm()) return;
     setDeleting(true);
     try { await services.profile.remove(backup.id); onDeleted(); }
-    catch (cause) { if (!confirmation.handleRejection(cause)) setError(message(cause)); setDeleting(false); }
+    catch (cause) { if (!confirmation.handleRejection(cause)) setError(errorMessage(cause, "The backup couldn't be deleted. Please try again.", { mutation: true })); setDeleting(false); }
   };
   return <DialogFocus busy={busy} returnTo={returnTo}>
     <Modal title="Delete this backup?" subtitle={`${subtitle(backup)} · ${backup.status === 'ready' ? sizeText(backup.sizeBytes) : 'Failed'}`} size="sm" variant="danger" onClose={() => { if (!busy) onClose(); }}>

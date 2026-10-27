@@ -1,10 +1,11 @@
 import type { AccountProfile, ProfileChanges, PasswordChange } from "./profile";
-import type { AccountStatus, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
+import type { AccountStatus, AdminPermissions, Building, Location, LocationDraft, Pathway, RouteNode, Session } from "../types";
 import { canContainLocations, isPlace, locationPolicy, placeClassificationOf } from "../lib/locationPolicy";
 import { pointInPolygon } from "../features/map/campusBoundary";
-import { AuthError, RateLimitError, fieldErrorsOf } from "./errors";
+import { AuthError, RateLimitError, RequestError, fieldErrorsOf } from "./errors";
 import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
+import { allPermissions, viewOnlyPermissions } from "../lib/permissions";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
@@ -20,23 +21,29 @@ const RECOVERY_EXPIRES_SECONDS = 600;
 const RECOVERY_RESEND_SECONDS = 60;
 
 /** A fixture administrator: the sign-in, the directory row and the session all read this one record. */
-export type FixtureAccount = AccountProfile & { password: string; status: AccountStatus };
+export type FixtureAccount = AccountProfile & { password: string; status: AccountStatus; permissions?: AdminPermissions };
 
 /**
  * `admin_justine` is the demo superadmin and `admin_registrar` the plain
  * administrator; `admin_dean` is a second superadmin so one can act on another.
- * They all sign in with the same password. `admin_dean` also has an alternative
- * email, so the shared email pool's duplicate path can be tried.
+ * `admin_viewer` is an administrator with every switch off, for trying the
+ * restricted portal. They all sign in with the same password. `admin_dean` also
+ * has an alternative email, so the shared email pool's duplicate path can be tried.
  */
 const seedAccounts = (): FixtureAccount[] => [
   { id: "1", username: "admin_justine", email: LOCAL_ADMIN_EMAIL, role: "superadmin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null },
-  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null },
+  { id: "2", username: "admin_registrar", email: "registrar.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null, permissions: allPermissions() },
   { id: "3", username: "admin_dean", email: "dean.admin@isu.edu.ph", role: "superadmin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: "dean.backup@gmail.com" },
+  { id: "4", username: "admin_viewer", email: "viewer.admin@isu.edu.ph", role: "admin", status: "Active", password: LOCAL_PASSWORD, alternativeEmail: null, permissions: viewOnlyPermissions() },
 ];
 
 const profileOf = ({ id, username, email, role, alternativeEmail }: FixtureAccount): AccountProfile => ({ id, username, email, role, alternativeEmail });
-/** The session carries the sign-in identity only; the alternative email is read from the profile. */
-const sessionOf = ({ id, username, email, role }: FixtureAccount): Session => ({ id, username, email, role });
+/**
+ * What the server's session reports: the sign-in identity plus a regular
+ * administrator's switches. The alternative email is read from the profile.
+ */
+const sessionOf = ({ id, username, email, role, permissions }: FixtureAccount): Session =>
+  role === "admin" && permissions ? { id, username, email, role, permissions: { ...permissions } } : { id, username, email, role };
 
 /** A code the fixture handed out. `account` is unset for emails with no account, which still behave like they have one. */
 type IssuedCode = { account?: FixtureAccount; attempts: number; expiresAt: number };
@@ -270,7 +277,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       viewer: (): FixtureAccount | null => session ? account : null,
       /** The account making an administrator request: signed in and still active, or the request is refused. */
       caller: (): FixtureAccount => {
-        if (!session) throw new Error("Authentication required");
+        if (!session) throw new RequestError("session");
         refuseIfDeactivated();
         return account;
       },
@@ -282,14 +289,14 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const building = mapData.buildings?.find((item) => item.id === buildingId);
         if (!location || !["Room", "Office", "Laboratory", "Restroom"].includes(location.type) ||
             (location.parentId !== buildingId && location.building !== building?.name)) {
-          throw new Error("Indoor Location does not belong to the selected Building.");
+          throw new Error("This location doesn't belong to the selected building. Reload the page and try again.");
         }
-        if (!building || building.points.length < 3) throw new Error("Building footprint is unavailable.");
-        if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
-        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
-        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
+        if (!building || building.points.length < 3) throw new Error("This building has no outline to place a marker in. Draw its outline first.");
+        if ((lat === null) !== (lng === null)) throw new Error("The marker position is invalid. Place the marker again.");
+        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("The marker position is invalid. Place the marker again.");
+        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("The marker position is invalid. Place the marker again.");
         if (lat !== null && lng !== null && !pointInPolygon([lat, lng], building.points)) {
-          throw new Error("Indoor marker must be inside the selected Building footprint.");
+          throw new Error("Place the marker inside the building's outline.");
         }
         location.lat = lat;
         location.lng = lng;
@@ -298,11 +305,11 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
       },
       savePosition: (id: string, lat: number | null, lng: number | null): Location => {
         const location = mapData.locations.find((item) => item.id === id);
-        if (!location) throw new Error("Location not found.");
+        if (!location) throw new Error("That location no longer exists. Reload the page.");
         if (!isPlace(location) || canContainLocations(placeClassificationOf(location)) || location.parentId !== null) throw new Error("Only standalone Food, Parking, and Facility records can own an outdoor position.");
-        if ((lat === null) !== (lng === null)) throw new Error("Latitude and longitude must be provided together.");
-        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("Latitude must be between -90 and 90.");
-        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("Longitude must be between -180 and 180.");
+        if ((lat === null) !== (lng === null)) throw new Error("The marker position is invalid. Place the marker again.");
+        if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) throw new Error("The marker position is invalid. Place the marker again.");
+        if (lng !== null && (!Number.isFinite(lng) || lng < -180 || lng > 180)) throw new Error("The marker position is invalid. Place the marker again.");
         location.lat = lat;
         location.lng = lng;
         location.positioned = lat !== null && lng !== null;

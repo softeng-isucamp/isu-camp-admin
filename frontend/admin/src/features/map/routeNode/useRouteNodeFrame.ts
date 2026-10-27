@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RouteNode } from "../../../types";
 import type { SavingAction } from "../session/useSavingAction";
 import type { RouteNodeValidationContext, RouteNodeWorkflow } from "./RouteNodeWorkflow";
+import { reportError } from "../../../services/errors";
 
 interface UseRouteNodeFrameOptions {
   workflow: RouteNodeWorkflow;
@@ -12,7 +13,7 @@ interface UseRouteNodeFrameOptions {
   onError: (message: string) => void;
 }
 
-const REFRESH_FAILED = "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.";
+const REFRESH_FAILED = "The route node was saved, but the map could not refresh. Reload the map to see it.";
 
 const fieldLabel = (field: string) =>
   field === "name" ? "Route Node name"
@@ -67,7 +68,8 @@ export function useRouteNodeFrame(selectedNode: RouteNode | undefined, {
       await refreshMapData();
       onError("");
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : REFRESH_FAILED);
+      reportError(cause);
+      onError(REFRESH_FAILED);
     } finally {
       saving.endSaving();
     }

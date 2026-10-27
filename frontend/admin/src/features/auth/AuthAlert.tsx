@@ -3,6 +3,18 @@ import type { ReactNode } from "react";
 /** Shown for every server rate limit. It names no number: the button that is locked counts down the live wait. */
 export const RATE_LIMIT_MESSAGE = "Too many attempts. Try again when the button unlocks.";
 
+/**
+ * The rate-limit sentence on the recovery screens. Only a known wait mentions an end, because only then does a button count down;
+ * only the server's `recovery_restricted` code says recovery itself is restricted.
+ */
+export const recoveryRateLimitMessage = ({ retryAfterSeconds, restricted }: { retryAfterSeconds?: number; restricted: boolean }) => {
+  const known = retryAfterSeconds !== undefined;
+  if (restricted) {
+    return `Account recovery is temporarily restricted after too many attempts. Please try again ${known ? "when the restriction ends" : "later"}.`;
+  }
+  return known ? "Too many attempts. Please try again when the restriction ends." : "Too many attempts. Please wait a moment and try again.";
+};
+
 /** The label of a button locked by a rate limit. */
 export const tryAgainLabel = (seconds: number) => `Try again in ${seconds}s`;
 
@@ -11,17 +23,22 @@ const URGENT_ATTEMPTS_THRESHOLD = 2;
 
 const isUrgentAttempts = (attemptsRemaining: number) => attemptsRemaining <= URGENT_ATTEMPTS_THRESHOLD;
 
-/** "4 attempts left." */
-const attemptsLeftText = (attemptsRemaining: number) =>
-  attemptsRemaining <= 0
-    ? "No attempts left."
-    : `${attemptsRemaining} attempt${attemptsRemaining === 1 ? "" : "s"} left.`;
+/** How the count is worded: "4 attempts left." on sign-in, "You have 4 attempts remaining." on the recovery screens. */
+export type AttemptsWording = "left" | "remaining";
+
+const attemptsText = (attemptsRemaining: number, wording: AttemptsWording) => {
+  const noun = `attempt${attemptsRemaining === 1 ? "" : "s"}`;
+  if (wording === "remaining") return attemptsRemaining <= 0 ? "No attempts remaining." : `You have ${attemptsRemaining} ${noun} remaining.`;
+  return attemptsRemaining <= 0 ? "No attempts left." : `${attemptsRemaining} ${noun} left.`;
+};
 
 interface AuthAlertProps {
   /** The error sentence, e.g. "Incorrect code." */
   children: ReactNode;
   /** Appends "N attempts left."; at the urgent threshold the count turns bold and a warning icon shows. */
   attemptsRemaining?: number;
+  /** The sentence the count is appended in; sign-in keeps "left". */
+  attemptsWording?: AttemptsWording;
   /** Forces the urgent emphasis without a count, e.g. once every attempt is used up. */
   urgent?: boolean;
   /** Lets the field the error is about point at it with `aria-describedby`. */
@@ -29,7 +46,7 @@ interface AuthAlertProps {
 }
 
 /** The one error box for login and every recovery step. Urgency adds emphasis, never a different box. */
-export function AuthAlert({ children, attemptsRemaining, urgent = false, id }: AuthAlertProps) {
+export function AuthAlert({ children, attemptsRemaining, attemptsWording = "left", urgent = false, id }: AuthAlertProps) {
   const urgentCount = attemptsRemaining !== undefined && isUrgentAttempts(attemptsRemaining);
   const emphasised = urgent || urgentCount;
   return (
@@ -46,7 +63,7 @@ export function AuthAlert({ children, attemptsRemaining, urgent = false, id }: A
         {attemptsRemaining !== undefined && (
           <>
             {" "}
-            {urgentCount ? <strong>{attemptsLeftText(attemptsRemaining)}</strong> : attemptsLeftText(attemptsRemaining)}
+            {urgentCount ? <strong>{attemptsText(attemptsRemaining, attemptsWording)}</strong> : attemptsText(attemptsRemaining, attemptsWording)}
           </>
         )}
       </span>

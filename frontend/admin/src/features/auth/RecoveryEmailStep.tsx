@@ -2,8 +2,9 @@ import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "../../components/UI";
 import { RateLimitError, services } from "../../services/api";
 import type { CodeRequestResult, RecoveryPurpose } from "../../services/recovery";
+import { errorMessage } from "../../services/errors";
 import { recoveryEmailSchema } from "../../services/schemas";
-import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
+import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { BackToLogin } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
@@ -43,10 +44,11 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
       onSent(parsed.data, await services.auth.requestRecovery(parsed.data, purpose));
     } catch (err) {
       if (err instanceof RateLimitError) {
-        setError(RATE_LIMIT_MESSAGE);
-        wait.start(err.retryAfterSeconds);
+        setError(recoveryRateLimitMessage(err));
+        // Without a Retry-After there is nothing to count down, so the button stays usable.
+        if (err.retryAfterSeconds !== undefined) wait.start(err.retryAfterSeconds);
       } else {
-        setError(err instanceof Error ? err.message : "Unable to send the verification code.");
+        setError(errorMessage(err, "We couldn't send the verification code. Please try again."));
       }
     } finally {
       inFlight.current = false;
@@ -58,7 +60,8 @@ export function RecoveryEmailStep({ purpose, title, initialEmail = "", onSent }:
     <form onSubmit={submit} noValidate>
       <h2>{title}</h2>
       <p className="muted recovery-copy">
-        Enter your primary or alternative admin email and we'll send you a <span className="nowrap">6-digit</span> code.
+        Enter the primary or alternative email associated with your administrator account. If the account is eligible for
+        recovery, we'll send a <span className="nowrap">6-digit</span> verification code.
       </p>
       <label className="field">
         <span className="recovery-label">Admin email</span>

@@ -412,10 +412,17 @@ def active_job():
     """
 
     with _jobs_lock:
-        for job in _jobs.values():
-            if job["status"] not in TERMINAL_STATUSES:
-                return _job_view(job)
-    return None
+        job = _unfinished_job()
+        return _job_view(job) if job else None
+
+
+def _unfinished_job():
+    """The unfinished job, if any. The caller holds ``_jobs_lock``."""
+
+    return next((job for job in _jobs.values() if job["status"] not in TERMINAL_STATUSES), None)
+
+
+BUSY_MESSAGE = "Another backup or restore is already running."
 
 
 def request_cancel(job_id):
@@ -545,8 +552,13 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
             command, env=environment, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True,
         )
-    except Exception as error:
-        ended("failed", f"The operation could not be started: {error}")
+    except Exception:
+        # A job message is read in the admin portal's Backup and Recovery
+        # interface, so it says what happened and nothing about how. The
+        # exception - which carries the tool path, the environment it was given
+        # and the OS error - goes to the log the operator reads instead.
+        logger.exception("Could not start %s", command[0])
+        ended("failed", "The operation could not be started.")
         return
 
     # Published before the wait so a cancel has something to signal, and
@@ -565,8 +577,9 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
         process.communicate()
         ended("failed", "The operation timed out after 10 minutes.")
         return
-    except Exception as error:
-        ended("failed", f"The operation could not be completed: {error}")
+    except Exception:
+        logger.exception("Could not complete %s", command[0])
+        ended("failed", "The operation could not be completed.")
         return
 
     if process.returncode == 0:
@@ -581,12 +594,13 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
         if on_success:
             try:
                 on_success()
-            except Exception as error:
+            except Exception:
                 # Through ``ended``, so a publish that failed before its rename
                 # does not leave the partial file behind. Once the rename has
                 # happened the discard is a no-op and the archive survives a
                 # failure in the bookkeeping after it.
-                ended("failed", f"The archive could not be recorded: {error}")
+                logger.exception("Could not record the archive from %s", command[0])
+                ended("failed", "The archive could not be recorded.")
                 return
         _finish(job_id, "succeeded")
         return
@@ -601,21 +615,37 @@ def _run(job_id, command, environment, on_success=None, on_failure=None):
     ended("failed", detail[-1][:300] if detail else "The operation failed.")
 
 
-def _start(kind, worker):
+def _start(kind, worker, admit=None):
+    """Reserves the one job slot and starts ``worker`` in it.
+
+    Checking for a running job and reserving the slot are one decision under
+    ``_jobs_lock``; as two steps, two requests arriving together could both see
+    nothing running. ``admit`` runs inside that decision for whatever must
+    agree with it - a restore's archive still being there, or leftovers being
+    safe to sweep - and refuses by raising BackupError. It must not take
+    ``_jobs_lock`` itself (the lock is not reentrant).
+    """
+
     if kind not in JOB_KINDS:
         raise BackupError(f"Unknown job kind: {kind}")
 
-    existing = active_job()
-    if existing:
-        raise BackupError("Another backup or restore is already running.", status=409)
-
     job_id = str(uuid.uuid4())
     with _jobs_lock:
+        if _unfinished_job():
+            raise BackupError(BUSY_MESSAGE, status=409)
+        if admit is not None:
+            admit()
         _jobs[job_id] = _new_job(job_id, kind)
         view = _job_view(_jobs[job_id])
 
     thread = threading.Thread(target=worker, args=(job_id,), daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        # A reservation with no thread behind it would refuse every later job.
+        with _jobs_lock:
+            _jobs.pop(job_id, None)
+        raise
     return view
 
 
@@ -684,7 +714,15 @@ def start_backup(actor, keep=None, app=None):
         _run(job_id, command, environment,
              on_success=lambda: record(job_id), on_failure=discard)
 
-    return _start("backup", worker)
+    def sweep_leftovers():
+        # Admitted means nothing else is running, so any .partial here was left
+        # by a process that died mid-dump; sweeping outside admission could
+        # delete the file a running backup is still writing.
+        swept = sweep_unfinished()
+        if swept:
+            logger.info("Removed %d unfinished archive(s) from an earlier run", swept)
+
+    return _start("backup", worker, admit=sweep_leftovers)
 
 
 def restore_enabled():
@@ -738,7 +776,13 @@ def start_restore(backup_id, actor):
     def worker(job_id):
         _run(job_id, command, environment)
 
-    return _start("restore", worker)
+    def archive_still_there():
+        # Looked up again inside admission: a delete that ran since the check
+        # above has removed the file pg_restore would open.
+        if find_archive(backup_id) is None:
+            raise BackupError("That backup is no longer available.", status=404)
+
+    return _start("restore", worker, admit=archive_still_there)
 
 
 # ==========================================
@@ -814,6 +858,27 @@ def forget_downloads(backup_id):
             key for key, issued in _downloads.items() if issued["backup_id"] == backup_id
         ]:
             _downloads.pop(token, None)
+
+
+def delete_archive_when_idle(backup_id):
+    """Deletes an archive unless a job is running. True if it is now gone.
+
+    Raises BackupError 409 while a job runs - it may be writing or reading this
+    file - and 404 when there is no such archive. Decided under ``_jobs_lock``,
+    the same lock admission takes, so no restore of this archive can be
+    admitted between the check and the delete.
+    """
+
+    with _jobs_lock:
+        if _unfinished_job():
+            raise BackupError(
+                "A backup or restore is running. Wait for it to finish before "
+                "deleting an archive.",
+                status=409,
+            )
+        if find_archive(backup_id) is None:
+            raise BackupError("That backup is no longer available.", status=404)
+        return delete_archive(backup_id)
 
 
 def delete_archive(backup_id):

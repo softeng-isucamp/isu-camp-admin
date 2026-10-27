@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAP_ISSUE_GROUPS, type MapIssue } from "./session/mapIssues";
+import { usePermissions } from "../auth/usePermissions";
 
 interface MapIssuesTrayProps {
   issues: MapIssue[];
@@ -36,6 +37,7 @@ function LocateIcon() {
  * sits in row 2 beside the legend (column 2).
  */
 export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssuesTrayProps) {
+  const { can } = usePermissions();
   const [open, setOpen] = useState(false);
   // Explicit user toggles; groups without an entry start open for alerts and closed for info.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
@@ -96,6 +98,8 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
                       <ul className="mt-1 flex flex-col gap-1 pl-2">
                         {group.issues.map((issue) => {
                           const active = issue.id === activeIssueId;
+                          // A fix creates geometry (Create Junction), so it needs Add; the row still focuses the issue.
+                          const fix = can("add") ? issue.action : undefined;
                           return (
                             <li
                               key={issue.id}
@@ -120,17 +124,17 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
                                   <strong className="min-w-0 truncate text-[#191c1d]">{issue.title}</strong>
                                   <span className="shrink-0 text-[11px] font-semibold text-[#526359]">{issue.detail}</span>
                                 </span>
-                                {!issue.action && <LocateIcon />}
+                                {!fix && <LocateIcon />}
                               </button>
-                              {issue.action && (
+                              {fix && (
                                 <button
                                   type="button"
-                                  aria-label={issue.action.label}
-                                  title={issue.action.label}
-                                  onClick={issue.action.onClick}
+                                  aria-label={fix.label}
+                                  title={fix.label}
+                                  onClick={fix.onClick}
                                   className="mr-2 shrink-0 rounded-full bg-[#005931] px-2.5 py-1 text-[10px] font-bold text-white shadow hover:bg-[#00472a]"
                                 >
-                                  {issue.action.shortLabel ?? issue.action.label}
+                                  {fix.shortLabel ?? fix.label}
                                 </button>
                               )}
                             </li>

@@ -342,6 +342,9 @@ def list_locations():
 
     except ValueError as error:
 
+        # The detail - which row, which unknown type id - is for whoever fixes
+        # the data, not for the response: it names storage the administrator
+        # cannot act on, and the browser is not the only thing that reads it.
         logger.warning(
             "Invalid persisted location data: %s",
             error
@@ -350,7 +353,7 @@ def list_locations():
         return jsonify(
             {
                 "success": False,
-                "message": str(error)
+                "message": "Failed to list locations."
             }
         ), 500
 

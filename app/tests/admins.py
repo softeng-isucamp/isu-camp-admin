@@ -174,6 +174,10 @@ class FakeSession:
         self.rolled_back = True
         FakeAdmin.release_rows()
 
+    def refresh(self, record):
+        # The fake directory holds live objects, so a record is always current.
+        pass
+
 
 def admins_app():
     app = Flask(__name__)
@@ -1657,6 +1661,111 @@ def test_a_demotion_with_a_partial_set_is_a_field_error():
 
 
 # ==========================================
+# A SUPPLIED NULL IS A VALUE, NOT AN OMISSION
+# ==========================================
+
+def test_creating_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    """Absent means "default"; present-and-null is a value the caller chose.
+
+    The one shape a supplied value may take is the four booleans, so null is
+    refused like any other wrong shape. Reading the two the same way meant a
+    client asking for "no permissions" silently received the view-only default
+    instead of being told its request made no sense (issue #145).
+    """
+
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "permissions": None})
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_create(admin_directory):
+    """The other half of the same rule, which must not change: an account being
+    set up has not been given anything yet."""
+
+    response = signed_in(admins_app()).post("/api/admins", json=NEW_ACCOUNT)
+
+    assert response.status_code == 201
+    assert created_accounts()[0].permissions == ALL_OFF
+
+
+def test_creating_a_superadmin_with_an_explicit_null_is_still_accepted():
+    """Ignored rather than refused, as documented: a client may hold one form
+    for both roles, and a field that cannot apply must not fail the request."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 201
+    assert response.json["admin"]["permissions"] is None
+    assert created_accounts()[0].permissions is None
+
+
+def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={
+        "role": "admin", "permissions": None,
+    })
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert role_of(3) == "superadmin"
+    assert admin_directory.committed is False
+
+
+def test_omitting_permissions_still_defaults_on_a_demotion():
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+
+    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert permissions_of(3) == ALL_OFF
+
+
+def test_promoting_with_an_explicit_null_permissions_is_accepted():
+    """A promotion discards the switches whatever it was sent."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/role", json={
+        "role": "superadmin", "permissions": None,
+    })
+
+    assert response.status_code == 200
+    assert permissions_of(2) is None
+
+
+def test_setting_permissions_to_an_explicit_null_is_still_a_field_error(admin_directory):
+    """This route always refused it; the create and demote paths now agree."""
+
+    response = signed_in(admins_app()).put("/api/admins/2/permissions", json={"permissions": None})
+
+    assert response.status_code == 400
+    assert "permissions" in response.json["fields"]
+    assert permissions_of(2) is None
+
+
+@pytest.mark.parametrize("supplied", [None, "everything", 42, ["add"], {}, {"add": True}])
+def test_every_wrong_shape_is_refused_the_same_way_on_create(supplied, admin_directory):
+    """One answer for every value that is not the four booleans, so a client
+    cannot tell which kind of wrong it was - and null is simply one of them."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "permissions": supplied,
+    })
+
+    assert response.status_code == 400
+    assert response.json["fields"] == {
+        "permissions": "Each of the four permissions must be given as true or false."
+    }
+    assert created_accounts() == []
+
+
+# ==========================================
 # THE SHARED EMAIL POOL
 # ==========================================
 
@@ -1752,3 +1861,82 @@ def test_self_editing_keeps_an_address_that_is_already_a_duplicate():
 
     assert response.status_code == 200
     assert FakeAdmin.store[0].username == "admin_renamed"
+
+
+def test_two_accounts_cannot_claim_one_unused_email_at_the_same_time(admin_directory):
+    """Both requests check the shared pool before either commits; only one may
+    end up holding the address."""
+
+    app = admins_app()
+    original = admins_module.email_taken
+    other_checked = threading.Event()
+    responses = {}
+    first_call = threading.Lock()
+
+    def create(name):
+        responses[name] = signed_in(app).post("/api/admins", json={
+            "username": name, "email": "shared@example.com", "password": "Another-secret1!",
+        })
+
+    def email_taken_while_another_claims(email, excluding_id=None):
+        taken = original(email, excluding_id=excluding_id)
+        if first_call.acquire(blocking=False):
+            other = threading.Thread(target=create, args=("admin04",))
+            other.start()
+            # Gives the other request every chance to check and commit in this
+            # gap; if a lock keeps it out, the wait simply times out.
+            other_checked.wait(0.5)
+            responses["other_thread"] = other
+        else:
+            other_checked.set()
+        return taken
+
+    admins_module.email_taken = email_taken_while_another_claims
+    try:
+        create("admin03")
+        responses["other_thread"].join(5)
+    finally:
+        admins_module.email_taken = original
+
+    holders = [record.username for record in FakeAdmin.store if record.gmail == "shared@example.com"]
+    assert len(holders) == 1
+    assert sorted(response.status_code for name, response in responses.items() if name != "other_thread") == [201, 409]
+
+
+def test_an_update_made_from_a_stale_account_is_refused(admin_directory):
+    """Admin 1 changes only the case of its address, from a snapshot taken
+    before another request moved it and a new account took the old one."""
+
+    app = admins_app()
+    client = signed_in(app)
+    real_lock = admins_module.identity_claim_lock
+    others = {}
+
+    class LockWithAGap:
+        first = True
+
+        def __enter__(self):
+            if LockWithAGap.first:
+                LockWithAGap.first = False
+                others["moved"] = signed_in(app).put("/api/admins/1", json={
+                    "username": "admin01", "email": "moved@example.com"})
+                others["taken"] = signed_in(app).post("/api/admins", json={
+                    "username": "admin03", "email": "admin01@example.com",
+                    "password": "Another-secret1!"})
+            return real_lock.__enter__()
+
+        def __exit__(self, *details):
+            return real_lock.__exit__(*details)
+
+    admins_module.identity_claim_lock = LockWithAGap()
+    try:
+        stale = client.put("/api/admins/1", json={"username": "admin01", "email": "ADMIN01@example.com"})
+    finally:
+        admins_module.identity_claim_lock = real_lock
+
+    assert others["moved"].status_code == 200
+    assert others["taken"].status_code == 201
+    assert stale.status_code == 409
+    holders = [record.username for record in FakeAdmin.store
+               if (record.gmail or "").lower() == "admin01@example.com"]
+    assert holders == ["admin03"]

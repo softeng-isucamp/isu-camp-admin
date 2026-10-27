@@ -13,7 +13,19 @@ import { resetPasswordSchema, resetSchema } from "./schemas";
 import { indoorLocationTypes } from "../lib/locationPolicy";
 import { createLocalAdapter } from "./localAdapter";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
+import { InvalidResponseError } from "./errors";
 import type { Location } from "../types";
+
+/** The developer detail of the `InvalidResponseError` a call throws; its message is the generic reply text. */
+const invalidResponseDetail = (run: () => unknown): string | undefined => {
+  try {
+    run();
+  } catch (cause) {
+    expect(cause).toBeInstanceOf(InvalidResponseError);
+    return (cause as InvalidResponseError).detail;
+  }
+  throw new Error("Expected the call to throw.");
+};
 
 describe("mock service contracts", () => {
   afterEach(() => {
@@ -117,15 +129,14 @@ describe("mock service contracts", () => {
       pageSize: 10,
     });
 
-    expect(() => normalizeBackendLocationPage({ items: [], total: 0 })).toThrow(
-      "Backend returned a malformed locations page.",
-    );
-    expect(() => normalizeBackendLocationPage({
+    expect(invalidResponseDetail(() => normalizeBackendLocationPage({ items: [], total: 0 })))
+      .toBe("Backend returned a malformed locations page.");
+    expect(invalidResponseDetail(() => normalizeBackendLocationPage({
       items: [{ id: "bad", name: "Missing code", type: "Facility" }],
       total: 1,
       page: 1,
       pageSize: 20,
-    })).toThrow("Backend returned a malformed location record.");
+    }))).toBe("Backend returned a malformed location record.");
   });
 
   it("normalizes persisted location type IDs without inferring Floor", () => {
@@ -208,7 +219,11 @@ describe("mock service contracts", () => {
     );
 
     fetchMock.mockRejectedValueOnce(new Error("backend unavailable"));
-    await expect(httpServices.locations.list()).rejects.toThrow("backend unavailable");
+    await expect(httpServices.locations.list()).rejects.toMatchObject({
+      kind: "network",
+      message: "Couldn't reach the ISU-CAMP server. Check your connection and try again.",
+      detail: "backend unavailable",
+    });
     vi.unstubAllEnvs();
   });
 
@@ -691,8 +706,8 @@ describe("real dashboard service boundary", () => {
   });
 
   it("rejects malformed dashboard data before it reaches the UI", () => {
-    expect(() => normalizeBackendDashboardSummary({ buildings: "12" }))
-      .toThrow("Backend returned a malformed dashboard summary.");
+    expect(invalidResponseDetail(() => normalizeBackendDashboardSummary({ buildings: "12" })))
+      .toBe("Backend returned a malformed dashboard summary.");
   });
 });
 
@@ -748,8 +763,14 @@ describe("real locations service boundary", () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ success: false, message: "Authentication required" }), { status: 401 }));
-    await expect(httpServices.locations.list()).rejects.toThrow("malformed locations page");
-    await expect(httpServices.locations.list()).rejects.toThrow("Authentication required");
+    await expect(httpServices.locations.list()).rejects.toMatchObject({
+      kind: "invalid_response",
+      detail: expect.stringContaining("malformed locations page"),
+    });
+    await expect(httpServices.locations.list()).rejects.toMatchObject({
+      kind: "session",
+      message: "Your session has ended. Sign in again to continue.",
+    });
     vi.unstubAllEnvs();
   });
 
@@ -767,8 +788,8 @@ describe("real locations service boundary", () => {
         total: 1, page: 1, pageSize: 20,
       }), { status: 200 }));
 
-    await expect(httpServices.locations.list()).rejects.toThrow("malformed location coordinates");
-    await expect(httpServices.locations.list()).rejects.toThrow("inconsistent location position");
+    await expect(httpServices.locations.list()).rejects.toMatchObject({ kind: "invalid_response", detail: expect.stringContaining("malformed location coordinates") });
+    await expect(httpServices.locations.list()).rejects.toMatchObject({ kind: "invalid_response", detail: expect.stringContaining("inconsistent location position") });
     vi.unstubAllEnvs();
   });
 
@@ -1139,7 +1160,7 @@ describe("real walking network service boundary", () => {
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+      .mockImplementation(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [
       [16.721, 121.691],
@@ -1170,9 +1191,10 @@ describe("real walking network service boundary", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(new Response(JSON.stringify({ message: "Coordinate is outside the campus boundary." }), { status: 422 }));
 
-    await expect(httpServices.map.replacePathPoints("9", [[16.721, 121.691]])).rejects.toThrow(
-      "Could not persist Path Points for Pathway 9: Coordinate is outside the campus boundary.",
-    );
+    await expect(httpServices.map.replacePathPoints("9", [[16.721, 121.691]])).rejects.toMatchObject({
+      message: "The pathway's points couldn't be saved, and the pathway was left as it was. Check the points and try again.",
+      detail: "Could not persist Path Points for Pathway 9: Coordinate is outside the campus boundary.",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -1181,7 +1203,7 @@ describe("real walking network service boundary", () => {
     vi.resetModules();
     const { services: httpServices } = await import("./api");
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
+      .mockImplementation(async () => new Response(JSON.stringify({ success: true }), { status: 200 }));
 
     await httpServices.map.replacePathPoints("9", [[16.721, 121.691]]);
 
@@ -1354,7 +1376,7 @@ describe("dashboard analytics", () => {
   });
 
   it("rejects a malformed analytics payload", () => {
-    expect(() => normalizeBackendDashboardAnalytics({ range: "week" })).toThrow("malformed dashboard analytics");
+    expect(invalidResponseDetail(() => normalizeBackendDashboardAnalytics({ range: "week" }))).toContain("malformed dashboard analytics");
   });
 
   it("requests the selected range from the real backend and unwraps the envelope", async () => {
@@ -1452,6 +1474,82 @@ describe("real administrators service boundary", () => {
     ]);
   });
 
+  it("reads each administrator's permissions: only for an administrator, and absent stays absent", async () => {
+    const { services: admins } = await httpServices();
+    const account = { email: "", status: "Active", isCurrent: false };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      items: [
+        { id: "1", username: "boss", role: "superadmin", permissions: { add: true, edit: true, delete: true, changeUserStatus: true }, ...account },
+        { id: "2", username: "staff", role: "admin", permissions: { add: true, edit: false, delete: false, changeUserStatus: true }, ...account },
+        { id: "3", username: "legacy", role: "admin", ...account },
+        { id: "4", username: "nulled", role: "admin", permissions: null, ...account },
+        { id: "5", username: "partial", role: "admin", permissions: { add: true }, ...account },
+      ],
+      total: 5,
+    }));
+
+    const [boss, staff, legacy, nulled, partial] = await admins.admins.list();
+    expect(boss).not.toHaveProperty("permissions");
+    expect(staff.permissions).toEqual({ add: true, edit: false, delete: false, changeUserStatus: true });
+    expect(legacy).not.toHaveProperty("permissions");
+    expect(nulled).not.toHaveProperty("permissions");
+    // A switch the server did not state as true is off.
+    expect(partial.permissions).toEqual({ add: true, edit: false, delete: false, changeUserStatus: false });
+  });
+
+  it("puts the signed-in administrator's permissions in the session, from sign-in and from me", async () => {
+    const { services: admins } = await httpServices();
+    const granted = { add: false, edit: true, delete: false, changeUserStatus: false };
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json({ success: true, admin: { id: "2", username: "staff", email: "s@isu.edu.ph", role: "admin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "2", username: "staff", role: "admin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "1", username: "boss", role: "superadmin", permissions: granted } }))
+      .mockResolvedValueOnce(json({ authenticated: true, admin: { id: "3", username: "legacy", role: "admin" } }));
+
+    await expect(admins.auth.login("staff", "x")).resolves.toMatchObject({ role: "admin", permissions: granted });
+    await expect(admins.auth.me()).resolves.toMatchObject({ role: "admin", permissions: granted });
+    expect(await admins.auth.me()).not.toHaveProperty("permissions");
+    expect(await admins.auth.me()).not.toHaveProperty("permissions");
+  });
+
+  it("sends the switches when adding an administrator, never for a superadmin or an edit", async () => {
+    const { services: admins } = await httpServices();
+    const granted = { add: true, edit: false, delete: false, changeUserStatus: false };
+    const reply = { success: true, admin: { id: "9", username: "plain", email: "p@isu.edu.ph", status: "Active", role: "admin", permissions: granted, isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply, 201));
+    const base = { username: "plain", email: "p@isu.edu.ph", password: "A-long-enough-secret1" };
+
+    await expect(admins.admins.save({ ...base, role: "admin", permissions: granted })).resolves.toMatchObject({ permissions: granted });
+    await admins.admins.save({ ...base, role: "superadmin", permissions: granted });
+    await admins.admins.save({ ...base, id: "9", permissions: granted });
+
+    const [first, second, third] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(first.permissions).toEqual(granted);
+    expect(second).not.toHaveProperty("permissions");
+    expect(third).not.toHaveProperty("permissions");
+  });
+
+  it("saves permissions through their own route and returns the updated account", async () => {
+    const { services: admins } = await httpServices();
+    const next = { add: true, edit: true, delete: false, changeUserStatus: false };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({
+      success: true,
+      admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", permissions: next, isCurrent: false },
+    }));
+
+    await expect(admins.admins.setPermissions("2", next)).resolves.toMatchObject({ username: "staff", permissions: next });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/admins\/2\/permissions$/);
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(String(init?.body))).toEqual({ permissions: next });
+  });
+
+  it("has no administrator removal any more", async () => {
+    const { services: admins } = await httpServices();
+    expect(admins.admins).not.toHaveProperty("remove");
+  });
+
   it("sends the chosen role when adding an administrator, but never when editing one", async () => {
     const { services: admins } = await httpServices();
     const reply = { success: true, admin: { id: "9", username: "boss", email: "b@isu.edu.ph", status: "Active", role: "superadmin", isCurrent: false } };
@@ -1489,23 +1587,215 @@ describe("real administrators service boundary", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ role: "superadmin" });
   });
 
+  it("sends the starting switches with a demotion, and none with a promotion", async () => {
+    const { services: admins } = await httpServices();
+    const starting = { add: false, edit: true, delete: false, changeUserStatus: false };
+    const reply = { success: true, admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply));
+
+    await admins.admins.setRole("2", "admin", starting);
+    await admins.admins.setRole("2", "superadmin", starting);
+
+    const [demote, promote] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(demote).toEqual({ role: "admin", permissions: starting });
+    expect(promote).toEqual({ role: "superadmin" });
+  });
+
+  it("announces a coded permission refusal so an open session revalidates", async () => {
+    const { services: http, errors } = await httpServices();
+    const listener = vi.fn();
+    window.addEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    try {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(json({ code: "PERMISSION_DENIED", message: "Permission revoked." }, 403))
+        .mockResolvedValueOnce(json({ message: "Other refusal." }, 403));
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toBeInstanceOf(errors.PermissionDeniedError);
+      expect(listener).toHaveBeenCalledTimes(1);
+      await expect(http.users.setStatus("2", "Inactive")).rejects.toThrow("Other refusal.");
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(errors.PERMISSION_DENIED_EVENT, listener);
+    }
+  });
+
   it("raises the superadmin error for a 403 carrying its code, not for any other 403", async () => {
     const { services: admins, errors } = await httpServices();
+    const noSwitches = { add: false, edit: false, delete: false, changeUserStatus: false };
     const fetchMock = vi.spyOn(globalThis, "fetch");
     fetchMock
       .mockResolvedValueOnce(json({ success: false, code: "superadmin_required", message: "Superadmin access required" }, 403))
       .mockResolvedValueOnce(json({ success: false, code: "password_confirmation_required", message: "Confirm your password." }, 403))
       .mockResolvedValueOnce(json({ success: false, message: "Superadmin access required" }, 403));
 
-    const refusal = await admins.admins.remove("2").catch((error: unknown) => error);
+    const refusal = await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(errors.SuperadminRequiredError);
     expect(refusal).toMatchObject({ message: "Superadmin access required" });
 
-    expect(await admins.admins.remove("2").catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
+    expect(await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error)).toBeInstanceOf(errors.PasswordConfirmationRequiredError);
 
     // The message alone is not the signal: a 403 without the code stays a plain error.
-    const plain = await admins.admins.remove("2").catch((error: unknown) => error);
+    const plain = await admins.admins.setPermissions("2", noSwitches).catch((error: unknown) => error);
     expect(plain).not.toBeInstanceOf(errors.SuperadminRequiredError);
     expect(plain).toMatchObject({ message: "Superadmin access required" });
+  });
+});
+
+describe("friendly request failures at the HTTP boundary", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  const json = (body: unknown, status: number, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
+  const loadHttpServices = async () => {
+    vi.stubEnv("VITE_API_MODE", "real");
+    vi.resetModules();
+    return (await import("./api")).services;
+  };
+  /** A write the HTTP adapter sends as DELETE, so only the reply decides the outcome. */
+  const failWith = async (reply: Response) => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(reply);
+    return http.map.deleteRouteNode("5");
+  };
+  const NETWORK = "Couldn't reach the ISU-CAMP server. Check your connection and try again.";
+
+  it("tells a failed read from a write whose outcome is unknown", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(http.locations.list()).rejects.toMatchObject({ kind: "network", message: NETWORK, detail: "Failed to fetch" });
+    await expect(http.map.deleteRouteNode("5")).rejects.toMatchObject({
+      kind: "outcome_unknown",
+      message: "The connection was interrupted, so we couldn't confirm whether your change was saved. Reload to check before trying again.",
+    });
+  });
+
+  it("reads a sign-in that never reached the server as a network failure, not an unconfirmed change", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(http.auth.login("admin01", "secret")).rejects.toMatchObject({ kind: "network", message: NETWORK });
+  });
+
+  it("reads a gateway page without JSON on sign-in as an unreachable server", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("<html>Bad Gateway</html>", { status: 502 }));
+    await expect(http.auth.login("admin01", "secret")).rejects.toMatchObject({ kind: "network", message: NETWORK, status: 502 });
+  });
+
+  it("does not expose the text of a server fault", async () => {
+    const error = await failWith(json({ message: "(psycopg2.errors.UndefinedColumn) column \"x\" does not exist" }, 500)).catch((cause) => cause);
+    expect(error).toMatchObject({ kind: "server", status: 500, message: "The server couldn't complete the request. Please try again." });
+    expect(error.message).not.toMatch(/psycopg2|column/);
+    expect(error.detail).toContain("psycopg2");
+  });
+
+  it.each([
+    [401, {}, "session", "Your session has ended. Sign in again to continue."],
+    [401, { message: "Authentication required" }, "session", "Your session has ended. Sign in again to continue."],
+    [403, {}, "permission", "You don't have permission to do that."],
+    [404, {}, "not_found", "That record no longer exists. Reload to see the latest information."],
+    [409, {}, "conflict", "This change conflicts with an existing record. Reload and try again."],
+  ])("gives a %s without a usable message the default for its kind", async (status, body, kind, message) => {
+    await expect(failWith(json(body, status))).rejects.toMatchObject({ kind, message, status });
+  });
+
+  it("keeps a clear 401 answer such as a wrong current password", async () => {
+    await expect(failWith(json({ message: "Your current password is incorrect", fields: { currentPassword: "Your current password is incorrect" } }, 401)))
+      .rejects.toMatchObject({ message: "Your current password is incorrect", fieldErrors: { currentPassword: "Your current password is incorrect" } });
+  });
+
+  it("maps known developer-oriented backend messages to instructions", async () => {
+    await expect(failWith(json({ message: "Selected Path Point changed; reload the Pathway" }, 409)))
+      .rejects.toMatchObject({ message: "This pathway changed since you opened it. Reload the map and try again." });
+    await expect(failWith(json({ message: "Walkways cannot allow Vehicle mode" }, 400)))
+      .rejects.toMatchObject({ message: "Walkways can't allow vehicles. Choose Road or remove Vehicle." });
+  });
+
+  it("replaces technical 4xx text with the status default", async () => {
+    await expect(failWith(json({ message: "Request body is required" }, 400)))
+      .rejects.toMatchObject({ message: "The request couldn't be completed. Check the details and try again." });
+    await expect(failWith(json({ message: "latitude must be a number" }, 422)))
+      .rejects.toMatchObject({ message: "The request couldn't be completed. Check the details and try again." });
+    await expect(failWith(json({ message: "Request failed (404)" }, 404)))
+      .rejects.toMatchObject({ kind: "not_found" });
+  });
+
+  it("keeps a clear 4xx message and attaches its field errors", async () => {
+    const error = await failWith(json({ message: "Location code must be unique.", fields: { code: "Location code must be unique." }, relationships: { parentId: "Choose a parent." } }, 409)).catch((cause) => cause);
+    expect(error.message).toBe("Location code must be unique.");
+    expect(error.fieldErrors).toEqual({ code: "Location code must be unique.", parentId: "Choose a parent." });
+  });
+
+  it("keeps field errors on a 5xx that names fields", async () => {
+    await expect(failWith(json({ message: "That username is already taken", fields: { username: "That username is already taken" } }, 500)))
+      .rejects.toMatchObject({ message: "That username is already taken", fieldErrors: { username: "That username is already taken" } });
+  });
+
+  it("still raises the password-confirmation, superadmin and rate-limit refusals", async () => {
+    await expect(failWith(json({ code: "password_confirmation_required", message: "Confirm your password." }, 403)))
+      .rejects.toMatchObject({ name: "PasswordConfirmationRequiredError", message: "Confirm your password." });
+    await expect(failWith(json({ code: "superadmin_required", message: "Superadmin access required" }, 403)))
+      .rejects.toMatchObject({ name: "SuperadminRequiredError" });
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ message: "Too many requests." }, 429, { "Retry-After": "7" }));
+    await expect(http.auth.login("admin01", "secret")).rejects.toMatchObject({ name: "RateLimitError", retryAfterSeconds: 7 });
+  });
+
+  it("keeps the invalid-credentials answer on sign-in", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ message: "Invalid username or password" }, 401));
+    await expect(http.auth.login("admin01", "wrong")).rejects.toMatchObject({ name: "AuthError", kind: "invalid_credentials", message: "Invalid username or password" });
+  });
+
+  it("raises InvalidResponseError for a dashboard summary that does not fit", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ buildings: "12" }, 200));
+    await expect(http.dashboard.summary("week")).rejects.toMatchObject({
+      name: "InvalidResponseError",
+      kind: "invalid_response",
+      message: "The server sent a response the admin portal couldn't read. Please try again.",
+      detail: "Backend returned a malformed dashboard summary.",
+    });
+  });
+
+  it("does not resolve a write whose successful reply cannot be read", async () => {
+    await expect(failWith(new Response("<html>OK</html>", { status: 200 }))).rejects.toMatchObject({ kind: "invalid_response", status: undefined });
+  });
+
+  it("does not resolve a write whose successful reply is cut off mid-read", async () => {
+    const cutOff = new ReadableStream({ start(controller) { controller.error(new TypeError("network error")); } });
+    await expect(failWith(new Response(cutOff, { status: 200 }))).rejects.toMatchObject({ kind: "invalid_response" });
+  });
+
+  it("still resolves a write answered with an empty body", async () => {
+    await expect(failWith(new Response(null, { status: 204 }))).resolves.toBeUndefined();
+  });
+
+  it("asks for a new sign-in when the session ends during password confirmation, but keeps a wrong-password answer", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(json({ success: false, message: "Authentication required" }, 401))
+      .mockResolvedValueOnce(json({ success: false, message: "Password is incorrect" }, 401));
+    await expect(http.auth.confirmPassword("secret")).rejects.toMatchObject({ kind: "session", message: "Your session has ended. Sign in again to continue." });
+    await expect(http.auth.confirmPassword("secret")).rejects.toThrow("Password is incorrect");
+  });
+
+  it("does not claim a password reset failed when its reply was lost", async () => {
+    const http = await loadHttpServices();
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(http.auth.resetPassword("admin@example.com", "123456", "N3w-password!")).rejects.toMatchObject({
+      kind: "outcome_unknown",
+      message: expect.stringMatching(/couldn't confirm whether your password was changed/),
+    });
+    await expect(http.auth.requestRecovery("admin@example.com", "password")).rejects.toMatchObject({ kind: "network", message: NETWORK });
+  });
+
+  it("explains a record that was never saved without naming a database ID", async () => {
+    const http = await loadHttpServices();
+    const error = await http.map.deleteRouteNode("node-local-1").catch((cause) => cause);
+    expect(error.message).toBe("This route node hasn't been saved to the server yet. Reload the map and try again.");
+    expect(error.message).not.toMatch(/database|ID/);
+    expect(error.detail).toContain("node-local-1");
   });
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { vi } from "vitest";
 import type { services } from "../../../services/api";
+import type { AdminPermissions } from "../../../types";
 import { PASSWORD_CONFIRMATION_REQUIRED, PasswordConfirmationRequiredError } from "../../../services/errors";
 
 export let mapClickHandler: ((event: { latlng: { lat: number; lng: number } }) => void) | undefined;
@@ -22,7 +23,12 @@ export const mapTestState: {
   visibleBounds: undefined,
 };
 
+/** Who the mocked auth reports. Integration tests set `permissions` to sign in as a restricted administrator. */
+export const mapTestSession: { role?: "admin" | "superadmin"; permissions?: AdminPermissions } = {};
+
 export const resetMapMockState = () => {
+  delete mapTestSession.role;
+  delete mapTestSession.permissions;
   mapClickHandler = undefined;
   mapZoomEndHandler = undefined;
   mapTestState.zoom = 18;
@@ -122,7 +128,7 @@ export const apiMock = () => ({
 
 export const authContextMock = () => ({
   useAuth: () => ({
-    session: { id: "test-admin", username: "test-admin" },
+    session: { id: "test-admin", username: "test-admin", ...mapTestSession },
     login: vi.fn(),
     logout: vi.fn(),
     loading: false,

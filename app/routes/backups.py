@@ -35,7 +35,7 @@ from services.backup_jobs import (
     active_job,
     archive_status,
     claim_download,
-    delete_archive,
+    delete_archive_when_idle,
     find_archive,
     get_job,
     issue_download,
@@ -405,24 +405,18 @@ def delete_backup(backup_id):
     if error:
         return error
 
-    # A running job may be writing this file, or reading it. Deleting either
-    # one out from under the tool turns a clear refusal into a corrupt archive
-    # or a half-finished restore.
-    if active_job():
-        return _error(
-            "A backup or restore is running. Wait for it to finish before "
-            "deleting an archive.",
-            status=409,
-        )
-
     created = next(
         (item["createdAt"] for item in list_backups() if item["id"] == backup_id), None
     )
 
-    if find_archive(backup_id) is None:
-        return _error("That backup is no longer available.", status=404)
-
-    if not delete_archive(backup_id):
+    # A running job may be writing this file, or reading it. Deleting either
+    # one out from under the tool turns a clear refusal into a corrupt archive
+    # or a half-finished restore, so the check and the delete are one step.
+    try:
+        deleted = delete_archive_when_idle(backup_id)
+    except BackupError as refusal:
+        return _error(str(refusal), status=refusal.status)
+    if not deleted:
         return _error("The backup could not be deleted.", status=500)
 
     log_audit("System", admin, "delete backup", "Database", backup_id,

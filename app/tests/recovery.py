@@ -1840,6 +1840,31 @@ def test_the_correct_code_is_refused_while_restricted(harness):
     assert refused.json["code"] == "recovery_restricted"
 
 
+def test_a_restriction_reached_while_a_reset_is_hashing_refuses_that_reset(harness, monkeypatch):
+    """The code was right when checked, but five wrong guesses landed while the
+    new password was being hashed. Redeeming re-reads the restriction."""
+
+    harness.request_code()
+    code = harness.issued_code()
+    real_hash = auth_module.hash_password
+    guessed = {}
+
+    def hash_while_guesses_land(password):
+        if not guessed:
+            guessed["done"] = True
+            harness.exhaust_attempts()
+        return real_hash(password)
+
+    monkeypatch.setattr(auth_module, "hash_password", hash_while_guesses_land)
+
+    refused = harness.reset(code)
+
+    assert guessed
+    assert refused.status_code == 429
+    assert refused.json["code"] == "recovery_restricted"
+    assert harness.password_commits == 0
+
+
 def test_recovery_works_again_once_the_restriction_lifts(harness):
     harness.request_code()
     harness.exhaust_attempts()

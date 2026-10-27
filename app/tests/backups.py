@@ -1,6 +1,7 @@
 """The Backup & Recovery routes: history, jobs, download, delete and schedule."""
 
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -442,10 +443,41 @@ def test_a_dump_that_cannot_be_published_leaves_no_partial_behind(app, monkeypat
         job = wait_for_terminal(body["id"])
 
         assert job["status"] == "failed"
-        assert "could not be recorded" in job["message"]
+        assert job["message"] == "The archive could not be recorded."
+        # A job message is shown in Backup and Recovery, so the OSError's own
+        # text - which names the directory the archives live in - stays in the
+        # log rather than travelling to the portal.
+        assert "the directory went away" not in job["message"]
         assert app.test_client().get("/api/backups").get_json()["items"] == []
 
     assert list(tmp_path.glob("*.dump*")) == []
+
+
+def test_a_tool_that_cannot_be_started_reports_a_failure_without_the_os_error(app, monkeypatch, caplog):
+    """The message an administrator reads says what failed, not how.
+
+    The exception here carries the tool's path on the server and the OS error
+    behind it; both belong in the log the operator reads, not in a job message
+    the portal renders and any other client can fetch.
+    """
+
+    def refuse(command, env=None, **keywords):
+        raise FileNotFoundError(2, "No such file or directory", "/usr/bin/pg_dump")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    monkeypatch.setattr(backup_jobs, "require_tool", lambda name: f"/usr/bin/{name}")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        with caplog.at_level(logging.ERROR, logger=backup_jobs.logger.name):
+            body = app.test_client().post("/api/backups").get_json()
+            job = wait_for_terminal(body["id"])
+
+    assert job["status"] == "failed"
+    assert job["message"] == "The operation could not be started."
+    assert "/usr/bin/pg_dump" not in job["message"]
+    # Logged with its traceback, so the operator still has the real reason.
+    assert "No such file or directory" in caplog.text
 
 
 def test_a_missing_pg_dump_is_reported_as_unavailable(app, monkeypatch):
@@ -476,6 +508,62 @@ def test_only_one_job_runs_at_a_time(app, monkeypatch):
         assert client.get("/api/backups").get_json()["activeJob"]["id"] == first.get_json()["id"]
         process.terminate()
         wait_for_terminal(first.get_json()["id"])
+
+
+def test_two_requests_arriving_together_start_only_one_job(app, monkeypatch):
+    """Admission is one decision: both requests cannot see "nothing running".
+
+    The barrier holds each request at the old check-then-insert gap, so if
+    admission still checked and reserved in separate steps both would pass.
+    """
+
+    captured = fake_tool(monkeypatch, runtime=5)
+    gap = threading.Barrier(2, timeout=1)
+    original = backup_jobs.active_job
+
+    def active_job_at_the_gap():
+        found = original()
+        try:
+            gap.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return found
+
+    monkeypatch.setattr(backup_jobs, "active_job", active_job_at_the_gap)
+    outcomes = []
+
+    def start():
+        try:
+            outcomes.append(backup_jobs.start_backup("admin01")["id"])
+        except backup_jobs.BackupError as refusal:
+            outcomes.append(refusal.status)
+
+    threads = [threading.Thread(target=start) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+
+    started = [outcome for outcome in outcomes if isinstance(outcome, str)]
+    assert len(started) == 1
+    assert 409 in outcomes
+    running_tool(captured).terminate()
+    wait_for_terminal(started[0])
+
+
+def test_a_job_whose_thread_cannot_start_does_not_block_the_next(app, monkeypatch):
+    fake_tool(monkeypatch)
+    real_start = threading.Thread.start
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    with pytest.raises(RuntimeError):
+        backup_jobs.start_backup("admin01")
+    monkeypatch.setattr(threading.Thread, "start", real_start)
+
+    assert backup_jobs.active_job() is None
 
 
 def test_a_manual_backup_applies_the_saved_retention(app, monkeypatch, tmp_path):
@@ -662,6 +750,81 @@ def test_cancelling_a_restore_leaves_the_database_as_it_was(app, monkeypatch, tm
     assert job["kind"] == "restore"
     assert job["status"] == "cancelled"
     assert "--single-transaction" in captured["command"]
+
+
+def test_a_restore_is_not_admitted_for_an_archive_being_deleted(app, monkeypatch, tmp_path):
+    """Deleting and admitting a restore of the same archive cannot interleave.
+
+    The restore request arrives while the delete is between finding the archive
+    and removing it. Either the delete refuses or the restore does; never a
+    restore accepted for a file that then disappears under pg_restore.
+    """
+
+    monkeypatch.setenv("BACKUP_RESTORE_ENABLED", "true")
+    archive_id = store_archive(tmp_path)
+    fake_tool(monkeypatch, runtime=0)
+    original_find = backup_jobs.find_archive
+    restore = {}
+
+    def restore_now():
+        try:
+            restore["view"] = backup_jobs.start_restore(archive_id, "admin02")
+        except backup_jobs.BackupError as refusal:
+            restore["status"] = refusal.status
+
+    def find_while_a_restore_arrives(backup_id):
+        found = original_find(backup_id)
+        if "thread" not in restore:
+            restore["thread"] = threading.Thread(target=restore_now)
+            restore["thread"].start()
+            restore["thread"].join(0.3)
+        return found
+
+    monkeypatch.setattr(backup_jobs, "find_archive", find_while_a_restore_arrives)
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        deleted = app.test_client().delete(f"/api/backups/{archive_id}")
+    restore["thread"].join(5)
+
+    if deleted.status_code == 204:
+        assert restore.get("status") == 404, "a restore was admitted for a deleted archive"
+    else:
+        assert "view" in restore
+        assert (tmp_path / f"{archive_id}.dump").exists()
+    if "view" in restore:
+        wait_for_terminal(restore["view"]["id"])
+
+
+def test_an_automatic_run_never_removes_a_running_backup_s_partial_file(app, monkeypatch, tmp_path):
+    """Leftover .partial files are swept only when no job could own them."""
+
+    from services import backup_schedule
+
+    captured = fake_tool(monkeypatch, runtime=5)
+    manual = backup_jobs.start_backup("admin01")
+    process = running_tool(captured)
+    partials = list(tmp_path.glob("*.dump.partial"))
+    assert len(partials) == 1
+
+    assert backup_schedule.run_backup_now(app=None, keep=7) is None
+
+    assert partials[0].exists(), "the automatic run deleted a live backup's partial file"
+    process.terminate()
+    wait_for_terminal(manual["id"])
+
+
+def test_an_automatic_run_still_sweeps_partials_nobody_owns(app, monkeypatch, tmp_path):
+    from services import backup_schedule
+
+    abandoned = tmp_path / "20261011-075702Z.dump.partial"
+    abandoned.write_bytes(b"PGDMP-abandoned")
+    fake_tool(monkeypatch)
+
+    job = backup_schedule.run_backup_now(app=None, keep=7)
+
+    assert job["status"] == "succeeded"
+    assert not abandoned.exists()
 
 
 def test_cancelling_an_unknown_job_is_not_found(app, monkeypatch):

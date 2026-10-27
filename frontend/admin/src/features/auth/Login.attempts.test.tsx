@@ -57,7 +57,7 @@ const rejected = (attemptsRemaining?: number) =>
   );
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 });
 
 afterEach(() => {
@@ -129,14 +129,22 @@ describe("login attempts left", () => {
     expect(screen.getByRole("button", { name: /^login$/i })).toBeEnabled();
   });
 
+  it("keeps its 60-second lockout when a 429 has no Retry-After", async () => {
+    mockBackend(jsonResponse({ success: false, message: "Too many login attempts." }, 429));
+    renderLogin();
+    await attemptSignIn();
+
+    expect(screen.getByRole("button", { name: "Try again in 60s" })).toBeDisabled();
+  });
+
   it("clears the attempts-left message when the next sign-in is submitted", async () => {
     mockBackend(rejected(4), jsonResponse({ success: false, message: "Server error" }, 500));
     renderLogin();
     await attemptSignIn();
     await attemptSignIn();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Server error");
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/attempt/i);
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn't sign you in. Please try again.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Server error|attempt/i);
   });
 });
 

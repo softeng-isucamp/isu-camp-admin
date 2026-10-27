@@ -62,7 +62,7 @@ Open the frontend at `http://127.0.0.1:5173`, which is where the runners serve i
 | Mode | Linux/macOS | Windows CMD | PowerShell | Data and login |
 | --- | --- | --- | --- | --- |
 | Real (default) | `./dev.sh --real` | `dev.bat --real` | `.\dev.ps1 --real` | Starts Flask and the frontend. Requires backend/database configuration and a real backend account. |
-| Fixture | `./dev.sh --fixture` | `dev.bat --fixture` | `.\dev.ps1 --fixture` | Starts only the frontend with the local adapter and OSM fixture. No Flask or database required. Logins, all with `password123`: `admin_justine` and `admin_dean` (superadmins), `admin_registrar` (administrator). |
+| Fixture | `./dev.sh --fixture` | `dev.bat --fixture` | `.\dev.ps1 --fixture` | Starts only the frontend with the local adapter and OSM fixture. No Flask or database required. Logins, all with `password123`: `admin_justine` and `admin_dean` (superadmins), `admin_registrar` (administrator with every permission) and `admin_viewer` (administrator with view-only permissions). |
 
 The runners print the selected mode and login guidance. Fixture credentials apply only to fixture mode. Fixture edits stay in the local adapter and do not update the backend database.
 
@@ -208,7 +208,7 @@ A superadmin switches four general actions on or off for each regular administra
 | `delete` | Deleting locations, buildings, route nodes, pathways, path points |
 | `changeUserStatus` | Activating and deactivating **app users** (`PUT /api/users/:id/status`) |
 
-**Superadmins hold every permission and cannot be configured.** Their stored switches are `NULL` and `PUT /api/admins/:id/permissions` refuses them with 409; to restrict one, demote them first. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
+**Superadmins hold every permission and cannot be configured.** Their stored switches are SQL `NULL` — the column is declared `none_as_null` so that assigning nothing stores SQL NULL and not the JSON scalar `null`, which the migration's shape constraint rejects — and `PUT /api/admins/:id/permissions` refuses them with 409; to restrict one, demote them first. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
 
 Nobody changes their own permissions.
 
@@ -234,6 +234,8 @@ Nobody changes their own permissions.
 ```
 
 All four keys, every time, each a boolean — a body naming two leaves the other two to whatever the reader assumes. Anything else is a 400 with `fields.permissions`.
+
+**Absent and null are different things.** Leaving `permissions` out of a create or a demotion takes the default (all four off); sending it as `null` is a value the caller chose, and the only shape a supplied value may take is the four booleans, so it is refused like any other wrong shape. Reading the two the same way meant a client asking for "no permissions" silently got the view-only default instead of being told its request made no sense. A supplied value is still **ignored** for a superadmin target, `null` included — a client may hold one form for both roles, and a field that cannot apply must not fail the request.
 
 | Case | Status | Message |
 | --- | --- | --- |

@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
 import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 import { Users } from "./Users";
 
 const page = {
@@ -23,7 +25,7 @@ function LogsProbe() {
 
 function renderUsers(initialEntry = "/users") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = () => (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
@@ -31,11 +33,16 @@ function renderUsers(initialEntry = "/users") {
           <Route path="/system-logs" element={<LogsProbe />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const rendered = render(view());
+  return { ...rendered, rerenderSession: () => rendered.rerender(view()) };
 }
 
 describe("Users account type", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("renders an Account Type column as plain text and a dash for unknown types", async () => {
@@ -172,5 +179,141 @@ describe("Users account type", () => {
 
     await waitFor(() => expect(list).toHaveBeenCalledWith("", 1, 10, "all", "teacher"));
     expect(screen.getByLabelText("ACCOUNT TYPE")).toHaveTextContent("Staff");
+  });
+});
+
+describe("Users page for a restricted administrator", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("closes deactivation when a refreshed session revokes the status switch", async () => {
+    signInAs("admin", { permissions: allPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    const setStatus = vi.spyOn(services.users, "setStatus");
+    const { rerenderSession } = renderUsers();
+    await screen.findByText("maria.santos1");
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Deactivate account" }));
+    expect(screen.getByRole("dialog", { name: "Deactivate this account?" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...viewOnlyPermissions(), changeUserStatus: true } });
+    rerenderSession();
+    expect(screen.getByRole("dialog", { name: "Deactivate this account?" })).toBeInTheDocument();
+
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    rerenderSession();
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(setStatus).not.toHaveBeenCalled();
+    signInAs("admin", { permissions: allPermissions() });
+    rerenderSession();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    signInAs("admin", { permissions: viewOnlyPermissions() });
+    rerenderSession();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity"]);
+    await userEvent.click(screen.getByRole("menuitem", { name: "View activity" }));
+    expect(await screen.findByTestId("logs-route")).toHaveTextContent("category=User");
+  });
+
+  it("offers only View activity on an app account without the status switch", async () => {
+    signInAs("admin", { permissions: { ...allPermissions(), changeUserStatus: false } });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    for (const username of ["maria.santos1", "legacy.user"]) {
+      await userEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }));
+      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity"]);
+      await userEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }));
+    }
+  });
+
+  it("keeps the status action when only other switches are off", async () => {
+    signInAs("admin", { permissions: { ...viewOnlyPermissions(), changeUserStatus: true } });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["View activity", "Deactivate account"]);
+  });
+
+  it("hides the Administrators tab from an administrator, however many switches are on", async () => {
+    signInAs("admin", { permissions: allPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers("/users?tab=admins");
+    await screen.findByText("maria.santos1");
+
+    expect(screen.getByRole("button", { name: "App Users" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Administrators" })).not.toBeInTheDocument();
+  });
+
+  it("shows a superadmin both tabs and the status action whatever the record says", async () => {
+    signInAs("superadmin", { permissions: viewOnlyPermissions() });
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+
+    expect(screen.getByRole("button", { name: "Administrators" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
+    expect(screen.getByRole("menuitem", { name: "Deactivate account" })).toBeInTheDocument();
+  });
+});
+
+describe("Users search requests", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("asks the server once typing pauses, not for every keystroke", async () => {
+    const list = vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    const search = screen.getByPlaceholderText("Search by username...");
+
+    // Synchronous changes land well inside the pause, so the count is deterministic.
+    for (const value of ["m", "ma", "mar", "mari", "maria"]) fireEvent.change(search, { target: { value } });
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    const searched = list.mock.calls.map((call) => call[0]).filter(Boolean);
+    expect(searched).toEqual(["maria"]);
+  });
+
+  it("shows the first page of a new search even when Next is pressed while it settles", async () => {
+    const maria = page.items[0];
+    vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? { items: pageNumber === 1 ? [maria] : [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
+    expect(screen.queryByText("No users found.")).not.toBeInTheDocument();
+  });
+
+  it("returns to the first page when Next is pressed while a new search is loading", async () => {
+    const maria = page.items[0];
+    let resolveFirstPage: (value: typeof page) => void = () => {};
+    const firstPage = new Promise<typeof page>((resolve) => { resolveFirstPage = resolve; });
+    const list = vi.spyOn(services.users, "list").mockImplementation(async (q = "", pageNumber = 1) =>
+      q === "maria"
+        ? pageNumber === 1 ? firstPage : { items: [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [{ ...page.items[1], id: `listed-${pageNumber}`, username: `listed.user${pageNumber}` }], total: 25, page: pageNumber, pageSize: 10 });
+    renderUsers();
+    await screen.findByText("listed.user1");
+
+    fireEvent.change(screen.getByPlaceholderText("Search by username..."), { target: { value: "maria" } });
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 1, 10, "all", "all"));
+    // The previous results are still showing, so Next is still enabled.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(list).toHaveBeenCalledWith("maria", 2, 10, "all", "all"));
+    resolveFirstPage({ items: [maria], total: 1, page: 1, pageSize: 10 });
+
+    expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
   });
 });

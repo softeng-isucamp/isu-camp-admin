@@ -1,3 +1,4 @@
+import { usePermissions } from "../../auth/usePermissions";
 import { useMemo, useState } from "react";
 import type { RouteNode } from "../../../types";
 import { pointOnCampus, type MapPoint } from "../campusBoundary";
@@ -6,6 +7,7 @@ import type { ActiveToolDraft, EditorMode } from "../types";
 import type { MapOverlay } from "../session/useMapOverlay";
 import type { SavingAction } from "../session/useSavingAction";
 import type { RouteNodeValidationContext, RouteNodeWorkflow } from "./RouteNodeWorkflow";
+import { reportError } from "../../../services/errors";
 
 export type PlacingNodeType = "Entrance" | "Junction" | "Access Point";
 
@@ -25,7 +27,7 @@ interface UseRouteNodePointToolOptions {
   editorContext: { mode: EditorMode; selected: unknown };
 }
 
-const REFRESH_FAILED = "Route Node was saved, but the map could not refresh. Retry the refresh before saving again.";
+const REFRESH_FAILED = "The route node was saved, but the map could not refresh. Reload the map to see it.";
 const isPlacingNodeType = (value: unknown): value is PlacingNodeType =>
   value === "Entrance" || value === "Junction" || value === "Access Point";
 
@@ -35,6 +37,7 @@ const isPlacingNodeType = (value: unknown): value is PlacingNodeType =>
  * owns editor mode and selection, and reacts to the saves' results.
  */
 export function useRouteNodePointTool({ workflow, overlay, saving, context, refreshMapData, onError, editorContext }: UseRouteNodePointToolOptions) {
+  const { can } = usePermissions();
   const [position, setPosition] = useState<MapPoint | null>(null);
   const [draftDirty, setDraftDirty] = useState(false);
   const [snapped, setSnapped] = useState(false);
@@ -64,6 +67,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
 
   /** Positions the provisional point from a map click. */
   const placeAt = (point: MapPoint) => {
+    if (!can(editorContext.mode === "move" ? "edit" : "add")) return;
     setPosition(point);
     setSnapped(false);
     setDraftDirty(true);
@@ -71,6 +75,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
 
   /** Positions the provisional point from a drag or a typed coordinate. */
   const editPosition = (point: MapPoint) => {
+    if (!can(editorContext.mode === "move" ? "edit" : "add")) return;
     setPosition(point);
     setDraftDirty(true);
   };
@@ -92,6 +97,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
   };
 
   const startMove = (node: RouteNode) => {
+    if (!can("edit")) return;
     setMovingId(node.id);
     const origin: MapPoint = [node.lat, node.lng];
     setMoveOrigin(origin);
@@ -103,6 +109,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
   };
 
   const updateMovePosition = (point: MapPoint, pointSnapped = false) => {
+    if (!can("edit")) return;
     setPosition(point);
     if (pointOnCampus(point, context.campusBoundary)) setLastValidMovePosition(point);
     setSnapped(pointSnapped);
@@ -134,6 +141,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
    * completed (the caller then returns to selection), or null otherwise.
    */
   const savePosition = async (): Promise<string | null> => {
+    if (!can("edit")) return null;
     if (!position) return null;
     if (!saving.beginSaving("position")) return null;
     let completedId: string | null = null;
@@ -157,7 +165,8 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
         try {
           await refreshMapData();
         } catch (cause) {
-          onError(cause instanceof Error ? cause.message : REFRESH_FAILED);
+          reportError(cause);
+          onError(REFRESH_FAILED);
           saving.endSaving();
           return null;
         }
@@ -177,6 +186,7 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
    * it was placed from, or null when nothing was placed.
    */
   const savePlacedNode = async (): Promise<{ node: RouteNode; draft: Omit<RouteNode, "id"> } | null> => {
+    if (!can("add")) return null;
     if (!position || !placingNodeName.trim()) return null;
     if (!saving.beginSaving("route-node")) return null;
     const draft: Omit<RouteNode, "id"> = {
@@ -199,7 +209,8 @@ export function useRouteNodePointTool({ workflow, overlay, saving, context, refr
       setPlacingNodeName("");
       return { node: confirmedNode, draft };
     } catch (cause) {
-      onError(cause instanceof Error ? cause.message : REFRESH_FAILED);
+      reportError(cause);
+      onError(REFRESH_FAILED);
       return null;
     } finally {
       saving.endSaving();

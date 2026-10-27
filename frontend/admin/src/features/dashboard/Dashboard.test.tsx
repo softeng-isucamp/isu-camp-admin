@@ -4,10 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { RequestError } from "../../services/errors";
 import { generateDashboardAnalytics } from "../../services/fixtures/dashboardAnalytics";
 import { locations } from "../../services/mockData";
 import type { DashboardAnalytics, DashboardRange, DashboardSummary } from "../../types";
 import { formatDateTime } from "../../lib/format";
+import { signInAs } from "../../test/session";
+import { allPermissions, viewOnlyPermissions } from "../../lib/permissions";
 import { Dashboard } from "./Dashboard";
 
 const summary: DashboardSummary = {
@@ -36,7 +39,8 @@ beforeAll(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 });
 
-function renderDashboard() {
+function renderDashboard(session: Parameters<typeof signInAs> = ["admin"]) {
+  signInAs(...session);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -95,12 +99,13 @@ describe("Dashboard backend boundary", () => {
   });
 
   it("shows an actionable error when the backend request fails", async () => {
-    vi.spyOn(services.dashboard, "summary").mockRejectedValue(new Error("Service unavailable"));
-    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Service unavailable"));
+    vi.spyOn(services.dashboard, "summary").mockRejectedValue(new RequestError("server", { status: 503, detail: "Service unavailable" }));
+    vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 503, detail: "Service unavailable" }));
     renderDashboard();
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Unable to load the dashboard. Service unavailable");
+    expect(alert).toHaveTextContent("Dashboard information couldn't be loaded. Please try again.");
+    expect(alert).not.toHaveTextContent(/Service unavailable|503|Backend returned/);
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByText("Search analytics are unavailable.")).toBeInTheDocument();
     expect(screen.getByText("Recent activity is unavailable.")).toBeInTheDocument();
@@ -152,12 +157,12 @@ describe("Dashboard backend boundary", () => {
 
   it("explains that analytics failed to load and retries on request", async () => {
     vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 500, detail: "Not found" }));
     renderDashboard();
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+    expect(await screen.findByText("Analytics couldn't be loaded. Please try again.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Not found");
     const failedCalls = request.mock.calls.length;
 
     request.mockResolvedValue(analytics());
@@ -187,5 +192,32 @@ describe("Dashboard backend boundary", () => {
     request.mockImplementation(async (range) => analytics(range));
     await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+});
+
+describe("Dashboard quick add for a restricted administrator", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const loadCards = () => {
+    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+  };
+
+  it("hides New Location without the Add switch but keeps every card and section", async () => {
+    loadCards();
+    renderDashboard(["admin", { permissions: { ...allPermissions(), add: false } }]);
+
+    expect(await screen.findByText("12")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /new location/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Registered Users")).toBeInTheDocument();
+    expect(screen.getByText("Campus Map Preview")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Analytics" })).toBeInTheDocument();
+  });
+
+  it("shows New Location with the Add switch", async () => {
+    loadCards();
+    renderDashboard(["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+
+    expect(await screen.findByRole("link", { name: /new location/i })).toBeInTheDocument();
   });
 });

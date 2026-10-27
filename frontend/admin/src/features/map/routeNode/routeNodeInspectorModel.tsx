@@ -1,3 +1,4 @@
+import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { isPlace } from "../../../lib/locationPolicy";
 import type { InspectorCardModel } from "../InspectorCardHUD";
@@ -9,6 +10,7 @@ import type { useRouteNodeFrame } from "./useRouteNodeFrame";
 
 interface RouteNodeInspectorOptions {
   node: RouteNode;
+  can: CanPerform;
   frame: ReturnType<typeof useRouteNodeFrame>;
   workflow: RouteNodeWorkflow;
   nodes: RouteNode[];
@@ -27,6 +29,7 @@ interface RouteNodeInspectorOptions {
 
 export function routeNodeInspectorModel({
   node,
+  can,
   frame: nodeFrame,
   workflow,
   nodes: currentNodes,
@@ -64,7 +67,8 @@ export function routeNodeInspectorModel({
       { label: "Latitude", value: node.lat.toFixed(6) },
       { label: "Longitude", value: node.lng.toFixed(6) },
     ],
-    details: (
+    // The metadata form and its Update button are edits, so a view-only administrator sees the summary alone.
+    details: can("edit") ? (
       <section className="inspector-related-section" aria-label="Edit Route Node metadata">
         <h3>Route Node metadata</h3>
         <div className="inspector-edit-fields">
@@ -100,10 +104,10 @@ export function routeNodeInspectorModel({
           <button type="button" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
         </div>
       </section>
-    ),
-    primaryAction: { label: node.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: onMove },
+    ) : undefined,
+    primaryAction: can("edit") ? { label: node.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: onMove } : undefined,
     overflowActions: [
-      ...(node.nodeType === "Entrance" ? [{
+      ...(node.nodeType === "Entrance" && can("edit") ? [{
         label: "⎋ Convert to Standard Node",
         tone: "danger" as const,
         onSelect: () => {
@@ -126,13 +130,13 @@ export function routeNodeInspectorModel({
           });
         },
       }] : []),
-      {
+      ...(can("delete") ? [{
         label: "🗑 Delete Route Node",
         tone: "danger" as const,
         onSelect: () => {
           onDelete({ kind: "route_node", id: node.id, name: node.name, impact: calculateDeleteImpact({ object: node, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
         },
-      },
+      }] : []),
     ],
   } satisfies InspectorCardModel;
 }

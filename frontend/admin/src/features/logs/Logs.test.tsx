@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -151,5 +151,63 @@ describe("Logs DATE filter", () => {
     chooseFilterOption("DATE", "All Dates");
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
     expect(await screen.findByText("login")).toBeInTheDocument();
+  });
+});
+
+describe("Logs search requests", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("asks the server once typing pauses, not for every keystroke", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "", "All Actors", "all", 1, 10));
+    const search = screen.getByPlaceholderText(/search actions/i);
+
+    // Synchronous changes land well inside the pause, so the count is deterministic.
+    for (const value of ["c", "cr", "cre", "crea", "creat", "create"]) fireEvent.change(search, { target: { value } });
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "create", "All Actors", "all", 1, 10));
+    const searched = list.mock.calls.map((call) => call[1]).filter(Boolean);
+    expect(searched).toEqual(["create"]);
+  });
+
+  it("shows the first page of a new search even when Next is pressed while it settles", async () => {
+    const entry = (id: string, target: string): AuditEntry => ({ id, actor: "admin01", action: "update", target, createdAt: isoTimestamp, category: "Admin" });
+    vi.spyOn(services.logs, "list").mockImplementation(async (_category, q = "", _actor, _date, pageNumber = 1) =>
+      q === "matched"
+        ? { items: pageNumber === 1 ? [entry("hit", "Matched Target")] : [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [entry(`listed-${pageNumber}`, `Listed Target ${pageNumber}`)], total: 25, page: pageNumber, pageSize: 10 });
+    renderLogs();
+    await screen.findByText("Listed Target 1");
+
+    fireEvent.change(screen.getByPlaceholderText(/search actions/i), { target: { value: "matched" } });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("Matched Target")).toBeInTheDocument();
+  });
+
+  it("returns to the first page when Next is pressed while a new search is loading", async () => {
+    const entry = (id: string, target: string): AuditEntry => ({ id, actor: "admin01", action: "update", target, createdAt: isoTimestamp, category: "Admin" });
+    type LogPage = { items: AuditEntry[]; total: number; page: number; pageSize: number };
+    let resolveFirstPage: (value: LogPage) => void = () => {};
+    const firstPage = new Promise<LogPage>((resolve) => { resolveFirstPage = resolve; });
+    const list = vi.spyOn(services.logs, "list").mockImplementation(async (_category, q = "", _actor, _date, pageNumber = 1) =>
+      q === "matched"
+        ? pageNumber === 1 ? firstPage : { items: [], total: 1, page: pageNumber, pageSize: 10 }
+        : { items: [entry(`listed-${pageNumber}`, `Listed Target ${pageNumber}`)], total: 25, page: pageNumber, pageSize: 10 });
+    renderLogs();
+    await screen.findByText("Listed Target 1");
+
+    fireEvent.change(screen.getByPlaceholderText(/search actions/i), { target: { value: "matched" } });
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "matched", "All Actors", "all", 1, 10));
+    // The previous results are still showing, so Next is still enabled.
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(list).toHaveBeenCalledWith("All", "matched", "All Actors", "all", 2, 10));
+    resolveFirstPage({ items: [entry("hit", "Matched Target")], total: 1, page: 1, pageSize: 10 });
+
+    expect(await screen.findByText("Matched Target")).toBeInTheDocument();
   });
 });

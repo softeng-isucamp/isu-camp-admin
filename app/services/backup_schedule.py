@@ -14,7 +14,8 @@ would be a third:
 * a run is claimed by creating a marker file with ``O_EXCL``, so the first
   process to reach a given minute takes that night and the others skip it, and
 * the claim outlives the process, so a restart does not re-dump a night that
-  has already been taken.
+  has already been taken - unless the claim has no archive behind it, in which
+  case its owner died or failed and the night is up for grabs again.
 
 What it reads is a database row, not the environment: Backup & Recovery offers
 the schedule as a form, so the thread re-reads
@@ -43,6 +44,7 @@ from extensions import db
 from model.backup_schedule import ROW_ID, BackupSchedule
 from services.audit import log_audit
 from services.backup_jobs import (
+    RUN_TIMEOUT_SECONDS,
     TERMINAL_STATUSES,
     BackupError,
     backup_directory,
@@ -51,7 +53,6 @@ from services.backup_jobs import (
     job_retention,
     list_backups,
     start_backup,
-    sweep_unfinished,
 )
 
 # The campus is in one place, so the schedule runs on one clock. Stored on the
@@ -88,6 +89,10 @@ SLEEP_SLICE_SECONDS = 60
 # Claim markers are tiny and empty, but there is no reason to keep every night
 # of them for ever.
 CLAIMS_KEPT = 60
+
+# How long a claim is respected with nothing to show for it: the longest a dump
+# may run, plus time to publish it. Past that, its owner is not coming back.
+CLAIM_GRACE = timedelta(seconds=RUN_TIMEOUT_SECONDS + 300)
 
 logger = logging.getLogger(__name__)
 
@@ -354,24 +359,63 @@ def _claim_path(due):
     return backup_directory() / f".claimed-{due.strftime('%Y%m%d-%H%M')}Z"
 
 
+def _abandoned(marker):
+    """Whether a claim was made by a run that never produced an archive.
+
+    A claim means "somebody is taking this night", and the claim outlives its
+    owner, so a process killed mid-dump - or a dump that failed - would
+    otherwise own the night for ever: every restart finds the marker and
+    skips it, and nothing is ever taken. The owner is given as long as a dump
+    may run, and after that a claim with no archive taken since it was made
+    is not a night in progress.
+    """
+
+    try:
+        claimed = datetime.fromtimestamp(marker.stat().st_mtime, timezone.utc)
+    except OSError:
+        return False
+
+    if datetime.now(timezone.utc) - claimed < CLAIM_GRACE:
+        return False
+
+    taken = _newest_archive_taken()
+    return taken is None or taken < claimed
+
+
 def claim(due):
     """Takes the run due at ``due`` for this process, or returns False.
 
     ``O_EXCL`` is the whole mechanism: creating the marker either succeeds, in
     which case this process owns that night, or it fails because another
-    process - or this one before a restart - already owns it.
+    process - or this one before a restart - already owns it. An owner that
+    left no archive behind (see ``_abandoned``) loses the night to the next
+    caller.
     """
 
     marker = _claim_path(due)
-    try:
-        handle = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return False
-    except OSError:
-        # Without a writable directory there is nowhere to put the archive
-        # either, so let the run proceed and fail where the reason is clear.
-        logger.warning("Could not record a claim for the %s run", iso_utc(due))
-        return True
+    for taking_over in (False, True):
+        try:
+            handle = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if taking_over or not _abandoned(marker):
+                return False
+            logger.warning(
+                "The %s run was claimed but left no archive; taking it over",
+                iso_utc(due),
+            )
+            try:
+                marker.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return False
+            continue
+        except OSError:
+            # Without a writable directory there is nowhere to put the archive
+            # either, so let the run proceed and fail where the reason is clear.
+            logger.warning("Could not record a claim for the %s run", iso_utc(due))
+            return True
+        break
 
     try:
         os.write(handle, iso_utc(datetime.now(timezone.utc)).encode("utf-8"))
@@ -393,8 +437,8 @@ def _forget_old_claims():
 # One Run
 # ==========================================
 
-def _age_of_newest_archive():
-    """How long since the newest archive was taken, or None if there is none."""
+def _newest_archive_taken():
+    """When the newest archive was taken, or None if there is none."""
 
     items = list_backups()
     if not items:
@@ -406,7 +450,14 @@ def _age_of_newest_archive():
         return None
     if taken.tzinfo is None:
         taken = taken.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - taken
+    return taken
+
+
+def _age_of_newest_archive():
+    """How long since the newest archive was taken, or None if there is none."""
+
+    taken = _newest_archive_taken()
+    return None if taken is None else datetime.now(timezone.utc) - taken
 
 
 def is_overdue():
@@ -470,10 +521,8 @@ def run_backup_now(app=None, keep=None):
     one this module started - the disk does not care who pressed the button.
     """
 
-    swept = sweep_unfinished()
-    if swept:
-        logger.info("Removed %d unfinished archive(s) from an earlier run", swept)
-
+    # Leftover .partial files are swept by start_backup once it is admitted,
+    # never here: while another job runs, a .partial is that job's live file.
     if keep is None:
         keep = _default_keep()
 
@@ -559,6 +608,11 @@ def _loop(app, stop):
             logger.info("No backup in the last day; taking one now")
             run_backup_now(app, keep=schedule["keep"])
 
+    # The run being waited for. Remembered between passes rather than worked
+    # out again each time: ``next_run_after`` answers "strictly after now", so
+    # once the sleep has carried the clock to the due minute, asking again
+    # names tomorrow and the run that was just reached is never taken.
+    pending = None
     announced = None
 
     while not stop.is_set():
@@ -567,25 +621,37 @@ def _loop(app, stop):
         # schedule off stops it taking one, with nothing to redeploy.
         schedule = current_schedule(app)
 
-        if not schedule or not schedule["enabled"]:
-            announced = None
+        if not schedule:
+            # Unreadable, which is usually the database being briefly away. The
+            # run being waited for stays waited for, so a night that comes due
+            # during an outage is taken when it ends rather than lost.
             if _sleep(stop, SLEEP_SLICE_SECONDS):
                 return
             continue
 
-        due = next_run_after(datetime.now(timezone.utc), schedule)
-        if due != announced:
+        if not schedule["enabled"]:
+            pending = announced = None
+            if _sleep(stop, SLEEP_SLICE_SECONDS):
+                return
+            continue
+
+        now = datetime.now(timezone.utc)
+        if pending is None or pending > now:
+            # Still ahead, so a saved change to the time is allowed to move it.
+            pending = next_run_after(now, schedule)
+        if pending != announced:
             # Only when it moves, because this runs every minute and a log line
             # a minute saying the same thing is a log nobody reads.
-            logger.info("The next automatic backup is due at %s", iso_utc(due))
-            announced = due
+            logger.info("The next automatic backup is due at %s", iso_utc(pending))
+            announced = pending
 
-        remaining = (due - datetime.now(timezone.utc)).total_seconds()
+        remaining = (pending - now).total_seconds()
         if remaining > 0:
             if _sleep(stop, min(remaining, SLEEP_SLICE_SECONDS)):
                 return
             continue
 
+        due, pending = pending, None
         try:
             if claim(due):
                 run_backup_now(app, keep=schedule["keep"])
@@ -595,6 +661,28 @@ def _loop(app, stop):
             # The timer is the only thing that makes automatic backups, so it
             # outlives any one failed night.
             logger.exception("The automatic backup at %s ended badly", iso_utc(due))
+
+
+def _show_progress_in_the_log():
+    """Lets this module's INFO lines reach the process log under gunicorn.
+
+    Nothing configures logging here, so the root logger drops everything below
+    WARNING and the only trace of a night was its failure. The lines that say
+    when the next run is due, and that a run was taken or skipped, are the ones
+    that explain a missing backup. Left alone wherever something has already
+    set logging up - a test run, or a deployment with its own configuration.
+    """
+
+    if logging.getLogger().handlers:
+        return
+
+    services = logging.getLogger("services")
+    if services.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"))
+    services.addHandler(handler)
+    services.setLevel(logging.INFO)
 
 
 def start_scheduler(app=None):
@@ -610,6 +698,8 @@ def start_scheduler(app=None):
     """
 
     global _thread, _stop
+
+    _show_progress_in_the_log()
 
     if app is None:
         logger.info("Automatic backups need an application to read their schedule")

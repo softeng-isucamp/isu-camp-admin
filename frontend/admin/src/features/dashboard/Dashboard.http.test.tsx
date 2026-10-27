@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
+import { RequestError } from "../../services/errors";
+import { signInAs } from "../../test/session";
 import { Dashboard } from "./Dashboard";
 
 vi.mock("../../services/api", async (importOriginal) => ({
@@ -19,7 +21,8 @@ it("keeps HTTP Overview searches usable without the future analytics endpoint", 
     usersByType: null, locations: 1, pathways: 0, searches: 18, recent: [],
     topSearched: [{ rank: "1", locationId: "Building:42", name: "Library", context: "Building", searches: 18 }],
   });
-  const analytics = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new Error("Not found"));
+  const analytics = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 500, detail: "Not found" }));
+  signInAs("admin");
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter><Dashboard /></MemoryRouter>
@@ -33,8 +36,8 @@ it("keeps HTTP Overview searches usable without the future analytics endpoint", 
   expect(analytics).not.toHaveBeenCalled();
 
   await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-  expect(await screen.findByText("Unable to load analytics. Not found")).toBeInTheDocument();
-  expect(screen.getByRole("alert")).toHaveTextContent("Unable to load analytics. Not found");
+  expect(await screen.findByText("Analytics couldn't be loaded. Please try again.")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).not.toHaveTextContent("Not found");
   expect(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" })).toBeEnabled();
   expect(analytics).toHaveBeenCalledWith("week");
 });

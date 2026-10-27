@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import time
 
 from flask import Flask
@@ -85,6 +86,33 @@ def test_login_refuses_a_deactivated_administrator(monkeypatch):
     # No session was opened, so the refusal is not just cosmetic.
     with client.session_transaction() as flask_session:
         assert "admin_id" not in flask_session
+
+
+def test_a_login_that_crashes_logs_the_exception_and_answers_without_it(monkeypatch, caplog):
+    """A 5xx body reaches developer tools and every non-portal client as sent.
+
+    The lookup's exception can name the admin table, its columns and the
+    database connection, so the response carries only the fixed sentence and
+    the detail goes to the log with its traceback.
+    """
+
+    auth_module.rate_limit_buckets.clear()
+
+    def crash(**_values):
+        raise RuntimeError('relation "admin" does not exist')
+
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {
+        "query": type("Query", (), {"filter_by": staticmethod(crash)})()
+    }))
+    client = auth_app().test_client()
+
+    with caplog.at_level(logging.ERROR, logger=auth_module.logger.name):
+        response = client.post("/api/login", json={"username": "admin01", "password": "password123"})
+
+    assert response.status_code == 500
+    assert response.json == {"success": False, "message": "Login failed"}
+    assert "does not exist" not in response.get_data(as_text=True)
+    assert 'relation "admin" does not exist' in caplog.text
 
 
 def test_a_session_ends_when_its_account_is_deactivated(monkeypatch):
@@ -484,3 +512,45 @@ def test_reauth_required_words_the_refusal_for_the_caller(monkeypatch):
     assert custom.json["message"] == "Confirm your password to do the thing."
     # The code is what the frontend reads, so wording never changes it.
     assert default.json["code"] == custom.json["code"] == auth_module.REAUTH_REQUIRED_CODE
+
+
+def test_a_superseded_reset_code_cannot_overwrite_a_newer_reset(monkeypatch):
+    """Request A holds code X and is still hashing when a newer code Y is issued
+    and redeemed. A must be refused, and the password must stay B's."""
+
+    auth_module.rate_limit_buckets.clear()
+    auth_module.reset_otps.clear()
+    admin = type("AdminRecord", (), {"username": "admin01", "gmail": "admin01@example.com", "password": "old"})()
+    committed = []
+    monkeypatch.setattr(auth_module, "Admin", type("Admin", (), {"query": type("Query", (), {
+        "filter_by": staticmethod(lambda **values: type("Result", (), {"first": lambda self: admin})()),
+    })()}))
+    monkeypatch.setattr(auth_module, "db", type("Db", (), {"session": type("Session", (), {
+        "commit": staticmethod(lambda: committed.append(admin.password)),
+        "rollback": staticmethod(lambda: None),
+    })()})())
+    monkeypatch.setattr(auth_module, "Message", lambda **values: type("Message", (), values)())
+    monkeypatch.setattr(auth_module, "mail", type("Mail", (), {"send": lambda self, message: None})())
+    codes = iter(["111111", "222222"])
+    monkeypatch.setattr(auth_module, "generate_otp", lambda: next(codes))
+    client = auth_app().test_client()
+    auth_module.send_password_reset_otp(admin)  # code X
+
+    newer = {}
+
+    def hash_while_a_newer_reset_lands(password):
+        if password == "PasswordA!1" and not newer:
+            auth_module.send_password_reset_otp(admin)  # code Y replaces X
+            newer["response"] = client.post("/api/reset-password", json={
+                "username": "admin01", "code": "222222", "password": "PasswordB!2"})
+        return f"hash:{password}"
+
+    monkeypatch.setattr(auth_module, "hash_password", hash_while_a_newer_reset_lands)
+
+    first = client.post("/api/reset-password", json={
+        "username": "admin01", "code": "111111", "password": "PasswordA!1"})
+
+    assert newer["response"].status_code == 200
+    assert first.status_code == 400
+    assert admin.password == "hash:PasswordB!2"
+    assert committed == ["hash:PasswordB!2"]

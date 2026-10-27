@@ -30,6 +30,10 @@ from auth import (
     Admin,
     admin_required,
     email_taken,
+    identity_changed_since,
+    identity_claim_lock,
+    identity_snapshot,
+    STALE_IDENTITY_MESSAGE,
     normalized_email,
     rate_limited,
 )
@@ -170,6 +174,7 @@ def update_profile():
     if invalid:
         return _refusals(invalid, 400)
 
+    loaded = identity_snapshot(admin)
     stored_email = normalized_email(admin.gmail)
     stored_alternative = normalized_email(admin.alternative_email)
     email_changed = normalized_email(email) != stored_email
@@ -211,16 +216,19 @@ def update_profile():
     # checking an unchanged field would leave those accounts unable to save a
     # rename - a rule about new values enforcing itself against old ones that
     # nobody can fix from this form.
-    conflicts = []
-    if username_changed and _username_taken(username, admin.id):
-        conflicts.append(("username", "That username is already taken"))
-    if email_changed and email_taken(email, excluding_id=admin.id):
-        conflicts.append(("email", EMAIL_TAKEN_MESSAGE))
-    if alternative_changed and alternative and email_taken(alternative, excluding_id=admin.id):
-        conflicts.append(("alternativeEmail", EMAIL_TAKEN_MESSAGE))
+    def conflicts():
+        found = []
+        if username_changed and _username_taken(username, admin.id):
+            found.append(("username", "That username is already taken"))
+        if email_changed and email_taken(email, excluding_id=admin.id):
+            found.append(("email", EMAIL_TAKEN_MESSAGE))
+        if alternative_changed and alternative and email_taken(alternative, excluding_id=admin.id):
+            found.append(("alternativeEmail", EMAIL_TAKEN_MESSAGE))
+        return found
 
-    if conflicts:
-        return _refusals(conflicts, 409)
+    found = conflicts()
+    if found:
+        return _refusals(found, 409)
 
     changes = []
     if username != admin.username:
@@ -235,19 +243,26 @@ def update_profile():
         return jsonify(admin.to_profile()), 200
 
     try:
-        admin.username = username
-        admin.gmail = email
-        if alternative_given:
-            # NULL rather than "", so the column has one spelling for "none".
-            admin.alternative_email = alternative or None
-        log_audit(
-            "Admin", admin, "update profile", "Administrator", admin.id,
-            # The addresses themselves are left out on purpose: the audit log
-            # is readable by every administrator, and the password is never
-            # written anywhere.
-            f"Changed own {' and '.join(changes)}",
-        )
-        db.session.commit()
+        with identity_claim_lock:
+            if identity_changed_since(admin, loaded):
+                return _error(STALE_IDENTITY_MESSAGE, status=409)
+            # Checked again now that no other claim can commit in between.
+            found = conflicts()
+            if found:
+                return _refusals(found, 409)
+            admin.username = username
+            admin.gmail = email
+            if alternative_given:
+                # NULL rather than "", so the column has one spelling for "none".
+                admin.alternative_email = alternative or None
+            log_audit(
+                "Admin", admin, "update profile", "Administrator", admin.id,
+                # The addresses themselves are left out on purpose: the audit
+                # log is readable by every administrator, and the password is
+                # never written anywhere.
+                f"Changed own {' and '.join(changes)}",
+            )
+            db.session.commit()
     except Exception:
         db.session.rollback()
         return _error("Failed to update your profile.", status=500)

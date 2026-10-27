@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, Badge, Empty, ProgressBar, Spinner } from "../../components/UI";
 import { services, USE_HTTP_API } from "../../services/api";
+import { errorMessage } from "../../services/errors";
 import { formatDateTime } from "../../lib/format";
 import type { DashboardRange } from "../../types";
 import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
@@ -10,10 +11,12 @@ import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
 import { AccountTypeSplit } from "./AccountTypeSplit";
 import { AnalyticsTab, dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
+import { usePermissions } from "../auth/usePermissions";
 import type { DashboardTab } from "./dashboardTabs";
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { can } = usePermissions();
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [range, setRange] = useState<DashboardRange>("week");
   const { data, error, isLoading, isFetching, refetch } = useQuery({
@@ -52,9 +55,11 @@ export function Dashboard() {
             map configuration, and recent administrative activity.
           </p>
         </div>
-        <Link className="btn btn-primary" to="/locations">
-          ＋ New Location
-        </Link>
+        {can("add") && (
+          <Link className="btn btn-primary" to="/locations">
+            ＋ New Location
+          </Link>
+        )}
         <div className="hero-toolbar">
           <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
             {(["overview", "analytics"] as const).map((key) => (
@@ -112,7 +117,7 @@ export function Dashboard() {
           </div>
           {error && (
             <div className="dashboard-error" role="alert">
-              <span>Unable to load the dashboard. {error instanceof Error ? error.message : "The dashboard service returned an error."}</span>
+              <span>{errorMessage(error, "Dashboard information couldn't be loaded. Please try again.")}</span>
               <button type="button" onClick={() => void refetch()}>Try again</button>
             </div>
           )}

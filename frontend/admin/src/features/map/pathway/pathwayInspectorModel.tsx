@@ -1,3 +1,4 @@
+import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Pathway, RouteNode } from "../../../types";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { suggestedPathwayName } from "../mapEditing";
@@ -11,6 +12,8 @@ interface PathwayInspectorOptions {
   pathway: ReturnType<typeof usePathwayEditing>;
   nodes: RouteNode[];
   savingAction: SaveAction | null;
+  /** What the signed-in administrator may do; an action they may not do is left out, not disabled. */
+  can: CanPerform;
   onSelect: (selection: PathwayInspectorSelection) => void;
   /** Applies the staged Pathway metadata; MapEditor closes the tool when the result says so. */
   onApply: () => void;
@@ -31,6 +34,7 @@ export function selectedPathwayInspectorModel({
   nodes: currentNodes,
   buildings: currentBuildings,
   savingAction,
+  can,
   onApply,
   onCancel,
   onReshape,
@@ -55,7 +59,8 @@ export function selectedPathwayInspectorModel({
       { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
       { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
     ],
-    details: (
+    // Metadata, geometry and Cancel are all edits, so a view-only administrator keeps the summary alone.
+    details: can("edit") ? (
       <>
         <section className="inspector-related-section" aria-label="Pathway metadata">
           <h3>Pathway metadata</h3>
@@ -78,23 +83,23 @@ export function selectedPathwayInspectorModel({
           <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
         </section>
       </>
-    ),
-    primaryAction: {
+    ) : undefined,
+    primaryAction: can("edit") ? {
       label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
       disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
-    },
+    } : undefined,
     overflowActions: [
-      { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
-      { label: "⌁ Reshape Pathway", onSelect: () => onReshape(selectedPath) },
-      {
+      ...(can("edit") ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
+      ...(can("edit") ? [{ label: "⌁ Reshape Pathway", onSelect: () => onReshape(selectedPath) }] : []),
+      ...(can("delete") ? [{
         label: "🗑 Delete Pathway",
         tone: "danger" as const,
         onSelect: () => {
           onDelete({ kind: "pathway", id: selectedPath.id, name: selectedPath.name, impact: calculateDeleteImpact({ object: selectedPath, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
         },
-      },
+      }] : []),
     ],
   } satisfies InspectorCardModel;
 }
@@ -111,6 +116,7 @@ export function pathPointInspectorModel({
   id,
   nodes: currentNodes,
   savingAction,
+  can,
   onSelect,
   onApply,
   onCancel,
@@ -147,7 +153,7 @@ export function pathPointInspectorModel({
     details: (
       <>
         <section className="inspector-related-section" aria-label="Parent Pathway context"><h3>Parent Pathway</h3><p>{activePathway?.name ?? editingPathId}</p><p>{activePathway?.shade} · {activePathway?.type} · {activePathway?.direction} · {activePathway?.status}</p></section>
-        <div className="inspector-point-inputs"><label>Latitude
+        {pathway.canModify && <div className="inspector-point-inputs"><label>Latitude
           <input aria-label="Path Point latitude" type="number" step="any" value={point[0]} onChange={(event) => {
             setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [Number(event.target.value), item[1]] : item));
             setPathDraftDirty(true);
@@ -158,23 +164,26 @@ export function pathPointInspectorModel({
             setPathPoints((current) => current.map((item, index) => index === selectedPathPointIndex ? [item[0], Number(event.target.value)] : item));
             setPathDraftDirty(true);
           }} />
-        </label></div>
+        </label></div>}
         {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
         {(pathwayFrameDirty || pathDraftDirty) && <p role="status">Update Pathway before converting this Path Point.</p>}
-        <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? activePathway?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label><label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>
-        <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
+        {pathway.canModify && <section className="inspector-related-section" aria-label="Parent Pathway metadata"><h3>Parent Pathway metadata</h3><div className="inspector-edit-fields"><label>Shade<select aria-label="Pathway shade" value={pathwayFrame?.shade ?? activePathway?.shade ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, shade: event.target.value as Pathway["shade"] } : current)}><option>Fully Shaded</option><option>Mostly Shaded</option><option>Partial Shade</option><option>Unshaded</option><option>Unknown</option></select></label><label>Way type<select aria-label="Pathway type" value={pathwayFrame?.type ?? activePathway?.type ?? "Walkway"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, type: event.target.value as Pathway["type"], allowedModes: event.target.value === "Walkway" ? ["Walking"] : current.allowedModes ?? ["Walking"] } : current)}><option>Walkway</option><option>Road</option></select></label><label>Direction<select aria-label="Pathway direction" value={pathwayFrame?.direction ?? activePathway?.direction ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, direction: event.target.value as Pathway["direction"] } : current)}><option>Two-way</option><option>One-way</option><option>Unknown</option></select></label><label>Status<select aria-label="Pathway status" value={pathwayFrame?.status ?? activePathway?.status ?? "Unknown"} onChange={(event) => setPathwayDraft((current) => current ? { ...current, status: event.target.value as Pathway["status"] } : current)}><option>Open</option><option>Closed</option><option>Unknown</option></select></label></div></section>}
+        {pathway.canModify && <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>}
       </>
     ),
-    primaryAction: {
+    // Updating, cancelling and removing a point change the Pathway (Edit); converting a point creates a Route Node (Add).
+    primaryAction: can("edit") ? {
       label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
       disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
-    },
+    } : undefined,
     overflowActions: [
-      { label: "✓ Update Pathway", onSelect: onApply },
-      { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
-      { label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion },
+      ...(can("edit") ? [
+        { label: "✓ Update Pathway", onSelect: onApply },
+        { label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel },
+      ] : []),
+      ...(can("add") ? [{ label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion }] : []),
       {
         label: "↩ Inspect Parent Pathway",
         onSelect: () => {
@@ -182,7 +191,7 @@ export function pathPointInspectorModel({
           onSelect(activePathway ? { type: "pathway", id: activePathway.id } : null);
         },
       },
-      {
+      ...(can("edit") ? [{
         label: "🗑 Remove Path Point",
         tone: "danger" as const,
         onSelect: () => {
@@ -191,7 +200,7 @@ export function pathPointInspectorModel({
           onSelect(activePathway ? { type: "pathway", id: activePathway.id } : null);
           setPathDraftDirty(true);
         },
-      },
+      }] : []),
     ],
   } satisfies InspectorCardModel;
 }

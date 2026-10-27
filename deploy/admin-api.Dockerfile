@@ -31,5 +31,8 @@ LABEL org.opencontainers.image.revision="$SOURCE_COMMIT"
 USER adminapi
 WORKDIR /srv/app/services
 EXPOSE 5000
-# OTPs and rate-limit buckets are process-local; retain one sync worker.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "database:app"]
+# OTPs, rate-limit buckets, backup jobs and the backup scheduler are
+# process-local, so keep one process. Its threads let requests overlap: each
+# one mostly waits on the remote database, and a single sync worker made every
+# request queue behind the one before it. The shared state is lock-guarded.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gthread", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "database:app"]

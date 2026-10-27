@@ -22,7 +22,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
-from extensions import db, mail
+from extensions import db, engine_options, mail
 from auth import auth_bp
 from model.location import Location
 from model.app_user import AppUser
@@ -241,6 +241,8 @@ print("Database URL loaded:", safe_database_url)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = engine_options(database_url)
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 
@@ -391,15 +393,13 @@ def test_db():
             "test_query": value
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("DATABASE CONNECTION ERROR:")
-        print(e)
+        app.logger.exception("Database connection failed")
 
         return jsonify({
             "success": False,
-            "message": "Database connection failed",
-            "error": str(e)
+            "message": "Database connection failed"
         }), 500
 
 
@@ -439,15 +439,13 @@ def test_location_table():
             "message": "The public.location table exists."
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOCATION TABLE ERROR:")
-        print(e)
+        app.logger.exception("Could not check location table")
 
         return jsonify({
             "success": False,
-            "message": "Could not check location table",
-            "error": str(e)
+            "message": "Could not check location table"
         }), 500
 
 
@@ -472,15 +470,13 @@ def test_location():
             ]
         }), 200
 
-    except Exception as e:
+    except Exception:
 
-        print("LOCATION ERROR:")
-        print(e)
+        app.logger.exception("Could not query location table")
 
         return jsonify({
             "success": False,
-            "message": "Could not query location table",
-            "error": str(e)
+            "message": "Could not query location table"
         }), 500
 
 

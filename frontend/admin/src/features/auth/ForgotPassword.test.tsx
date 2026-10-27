@@ -11,7 +11,7 @@ import { ForgotPassword } from "./ForgotPassword";
 import { Login } from "./AuthPages";
 import { issued, jsonResponse, mockBackend, settle, verified, wrongCode } from "./testing/recoveryFetch";
 
-const RATE_LIMIT_MESSAGE = "Too many attempts. Try again when the button unlocks.";
+const RECOVERY_RATE_LIMIT_MESSAGE = "Too many attempts. Please try again when the restriction ends.";
 
 const EMAIL = "admin@isu.edu.ph";
 
@@ -61,6 +61,31 @@ afterEach(() => {
 });
 
 describe("forgot-password: email step", () => {
+  it("answers an unregistered address with the same generic copy, never saying whether it exists", async () => {
+    // The backend answers every well-formed address identically; the page must not add anything of its own.
+    mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
+    renderForgotPassword();
+    expect(screen.getByText(/If the account is eligible for recovery, we'll send a/)).toBeInTheDocument();
+
+    await sendCodeTo("nobody@isu.edu.ph");
+
+    expect(screen.getByText(/if an account exists for/i)).toHaveTextContent("nobody@isu.edu.ph");
+    expect(document.body).not.toHaveTextContent(/not (found|registered)|no account|does not exist|unknown/i);
+  });
+
+  it("names no wait and keeps Send code usable when a 429 has no Retry-After", async () => {
+    mockBackend({ [REQUEST]: [jsonResponse({ message: "Too many recovery requests." }, 429)] });
+    renderForgotPassword();
+
+    fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
+    fireEvent.click(screen.getByRole("button", { name: /send code/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Too many attempts\. Please wait a moment and try again\.$/);
+    expect(screen.queryByRole("button", { name: /try again in/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /send code/i })).toBeEnabled();
+  });
+
+
   it("rejects an empty or malformed email before sending anything", () => {
     const { fetchMock } = mockBackend({});
     renderForgotPassword();
@@ -105,14 +130,14 @@ describe("forgot-password: email step", () => {
     ["an HTML error page", "<html><body>Too Many Requests</body></html>"],
   ])("still counts down from Retry-After when a 429 has %s", async (_name, body) => {
     mockBackend({ [REQUEST]: [new Response(body, { status: 429, headers: { "Retry-After": "5" } })] });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     renderForgotPassword();
 
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(screen.getByRole("alert")).toHaveTextContent(RECOVERY_RATE_LIMIT_MESSAGE);
     expect(screen.getByRole("button", { name: "Try again in 5s" })).toBeDisabled();
   });
 
@@ -123,14 +148,14 @@ describe("forgot-password: email step", () => {
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to connect to the backend.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach the ISU-CAMP server. Check your connection and try again.");
   });
 
   it("counts a server rate limit down on the Send code button, with a number-free urgent alert", async () => {
     mockBackend({
       [REQUEST]: [jsonResponse({ message: "Too many requests." }, 429, { "Retry-After": "3" })],
     });
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     renderForgotPassword();
 
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
@@ -139,7 +164,7 @@ describe("forgot-password: email step", () => {
 
     const alert = screen.getByRole("alert");
     // The button carries the live count, so the alert names no number that could disagree with it.
-    expect(alert).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(alert).toHaveTextContent(RECOVERY_RATE_LIMIT_MESSAGE);
     expect(alert).not.toHaveTextContent(/\d/);
     expect(within(alert).getByRole("img", { name: "Warning" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again in 3s" })).toBeDisabled();
@@ -237,7 +262,7 @@ describe("forgot-password: code step", () => {
 
     await failVerification();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect code. 4 attempts left.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
     expectBoxes("111111");
     for (let position = 1; position <= 6; position += 1) expect(box(position)).toBeInvalid();
     // The alert renders before the passive effect that refocuses box 1 has run.
@@ -252,22 +277,22 @@ describe("forgot-password: code step", () => {
 
     await failVerification();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 1 attempt left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 1 attempt remaining.");
   });
 
-  it("shows the plain server message when the backend sends no attempt count", async () => {
+  it("says the code is incorrect, with no count, when the backend sends no attempt count", async () => {
     mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode()] });
     renderForgotPassword();
     await sendCodeTo();
 
     await failVerification();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/^Invalid verification code$/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^The verification code is incorrect\. Please try again\.$/);
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
   it("does not resend rejected digits on its own; the same code entered again is checked, and so is Verify on the unedited boxes", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2), wrongCode(1)] });
     renderForgotPassword();
     fireEvent.change(screen.getByLabelText("Admin email"), { target: { value: EMAIL } });
@@ -284,19 +309,19 @@ describe("forgot-password: code step", () => {
     pasteCode(1, "111111");
     await settle();
     expect(sent[VERIFY]).toHaveLength(2);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 3 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
 
     // Typing it again is just as good.
     typeCode("111111");
     await settle();
     expect(sent[VERIFY]).toHaveLength(3);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 2 attempts left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
 
     // An explicit retry of the unedited rejected code is fine.
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await settle();
     expect(sent[VERIFY]).toHaveLength(4);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect code. 1 attempt left.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 1 attempt remaining.");
   });
 
   it("still auto-submits a different code after one was rejected", async () => {
@@ -335,7 +360,7 @@ describe("forgot-password: code step", () => {
   it.each([
     ["attemptsRemaining is a string", "3"],
     ["attemptsRemaining is negative", -1],
-  ])("falls back to the server message when %s", async (_name, attemptsRemaining) => {
+  ])("says the code is incorrect, with no count, when %s", async (_name, attemptsRemaining) => {
     mockBackend({
       [REQUEST]: [issued()],
       [VERIFY]: [jsonResponse({ success: false, code: "invalid_code", message: "Invalid verification code", attemptsRemaining }, 400)],
@@ -345,7 +370,7 @@ describe("forgot-password: code step", () => {
 
     await failVerification();
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/^Invalid verification code$/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/^The verification code is incorrect\. Please try again\.$/);
   });
 
   it("ignores malformed timing fields instead of starting a countdown", async () => {
@@ -368,7 +393,7 @@ describe("forgot-password: code step", () => {
   });
 
   it("counts a server rate limit down on the Verify button, keeps the typed code and sends it when the wait ends", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({
       [REQUEST]: [issued()],
       [VERIFY]: [jsonResponse({ message: "Too many requests." }, 429, { "Retry-After": "2" }), verified()],
@@ -380,7 +405,7 @@ describe("forgot-password: code step", () => {
 
     typeCode("123456");
     await settle();
-    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(screen.getByRole("alert")).toHaveTextContent(RECOVERY_RATE_LIMIT_MESSAGE);
     expect(within(screen.getByRole("alert")).getByRole("img", { name: "Warning" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     expectBoxes("123456");
@@ -396,7 +421,7 @@ describe("forgot-password: code step", () => {
 
 describe("forgot-password: resend", () => {
   it("disables Resend for the cooldown the server reports, then sends another code and clears the boxes", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({
       [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 3 }), issued({ resendAfterSeconds: 3 })],
       [VERIFY]: [wrongCode(4)],
@@ -406,9 +431,11 @@ describe("forgot-password: resend", () => {
     fireEvent.click(screen.getByRole("button", { name: /send code/i }));
     await settle();
 
-    expect(screen.getByRole("button", { name: "Resend code in 3s" })).toBeDisabled();
+    // The cooldown reads as a sentence, with no button to press until it ends.
+    expect(screen.getByText("Resend available in 3s.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /resend/i })).toBeNull();
     await tickSecond();
-    expect(screen.getByRole("button", { name: "Resend code in 2s" })).toBeDisabled();
+    expect(screen.getByText("Resend available in 2s.")).toBeInTheDocument();
     await tickSecond();
     await tickSecond();
 
@@ -420,9 +447,9 @@ describe("forgot-password: resend", () => {
       { email: EMAIL, purpose: "password" },
       { email: EMAIL, purpose: "password" },
     ]);
-    expect(screen.getByText("A new code has been sent.")).toBeInTheDocument();
+    expect(screen.getByText("A new verification code has been sent. Your previous code is no longer valid.")).toBeInTheDocument();
     expectBoxes("");
-    expect(screen.getByRole("button", { name: "Resend code in 3s" })).toBeDisabled();
+    expect(screen.getByText("Resend available in 3s.")).toBeInTheDocument();
   });
 
   it("leaves Resend available when the server reports no cooldown", async () => {
@@ -434,7 +461,7 @@ describe("forgot-password: resend", () => {
   });
 
   it("counts a rate-limited resend down on the Resend button", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     mockBackend({
       [REQUEST]: [issued(), jsonResponse({ message: "Too many requests. Please wait 2 seconds." }, 429, { "Retry-After": "2" })],
     });
@@ -447,7 +474,7 @@ describe("forgot-password: resend", () => {
     await settle();
 
     // The server's own wording names a number; the alert replaces it so only the button counts.
-    expect(screen.getByRole("alert")).toHaveTextContent(RATE_LIMIT_MESSAGE);
+    expect(screen.getByRole("alert")).toHaveTextContent(RECOVERY_RATE_LIMIT_MESSAGE);
     expect(screen.getByRole("alert")).not.toHaveTextContent(/\d/);
     expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     await tickSecond();
@@ -467,12 +494,15 @@ describe("forgot-password: new password and return to login", () => {
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [verified()], [RESET]: [verified("admin_justine")] });
     renderForgotPassword();
     await reachNewPassword();
+    expect(screen.getByText(/^Create a new password for your administrator account\./)).toBeInTheDocument();
+    expect(screen.getByText(/If your verification code expires before you finish, you'll need to request a new one\./)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("New password"), { target: { value: "Passw0rd!x" } });
     fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "Passw0rd!x" } });
     fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
 
     expect(await screen.findByRole("heading", { name: /password reset successful/i })).toBeInTheDocument();
+    expect(screen.getByText("Your password has been reset successfully. You can now sign in with your new password.")).toBeInTheDocument();
     expect(sent[RESET]).toEqual([{ email: EMAIL, code: "000000", password: "Passw0rd!x" }]);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to login" }));
@@ -531,7 +561,7 @@ describe("recovery by alternative email", () => {
     const ALTERNATIVE = "dean.backup@gmail.com";
     const { sent } = mockBackend({ [REQUEST]: [issued()] });
     renderForgotPassword();
-    expect(screen.getByText(/primary or alternative admin email/i)).toBeInTheDocument();
+    expect(screen.getByText(/primary or alternative email associated with your administrator account/i)).toBeInTheDocument();
 
     await sendCodeTo(ALTERNATIVE);
 

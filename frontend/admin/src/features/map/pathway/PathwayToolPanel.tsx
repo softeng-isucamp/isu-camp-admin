@@ -1,4 +1,5 @@
 import { Spinner } from "../../../components/UI";
+import { usePermissions } from "../../auth/usePermissions";
 import type { Pathway, RouteNode } from "../../../types";
 import { suggestedPathwayName } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
@@ -27,11 +28,11 @@ export function PathwayToolPanel({
   onSave: handleSavePathShape,
   onCancel,
 }: PathwayToolPanelProps) {
+  const { can } = usePermissions();
   const {
     currentPathways,
     activePathway,
     editingPathId,
-    setEditingPathId,
     pathwayDraft,
     setPathwayDraft,
     provisionalPathwayId,
@@ -49,20 +50,43 @@ export function PathwayToolPanel({
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Path Shape Points</div>
       <h2 className="text-base font-extrabold text-[#191c1d] mt-1">Calibrate Path Points</h2>
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>
+        {can("add") && <button type="button" className="px-3 py-1.5 bg-[#005931] text-white rounded-full text-xs font-bold" onClick={startNewPathway}>＋ New Pathway</button>}
         <button
           type="button"
           className="px-3 py-1.5 border border-[#005931] bg-white text-[#005931] rounded-full text-xs font-bold"
           onClick={onBrowseNetwork}
         >Browse Walking Network</button>
       </div>
-      {!activePathway && (
+          {can("edit") && <div className="flex flex-col gap-1.5 my-3">
+            <label className="text-xs font-semibold text-[#3f4941]">Pathway</label>
+            <select
+              aria-label="Pathway to edit"
+              value={editingPathId ?? ""}
+              onChange={(e) => {
+                if (!can("edit")) return;
+                const found = directoryPathways.find((p) => p.id === e.target.value) || overlayPathways.find((p) => p.id === e.target.value);
+                if (found) {
+                  pathway.loadForEditing(found);
+                }
+                setSelectedPathPointIndex(null);
+              }}
+              className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
+            >
+              <option value="">Select an existing Pathway</option>
+              {currentPathways.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>}
+      {!activePathway && can("add") && (
         <div className="mt-3 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-3 text-xs text-[#3f4941]">
           <p>Select two existing active Route Nodes on the map to create a new Pathway. The endpoints are kept as nodes; only intermediate clicks become Path Points.</p>
           <p className="mt-2 font-semibold">{pathStartNodeId ? `Start selected: ${currentNodes.find((node) => node.id === pathStartNodeId)?.name ?? "Route Node"}. Select a different node.` : "Select the first Route Node to begin."}</p>
         </div>
       )}
-      {activePathway && (
+      {activePathway && pathway.canModify && (
         <>
           <section aria-label="Pathway metadata" className="mt-3 rounded-xl border border-[#dbe0e2] p-3">
             <div className="flex flex-col gap-1.5">
@@ -93,27 +117,7 @@ export function PathwayToolPanel({
               </fieldset>
             </div>
           </section>
-          <div className="flex flex-col gap-1.5 my-3">
-            <label className="text-xs font-semibold text-[#3f4941]">Pathway</label>
-            <select
-              value={editingPathId ?? ""}
-              onChange={(e) => {
-                setEditingPathId(e.target.value);
-                const found = directoryPathways.find((p) => p.id === e.target.value) || overlayPathways.find((p) => p.id === e.target.value);
-                if (found) {
-                  setPathPoints(found.pathPoints || []);
-                }
-                setSelectedPathPointIndex(null);
-              }}
-              className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-            >
-              {currentPathways.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
+
           <p className="text-xs text-[#3f4941] my-2">
               Select a Path Point to drag it, or click the map to add Path Points.{" "}
             <strong>{pathPoints.length} points plotted</strong>.

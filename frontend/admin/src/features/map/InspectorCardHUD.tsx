@@ -73,6 +73,9 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
           {object.status && <p>{object.status}</p>}
         </div>
         <div className="inspector-card-controls" ref={menuRef}>
+          {/* An admin who may do nothing with this object gets no ⋯ trigger either. */}
+          {object.overflowActions.length > 0 && (
+          <>
           <button
             type="button"
             className="inspector-icon-button"
@@ -102,6 +105,8 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
                 </button>
               ))}
             </div>
+          )}
+          </>
           )}
           <button
             type="button"

@@ -1,4 +1,5 @@
 import io
+import logging
 
 import pytest
 from flask import Flask
@@ -262,7 +263,10 @@ def test_list_locations_rejects_unknown_persisted_type(monkeypatch):
     response = client.get("/api/locations")
 
     assert response.status_code == 500
-    assert response.json["message"] == "Location 9 references an unknown location type."
+    # Which row and which unknown type id is logged, not answered: the detail
+    # describes storage, and a 5xx body is readable by anything that calls the
+    # API, not only by the portal that hides it.
+    assert response.json["message"] == "Failed to list locations."
 
 
 def test_list_locations_paginates_deterministic_building_families(monkeypatch):
@@ -539,7 +543,7 @@ def make_mutation_client(monkeypatch):
     return app.test_client(), records, session
 
 
-def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch):
+def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch, caplog):
     client, records, _ = make_mutation_client(monkeypatch)
     building = client.post("/api/locations", json={"name": "Engineering Hall", "code": "ENG", "type": "Campus Services"})
     wrong_building = client.post("/api/locations", json={"name": "Other Hall", "code": "OTHER", "type": "Campus Services"})
@@ -551,10 +555,16 @@ def test_invalid_floor_relationship_is_reported_instead_of_projected(monkeypatch
     room.location_id = 21
     records.append(room)
 
-    response = client.get("/api/locations")
+    with caplog.at_level(logging.WARNING, logger=location_module.logger.name):
+        response = client.get("/api/locations")
 
     assert response.status_code == 500
-    assert "invalid Floor relationship" in response.json["message"]
+    # Reported to the operator who can fix the row, in the log. The response
+    # says only that the listing failed: the detail names stored relationships
+    # the administrator cannot act on, and a 5xx body is readable by any client.
+    assert "invalid Floor relationship" in caplog.text
+    assert response.json["message"] == "Failed to list locations."
+    assert "Floor" not in response.json["message"]
 
 
 def test_mutations_validate_relationship_floor_and_duplicate_without_partial_write(monkeypatch):
