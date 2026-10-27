@@ -600,11 +600,13 @@ def send_password_reset(admin_id):
         )
 
     # One code a minute per account, so a colleague's inbox cannot be flooded.
+    reservation = []
     limited = rate_limited(
         "admin-reset",
         str(record.id),
         1,
         "A reset code was just sent to that account. Please wait before sending another.",
+        reservation=reservation,
     )
     if limited:
         return limited
@@ -616,7 +618,7 @@ def send_password_reset(admin_id):
         # delivery the helper has already given back the account's budget and
         # left their current code in place; the minute's hit is returned here,
         # so the sender can try again at once.
-        release_rate_limit("admin-reset", str(record.id))
+        release_rate_limit("admin-reset", str(record.id), reservation)
         db.session.rollback()
         return _error("Failed to send the password reset code.", status=502)
 

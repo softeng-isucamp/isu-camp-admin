@@ -90,7 +90,8 @@ def reclaim_idle_rate_limit_buckets(now):
         rate_limit_buckets.pop(key, None)
 
 
-def rate_limited(scope, key, limit, message):
+def rate_limited(scope, key, limit, message, *, reservation=None):
+    """Refuses excess hits; optionally records the admitted hit for an exact refund."""
     with rate_limit_lock:
         # Read inside the lock so hits are stored in the order they were
         # taken; hits are still judged by value, not position.
@@ -106,6 +107,8 @@ def rate_limited(scope, key, limit, message):
             retry_after = max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - min(bucket))))
         else:
             bucket.append(now)
+            if reservation is not None:
+                reservation.append(now)
             return None
     # The code says which kind of 429 this is. A flood limit is about how fast
     # this client is going and lifts in seconds; an account restriction is
@@ -116,16 +119,16 @@ def rate_limited(scope, key, limit, message):
     return response, 429
 
 
-def release_rate_limit(scope, key):
-    """Gives back the newest hit ``rate_limited`` took for ``(scope, key)``.
-
-    For an action that was let through but then did nothing, so a retry is not
-    told it is going too fast.
-    """
+def release_rate_limit(scope, key, reservation):
+    """Refunds only this request's admitted hit, even if its bucket was reused."""
     with rate_limit_lock:
         bucket = rate_limit_buckets.get((scope, key))
         if bucket:
-            bucket.pop()
+            for hit in reservation:
+                try:
+                    bucket.remove(hit)
+                except ValueError:
+                    pass  # This hit already expired; a newer hit is not ours.
 
 
 # ==========================================
@@ -1215,6 +1218,7 @@ def record_recovery_request(row):
     times = recovery_request_times(row) + [utc_now()]
     row.requested_at = [moment.isoformat() for moment in times[-RECOVERY_REQUEST_LIMIT:]]
     row.updated_at = utc_now()
+    return times[-1]
 
 
 def record_recovery_failure(row):
@@ -1466,8 +1470,8 @@ def send_recovery_otp(admin, purpose, otp, address):
     run_in_background(deliver)
 
 
-def withdraw_recovery_request(subject):
-    """Takes back one request counted against ``subject``.
+def withdraw_recovery_request(subject, reservation):
+    """Takes back this send's request, preserving later requests and their times.
 
     For a colleague send the mail server refused: no email went out, so nothing
     the request cap protects an inbox from happened, and an outage must not
@@ -1476,7 +1480,12 @@ def withdraw_recovery_request(subject):
 
     with recovery_lock:
         row = recovery_attempt_row(subject)
-        times = recovery_request_times(row)[:-1]
+        times = recovery_request_times(row)
+        for moment in reservation:
+            try:
+                times.remove(moment)
+            except ValueError:
+                pass  # This request left the window while SMTP was waiting.
         row.requested_at = [moment.isoformat() for moment in times]
         row.updated_at = utc_now()
         db.session.commit()
@@ -1517,7 +1526,8 @@ def send_password_reset_otp(admin):
                        "Give the account an address of its own first.",
         }), 409
 
-    refused = authorize_recovery_subject(subject)
+    reservation = []
+    refused = authorize_recovery_subject(subject, reservation=reservation)
     if refused:
         return refused
 
@@ -1526,7 +1536,7 @@ def send_password_reset_otp(admin):
         mail.send(recovery_message(admin, "password", otp, admin.gmail, sent_by_colleague=True))
     except Exception as error:
         logger.exception("Could not send a password reset code from User Management")
-        withdraw_recovery_request(subject)
+        withdraw_recovery_request(subject, reservation)
         raise RecoveryDeliveryError() from error
 
     # Stored only now that it is on its way. Storing first would have replaced
@@ -1584,7 +1594,7 @@ def recovery_code_matches(entry, code):
     return digits_match and entry["otp"] is not None
 
 
-def authorize_recovery_subject(subject):
+def authorize_recovery_subject(subject, *, reservation=None):
     """Counts one code request against ``subject``, or what to send instead.
 
     Returns None when a code may be issued - having recorded that it was - and
@@ -1616,8 +1626,10 @@ def authorize_recovery_subject(subject):
             db.session.commit()
             return recovery_request_limited_response(wait)
 
-        record_recovery_request(row)
+        admitted_at = record_recovery_request(row)
         db.session.commit()
+        if reservation is not None:
+            reservation.append(admitted_at)
     return None
 
 

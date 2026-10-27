@@ -1039,6 +1039,37 @@ def test_a_colleague_send_the_mail_server_refuses_is_reported_and_costs_nothing(
     assert harness.reset(harness.issued_code()).status_code == 200
 
 
+def test_a_failed_colleague_send_refunds_its_own_request_not_a_later_one(harness, colleague, monkeypatch):
+    started = datetime.now(timezone.utc)
+    clock = [started]
+    monkeypatch.setattr(auth_module, "utc_now", lambda: clock[0])
+
+    def fail_after_another_request(message):
+        # Another thread can request through the alternative address while
+        # SMTP is waiting. Its later timestamp must keep its own full window.
+        clock[0] = started + timedelta(seconds=30)
+        assert auth_module.authorize_recovery_subject(harness.subject()) is None
+        raise RuntimeError("smtp is down")
+
+    monkeypatch.setattr(auth_module.mail, "send", fail_after_another_request)
+    assert colleague.send().status_code == 502
+    assert auth_module.recovery_request_times(harness.row()) == [clock[0]]
+
+
+def test_a_failed_slow_send_does_not_refund_a_later_send_cooldown(harness, colleague, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(auth_module.time, "monotonic", lambda: clock[0])
+
+    def fail_after_cooldown_was_reused(message):
+        clock[0] += auth_module.RATE_LIMIT_WINDOW_SECONDS + 1
+        assert auth_module.rate_limited("admin-reset", "1", 1, "slow") is None
+        raise RuntimeError("smtp is down")
+
+    monkeypatch.setattr(auth_module.mail, "send", fail_after_cooldown_was_reused)
+    assert colleague.send().status_code == 502
+    assert list(auth_module.rate_limit_buckets[("admin-reset", "1")]) == [clock[0]]
+
+
 def test_a_code_requested_from_the_page_stays_asynchronous_when_mail_fails(harness, colleague):
     """The unauthenticated page still answers before the mail server does."""
 
