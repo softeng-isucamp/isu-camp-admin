@@ -51,7 +51,7 @@ import { MapModals, type OwnerModal } from "./MapModals";
 import { MapLayers } from "./MapLayers";
 import { ToolPanel } from "./ToolPanel";
 import { MapController } from "./MapController";
-import { indoorLocationParent, isPositionedLocation } from "./indoorLocation/indoorLocations";
+import { footprintBounds, indoorLocationParent, isPositionedLocation } from "./indoorLocation/indoorLocations";
 import { useIndoorLocationPlacement } from "./indoorLocation/useIndoorLocationPlacement";
 import { IndoorLocationPlacementPanel } from "./indoorLocation/IndoorLocationPlacementPanel";
 import { useLocationDetailsSave } from "./location/useLocationDetailsSave";
@@ -295,12 +295,8 @@ export function MapEditor() {
         // owned by Map Editor's Building Polygon tool.
         setMode("select");
         setSelected({ type: "building", id: building.id });
-        if (building.points.length >= 3) {
-          setFrameBounds([
-            [Math.min(...building.points.map(([lat]) => lat)), Math.min(...building.points.map(([, lng]) => lng))],
-            [Math.max(...building.points.map(([lat]) => lat)), Math.max(...building.points.map(([, lng]) => lng))],
-          ]);
-        }
+        const bounds = footprintBounds(building.points);
+        if (bounds) setFrameBounds(bounds);
         break;
       }
       case "locate-location": {
@@ -366,9 +362,10 @@ export function MapEditor() {
       overlayLocations: overlay.locations,
       overlayNodes: overlay.nodes,
       pathways: currentPathways,
+      buildings: currentBuildings,
     },
     selectObject,
-    flyTo,
+    { flyTo, frameBounds: setFrameBounds, reportInfo: feedback.reportInfo },
   );
 
   const handleNetworkBrowserSelection = (networkSelection: NonNullable<NetworkBrowserSelection>) => {

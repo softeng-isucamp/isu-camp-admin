@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import type { Location, Pathway, RouteNode } from "../../../types";
-import { isPositionedLocation } from "../indoorLocation/indoorLocations";
+import type { Building, Location, Pathway, RouteNode } from "../../../types";
+import { footprintBounds, isPositionedLocation, parentBuildingOf } from "../indoorLocation/indoorLocations";
 import { locationSelection, type MapSelection } from "./useMapSelection";
 
 export type MapSearchResult =
@@ -14,15 +14,35 @@ export interface SearchableMapData {
   overlayLocations: Location[];
   overlayNodes: RouteNode[];
   pathways: Pathway[];
+  buildings: Building[];
+}
+
+export interface MapSearchFocus {
+  flyTo: (point: [number, number]) => void;
+  frameBounds: (bounds: [[number, number], [number, number]]) => void;
+  reportInfo: (text: string) => void;
 }
 
 /** Campus place search: query state, matching results, and picking a result. */
 export function useMapSearch(
   data: SearchableMapData,
   selectObject: (selection: MapSelection) => void,
-  flyTo: (point: [number, number]) => void,
+  focus: MapSearchFocus,
 ) {
-  const { directoryLocations, directoryNodes, overlayLocations, overlayNodes, pathways } = data;
+  const { directoryLocations, directoryNodes, overlayLocations, overlayNodes, pathways, buildings } = data;
+  const { flyTo } = focus;
+
+  /** A Location with no marker is shown by framing the Building it sits in, if that Building has a footprint. */
+  const focusUnpositionedLocation = (location: Location) => {
+    const building = parentBuildingOf(location, buildings);
+    const bounds = building ? footprintBounds(building.points) : null;
+    if (building && bounds) {
+      focus.frameBounds(bounds);
+      focus.reportInfo(`${location.name} has no map marker yet. Showing its building, ${building.name}.`);
+    } else if (location.type !== "Place") {
+      focus.reportInfo(`${location.name} has no map marker and no mapped building.`);
+    }
+  };
   const [search, setSearch] = useState("");
 
   const results = useMemo(() => {
@@ -48,6 +68,7 @@ export function useMapSearch(
     if (item.kind === "Location") {
       selectObject(locationSelection(item));
       if (isPositionedLocation(item)) flyTo([item.lat, item.lng]);
+      else focusUnpositionedLocation(item);
     } else if (item.kind === "Route Node") {
       selectObject({ type: "node", id: item.id });
       flyTo([item.lat, item.lng]);
