@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MAP_ISSUE_GROUPS, type MapIssue } from "./session/mapIssues";
 import { usePermissions } from "../auth/usePermissions";
 
@@ -8,6 +8,8 @@ interface MapIssuesTrayProps {
   activeIssueId: string | null;
   /** Flies the map to the issue and selects its object. Never changes data. */
   onFocusIssue: (issue: MapIssue) => void;
+  /** An inspector is open: keep the tray closed and the pill compact unless it is opened while the inspector is open. */
+  yieldToInspector?: boolean;
 }
 
 function Chevron({ open }: { open: boolean }) {
@@ -36,18 +38,36 @@ function LocateIcon() {
  * Renders into the editor's bottom-left grid: the tray fills row 1 above the legend, and the pill
  * sits in row 2 beside the legend (column 2).
  */
-export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssuesTrayProps) {
+export function MapIssuesTray({ issues, activeIssueId, onFocusIssue, yieldToInspector = false }: MapIssuesTrayProps) {
   const { can } = usePermissions();
-  const [open, setOpen] = useState(false);
+  // The administrator's own choice (and search) survive an inspector opening; it only hides the tray meanwhile.
+  const [chosenOpen, setChosenOpen] = useState(false);
+  const [openedOverInspector, setOpenedOverInspector] = useState(false);
+  useEffect(() => {
+    if (!yieldToInspector) setOpenedOverInspector(false);
+  }, [yieldToInspector]);
+  const open = chosenOpen && (!yieldToInspector || openedOverInspector);
+  const setOpen = (next: boolean) => {
+    // Closing a tray that is only hidden by the inspector is not a choice; closing a visible one is.
+    if (next || !yieldToInspector || openedOverInspector) setChosenOpen(next);
+    setOpenedOverInspector(next && yieldToInspector);
+  };
   // Explicit user toggles; groups without an entry start open for alerts and closed for info.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const [query, setQuery] = useState("");
+  const searchId = useId();
   const activeRow = useRef<HTMLLIElement | null>(null);
 
+  const trimmed = query.trim().toLowerCase();
+  const matching = useMemo(() => trimmed
+    ? issues.filter((issue) => issue.title.toLowerCase().includes(trimmed) || (issue.identifier ?? "").toLowerCase().includes(trimmed))
+    : issues, [issues, trimmed]);
   const groups = useMemo(() => MAP_ISSUE_GROUPS
-    .map((group) => ({ ...group, issues: issues.filter((issue) => issue.kind === group.kind) }))
-    .filter((group) => group.issues.length > 0), [issues]);
+    .map((group) => ({ ...group, issues: matching.filter((issue) => issue.kind === group.kind) }))
+    .filter((group) => group.issues.length > 0), [matching]);
   const activeKind = issues.find((issue) => issue.id === activeIssueId)?.kind;
-  const isExpanded = (group: (typeof groups)[number]) => toggled[group.kind] ?? (group.severity === "alert" || group.kind === activeKind);
+  // A search shows its matches rather than hiding them behind a collapsed group.
+  const isExpanded = (group: (typeof groups)[number]) => toggled[group.kind] ?? (Boolean(trimmed) || group.severity === "alert" || group.kind === activeKind);
 
   useEffect(() => {
     if (open && activeIssueId) activeRow.current?.scrollIntoView?.({ block: "nearest" });
@@ -64,7 +84,12 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
           className="map-glass-panel pointer-events-auto col-span-3 row-start-1 flex max-h-full min-h-0 flex-col self-end overflow-hidden rounded-2xl text-xs"
         >
           <header className="flex items-center justify-between border-b border-[#dfe8e2] px-4 py-2.5">
-            <h2 className="font-extrabold text-[#191c1d]">Map issues</h2>
+            <h2 className="font-extrabold text-[#191c1d]">
+              Map issues
+              <span className="ml-2 text-[11px] font-semibold tabular-nums text-[#526359]">
+                {trimmed ? `${matching.length} of ${issues.length}` : issues.length}
+              </span>
+            </h2>
             <button
               type="button"
               aria-label="Close issues tray"
@@ -74,7 +99,24 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
               <span aria-hidden="true">×</span>
             </button>
           </header>
+          <div className="border-b border-[#dfe8e2] px-3 py-2">
+            <label htmlFor={searchId} className="sr-only">Search map issues by name or code</label>
+            <input
+              id={searchId}
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search by name or code"
+              autoComplete="off"
+              className="w-full rounded-xl border border-[#dbe0e2] bg-white px-3 py-1.5 text-xs font-semibold text-[#191c1d] outline-none focus:ring-2 focus:ring-[#005931]"
+            />
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {trimmed && matching.length === 0 && (
+              <p className="px-3 py-4 text-center text-[11px] font-semibold text-[#526359]" role="status">
+                No issues match “{query.trim()}”. Clear the search to see all {issues.length}.
+              </p>
+            )}
             {groups.map((group) => {
               const expanded = isExpanded(group);
               const alert = group.severity === "alert";
@@ -115,14 +157,21 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
                               <button
                                 type="button"
                                 aria-current={active ? "true" : undefined}
-                                aria-label={`${issue.title}, ${issue.detail}`}
-                                onClick={() => onFocusIssue(issue)}
-                                title={`${issue.title} — ${issue.detail}`}
+                                aria-label={`${issue.title}${issue.identifier ? ` (${issue.identifier})` : ""}, ${issue.detail}`}
+                                onClick={() => {
+                                  // Working through the tray is explicit use of it: focusing a row opens its inspector, but the tray stays.
+                                  if (open) setOpenedOverInspector(true);
+                                  onFocusIssue(issue);
+                                }}
+                                title={`${issue.title}${issue.identifier ? ` (${issue.identifier})` : ""} — ${issue.detail}`}
                                 className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left"
                               >
-                                <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                                   <strong className="min-w-0 truncate text-[#191c1d]">{issue.title}</strong>
-                                  <span className="shrink-0 text-[11px] font-semibold text-[#526359]">{issue.detail}</span>
+                                  <span className="flex min-w-0 items-baseline gap-2 text-[11px] font-semibold text-[#526359]">
+                                    {issue.identifier && <span className="min-w-0 truncate font-mono text-[10px]">{issue.identifier}</span>}
+                                    <span className="shrink-0">{issue.detail}</span>
+                                  </span>
                                 </span>
                                 {!fix && <LocateIcon />}
                               </button>
@@ -153,7 +202,7 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
         type="button"
         aria-label={`Show map issues (${issues.length})`}
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         className="pointer-events-auto col-start-2 row-start-2 flex items-center gap-2 self-end rounded-[24px] border border-amber-300 bg-amber-50/95 px-4 py-3 text-xs font-bold text-amber-950 shadow-lg"
       >
         {hasAlert && (
@@ -162,7 +211,7 @@ export function MapIssuesTray({ issues, activeIssueId, onFocusIssue }: MapIssues
             <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-600" />
           </span>
         )}
-        <span aria-hidden="true">⚠ {issues.length} issue{issues.length === 1 ? "" : "s"}</span>
+        <span aria-hidden="true">⚠ {issues.length}{yieldToInspector && !open ? "" : ` issue${issues.length === 1 ? "" : "s"}`}</span>
       </button>
     </>
   );

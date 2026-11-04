@@ -44,8 +44,11 @@ describe("Building inspector", () => {
     expect(model.primaryAction).toBeUndefined();
     expect(model.overflowActions).toEqual([]);
 
+    expect(model.statusAction).toBeUndefined();
+
     renderDetails(model);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    // The only button left is the disclosure for the indoor contents; none of them acts on the building.
+    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["▾Building content0 places"]);
     expect(screen.getByText("Indoor locations by floor")).toBeInTheDocument();
     expect(screen.getByText("Entrance route nodes")).toBeInTheDocument();
   });
@@ -59,10 +62,25 @@ describe("Building inspector", () => {
   });
 
   it("splits the body's entrance buttons between Add and Edit", () => {
-    renderDetails(buildingModel(only("add")));
+    const model = buildingModel(only("add"));
+    // Not routable: Add entrance sits under that status instead of in the body, so it is never shown twice.
+    expect(model.statusAction?.label).toBe("＋ Add entrance");
+    renderDetails(model);
     expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "＋ Add entrance" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "↔ Link existing entrance" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Add entrance in the body once the building is routable, and offers no status action", () => {
+    const routable: SelectedBuildingView = { ...view, routable: true };
+    const model = buildingInspectorModel({ view: routable, contentLocations: [], nodes: [], linkingEntrance: false, can: canWith(only("add")), actions: buildingActions });
+    expect(model.statusAction).toBeUndefined();
+    renderDetails(model);
+    expect(screen.getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+  });
+
+  it("leaves the status action out without the Add switch", () => {
+    expect(buildingModel(only("edit")).statusAction).toBeUndefined();
   });
 
   it("shows the entrance picker only to someone who may edit", () => {

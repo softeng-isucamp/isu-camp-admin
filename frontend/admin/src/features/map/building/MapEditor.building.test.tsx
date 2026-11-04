@@ -21,7 +21,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
 
     const generatedCode = screen.getByLabelText<HTMLInputElement>("Building code").value;
     expect(generatedCode).toMatch(/^BLDG-\d{4}$/);
@@ -40,7 +40,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     expect(screen.getByLabelText<HTMLInputElement>("Building code").value).toMatch(/^BLDG-\d{4}$/);
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "CUSTOM-HALL" } });
     fireEvent.click(within(screen.getByRole("dialog", { name: "Add Building" })).getByRole("button", { name: "Cancel" }));
@@ -54,7 +54,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     expect(screen.getByLabelText<HTMLInputElement>("Building code").value).toMatch(/^BLDG-\d{4}$/);
   });
 
@@ -160,6 +160,54 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Building Polygon" }));
     expect(screen.getByText("Points plotted: 0")).toBeInTheDocument();
+  });
+
+  it("guides a new footprint neutrally and shows the error only after an invalid finish attempt", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+
+    expect(screen.getByText("Place at least 3 corners")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finish drawing" })).toBeDisabled();
+
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("at least 3 distinct non-collinear vertices");
+    expect(screen.queryByRole("region", { name: "Create Building" })).not.toBeInTheDocument();
+
+    clickMap(16.721, 121.690);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
+    expect(screen.getByRole("region", { name: "Create Building" })).toBeInTheDocument();
+  });
+
+  it("flags collinear corners as soon as they are placed and refuses to finish them", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.722, 121.689);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("non-collinear");
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
+    expect(screen.queryByRole("region", { name: "Create Building" })).not.toBeInTheDocument();
+  });
+
+  it("puts Add entrance under a Not routable status and offers it only once", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-bare", name: "Bare Hall", code: "BARE", classification: "College", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
+
+    const card = screen.getByRole("complementary", { name: "Bare Hall object details" });
+    const header = card.querySelector("header") as HTMLElement;
+    expect(header).toHaveTextContent("Not routable");
+    expect(within(header).getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+    expect(within(card).getAllByRole("button", { name: "＋ Add entrance" })).toHaveLength(1);
   });
 
   it("does not render an ordinary marker for a positioned Building with a footprint", async () => {
@@ -269,7 +317,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
@@ -292,7 +340,7 @@ describe("Map Editor preview", () => {
 
     expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.72,121.689"]')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     clickMap(16.720, 121.690);
 
     expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
@@ -305,21 +353,21 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
 
     expect(screen.getByRole("region", { name: "Create Building" })).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-testid="move-point-marker"]').length).toBe(3);
   });
 
-  it("opens Add Building after Save shape and preserves the footprint when details are cancelled", async () => {
+  it("opens Add Building after Finish drawing and preserves the footprint when details are cancelled", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     expect(screen.getByRole("dialog", { name: "Add Building" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Draft Annex" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
@@ -352,7 +400,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Backend Hall" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "BACK-01" } });
@@ -375,7 +423,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Duplicate Hall" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "DUP-01" } });
@@ -393,7 +441,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
   }
 
   it("starts a new Place with no Classification, never offers Building, and blocks saving until one is chosen", async () => {
@@ -436,7 +484,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
@@ -452,7 +500,7 @@ describe("Map Editor preview", () => {
     clickMap(16.720, 121.689);
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Science Annex" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SCI-ANN" } });
@@ -461,7 +509,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Show map issues/ }));
     const tray = await screen.findByRole("region", { name: "Map issues" });
     expect(within(tray).getByRole("button", { name: /No entrance/ })).toHaveTextContent("1");
-    fireEvent.click(within(tray).getByRole("button", { name: "Science Annex, 0 entrance nodes" }));
+    fireEvent.click(within(tray).getByRole("button", { name: "Science Annex (SCI-ANN), 0 entrance nodes" }));
     expect(within(tray).queryByRole("button", { name: /Add Entrance/ })).not.toBeInTheDocument();
     fireEvent.click(within(await screen.findByRole("complementary", { name: "Science Annex object details" })).getByRole("button", { name: "＋ Add entrance" }));
 
@@ -486,6 +534,7 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
     const buildingContent = screen.getByRole("region", { name: "Building content" });
+    fireEvent.click(within(buildingContent).getByRole("button", { name: /Building content/ }));
     expect(within(buildingContent).queryByRole("button", { name: "＋ Add indoor location" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
   });
@@ -507,6 +556,13 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
 
+    // Indoor contents are collapsed behind their count until asked for.
+    const contentToggle = screen.getByRole("button", { name: /Building content/ });
+    expect(contentToggle).toHaveAttribute("aria-expanded", "false");
+    expect(contentToggle).toHaveTextContent("1 place");
+    expect(screen.queryByRole("region", { name: "Building room directory" })).not.toBeInTheDocument();
+    fireEvent.click(contentToggle);
+    expect(contentToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("2nd Floor");
     expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
     expect(screen.getByRole("region", { name: "2nd Floor indoor locations" })).toHaveTextContent("Room · 204");
@@ -572,7 +628,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.690);
     expect(screen.getByText("Points plotted: 3")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     expect(screen.getByText("Create Building")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "▱ Edit Shape" }));
@@ -592,7 +648,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Hall" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-01" } });
@@ -629,7 +685,7 @@ describe("Map Editor preview", () => {
 
     expect(screen.getByText(/Advisory: Footprint overlaps with Existing Hall/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     expect(screen.getByText(/Advisory: Footprint overlaps with Existing Hall/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "New Overlapping Hall" } });
@@ -688,7 +744,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Engineering Complex" } });
     fireEvent.change(screen.getByLabelText(/^classification/i), { target: { value: "College" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "ENG-CMP" } });

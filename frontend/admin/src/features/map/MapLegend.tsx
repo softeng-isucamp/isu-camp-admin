@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LocationTypeIcon } from "../locations/LocationTypeIcon";
 
 const legendItems = [
@@ -10,8 +10,28 @@ const legendItems = [
   { label: "Building Footprint", symbolClass: "w-4 h-2.5 bg-[#8fd1bd]/50 border border-[#278b70]" },
 ];
 
-export function MapLegend() {
-  const [minimized, setMinimized] = useState(true);
+interface MapLegendProps {
+  /** An inspector is open: show the legend minimized unless it is expanded while the inspector is open. */
+  yieldToInspector?: boolean;
+}
+
+export function MapLegend({ yieldToInspector = false }: MapLegendProps) {
+  // The administrator's own choice; an open inspector never overwrites it, so it returns when the inspector closes.
+  const [chosenMinimized, setChosenMinimized] = useState(true);
+  const [expandedOverInspector, setExpandedOverInspector] = useState(false);
+  useEffect(() => {
+    if (!yieldToInspector) setExpandedOverInspector(false);
+  }, [yieldToInspector]);
+  const minimized = chosenMinimized || (yieldToInspector && !expandedOverInspector);
+  const toggle = () => {
+    if (yieldToInspector) {
+      // Expanding over the inspector is explicit and lasts until it closes; minimizing there is kept too.
+      setExpandedOverInspector(minimized);
+      setChosenMinimized(!minimized);
+      return;
+    }
+    setChosenMinimized(!minimized);
+  };
 
   return (
     <div className={`map-glass-panel rounded-[24px] pointer-events-auto ${minimized ? "px-4 py-3" : "w-52 p-4"}`}>
@@ -21,7 +41,7 @@ export function MapLegend() {
           type="button"
           aria-label={minimized ? "Expand map legend" : "Minimize map legend"}
           aria-expanded={!minimized}
-          onClick={() => setMinimized((current) => !current)}
+          onClick={toggle}
           className="grid h-6 w-6 place-items-center rounded-full text-base leading-none text-[#3f4941] hover:bg-[#edf3ef]"
         >
           <span aria-hidden="true">{minimized ? "+" : "−"}</span>

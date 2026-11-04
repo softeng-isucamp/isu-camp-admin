@@ -26,4 +26,26 @@ describe("MapLegend", () => {
     expect(screen.getByText("Road").previousElementSibling).not.toHaveClass("border-dashed");
     expect(screen.queryByText("Walking Path")).not.toBeInTheDocument();
   });
+
+  it("gives way to an open inspector, honours an explicit expand over it, and restores the choice afterwards", () => {
+    const { rerender } = render(<MapLegend />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand map legend" }));
+    expect(screen.getByText("Campus Location")).toBeInTheDocument();
+
+    rerender(<MapLegend yieldToInspector />);
+    expect(screen.queryByText("Campus Location")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand map legend" })).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<MapLegend />);
+    expect(screen.getByText("Campus Location")).toBeInTheDocument();
+  });
+
+  it("keeps an expand made while the inspector is open until it closes", () => {
+    const { rerender } = render(<MapLegend yieldToInspector />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand map legend" }));
+    expect(screen.getByText("Campus Location")).toBeInTheDocument();
+
+    rerender(<MapLegend yieldToInspector={false} />);
+    expect(screen.getByText("Campus Location")).toBeInTheDocument();
+  });
 });

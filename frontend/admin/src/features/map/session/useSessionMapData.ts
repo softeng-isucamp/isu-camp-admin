@@ -66,6 +66,7 @@ export function useSessionMapData(
         code: location.code,
         classification: placeClassificationOf(location),
         status: location.status,
+        source: location.source,
         points: [],
       });
     }

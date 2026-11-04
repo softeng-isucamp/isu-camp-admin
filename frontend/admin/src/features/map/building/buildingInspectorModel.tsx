@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Badge } from "../../../components/UI";
 import { canContainLocations, isUnclassifiedPlace } from "../../../lib/locationPolicy";
 import type { CanPerform } from "../../../lib/permissions";
@@ -27,6 +28,54 @@ interface BuildingInspectorOptions {
   actions: BuildingInspectorActions;
 }
 
+/** Indoor contents are secondary: collapsed behind a count when there are entries, open when there is nothing to hide. */
+function BuildingContentSection({ building, contentLocations, onAddIndoorLocation }: {
+  building: SelectedBuildingView["building"];
+  contentLocations: Location[];
+  onAddIndoorLocation?: () => void;
+}) {
+  const children = contentLocations.filter((location) => location.parentId === building.id || location.building === building.name);
+  const [expanded, setExpanded] = useState(children.length === 0);
+  const grouped = new Map<string, Location[]>();
+  children.forEach((child) => {
+    const floor = child.floor || "Unspecified Floor";
+    grouped.set(floor, [...(grouped.get(floor) ?? []), child]);
+  });
+  return (
+    <section aria-label="Building content" className="inspector-related-section">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          className="inspector-section-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+          <span className="inspector-section-title">Building content</span>
+          <span className="inspector-section-count">{children.length} {children.length === 1 ? "place" : "places"}</span>
+        </button>
+        {onAddIndoorLocation && <button type="button" className="inspector-secondary-action" onClick={onAddIndoorLocation}>＋ Add indoor location</button>}
+      </div>
+      {expanded && (
+        <section aria-label="Building room directory">
+          <div className="inspector-related-heading">
+            <div>
+              <h4>Indoor locations by floor</h4>
+              <span>{children.length} places</span>
+            </div>
+          </div>
+          {grouped.size ? [...grouped.entries()].map(([floor, rooms]) => (
+            <div key={floor} role="region" className="inspector-floor-group" aria-label={`${floor} indoor locations`}>
+              <div className="inspector-floor-heading"><strong><span aria-hidden="true">⌄</span>{floor}</strong><span>{rooms.length}</span></div>
+              {rooms.map((room) => <div key={room.id} className="inspector-location-row"><span className="inspector-content-icon" aria-hidden="true">{room.type === "Laboratory" ? "L" : "R"}</span><div><strong>{room.name}</strong><span>{room.type} · {room.code}</span></div></div>)}
+            </div>
+          )) : <p>No Indoor Locations recorded.</p>}
+        </section>
+      )}
+    </section>
+  );
+}
+
 export function buildingInspectorModel({
   view,
   contentLocations: buildingContentLocations,
@@ -49,6 +98,8 @@ export function buildingInspectorModel({
     title: selectedBuilding.name,
     domain: "Locations",
     status: selectedBuildingRoutable ? "Routable" : "Not routable",
+    // The fix for "Not routable" sits right under it; it needs Add, like creating any Route Node.
+    statusAction: !selectedBuildingRoutable && can("add") ? { label: "＋ Add entrance", onSelect: actions.onAddEntrance } : undefined,
     summary: [
       { label: "Code", value: selectedBuilding.code },
       ...(isUnclassifiedPlace({ type: "Place", classification }) ? [{ label: "Classification", value: <Badge tone="grey">Unclassified</Badge> }] : []),
@@ -56,34 +107,12 @@ export function buildingInspectorModel({
     ],
     details: (
       <>
-        <section aria-label="Building content" className="inspector-related-section">
-          <div className="flex items-center justify-between gap-2">
-            <h3>Building content</h3>
-            {canContain && can("add") && <button type="button" className="inspector-secondary-action" onClick={actions.onAddIndoorLocation}>＋ Add indoor location</button>}
-          </div>
-          <section aria-label="Building room directory">
-            <div className="inspector-related-heading">
-              <div>
-                <h4>Indoor locations by floor</h4>
-                <span>{buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name).length} places</span>
-              </div>
-            </div>
-            {(() => {
-              const children = buildingContentLocations.filter((location) => location.parentId === selectedBuilding.id || location.building === selectedBuilding.name);
-              const grouped = new Map<string, Location[]>();
-              children.forEach((child) => {
-                const floor = child.floor || "Unspecified Floor";
-                grouped.set(floor, [...(grouped.get(floor) ?? []), child]);
-              });
-              return grouped.size ? [...grouped.entries()].map(([floor, rooms]) => (
-                <div key={floor} role="region" className="inspector-floor-group" aria-label={`${floor} indoor locations`}>
-                  <div className="inspector-floor-heading"><strong><span aria-hidden="true">⌄</span>{floor}</strong><span>{rooms.length}</span></div>
-                  {rooms.map((room) => <div key={room.id} className="inspector-location-row"><span className="inspector-content-icon" aria-hidden="true">{room.type === "Laboratory" ? "L" : "R"}</span><div><strong>{room.name}</strong><span>{room.type} · {room.code}</span></div></div>)}
-                </div>
-              )) : <p>No Indoor Locations recorded.</p>;
-            })()}
-          </section>
-        </section>
+        <BuildingContentSection
+          key={selectedBuilding.id}
+          building={selectedBuilding}
+          contentLocations={buildingContentLocations}
+          onAddIndoorLocation={canContain && can("add") ? actions.onAddIndoorLocation : undefined}
+        />
         <section aria-label="Walking access" className="inspector-related-section">
           <div className="inspector-related-heading">
             <div>
@@ -98,9 +127,10 @@ export function buildingInspectorModel({
               : <p>No active Entrance Route Node.</p>}
           </section>
           {/* Adding an entrance creates a Route Node (Add); linking an existing one changes it (Edit). */}
-          {(can("add") || can("edit")) && (
+          {((can("add") && selectedBuildingRoutable) || can("edit")) && (
             <div className="inspector-inline-actions">
-              {can("add") && <button type="button" onClick={actions.onAddEntrance}>＋ Add entrance</button>}
+              {/* While the building is not routable, adding an entrance sits under that status at the top instead. */}
+              {can("add") && selectedBuildingRoutable && <button type="button" onClick={actions.onAddEntrance}>＋ Add entrance</button>}
               {can("edit") && <button type="button" onClick={actions.onToggleLinkEntrance}>↔ Link existing entrance</button>}
             </div>
           )}

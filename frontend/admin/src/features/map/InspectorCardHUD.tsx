@@ -28,6 +28,8 @@ export interface InspectorCardModel {
   title: string;
   domain: SpatialDomain;
   status?: string;
+  /** The action that resolves `status` (for example Add entrance for "Not routable"), shown right under it. */
+  statusAction?: InspectorAction;
   readOnly?: boolean;
   summary: InspectorSummaryItem[];
   details?: ReactNode;
@@ -71,6 +73,17 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
           <div className="inspector-domain-badge">[{object.domain}]</div>
           <h2>{object.title}</h2>
           {object.status && <p>{object.status}</p>}
+          {object.statusAction && (
+            <button
+              type="button"
+              className="inspector-status-action"
+              disabled={object.statusAction.disabled}
+              title={object.statusAction.disabledReason}
+              onClick={object.statusAction.onSelect}
+            >
+              {object.statusAction.label}
+            </button>
+          )}
         </div>
         <div className="inspector-card-controls" ref={menuRef}>
           {/* An admin who may do nothing with this object gets no ⋯ trigger either. */}

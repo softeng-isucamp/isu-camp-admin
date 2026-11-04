@@ -652,6 +652,9 @@ export function MapEditor() {
       onStartPathPointConversion: startPathPointConversion,
     },
   });
+  // While the inspector is open, the legend and issues tray give way to it (their state returns when it closes).
+  const inspectorOpen = Boolean(inspectorModel) && !networkBrowserOpen
+    && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway");
 
   const mapIssues = useMapIssues(
     { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways, pathwayCrossings },
@@ -812,7 +815,7 @@ export function MapEditor() {
             />
           )}
 
-          {inspectorModel && !networkBrowserOpen && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway") && (
+          {inspectorModel && inspectorOpen && (
             <>
               {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
               <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
@@ -822,9 +825,9 @@ export function MapEditor() {
           {/* Left edge, below the tool rail: the issues tray fills the height above the legend and pill row. */}
           <div className="pointer-events-none absolute bottom-4 left-4 top-36 z-[900] grid w-[22rem] grid-cols-[auto_auto_1fr] grid-rows-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
             <div className="col-start-1 row-start-2 self-end">
-              <MapLegend />
+              <MapLegend yieldToInspector={inspectorOpen} />
             </div>
-            <MapIssuesTray issues={mapIssues.issues} activeIssueId={mapIssues.activeIssueId} onFocusIssue={mapIssues.focusIssue} />
+            <MapIssuesTray yieldToInspector={inspectorOpen} issues={mapIssues.issues} activeIssueId={mapIssues.activeIssueId} onFocusIssue={mapIssues.focusIssue} />
           </div>
         </div>
 

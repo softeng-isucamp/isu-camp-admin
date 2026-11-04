@@ -1,6 +1,8 @@
 import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { isPlace } from "../../../lib/locationPolicy";
+import { BuildingPicker } from "../../locations/BuildingPicker";
+import { buildingIdentifier } from "../building/buildingIdentifier";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { MapPoint } from "../campusBoundary";
 import type { SaveAction } from "../session/useSavingAction";
@@ -87,16 +89,22 @@ export function routeNodeInspectorModel({
             </select>
           </label>
           {(nodeFrame.frame?.nodeType ?? node.nodeType) === "Entrance" && (
-            <label> Building association
-              <select aria-label="Route Node association" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => {
-                const associatedPlaceId = event.target.value || null;
-                stageRouteNodeEdit({ ...(nodeFrame.frame ?? node), associatedPlaceId });
-              }}>
-                <option value="">No Building association</option>
-                {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
-              </select>
+            <div>
+              <BuildingPicker
+                label="Building association"
+                ariaLabel="Route Node association"
+                buildings={buildingAssociationOptions}
+                value={nodeFrame.frame?.associatedPlaceId ?? null}
+                onChange={(building) => stageRouteNodeEdit({ ...(nodeFrame.frame ?? node), associatedPlaceId: building?.id ?? null })}
+                noneLabel="No Building association"
+                clearLabel="Clear Building association"
+                searchPlaceholder="No Building association. Type to search by name or code…"
+                identifierOf={buildingIdentifier}
+                labelClassName="inspector-picker-label"
+                compact
+              />
               <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Update action.</span>
-            </label>
+            </div>
           )}
         </div>
         <div className="inspector-inline-actions">

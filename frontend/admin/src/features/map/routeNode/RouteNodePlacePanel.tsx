@@ -1,4 +1,6 @@
 import { Spinner } from "../../../components/UI";
+import { BuildingPicker } from "../../locations/BuildingPicker";
+import { buildingIdentifier } from "../building/buildingIdentifier";
 import type { Building } from "../../../types";
 import type { SaveAction } from "../session/useSavingAction";
 import type { MapPoint } from "../campusBoundary";
@@ -49,21 +51,24 @@ export function RouteNodePlacePanel({
           className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
         />
       </div>
-      <div className="flex flex-col gap-1.5 my-2">
-        <label className="text-xs font-semibold text-[#3f4941]">Building association</label>
-        <select
-          aria-label="Route Node association"
-          value={pointTool.placingAssociatedBuildingId ?? ""}
-          onChange={(e) => pointTool.setPlacingAssociatedBuildingId(e.target.value || null)}
+      <div className="my-2">
+        <BuildingPicker
+          label="Building association"
+          ariaLabel="Route Node association"
+          buildings={buildingAssociationOptions}
+          value={pointTool.placingAssociatedBuildingId}
+          onChange={(building) => pointTool.setPlacingAssociatedBuildingId(building?.id ?? null)}
           disabled={pointTool.placingNodeType !== "Entrance"}
-          className="bg-[#f8f9fa] border border-[#dbe0e2] text-xs font-semibold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-[#005931]"
-        >
-          <option value="">No Building association</option>
-          {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>
-            {building.name} ({building.code})
-          </option>)}
-        </select>
-        <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Save action.</span>
+          noneLabel="No Building association"
+          clearLabel="Clear Building association"
+          searchPlaceholder="No Building association. Type to search by name or code…"
+          identifierOf={buildingIdentifier}
+          labelClassName="text-xs font-semibold text-[#3f4941]"
+          compact
+        />
+        <span className="mt-1 block text-[10px] text-[#526359]">
+          {pointTool.placingNodeType === "Entrance" ? "Saved with the Route Node Save action." : "Only an Entrance can be associated with a Building."}
+        </span>
       </div>
       <div className="my-2 text-xs text-[#3f4941]">
         {pointTool.position
