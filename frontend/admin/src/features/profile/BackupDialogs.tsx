@@ -122,7 +122,7 @@ export function FailureDialog({ backup, returnTo, onClose }: { backup: SystemBac
   return <DialogFocus returnTo={returnTo}>
     <Modal title="Backup failed" subtitle="This backup did not complete and cannot be restored or downloaded." size="sm" variant="danger" onClose={onClose}>
       <div className="admin-form">
-        <dl className="profile-failure-meta">
+        <dl className="detail-list">
           <dt>Started</dt><dd><time dateTime={backup.createdAt}>{formatDateTimeFull(backup.createdAt)}</time></dd>
           <dt>Type</dt><dd>{isAutomatic(backup) ? 'Automatic' : 'Manual'}</dd>
           <dt>Started by</dt><dd>{isAutomatic(backup) ? 'The automatic schedule' : backup.createdBy}</dd>

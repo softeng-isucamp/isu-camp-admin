@@ -8,7 +8,7 @@ import {
   useEffect,
   useId,
 } from "react";
-import { cx } from "../lib/format";
+import { cx, formatDateTimeCompact, formatDateTimeFull, timestampIso, viewerTimeZone } from "../lib/format";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "subtle" | "danger" | "secondary";
@@ -90,6 +90,17 @@ export function ProgressBar({ active, className }: { active: boolean; className?
       <span />
     </div>
   );
+}
+
+/** One table timestamp: compact text, the full local time on hover, and the machine-readable instant. */
+export function Stamp({ value }: { value: string }) {
+  return <time dateTime={timestampIso(value)} title={formatDateTimeFull(value)}>{formatDateTimeCompact(value)}</time>;
+}
+
+/** The viewer's own time zone, shown once beside a date column heading. */
+export function TimeZoneTag() {
+  const zone = viewerTimeZone();
+  return <span className="th-zone" title={zone.name}>({zone.short})</span>;
 }
 
 export function Card({

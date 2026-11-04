@@ -1018,11 +1018,11 @@ main {
 .page-hero {
   background: #fff;
   border-radius: 0 0 36px 36px;
-  padding: 30px 28px 28px;
+  padding: 18px 28px 20px;
   display: flex;
   gap: 18px;
   align-items: center;
-  margin: 0 -24px 20px;
+  margin: -32px -24px 20px;
 }
 .page-icon {
   display: grid;
@@ -4701,7 +4701,7 @@ td small {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.log-detail-meta {
+.detail-list {
   display: grid;
   grid-template-columns: 110px 1fr;
   gap: 6px 16px;
@@ -4709,11 +4709,11 @@ td small {
   font-size: 12px;
   color: #3f4941;
 }
-.log-detail-meta dt {
+.detail-list dt {
   color: #64716a;
   font-weight: 700;
 }
-.log-detail-meta dd {
+.detail-list dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -4735,4 +4735,16 @@ td small {
   color: var(--muted);
   font-size: 11px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+/* Dashboard shortcuts are real links: same look, reachable by keyboard. */
+.dashboard-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dashboard-link:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 12px;
 }

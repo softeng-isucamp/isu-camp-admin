@@ -3,10 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
-import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner } from "../../components/UI";
+import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner, Stamp, TimeZoneTag } from "../../components/UI";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
-import { formatDateTime } from "../../lib/format";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
 import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
@@ -126,7 +125,7 @@ function AppUserDirectory() {
           <table>
             <thead>
               <tr>
-                <th>Username</th><th>Account Type</th><th>Registered On</th><th>Status</th>
+                <th>Username</th><th>Account Type</th><th>Registered On <TimeZoneTag /></th><th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
@@ -135,7 +134,7 @@ function AppUserDirectory() {
                 <tr key={user.id}>
                   <td><strong>{user.username}</strong></td>
                   <td>{user.userType ? accountTypeLabel(user.userType) : "—"}</td>
-                  <td>{formatDateTime(user.createdAt)}</td>
+                  <td><Stamp value={user.createdAt} /></td>
                   <td><Badge tone={user.status === "Active" ? "green" : "grey"}>{user.status}</Badge></td>
                   <td style={{ textAlign: "right", position: "relative" }}>
                     <div style={{ display: "inline-flex" }} ref={actionMenuId === user.id ? actionMenuRef : undefined}>

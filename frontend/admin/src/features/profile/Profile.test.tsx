@@ -425,7 +425,7 @@ describe('backup & recovery', () => {
     expect(button).toHaveTextContent('Auto · Daily at 2:30 AM');
     expect(button).toHaveAttribute('title', 'Automatic backups: Daily at 2:30 AM · keeps 14');
     expect(screen.getByRole('button', { name: /Create Backup/ })).toBeInTheDocument();
-    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Created', 'Type', 'Size', 'Status', 'Actions']);
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent?.replace(/ \(.+\)$/, ''))).toEqual(['Created', 'Type', 'Size', 'Status', 'Actions']);
   });
 
   it('words a weekly schedule and an off schedule', async () => {

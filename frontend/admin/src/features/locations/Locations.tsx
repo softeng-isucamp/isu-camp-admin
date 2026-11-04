@@ -811,50 +811,17 @@ export function Locations() {
           marginBottom: "20px",
         }}
       >
-        {/* Full-width search bar */}
-        <div style={{ position: "relative", width: "100%" }}>
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#525c57"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{
-              position: "absolute",
-              left: "18px",
-              top: "50%",
-              transform: "translateY(-50%)",
-              pointerEvents: "none",
-            }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            aria-label="Search locations"
-            placeholder="Search by building, room, office, lab, facility, or keyword..."
-            value={query}
-            onChange={(event) => {
-              setTargetKey(null);
-              setQuery(event.target.value);
-            }}
-            style={{
-              width: "100%",
-              height: "48px",
-              borderRadius: "999px",
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
-              padding: "0 20px 0 52px",
-              fontSize: "14px",
-              color: "#191c1d",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+        <Field
+          className="filters-search"
+          label="SEARCH LOCATIONS"
+          aria-label="Search locations"
+          placeholder="Search by building, room, office, lab, facility, or keyword..."
+          value={query}
+          onChange={(event) => {
+            setTargetKey(null);
+            setQuery(event.target.value);
+          }}
+        />
 
         {/* Filters and Actions Row */}
         <div
@@ -1390,10 +1357,10 @@ export function Locations() {
 
             {/* Bottom Actions */}
             <div style={{ padding: "18px 32px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-              <Button variant="subtle" style={{ borderRadius: "999px", padding: "0 22px" }} onClick={closeOverlay}>
+              <Button variant="subtle" onClick={closeOverlay}>
                 Cancel
               </Button>
-              <Button loading={saving} aria-busy={saving} style={{ borderRadius: "999px", padding: "0 24px", background: "#005931", color: "#fff" }} onClick={() => void save()}>
+              <Button loading={saving} aria-busy={saving} onClick={() => void save()}>
                 {saving ? "Saving…" : "Save Location"}
               </Button>
             </div>

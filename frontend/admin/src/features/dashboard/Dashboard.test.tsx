@@ -82,6 +82,10 @@ describe("Dashboard backend boundary", () => {
     await userEvent.click(screen.getByRole("button", { name: "View Student accounts" }));
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=student");
     const rankedLibrary = screen.getByTitle("View Library in directory");
+    expect(rankedLibrary).toHaveAttribute("href", expect.stringContaining("/locations?q=Library"));
+    // Shortcuts are real links, so they are reachable from the keyboard.
+    expect(screen.getByRole("link", { name: /Total Buildings/ })).toHaveAttribute("href", "/locations");
+    expect(screen.getByRole("link", { name: /Indoor Locations/ })).toHaveAttribute("href", "/locations");
     expect(within(rankedLibrary).getByText("Library")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("Student Services")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("18")).toBeInTheDocument();

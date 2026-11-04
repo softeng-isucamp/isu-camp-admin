@@ -90,7 +90,7 @@ export function Dashboard() {
       {tab === "analytics" ? <AnalyticsTab range={range} /> : (
         <>
           <div className="metric-grid">
-            <Card style={{ cursor: "pointer" }} onClick={() => navigate("/locations")}>
+            <Link className="card dashboard-link" to="/locations">
               <div className="metric-top">
                 <span className="metric-icon">
                   <img src={metricBuildings} alt="" />
@@ -103,8 +103,8 @@ export function Dashboard() {
               </div>
               <span>Total Buildings</span>
               <strong>{data?.buildings ?? "—"}</strong>
-            </Card>
-            <Card style={{ cursor: "pointer" }} onClick={() => navigate("/locations")}>
+            </Link>
+            <Link className="card dashboard-link" to="/locations">
               <div className="metric-top">
                 <span className="metric-icon">
                   <img src={metricOffices} alt="" />
@@ -112,7 +112,7 @@ export function Dashboard() {
               </div>
               <span>Indoor Locations</span>
               <strong>{data?.indoorLocations?.toLocaleString() ?? "—"}</strong>
-            </Card>
+            </Link>
           </div>
           {error && (
             <div className="dashboard-error" role="alert">
@@ -150,14 +150,13 @@ export function Dashboard() {
                     <Empty>No search analytics recorded yet.</Empty>
                   ) : (
                     destinations.map((r) => (
-                      <div
-                        className={r.visits !== undefined ? "rank-row rank-row-visits" : "rank-row"}
+                      <Link
+                        className={r.visits !== undefined ? "rank-row rank-row-visits dashboard-link" : "rank-row dashboard-link"}
                         key={r.locationId ?? `${r.rank}:${r.name}`}
-                        style={{ cursor: "pointer" }}
-                        onClick={() => navigate(`/locations?${new URLSearchParams({
+                        to={`/locations?${new URLSearchParams({
                           q: r.name,
                           ...(r.locationId ? { locationKey: r.locationId } : {}),
-                        })}`)}
+                        })}`}
                         title={`View ${r.name} in directory`}
                       >
                         <b>{r.rank}</b>
@@ -181,7 +180,7 @@ export function Dashboard() {
                             </span>
                           </>
                         )}
-                      </div>
+                      </Link>
                     ))
                   )}
                 </div>
@@ -217,11 +216,10 @@ export function Dashboard() {
                   ) : recentAdminActivity.length === 0 ? (
                     <Empty>No recent administrative activity recorded yet.</Empty>
                   ) : recentAdminActivity.map((a) => (
-                    <div
-                      className="activity-row"
+                    <Link
+                      className="activity-row dashboard-link"
                       key={a.id}
-                      style={{ cursor: "pointer" }}
-                      onClick={() => navigate("/system-logs")}
+                      to="/system-logs"
                       title="View activity in system logs"
                     >
                       <i />
@@ -230,7 +228,7 @@ export function Dashboard() {
                         <strong>{a.action}</strong>
                         <p>{a.detail ?? `${a.target} was updated.`}</p>
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </Card>

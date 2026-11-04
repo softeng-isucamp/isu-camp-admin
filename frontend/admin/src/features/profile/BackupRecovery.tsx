@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge, Button, Card, Empty, LoadingState } from '../../components/UI';
+import { Badge, Button, Card, Empty, LoadingState, Stamp, TimeZoneTag } from '../../components/UI';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
@@ -165,15 +165,15 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     {loading ? <LoadingState size={20}>Loading backups…</LoadingState> : !error && <div className="table-wrap" style={{ overflow: 'visible' }}>
       <table className="profile-backup-table">
         <colgroup><col style={{ width: '27%' }} /><col style={{ width: '25%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /></colgroup>
-        <thead><tr><th>Created</th><th>Type</th><th>Size</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Created <TimeZoneTag /></th><th>Type</th><th>Size</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
         <tbody>{items.map((backup) => {
           const actions = rowActions(backup);
           return <tr key={backup.id}>
-            <td><time dateTime={backup.createdAt}>{formatDateTime(backup.createdAt)}</time></td>
+            <td><Stamp value={backup.createdAt} /></td>
             <td>{isAutomatic(backup) ? <Badge tone="green">Automatic</Badge> : <><Badge tone="grey">Manual</Badge> <span className="profile-muted">{backup.createdBy}</span></>}</td>
             <td>{backup.status === 'ready' ? sizeText(backup.sizeBytes) : '—'}</td>
             <td>{backup.status === 'ready' ? <Badge tone="green">Ready</Badge> : <Badge tone="red" className="badge-with-icon"><FailedIcon />Failed</Badge>}</td>
-            <td style={{ position: 'relative' }}>
+            <td style={{ position: 'relative', textAlign: 'right' }}>
               {actions.length > 0 && <div style={{ display: 'inline-flex' }} ref={menuId === backup.id ? menuRef : undefined}>
                 <button className="table-action menu-trigger" data-backup-trigger={backup.id} aria-label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} aria-expanded={menuId === backup.id}
                   disabled={locked || target !== null} onClick={() => setMenuId((current) => current === backup.id ? null : backup.id)}>•••</button>

@@ -131,7 +131,7 @@ describe("Logs", () => {
     const badge = within(dialog).getByText("Admin Activity");
     expect(badge.parentElement).toHaveClass("log-detail-head");
     const text = within(dialog).getByText("Changed the building code from A1 to A2.");
-    const meta = dialog.querySelector(".log-detail-meta")!;
+    const meta = dialog.querySelector(".detail-list")!;
     expect(text.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(dialog).getAllByText("create")).toHaveLength(1);
   });
@@ -250,5 +250,18 @@ describe("Logs search requests", () => {
     resolveFirstPage({ items: [entry("hit", "Matched Target")], total: 1, page: 1, pageSize: 10 });
 
     expect(await screen.findByText("Matched Target")).toBeInTheDocument();
+  });
+  it("exposes which log category is selected", async () => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+
+    const all = await screen.findByRole("button", { name: "All Logs" });
+    const admin = screen.getByRole("button", { name: "Admin Activity" });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(admin).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(admin);
+    expect(admin).toHaveAttribute("aria-pressed", "true");
+    expect(all).toHaveAttribute("aria-pressed", "false");
   });
 });

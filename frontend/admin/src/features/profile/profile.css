@@ -47,6 +47,3 @@
 .profile-actions .profile-signout { color: var(--danger); border: 1px solid #efc4c4; background: #fff; }
 .profile-actions .profile-signout:hover:not(:disabled) { background: #fdf0f0; }
 .profile-backups { margin-top: 8px; }
-.profile-failure-meta { display: grid; grid-template-columns: 100px 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
-.profile-failure-meta dt { color: #64716a; font-weight: 700; }
-.profile-failure-meta dd { margin: 0; overflow-wrap: anywhere; }
