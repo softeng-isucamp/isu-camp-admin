@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Field, Modal, SelectField } from "../../components/UI";
 import { services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
@@ -17,6 +17,8 @@ interface LocationDetailsFieldsProps {
   errors?: Partial<Record<keyof LocationDraft, string>>;
   onChange: (draft: LocationDraft) => void;
   onTypeChange?: (type: BackendLocationType) => void;
+  /** Rendered right after name and type, so required placement fields (parent building, floor) sit with them. */
+  afterType?: ReactNode;
 }
 
 const defaultLocationTypes: BackendLocationType[] = [...indoorLocationTypes, ...PLACE_CLASSIFICATIONS];
@@ -29,19 +31,24 @@ export function LocationCoordinatesFields({
   onPickOnMap,
   busy = false,
   parentLabel,
+  creating = false,
 }: Pick<Location, "lat" | "lng" | "positioned"> & {
   onPickOnMap?: () => void;
   busy?: boolean;
   parentLabel?: string;
+  /** A new record has no ID yet, so picking a position has to save it first. */
+  creating?: boolean;
 }) {
   return (
     <section className="rounded-2xl border border-[#dbe5df] bg-[#f8fbf9] p-4" aria-label="Map coordinates">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#234333]">Map coordinates</h3>
+          <h3 className="text-xs font-extrabold uppercase tracking-wide text-[#234333]">Map coordinates{onPickOnMap ? " (optional)" : ""}</h3>
           <p className="mt-1 text-[11px] text-[#526359]">
             {onPickOnMap
-              ? `Coordinates for this indoor location inside ${parentLabel || "its parent building"}.`
+              ? creating
+                ? `A new location has to be saved before its marker can be placed inside ${parentLabel || "its parent building"}. Pick on map saves it first, then opens Map Editor.`
+                : `Optional marker for this indoor location inside ${parentLabel || "its parent building"}. Opens Map Editor without saving other edits.`
               : "Position inherited from the mapped footprint."}
           </p>
         </div>
@@ -85,10 +92,12 @@ export function LocationDetailsFields({
   errors = {},
   onChange,
   onTypeChange,
+  afterType,
 }: LocationDetailsFieldsProps) {
   return (
     <>
       <div className="form-grid-two">
+        <Field aria-label={isLocationContainer(draft) ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
         <SelectField
           label="LOCATION TYPE"
           required
@@ -106,6 +115,9 @@ export function LocationDetailsFields({
           {isUnclassifiedPlace(draft) && <option value="" disabled>Select a classification</option>}
           {allowedTypes.map((type) => <option key={type} value={type} disabled={disabledTypes.includes(type)}>{locationTypeOptionLabel(type)}</option>)}
         </SelectField>
+      </div>
+      {afterType}
+      <div className="form-grid-two">
         <SelectField
           label="STATUS"
           required
@@ -116,9 +128,6 @@ export function LocationDetailsFields({
               public.location.status accept. */}
           <option>Active</option><option>Inactive</option>
         </SelectField>
-      </div>
-      <div className="form-grid-two">
-        <Field aria-label={isLocationContainer(draft) ? "Building name" : "Location name"} label="LOCATION NAME" required error={errors.name} value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} />
         <Field aria-label={isLocationContainer(draft) ? "Building code" : "Location code"} label="LOCATION CODE / ID" required error={errors.code} value={draft.code} onChange={(event) => onChange({ ...draft, code: event.target.value })} />
       </div>
       <Field aria-label="DESCRIPTION" label="DESCRIPTION" required error={errors.function} value={draft.function ?? ""} onChange={(event) => onChange({ ...draft, function: event.target.value })} />

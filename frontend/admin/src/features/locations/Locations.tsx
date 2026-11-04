@@ -21,7 +21,7 @@ import { PLACE_CLASSIFICATIONS } from "../../types";
 import type { Location, LocationDraft, LocationPhotoDraft, LocationType } from "../../types";
 import { locations as initialLocations } from "../../services/mockData";
 import { PageIcon } from "../../components/PageIcon";
-import { backendLocationType, blockedReclassifications, indoorLocationsOf, indoorLocationTypes, isBlockedReclassification, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
+import { backendLocationType, blockedReclassifications, indoorLocationsOf, floorLevelsInPhysicalOrder, floorNameRank, indoorLocationTypes, isBlockedReclassification, isLocationContainer, isPlace, isUnclassifiedPlace, locationIdentityKey, locationPolicy, locationTypeOptionLabel, normalizeLocationKey, placeClassificationOf, placeClassificationOptions, reclassificationBlockedMessage, standardFloorLevels, withLocationTypeOption, type BackendLocationType } from "../../lib/locationPolicy";
 import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDetailsModal";
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
@@ -48,13 +48,11 @@ const statusFilterOptions = ["Active", "Inactive"].map((value) => ({ id: value, 
 
 /** Distinct floor names in storey order: the standard levels first, other names alphabetically, Unspecified Floor last. */
 function floorNamesInOrder(names: string[]): string[] {
-  const rank = (name: string) => {
-    if (name === "Unspecified Floor") return standardFloorLevels.length + 1;
-    const index = (standardFloorLevels as readonly string[]).indexOf(name);
-    return index === -1 ? standardFloorLevels.length : index;
-  };
-  return [...new Set(names)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  return [...new Set(names)].sort((a, b) => floorNameRank(a) - floorNameRank(b) || a.localeCompare(b));
 }
+
+type FamilyRow = { item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean; childSummary?: string };
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 const blankLocation = (): LocationDraft => ({
   name: "",
@@ -362,6 +360,7 @@ export function Locations() {
     if (selectedBuildingRecord) {
       return floors
         .filter((floor) => floor.parentId === selectedBuildingRecord.id)
+        .sort((a, b) => floorNameRank(a.name) - floorNameRank(b.name) || a.name.localeCompare(b.name))
         .map((floor) => ({ value: floor.id, label: floor.name }));
     }
     return floorNamesInOrder(floors.map((floor) => floor.name))
@@ -451,10 +450,10 @@ export function Locations() {
   // Build complete hierarchy families. Filtering can reduce a family to the
   // matching descendants, but a matching indoor record always keeps its root
   // Building and Floor Level context visible.
-  const hierarchyFamilies = useMemo(() => {
+  const hierarchyFamilies = useMemo<FamilyRow[][]>(() => {
     if (viewMode === "flat") return items.map((item) => [{ item, level: 0, hasChildren: false, isLast: false, isCollapsed: false }]);
 
-    const result: Array<Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }>> = [];
+    const result: FamilyRow[][] = [];
 
     // Find roots
     const rootBuildings = allLocations.filter((loc) => isLocationContainer(loc) && (
@@ -497,13 +496,13 @@ export function Locations() {
           lng: null,
           positioned: false,
         }));
-      const childFloors = [...explicitFloors, ...inferredFloors];
+      const childFloors = [...explicitFloors, ...inferredFloors].sort((a, b) => floorNameRank(a.name) - floorNameRank(b.name) || a.name.localeCompare(b.name));
       const childFloorIds = new Set(childFloors.map((floor) => floor.id));
       for (const loc of [...childFloors, ...childLocations, ...allLocations.filter((loc) => loc.parentId && childFloorIds.has(loc.parentId))]) {
         nestedKeys.add(locationIdentityKey(loc));
       }
-      const family: Array<{ item: Location; level: number; hasChildren: boolean; isLast: boolean; isCollapsed: boolean }> = [];
-      family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed });
+      const family: FamilyRow[] = [];
+      family.push({ item: bldg, level: 0, hasChildren: childFloors.length > 0, isLast: false, isCollapsed: bldgCollapsed, childSummary: childFloors.length > 0 ? `${plural(childFloors.length, "floor")} · ${plural(childLocations.length, "indoor location")}` : undefined });
 
       if (!bldgCollapsed) {
         childFloors.forEach((flr, flrIndex) => {
@@ -525,6 +524,7 @@ export function Locations() {
             hasChildren: childRooms.length > 0,
             isLast: flrIndex === childFloors.length - 1,
             isCollapsed: flrCollapsed,
+            childSummary: childRooms.length > 0 ? plural(childRooms.length, "indoor location") : undefined,
           });
 
           if (!flrCollapsed) {
@@ -768,6 +768,23 @@ export function Locations() {
   // Only an edit reclassifies; the add dialog's `selected` is the parent of a new indoor Location.
   const reclassifyingChildren = dialog === "edit" && selected && isPlace(draft) ? indoorLocationsOf(selected, allLocations) : [];
 
+  const activeFilters = [
+    ...(query.trim() ? [{ key: "q", label: `Search: ${query.trim()}`, clear: () => { setTargetKey(null); setQuery(""); } }] : []),
+    ...(targetKey && !query.trim() ? [{ key: "target", label: "Selected location", clear: () => setTargetKey(null) }] : []),
+    ...(type !== "All Types" ? [{ key: "type", label: `Type: ${locationTypeOptionLabel(type as BackendLocationType)}`, clear: () => setType("All Types") }] : []),
+    ...(buildingId !== "All Buildings" ? [{ key: "building", label: `Building: ${buildingsById.get(buildingId)?.name ?? "Unknown"}`, clear: () => { setBuildingId("All Buildings"); setFloorId("All Floors"); } }] : []),
+    ...(floorId !== "All Floors" ? [{ key: "floor", label: `Floor: ${floorOptions.find((option) => option.value === floorId)?.label ?? selectedFloorName ?? "Unknown"}`, clear: () => setFloorId("All Floors") }] : []),
+    ...(status !== "All Statuses" ? [{ key: "status", label: `Status: ${status}`, clear: () => setStatus("All Statuses") }] : []),
+  ];
+  const clearFilters = () => {
+    setTargetKey(null);
+    setQuery("");
+    setType("All Types");
+    setBuildingId("All Buildings");
+    setFloorId("All Floors");
+    setStatus("All Statuses");
+  };
+
   const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
 
   return (
@@ -937,6 +954,20 @@ export function Locations() {
             )}
           </div>
         </div>
+
+        {activeFilters.length > 0 && (
+          <div className="filter-chips" role="group" aria-label="Active filters">
+            {activeFilters.map((filter) => (
+              <span className="filter-chip" key={filter.key}>
+                {filter.label}
+                <button type="button" aria-label={`Remove filter ${filter.label}`} onClick={filter.clear}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8" /></svg>
+                </button>
+              </span>
+            ))}
+            <button type="button" className="filter-clear" onClick={clearFilters}>Clear filters</button>
+          </div>
+        )}
       </Card>
 
       <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
@@ -963,8 +994,8 @@ export function Locations() {
               {success.building ? ` under ${success.building}${success.floor ? ` / ${success.floor}` : ""}.` : "."}
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(success.indoor ? `/map-editor?indoorLocation=${encodeURIComponent(success.id)}` : `/map-editor?location=${encodeURIComponent(success.mapTargetId)}`)}>
-                {success.indoor ? success.positioned ? "View location on map" : "Place location on map" : success.kind === "added" ? "Place on map" : "Edit position on map"}
+              <Button style={{ width: "100%", background: "#0c7441", color: "#fff", height: "48px", borderRadius: "999px" }} onClick={() => navigate(success.indoor ? `/map-editor?indoorLocation=${encodeURIComponent(success.id)}${success.positioned ? "" : "&place=1"}` : `/map-editor?location=${encodeURIComponent(success.mapTargetId)}`)}>
+                {success.indoor ? success.positioned ? "View location on map" : "Place marker" : success.kind === "added" ? "Place on map" : "Edit position on map"}
               </Button>
               <Button data-modal-initial variant="subtle" style={{ width: "100%", height: "44px", borderRadius: "999px" }} onClick={() => setSuccess(null)}>
                 Done
@@ -983,7 +1014,7 @@ export function Locations() {
           <div>
             <h2 ref={directoryHeadingRef} tabIndex={-1} style={{ fontSize: "18px", fontWeight: "bold", margin: "0", color: "#191c1d", outlineOffset: "4px" }}>Location Directory</h2>
             <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
-              {isLoading ? "Loading…" : `${viewMode === "hierarchy" ? hierarchyDisplayCount : data?.total ?? 0} locations`}
+              {isLoading ? "Loading…" : viewMode === "hierarchy" ? `${plural(hierarchyDisplayCount, "location")}, including indoor` : `${data?.total ?? 0} locations`}
               {isFetching && !isLoading && <Spinner size={13} />}
             </p>
           </div>
@@ -1021,7 +1052,7 @@ export function Locations() {
               </tr>
             </thead>
             <tbody>
-              {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed }, index) => {
+              {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed, childSummary }, index) => {
                 const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
@@ -1079,6 +1110,7 @@ export function Locations() {
                         {item.type !== "Floor" && (
                           <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
                         )}
+                        {childSummary && <small className="group-count">{childSummary}</small>}
                         {level > 0 && item.floor && (
                           <span style={{ display: "inline-block", marginTop: "5px", padding: "2px 8px", borderRadius: "999px", background: "#eef6f1", color: "#0c7441", fontSize: "11px", fontWeight: 600 }}>
                             {item.floor}
@@ -1218,6 +1250,7 @@ export function Locations() {
           total={viewMode === "hierarchy" ? hierarchyTotal : data?.total ?? 0}
           page={viewMode === "hierarchy" ? effectiveHierarchyPage : page}
           pageSize={pageSize}
+          unit={viewMode === "hierarchy" ? "top-level places" : undefined}
           onChange={setPage}
         />
       </Card>
@@ -1239,7 +1272,11 @@ export function Locations() {
                     {dialog === "add" ? "Add Location" : "Edit Location"}
                   </h2>
                   <p id="location-form-description" style={{ margin: "4px 0 0", color: "#d6ede0", fontSize: "13px" }}>
-                    Add a Room, Office, Laboratory, or Restroom under an existing Building.
+                    {dialog === "add"
+                      ? "Add a Room, Office, Laboratory, or Restroom under an existing Building."
+                      : isChildType(draft.type)
+                        ? "Update this indoor location's details, or set its optional marker position inside its building."
+                        : "Update this place's name, code, classification, and description. Its map position comes from its footprint in Map Editor."}
                   </p>
                 </div>
               </div>
@@ -1276,20 +1313,7 @@ export function Locations() {
                 errors={{ type: errorFor("type"), name: errorFor("name"), code: errorFor("code"), function: errorFor("function") }}
                 onChange={setDraft}
                 onTypeChange={(type) => setDraft(normalizeDraft(withLocationTypeOption(draft, type)))}
-              />
-
-              <LocationCoordinatesFields
-                lat={draft.lat}
-                lng={draft.lng}
-                positioned={draft.positioned}
-                parentLabel={draft.building}
-                busy={saving}
-                onPickOnMap={isChildType(draft.type) && can(indoorPositionAction)
-                  ? pickIndoorLocationOnMap
-                  : undefined}
-              />
-
-              {(isChildType(draft.type) || draft.parentId !== null) && (
+                afterType={(isChildType(draft.type) || draft.parentId !== null) && (
                 <div className="locations-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
                   <ParentBuildingField
                     buildings={buildingOptions}
@@ -1324,7 +1348,7 @@ export function Locations() {
                             value with no option to render would show that
                             record standing on the Ground Floor. */}
                         <option value="" disabled hidden>Select a floor level</option>
-                        {standardFloorLevels.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
+                        {floorLevelsInPhysicalOrder.map((floorLevel) => <option key={floorLevel} value={floorLevel}>{floorLevel}</option>)}
                         {dialog === "edit" && customFloorMode && <option value="__custom__">Custom Floor Level</option>}
                       </SelectField>
                       {customFloorMode && (
@@ -1334,10 +1358,23 @@ export function Locations() {
                   )}
                 </div>
               )}
+              />
 
-              {locationPolicy.classify(draft.type).kind === "indoor" && <p style={{ margin: 0, padding: "12px 14px", borderRadius: "10px", background: "#edf3f0", color: "#365047", fontSize: "13px" }}>
-                Indoor Locations inherit map position and routing from their selected Building.
+
+              {locationPolicy.classify(draft.type).kind === "indoor" && <p className="locations-form-note">
+                Routing is inherited from the selected building. The map position below is an optional marker for this place inside that building.
               </p>}
+              <LocationCoordinatesFields
+                lat={draft.lat}
+                lng={draft.lng}
+                positioned={draft.positioned}
+                parentLabel={draft.building}
+                creating={dialog === "add"}
+                busy={saving}
+                onPickOnMap={isChildType(draft.type) && can(indoorPositionAction)
+                  ? pickIndoorLocationOnMap
+                  : undefined}
+              />
 
               {/* Upload Box */}
               <LocationPhotoUpload

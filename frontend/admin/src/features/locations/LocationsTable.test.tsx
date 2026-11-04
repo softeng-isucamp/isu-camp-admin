@@ -347,7 +347,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect((await screen.findAllByRole("row", { name: /Administration Building/ })).length).toBeGreaterThan(1);
     expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
     expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
-    expect(screen.getByText("1 locations")).toBeInTheDocument();
+    expect(screen.getByText("1 location, including indoor")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
   });
 
@@ -602,6 +602,64 @@ describe("Locations screen table and hierarchy toggle validation", () => {
   });
 
 
+  it("orders the indoor form with required placement fields first and offers Place marker after saving", async () => {
+    const building = await services.locations.save({ id: "marker-test-building", name: "Marker Test Building", code: "MARK-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    const dialog = screen.getByRole("dialog", { name: "Add Location" });
+
+    const order = ["LOCATION NAME", "LOCATION TYPE", "PARENT BUILDING", "FLOOR LEVEL", "STATUS", "LOCATION CODE / ID", "DESCRIPTION", "KEYWORDS / TAGS", "Map coordinates (optional)", "Location photos"];
+    const text = dialog.textContent ?? "";
+    const positions = order.map((label) => text.indexOf(label));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    expect(within(dialog).getByText(/Routing is inherited from the selected building/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/has to be saved before its marker can be placed/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Show all photos" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Marker Test Room" } });
+    fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "MARK-ROOM" } });
+    chooseParentBuilding(building.name);
+    fireEvent.change(screen.getByLabelText("FLOOR LEVEL"), { target: { value: "2nd Floor" } });
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Place marker" }));
+    const room = (await services.locations.list("Marker Test Room")).items[0];
+    expect(screen.getByTestId("location-route")).toHaveTextContent(`/map-editor?indoorLocation=${room.id}&place=1`);
+  });
+
+  it("describes editing a Place without the add-a-room copy", async () => {
+    const place = await services.locations.save({ id: "copy-test-place", name: "Copy Test Place", code: "COPY-PL", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations();
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: place.name } });
+    fireEvent.click(await screen.findByRole("button", { name: `Actions for ${place.name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit Location" });
+    expect(within(dialog).queryByText(/Add a Room/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Update this place's name, code, classification/)).toBeInTheDocument();
+  });
+
+  it("shows removable active-filter chips and one Clear filters action only while filtering", async () => {
+    renderLocations();
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: "" } });
+    await screen.findByText(/locations, including indoor/);
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+    expect(screen.getByText(/top-level places/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "Laboratory" } });
+    const chips = await screen.findByRole("group", { name: "Active filters" });
+    expect(within(chips).getByText("Search: Laboratory")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Clear filters" })).toHaveLength(1);
+    fireEvent.click(within(chips).getByRole("button", { name: "Remove filter Search: Laboratory" }));
+    expect(screen.getByLabelText(/search locations/i)).toHaveValue("");
+    expect(screen.queryByRole("group", { name: "Active filters" })).not.toBeInTheDocument();
+  });
+
+  it("counts a building's floors and indoor locations on its group rows", async () => {
+    renderLocations();
+    fireEvent.change(await screen.findByLabelText(/search locations/i), { target: { value: "Administration Building" } });
+    expect((await screen.findAllByText(/\d+ floors? · \d+ indoor locations?/)).length).toBeGreaterThan(0);
+  });
+
   it("creates a child location with a parent building and standard floor level", async () => {
     const building = await services.locations.save({ id: "hierarchy-test-building", name: "Hierarchy Test Building", code: "HIER-BLDG", type: "Place", classification: "College", parentId: null, status: "Active", lat: null, lng: null, positioned: false });
     renderLocations();
@@ -622,12 +680,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(Array.from((floorLevel as HTMLSelectElement).options)
       .filter((option) => !option.disabled)
       .map((option) => option.text)).toEqual([
+      "Basement",
       "Ground Floor",
       "2nd Floor",
       "3rd Floor",
       "4th Floor",
       "5th Floor",
-      "Basement",
     ]);
     const placeholder = Array.from((floorLevel as HTMLSelectElement).options).find((option) => option.value === "");
     expect(placeholder?.disabled).toBe(true);
@@ -1492,7 +1550,7 @@ describe("Locations search requests", () => {
     fireEvent.change(screen.getByLabelText("Search locations"), { target: { value: "Laboratory 107" } });
 
     await screen.findByText("Administration Building 2nd Floor Laboratory 107");
-    await waitFor(() => expect(screen.getByText("1 locations")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("1 location, including indoor")).toBeInTheDocument());
     await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
     // Let any debounced request fire before asserting none was sent.
     await new Promise((resolve) => setTimeout(resolve, 400));

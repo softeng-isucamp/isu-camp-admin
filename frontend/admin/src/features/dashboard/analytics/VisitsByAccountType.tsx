@@ -10,7 +10,7 @@ export function VisitsByAccountType({ data }: { data: DashboardAnalytics | undef
   return (
     <ChartCard
       title="Visits by account type"
-      subtitle="Who arrives at their Destination."
+      subtitle="Visits per account type."
       data={data}
       isEmpty={(d) => Object.values(d.visitsByAccountType).every((value) => value === 0)}
     >

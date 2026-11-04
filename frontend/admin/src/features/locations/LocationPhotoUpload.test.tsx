@@ -20,6 +20,16 @@ function Fixture() {
 }
 
 describe("location photo upload", () => {
+  it("shows a concise collapsed row with the count and thumbnails of existing photos", () => {
+    const photos: LocationPhotoDraft[] = ["a", "b", "c", "d", "e", "f"].map((id, index) => ({ id, name: `${id}.png`, type: "image/png", previewUrl: `blob:${id}`, isCover: index === 0 }));
+    const { container } = render(<LocationPhotoUpload photos={photos} onChange={() => {}} />);
+    expect(screen.getByText("Location photos (6/10)")).toBeVisible();
+    expect(container.querySelectorAll(".photo-thumbs img")).toHaveLength(4);
+    expect(screen.getByText("+2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show all photos" })).toHaveAttribute("aria-expanded", "false");
+    expect(container.querySelector(".photo-grid")?.parentElement).toHaveAttribute("hidden");
+  });
+
   it("keeps the chooser beside a collapsed gallery toggle and adds multiple photos", async () => {
     render(<Fixture />);
     expect(screen.getByRole("button", { name: "Choose photos" })).toBeVisible();

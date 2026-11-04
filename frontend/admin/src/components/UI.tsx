@@ -303,11 +303,14 @@ export function Pagination({
   page = 1,
   pageSize = 20,
   onChange,
+  unit,
 }: {
   total: number;
   page?: number;
   pageSize?: number;
   onChange?: (page: number) => void;
+  /** Names what the total counts, e.g. "top-level places", when another count on the page counts something else. */
+  unit?: string;
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(Math.max(page, 1), pages);
@@ -327,7 +330,7 @@ export function Pagination({
     <div className="pagination">
       <span>
         Showing {total === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(total, currentPage * pageSize)}{" "}
-        of {total}
+        of {total}{unit ? ` ${unit}` : ""}
       </span>
       <div>
         <button type="button" disabled={currentPage === 1} onClick={() => onChange?.(currentPage - 1)}>Previous</button>

@@ -12,6 +12,18 @@ export const standardFloorLevels = [
   "Ground Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement",
 ] as const;
 
+/** Physical storey order, lowest first, for lists that show floors. `standardFloorLevels` keeps its order for validation messages. */
+export const floorLevelsInPhysicalOrder = [
+  "Basement", "Ground Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor",
+] as const;
+
+/** Sort key for floor names: the standard levels in storey order, other names after them, Unspecified Floor last. */
+export const floorNameRank = (name: string) => {
+  if (name === "Unspecified Floor") return floorLevelsInPhysicalOrder.length + 1;
+  const index = (floorLevelsInPhysicalOrder as readonly string[]).indexOf(name);
+  return index === -1 ? floorLevelsInPhysicalOrder.length : index;
+};
+
 export const isIndoorLocationType = (type: LocationType) =>
   (indoorLocationTypes as readonly string[]).includes(type);
 

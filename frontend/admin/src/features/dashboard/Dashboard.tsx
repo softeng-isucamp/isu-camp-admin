@@ -11,6 +11,7 @@ import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
 import { AccountTypeSplit } from "./AccountTypeSplit";
 import { AnalyticsTab, dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
+import { formatAnalyticsPeriod } from "./analytics/format";
 import { usePermissions } from "../auth/usePermissions";
 import type { DashboardTab } from "./dashboardTabs";
 
@@ -31,7 +32,7 @@ export function Dashboard() {
     queryKey: dashboardAnalyticsQueryKey(range),
     queryFn: () => services.dashboard.analytics(range),
     placeholderData: (previous) => previous,
-    enabled: useAnalyticsDestinations,
+    enabled: useAnalyticsDestinations || tab === "analytics",
     retry: false,
   });
   const destinations: Array<{ rank: string; locationId?: string; name: string; context: string; searches: number; visits?: number }> =
@@ -39,42 +40,40 @@ export function Dashboard() {
   const destinationsLoading = useAnalyticsDestinations ? destinationsQuery.isLoading : isLoading;
   const destinationsFailed = useAnalyticsDestinations ? !!destinationsQuery.error && !destinationsQuery.data : !!error && !data;
 
+  const periodText = destinationsQuery.data?.range === range ? formatAnalyticsPeriod(destinationsQuery.data) : null;
   const rangeLabel = range === "week" ? "this week" : range === "month" ? "this month" : "all time";
   const buildingChange = data?.buildingChange;
   const recentAdminActivity = (data?.recent ?? []).filter((entry) => entry.category === "Admin");
 
   return (
     <div className="page dashboard">
-      <section className={tab === "overview" ? "hero" : "hero hero-compact"}>
+      <section className="hero">
         <div>
           <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Campus Overview</h1>
-          <p>
-            Monitor campus data quality, location coverage,
-            <br />
-            map configuration, and recent administrative activity.
-          </p>
+          <p>Campus data quality, location coverage, map setup, and recent admin activity.</p>
         </div>
-        {can("add") && (
-          <Link className="btn btn-primary" to="/locations">
-            ＋ New Location
-          </Link>
-        )}
-        <div className="hero-toolbar">
-          <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
-            {(["overview", "analytics"] as const).map((key) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={tab === key}
-                className={tab === key ? "active" : undefined}
-                onClick={() => setTab(key)}
-              >
-                {key === "overview" ? "Overview" : "Analytics"}
-              </button>
-            ))}
-          </div>
+        <Link className="btn btn-primary" to="/locations">
+          Open Locations
+        </Link>
+      </section>
+      <div className="dashboard-bar">
+        <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
+          {(["overview", "analytics"] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              className={tab === key ? "active" : undefined}
+              onClick={() => setTab(key)}
+            >
+              {key === "overview" ? "Overview" : "Analytics"}
+            </button>
+          ))}
+        </div>
+        <div className="dashboard-range">
+          {tab === "analytics" && periodText && <span className="dashboard-range-dates">{periodText}</span>}
           <select
             className="dashboard-time-filter"
             aria-label="Dashboard time range"
@@ -82,12 +81,12 @@ export function Dashboard() {
             disabled={isFetching}
             onChange={(event) => setRange(event.target.value as DashboardRange)}
           >
-            <option value="week">This Week</option>
-            <option value="month">This Month</option>
-            <option value="all">All Time</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="all">All time</option>
           </select>
         </div>
-      </section>
+      </div>
       {tab === "analytics" ? <AnalyticsTab range={range} /> : (
         <>
           <div className="metric-grid">

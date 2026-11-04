@@ -10,7 +10,7 @@ export function RegistrationsOverTime({ data }: { data: DashboardAnalytics | und
   return (
     <ChartCard
       title="New registrations"
-      subtitle={data?.range === "all" ? "Weekly sign-ups by account type." : "Daily sign-ups by account type."}
+      subtitle={data?.range === "all" ? "Sign-ups per week by account type." : "Sign-ups per day by account type."}
       data={data}
       isEmpty={(d) => d.registrations.every((entry) => entry.student + entry.teacher + entry.visitor === 0)}
       emptyMessage="No new registrations in this period."
