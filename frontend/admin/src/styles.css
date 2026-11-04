@@ -4648,3 +4648,83 @@ td small {
 .photo-panel.has-problem .photo-feedback {
   color: #b42318;
 }
+
+/* Filter bar search: a persistent label, the row's free width, and the same 46px height as the dropdowns beside it. */
+.filters .filters-search {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+.filters .filters-search .field-input {
+  height: 46px;
+  border-radius: 18px;
+  background: #ffffff;
+  border-color: #e1e3e4;
+}
+.filters .filters-search .field-input:focus {
+  border-color: #005931;
+}
+
+/* A separator between groups of row-menu actions. */
+.row-action-menu [role="separator"] {
+  height: 1px;
+  margin: 6px 4px;
+  border: 0;
+  background: var(--border);
+}
+
+/* System Logs: the zone is stated once in the column header; the detail dialog leads with the event's own text. */
+.th-zone {
+  font-weight: 500;
+  color: #64716a;
+  white-space: nowrap;
+}
+.log-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.log-detail-head .badge {
+  flex: none;
+}
+.log-detail-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.log-detail-text {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f4f7f5;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.log-detail-meta {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 16px;
+  margin: 0 0 18px;
+  font-size: 12px;
+  color: #3f4941;
+}
+.log-detail-meta dt {
+  color: #64716a;
+  font-weight: 700;
+}
+.log-detail-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Failed / danger tone, drawn from the palette's --danger. */
+.badge-red {
+  background: #fbe9e9;
+  color: #8f2a2a;
+}
+.badge-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}

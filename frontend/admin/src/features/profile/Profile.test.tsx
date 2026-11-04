@@ -112,6 +112,14 @@ describe('change password rules', () => {
   });
 });
 
+it('keeps Change Password, Edit Profile and Sign Out together in the identity card', async () => {
+  page();
+  const signOut = await screen.findByRole('button', { name: 'Sign Out' });
+  const group = signOut.parentElement!;
+  expect(group).toHaveClass('profile-actions');
+  expect(within(group).getAllByRole('button').map((button) => button.textContent)).toEqual(['Change Password', 'Edit Profile', 'Sign Out']);
+});
+
 it('signs out from the profile after confirmation', async () => {
   const logout = vi.spyOn(services.auth, 'logout');
   page();
@@ -457,15 +465,39 @@ describe('backup & recovery', () => {
     expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete' })).toHaveClass('danger');
     await userEvent.click(screen.getByText('Backup & Recovery'));
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    expect(menuLabels(await openMenu(3))).toEqual(['Delete']);
+    expect(menuLabels(await openMenu(3))).toEqual(['View failure details', 'Delete']);
   });
 
   it('hides Download and Delete when the server does not offer them', async () => {
     history({ canDownload: undefined, canDelete: undefined });
     page();
     expect(menuLabels(await openMenu(1))).toEqual(['Restore']);
-    // A failed backup then has nothing to offer, so it has no menu.
-    expect(within(await row(3)).queryByRole('button', { name: /Actions for backup/ })).not.toBeInTheDocument();
+    // A failed backup still explains itself.
+    await userEvent.click(screen.getByText('Backup & Recovery'));
+    expect(menuLabels(await openMenu(3))).toEqual(['View failure details']);
+  });
+
+  it('marks a failed backup with its own danger tone and icon, not the neutral grey', async () => {
+    history();
+    page();
+    const failed = within(await row(3)).getByText('Failed');
+    expect(failed).toHaveClass('badge-red');
+    expect(failed).not.toHaveClass('badge-grey');
+    expect(failed.querySelector('svg')).not.toBeNull();
+    expect(within(await row(1)).getByText('Ready')).toHaveClass('badge-green');
+  });
+
+  it('explains a failed backup with only the fields it has and says no reason was recorded', async () => {
+    history();
+    page();
+    await userEvent.click(within(await openMenu(3)).getByRole('menuitem', { name: 'View failure details' }));
+    const dialog = screen.getByRole('dialog', { name: 'Backup failed' });
+    expect(within(dialog).getByText('Automatic')).toBeInTheDocument();
+    expect(within(dialog).getByText('The automatic schedule')).toBeInTheDocument();
+    expect(within(dialog).getByText(/No reason was recorded/)).toBeInTheDocument();
+    expect(dialog.querySelector('time')).toHaveAttribute('datetime', '2026-10-07T02:00:00Z');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   describe('schedule dialog', () => {

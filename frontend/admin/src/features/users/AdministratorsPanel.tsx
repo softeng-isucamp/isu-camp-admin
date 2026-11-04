@@ -345,6 +345,7 @@ export function AdministratorsPanel({ feedback }: {
                         <button role="menuitem" onClick={() => viewActivity(account)}>
                           View activity
                         </button>
+                        {canManage && <div role="separator" />}
                         {canManage && account.role === "admin" && !account.isCurrent && (
                           <button
                             role="menuitem"
@@ -374,6 +375,7 @@ export function AdministratorsPanel({ feedback }: {
                             {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
                           </button>
                         )}
+                        <div role="separator" />
                         {/* Helps a locked-out colleague without touching their
                             account: the code only reaches their own inbox. */}
                         <button

@@ -5,7 +5,7 @@ import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
 import type { BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
 import { isAutomatic, scheduleWhen, sizeText } from './backupFormat';
-import { DeleteDialog, DownloadDialog, RestoreDialog, StopRestoreDialog } from './BackupDialogs';
+import { DeleteDialog, DownloadDialog, FailureDialog, RestoreDialog, StopRestoreDialog } from './BackupDialogs';
 import { ScheduleDialog } from './BackupScheduleDialog';
 /** A job's own message when it is plain; the server appends raw exception text after a colon, which is replaced by a line for the kind of job. */
 const jobFailureText = (job: BackupJob) => {
@@ -16,8 +16,9 @@ const jobFailureText = (job: BackupJob) => {
     ? "The restore couldn't be completed. Check the data before making changes, and try again."
     : "The backup couldn't be completed. Try again, or check the server logs if it keeps failing.";
 };
+const FailedIcon = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 7v6M12 17h.01" /></svg>;
 const pending = (job: BackupJob | null) => job?.status === 'queued' || job?.status === 'running';
-type Target = { action: 'download' | 'restore' | 'delete'; backup: SystemBackup };
+type Target = { action: 'download' | 'restore' | 'delete' | 'failure'; backup: SystemBackup };
 
 /** Superadmin backups; `onSuccess` reports completed operations through the page's feedback stack. */
 export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => void }) {
@@ -134,6 +135,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const rowActions = (backup: SystemBackup) => {
     const ready = backup.status === 'ready';
     const actions: { action: Target['action']; label: string }[] = [];
+    if (!ready) actions.push({ action: 'failure', label: 'View failure details' });
     if (ready && capabilities.canDownload) actions.push({ action: 'download', label: 'Download' });
     if (ready) actions.push({ action: 'restore', label: 'Restore' });
     if (capabilities.canDelete) actions.push({ action: 'delete', label: 'Delete' });
@@ -170,7 +172,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
             <td><time dateTime={backup.createdAt}>{formatDateTime(backup.createdAt)}</time></td>
             <td>{isAutomatic(backup) ? <Badge tone="green">Automatic</Badge> : <><Badge tone="grey">Manual</Badge> <span className="profile-muted">{backup.createdBy}</span></>}</td>
             <td>{backup.status === 'ready' ? sizeText(backup.sizeBytes) : '—'}</td>
-            <td><Badge tone={backup.status === 'ready' ? 'green' : 'grey'}>{backup.status === 'ready' ? 'Ready' : 'Failed'}</Badge></td>
+            <td>{backup.status === 'ready' ? <Badge tone="green">Ready</Badge> : <Badge tone="red" className="badge-with-icon"><FailedIcon />Failed</Badge>}</td>
             <td style={{ position: 'relative' }}>
               {actions.length > 0 && <div style={{ display: 'inline-flex' }} ref={menuId === backup.id ? menuRef : undefined}>
                 <button className="table-action menu-trigger" data-backup-trigger={backup.id} aria-label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} aria-expanded={menuId === backup.id}
@@ -187,6 +189,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     </div>}
     {target?.action === 'download' && <DownloadDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)}
       onStarted={() => { setTarget(null); onSuccess('Download started. The link works once and expires shortly.'); }} />}
+    {target?.action === 'failure' && <FailureDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)} />}
     {target?.action === 'restore' && <RestoreDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)} onStarted={(started) => { setJob(started); setTarget(null); }} />}
     {target?.action === 'delete' && <DeleteDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onlyRestorable={target.backup.status === 'ready' && readyCount === 1} onClose={() => setTarget(null)}
       onDeleted={() => { setItems((list) => list.filter((backup) => backup.id !== target.backup.id)); setTarget(null); onSuccess('Backup was deleted successfully.'); }} />}

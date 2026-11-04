@@ -95,7 +95,7 @@ function AppUserDirectory() {
       <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
 
       <Card className="filters">
-        <Field label="" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
+        <Field className="filters-search" label="SEARCH USERS" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
         <FilterCombobox
           label="REGISTERED"
           noun="date ranges"
@@ -119,10 +119,7 @@ function AppUserDirectory() {
       <Card className="table-card" style={{ overflow: "visible" }}>
         <div className="table-heading">
           <h2>Accounts</h2>
-          <p style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {isFetching ? "Loading…" : `Showing ${result.total} users`}
-            {isFetching && <Spinner size={13} />}
-          </p>
+          {isFetching && <p style={{ display: "flex", alignItems: "center", gap: "8px" }}>Loading… <Spinner size={13} /></p>}
         </div>
         <ProgressBar active={isFetching} />
         <div className="table-wrap" style={{ overflow: "visible" }}>
@@ -187,7 +184,7 @@ function AppUserDirectory() {
             ? <LoadingState size={20}>Loading users…</LoadingState>
             : !result.items.length && <Empty>No users found.</Empty>}
         </div>
-        <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} />
+        <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} unit={result.total === 1 ? "matching user" : "matching users"} />
       </Card>
 
       {pendingDeactivation && canChangeStatus && (

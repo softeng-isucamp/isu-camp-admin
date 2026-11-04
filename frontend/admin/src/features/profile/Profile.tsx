@@ -44,10 +44,10 @@ export function Profile() {
         <div className="profile-actions">
           <Button variant="subtle" onClick={() => setDialog('password')}>Change Password</Button>
           <Button onClick={() => setDialog('details')}>Edit Profile</Button>
+          <Button variant="subtle" className="profile-signout" onClick={() => setDialog('signout')}>Sign Out</Button>
         </div>
       </Card>
       {session?.role === 'superadmin' && profile.role === 'superadmin' && <BackupRecovery onSuccess={feedback.reportSuccess} />}
-      <div><Button variant="danger" onClick={() => setDialog('signout')}>Sign Out</Button></div>
     </div>}
     {dialog === 'details' && profile && <DetailsDialog profile={profile} onClose={() => setDialog(null)} onSaved={(updated) => {
       setProfile(updated); updateSession(updated); setDialog(null);

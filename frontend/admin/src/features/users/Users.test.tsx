@@ -317,3 +317,26 @@ describe("Users search requests", () => {
     expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
   });
 });
+
+describe("Users filter bar and count", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("labels the search persistently and counts matching users with the pager", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    expect(screen.getByLabelText("SEARCH USERS")).toBe(screen.getByPlaceholderText("Search by username..."));
+    expect(screen.getByText(/of 2 matching users/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Showing 2 users$/)).not.toBeInTheDocument();
+  });
+
+  it("uses the singular for one matching user", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue({ ...page, items: [page.items[0]], total: 1 });
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    expect(screen.getByText(/of 1 matching user$/)).toBeInTheDocument();
+  });
+});

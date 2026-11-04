@@ -1,12 +1,12 @@
 import { FormEvent, useState } from 'react';
 import { Button, Field, Modal } from '../../components/UI';
 import { PasswordField } from '../../components/PasswordField';
-import { formatDateTime } from '../../lib/format';
+import { formatDateTime, formatDateTimeFull } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage } from '../../services/errors';
 import type { BackupDownload, BackupJob, SystemBackup } from '../../services/profile';
 import { DELETE_CONFIRMATION_WORDING, PasswordConfirmationField, usePasswordConfirmation } from '../auth/PasswordConfirmation';
-import { origin, sizeText } from './backupFormat';
+import { isAutomatic, origin, sizeText } from './backupFormat';
 import { DialogFocus, type FocusReturn } from './DialogFocus';
 
 const BACKUP_DELETE_WORDING = { ...DELETE_CONFIRMATION_WORDING, expired: 'Your password confirmation expired. Enter it again to delete this backup.' };
@@ -115,4 +115,23 @@ export function StopRestoreDialog({ returnTo, onClose, onStop }: { returnTo: Foc
       </div>
     </div>
   </Modal></DialogFocus>;
+}
+
+/** What is known about a failed backup. The server sends no error text for a history row, so the dialog says so rather than guessing. */
+export function FailureDialog({ backup, returnTo, onClose }: { backup: SystemBackup; returnTo: FocusReturn; onClose: () => void }) {
+  return <DialogFocus returnTo={returnTo}>
+    <Modal title="Backup failed" subtitle="This backup did not complete and cannot be restored or downloaded." size="sm" variant="danger" onClose={onClose}>
+      <div className="admin-form">
+        <dl className="profile-failure-meta">
+          <dt>Started</dt><dd><time dateTime={backup.createdAt}>{formatDateTimeFull(backup.createdAt)}</time></dd>
+          <dt>Type</dt><dd>{isAutomatic(backup) ? 'Automatic' : 'Manual'}</dd>
+          <dt>Started by</dt><dd>{isAutomatic(backup) ? 'The automatic schedule' : backup.createdBy}</dd>
+          <dt>Reason</dt><dd>No reason was recorded for this failure. Check the server logs for details.</dd>
+        </dl>
+        <div className="modal-actions">
+          <Button type="button" variant="subtle" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
+  </DialogFocus>;
 }
