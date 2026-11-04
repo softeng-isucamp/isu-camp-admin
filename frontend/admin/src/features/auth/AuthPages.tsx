@@ -6,8 +6,8 @@ import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { AuthError, errorMessage } from "../../services/errors";
 import { readLoginPrefill } from "./loginPrefill";
-import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
-import { Button, Card, Field } from "../../components/UI";
+import { Button, Card } from "../../components/UI";
+import { PasswordField } from "../../components/PasswordField";
 import { RateLimitError } from "../../services/api";
 import { loginSchema } from "../../services/schemas";
 import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
@@ -21,7 +21,6 @@ export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [loginCountdown, setLoginCountdown] = useState(0);
   const [loginPending, setLoginPending] = useState(false);
@@ -121,29 +120,22 @@ export function Login() {
           <div className="forgot forgot-username">
             <Link to="/forgot-username">Forgot username?</Link>
           </div>
-          <label className="field">
-            <span>Password</span>
-            <div className="password">
-              <img className="password-icon" src={lockIcon} alt="" />
-              <input
-                {...passwordField}
-                {...fieldErrorProps("password")}
-                onBlur={(event) => {
-                  void passwordField.onBlur(event);
-                  capsLock.onBlur();
-                }}
-                onKeyDown={capsLock.onKeyDown}
-                onKeyUp={capsLock.onKeyUp}
-                disabled={lockedOut}
-                type={show ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="Enter your password"
-              />
-              <button type="button" onClick={() => setShow(!show)} aria-pressed={show} aria-label="Show password">
-                <PasswordVisibilityIcon shown={show} />
-              </button>
-            </div>
-          </label>
+          <PasswordField
+            label="Password"
+            variant="login"
+            icon={<img className="password-icon" src={lockIcon} alt="" />}
+            {...passwordField}
+            {...fieldErrorProps("password")}
+            onBlur={(event) => {
+              void passwordField.onBlur(event);
+              capsLock.onBlur();
+            }}
+            onKeyDown={capsLock.onKeyDown}
+            onKeyUp={capsLock.onKeyUp}
+            disabled={lockedOut}
+            autoComplete="current-password"
+            placeholder="Enter your password"
+          />
           <div className="forgot">
             <label className="remember-me">
               <input

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
 import type { useFeedback } from "../../components/Feedback";
+import { PasswordField } from "../../components/PasswordField";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
@@ -426,10 +427,10 @@ export function AdministratorsPanel({ feedback }: {
               error={fieldErrors.email}
               onChange={(event) => setDraft({ ...draft, email: event.target.value })}
             />
-            <Field
+            <PasswordField
               label="PASSWORD"
+              toggleName="password"
               aria-label="Password"
-              type="password"
               required
               autoComplete="new-password"
               value={draft.password ?? ""}

@@ -406,7 +406,7 @@ button {
 .content {
   margin-left: 280px;
   flex: 1;
-  min-width: 800px;
+  min-width: 0;
 }
 .content > header,
 .map-toolbar {
@@ -1277,6 +1277,44 @@ td small {
 .password input {
   width: 100%;
   padding-left: 42px;
+  padding-right: 44px;
+}
+.password-label {
+  /* Same look as the login card's other labels. */
+  color: #3f4941;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* The one show/hide control: a 32px hit area around the 18px glyph, centred in the input's end. */
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64716a;
+}
+.password-toggle:hover {
+  color: var(--green);
+  background: #0059310f;
+}
+.password-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.field-input-wrap {
+  position: relative;
+}
+.field-input-wrap .field-input {
+  padding-right: 44px;
 }
 .password-icon {
   position: absolute;
@@ -1286,16 +1324,6 @@ td small {
   height: 21px;
   transform: translateY(-50%);
   pointer-events: none;
-}
-.password button {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  background: transparent;
-  color: #64716a;
-  padding: 0;
 }
 .forgot {
   display: flex;
@@ -1423,17 +1451,12 @@ td small {
 .login-card > .muted {
   line-height: 1.5;
 }
-.recovery-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  place-items: center;
-  background: #0e12107a;
-  padding: 24px;
-}
 .recovery-modal {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   width: 460px;
   max-width: 100%;
   padding: 32px;
@@ -1482,6 +1505,7 @@ td small {
 }
 /* Field labels share the login form's small caps style. The markup is sentence case, so screen readers read words, not letters. */
 .login-card .field > span,
+.login-card .field > .password-label,
 .recovery-modal .recovery-label {
   color: #3f4941;
   font-size: 11px;
@@ -1594,27 +1618,18 @@ td small {
   width: 100%;
   padding-right: 48px;
 }
-.recovery-modal .recovery-password-toggle {
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  background: transparent;
-  padding: 0;
-  color: #64716a;
-}
 .recovery-modal .recovery-rules,
 .admin-form .recovery-rules {
   list-style: none;
   margin: -6px 0 0;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-radius: 14px;
   background: #f0f8f3;
   display: grid;
-  gap: 4px;
-  font-size: 13px;
-  line-height: 19px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+  font-size: 12px;
+  line-height: 18px;
 }
 .recovery-modal .recovery-rules li,
 .admin-form .recovery-rules li {
@@ -4211,4 +4226,126 @@ td small {
 /* "Change email" sits inside the subtext, so it takes the subtext's size. */
 .recovery-modal .recovery-copy .recovery-link {
   font-size: inherit;
+}
+
+/* Narrow windows: the page never scrolls sideways. Tables scroll inside their own wrapper, and rows of controls wrap. */
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow-x: auto !important;
+    max-width: 100%;
+  }
+  .filters .field:first-child {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .hero {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .hero-toolbar {
+    left: 16px;
+    right: 16px;
+    flex-wrap: wrap;
+  }
+  .hero-tabs {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .dashboard-time-filter {
+    max-width: 100%;
+  }
+}
+
+/* Recovery progress cue: Email, Code, then the flow's last step. */
+.recovery-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.recovery-progress li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.recovery-progress li + li::before {
+  content: "";
+  width: 16px;
+  height: 1px;
+  margin-right: 2px;
+  background: var(--border);
+}
+.recovery-progress-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+.recovery-progress .is-current {
+  color: var(--green);
+}
+.recovery-progress .is-current .recovery-progress-dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.recovery-progress .is-done .recovery-progress-dot {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: var(--green);
+}
+/* Holds the room of a two-line error so the controls below do not move when one appears. */
+.recovery-modal .recovery-error-slot {
+  min-height: 58px;
+}
+/* The unknown-page card. */
+.not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 32px;
+  border-radius: 28px;
+}
+.not-found h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.not-found p {
+  margin: 0;
+  color: var(--muted);
+}
+.not-found-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+/* Narrow windows: the basemap switch keeps its names for assistive technology but drops to icons, so it and the search box share the top row. */
+@media (max-width: 720px) {
+  .map-basemap-toggle .tool {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .map-basemap-toggle .tool > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .map-search-box {
+    width: calc(100% - 8.5rem);
+  }
 }

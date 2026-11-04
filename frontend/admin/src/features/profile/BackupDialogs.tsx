@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Button, Field, Modal } from '../../components/UI';
+import { PasswordField } from '../../components/PasswordField';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage } from '../../services/errors';
@@ -35,7 +36,7 @@ export function DownloadDialog({ backup, returnTo, onClose, onStarted }: { backu
       <form onSubmit={submit} className="admin-form" aria-busy={busy}>
         <p className="profile-warning">This file is a complete copy of the database, including administrator password hashes. Store it securely.</p>
         {error && <div role="alert" className="admin-form-error">{error}</div>}
-        <Field label="YOUR PASSWORD" aria-label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
+        <PasswordField label="YOUR PASSWORD" aria-label="Your password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
         <div className="modal-actions">
           <Button variant="subtle" type="button" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={busy} disabled={!password}>Download</Button>
@@ -63,7 +64,7 @@ export function RestoreDialog({ backup, returnTo, onClose, onStarted }: { backup
         <p className="admin-remove-copy">This replaces {backup.scope} with this backup. Changes made after it was created may be lost.</p>
         {error && <div role="alert" className="admin-form-error">{error}</div>}
         <Field label="TYPE RESTORE TO CONFIRM" aria-label="Type RESTORE to confirm" autoComplete="off" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} disabled={busy} required />
-        <Field label="YOUR PASSWORD" aria-label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
+        <PasswordField label="YOUR PASSWORD" aria-label="Your password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
         <div className="modal-actions">
           <Button variant="subtle" type="button" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="danger" loading={busy} disabled={confirmation !== 'RESTORE' || !password}>Restore Backup</Button>

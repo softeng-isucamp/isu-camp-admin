@@ -2,6 +2,7 @@ import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { Badge, Button, Card, Field, LoadingState, Modal } from '../../components/UI';
 import { FeedbackStack, useFeedback } from '../../components/Feedback';
 import { PageIcon } from '../../components/PageIcon';
+import { PasswordField } from '../../components/PasswordField';
 import { PasswordChecklist } from '../../components/PasswordChecklist';
 import { services } from '../../services/api';
 import { errorMessage } from '../../services/errors';
@@ -105,7 +106,7 @@ function DetailsDialog({ profile, onClose, onSaved }: { profile: AccountProfile;
       <Field label="USERNAME" aria-label="Username" value={username} onChange={edit('username', setUsername)} required autoComplete="username" maxLength={100} disabled={saving} error={fieldErrors.username} />
       <Field label={alternativeSupported ? 'PRIMARY EMAIL' : 'EMAIL'} aria-label={alternativeSupported ? 'Primary email' : 'Email'} type="email" value={email} onChange={edit('email', setEmail)} required autoComplete="email" maxLength={254} disabled={saving} subhelper="Password reset codes are sent here." error={fieldErrors.email} />
       {alternativeSupported && <Field label="ALTERNATIVE EMAIL" aria-label="Alternative email" type="email" badge="Optional" value={alternativeEmail} onChange={edit('alternativeEmail', setAlternativeEmail)} autoComplete="email" maxLength={254} placeholder="you@example.com" disabled={saving} subhelper="Used for account recovery if you lose access to your primary email." error={fieldErrors.alternativeEmail} />}
-      {emailsChanged && <Field label="CURRENT PASSWORD" aria-label="Current password" type="password" value={currentPassword} onChange={edit('currentPassword', setCurrentPassword)} required autoComplete="current-password" disabled={saving} subhelper="Changing an email address needs your password." error={fieldErrors.currentPassword} />}
+      {emailsChanged && <PasswordField label="CURRENT PASSWORD" toggleName="current password" aria-label="Current password" value={currentPassword} onChange={edit('currentPassword', setCurrentPassword)} required autoComplete="current-password" disabled={saving} subhelper="Changing an email address needs your password." error={fieldErrors.currentPassword} />}
       <div className="modal-actions">
         <Button type="button" variant="subtle" disabled={saving} onClick={onClose}>Cancel</Button>
         <Button type="submit" loading={saving} disabled={!username.trim() || !email.trim() || unchanged}>Save Changes</Button>
@@ -122,7 +123,6 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
   const [weakness, setWeakness] = useState('');
   const [error, setError] = useState('');
   const [changing, setChanging] = useState(false);
-  const [showPasswords, setShowPasswords] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (changing) return;
@@ -138,11 +138,10 @@ function PasswordDialog({ onClose, onChanged }: { onClose: () => void; onChanged
   return <DialogFocus busy={changing}><Modal title="Change Password" size="sm" onClose={() => { if (!changing) onClose(); }}>
     <form onSubmit={submit} className="admin-form">
       {error && <div role="alert" className="admin-form-error">{error}</div>}
-      <Field label="CURRENT PASSWORD" aria-label="Current password" type={showPasswords ? 'text' : 'password'} autoComplete="current-password" required value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={changing} />
-      <Field label="NEW PASSWORD" aria-label="New password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required error={weakness} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={changing} />
+      <PasswordField label="CURRENT PASSWORD" toggleName="current password" aria-label="Current password" autoComplete="current-password" required value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} disabled={changing} />
+      <PasswordField label="NEW PASSWORD" toggleName="new password" aria-label="New password" autoComplete="new-password" required error={weakness} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} disabled={changing} />
       <PasswordChecklist password={newPassword} />
-      <Field label="CONFIRM NEW PASSWORD" aria-label="Confirm new password" type={showPasswords ? 'text' : 'password'} autoComplete="new-password" required error={mismatch} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={changing} />
-      <label className="profile-show-password"><input type="checkbox" checked={showPasswords} disabled={changing} onChange={(e) => setShowPasswords(e.target.checked)} />Show passwords</label>
+      <PasswordField label="CONFIRM NEW PASSWORD" toggleName="confirm new password" aria-label="Confirm new password" autoComplete="new-password" required error={mismatch} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={changing} />
       <div className="modal-actions">
         <Button type="button" variant="subtle" disabled={changing} onClick={onClose}>Cancel</Button>
         <Button type="submit" loading={changing}>Update Password</Button>

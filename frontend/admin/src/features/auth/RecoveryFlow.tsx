@@ -15,6 +15,8 @@ interface RecoveryFlowProps {
   purpose: RecoveryPurpose;
   /** Heading of the email step. */
   title: string;
+  /** Label of the last step in the progress cue, e.g. "New password". */
+  finalLabel: string;
   /**
    * The purpose-specific step shown once the code is verified. It renders inside
    * the recovery card and owns its own heading, actions and "Back to login".
@@ -35,7 +37,7 @@ type FlowStep =
  * then code step, then `renderFinal`. All of it lives in memory, so a refresh
  * restarts the flow.
  */
-export function RecoveryFlow({ purpose, title, renderFinal }: RecoveryFlowProps) {
+export function RecoveryFlow({ purpose, title, finalLabel, renderFinal }: RecoveryFlowProps) {
   const [flow, setFlow] = useState<FlowStep>({ step: "email", email: "" });
   const content = useRef<HTMLDivElement>(null);
 
@@ -47,7 +49,7 @@ export function RecoveryFlow({ purpose, title, renderFinal }: RecoveryFlowProps)
   }, [flow.step]);
 
   return (
-    <RecoveryFrame>
+    <RecoveryFrame progress={{ steps: ["Email", "Code", finalLabel], current: flow.step === "email" ? 0 : flow.step === "code" ? 1 : 2 }}>
       <div ref={content} className="recovery-step">
         {flow.step === "email" && (
           <RecoveryEmailStep

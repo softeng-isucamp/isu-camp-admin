@@ -126,14 +126,20 @@ it('signs out from the profile after confirmation', async () => {
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'My Profile' })).not.toBeInTheDocument());
 });
 
-it('reveals password fields while the show passwords checkbox is checked', async () => {
+it('reveals each password field separately with its own named toggle', async () => {
   page();
   await userEvent.click(await screen.findByRole('button', { name: 'Change Password' }));
+  expect(screen.queryByRole('checkbox', { name: 'Show passwords' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'password');
-  await userEvent.click(screen.getByRole('checkbox', { name: 'Show passwords' }));
-  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'text');
+  await userEvent.click(screen.getByRole('button', { name: 'Show new password' }));
   expect(screen.getByLabelText('New password')).toHaveAttribute('type', 'text');
+  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'password');
+  expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('type', 'password');
+  expect(screen.getByRole('button', { name: 'Show new password' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: 'Show confirm new password' }));
   expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('type', 'text');
+  await userEvent.click(screen.getByRole('button', { name: 'Show current password' }));
+  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'text');
 });
 
 it('seeds the fixture history with automatic, manual and failed backups', async () => {

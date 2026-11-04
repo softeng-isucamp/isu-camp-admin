@@ -9,6 +9,7 @@ export function ForgotUsername() {
     <RecoveryFlow
       purpose="username"
       title="Find your username"
+      finalLabel="Username"
       renderFinal={(verified) => <UsernameResult verified={verified} />}
     />
   );

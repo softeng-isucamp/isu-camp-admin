@@ -3,6 +3,7 @@ import {
   type HTMLAttributes,
   type PropsWithChildren,
   type InputHTMLAttributes,
+  type ReactNode,
   type SelectHTMLAttributes,
   useEffect,
   useId,
@@ -104,6 +105,8 @@ export interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
   subhelper?: string;
   error?: string;
   badge?: string;
+  /** Rendered over the end of the input, e.g. the show/hide password toggle. */
+  endAdornment?: ReactNode;
 }
 
 export function Field({
@@ -112,6 +115,7 @@ export function Field({
   subhelper,
   error,
   badge,
+  endAdornment,
   className,
   required,
   id: customId,
@@ -120,6 +124,16 @@ export function Field({
   const sub = subhelper || helper;
   const id = customId || (label ? `field-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}` : undefined);
   const errorId = error && id ? `${id}-error` : undefined;
+  const input = (
+    <input
+      id={id}
+      className={cx("field-input", error ? "field-input-error" : "")}
+      required={required}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={[props["aria-describedby"], errorId].filter(Boolean).join(" ") || undefined}
+      {...props}
+    />
+  );
   return (
     <div className={cx("field-group", className)}>
       <div className="field-label-row">
@@ -129,14 +143,7 @@ export function Field({
         </label>
         {badge && <span className="field-badge">{badge}</span>}
       </div>
-      <input
-        id={id}
-        className={cx("field-input", error ? "field-input-error" : "")}
-        required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={[props["aria-describedby"], errorId].filter(Boolean).join(" ") || undefined}
-        {...props}
-      />
+      {endAdornment ? <div className="field-input-wrap">{input}{endAdornment}</div> : input}
       {sub && <span className="field-subhelper">{sub}</span>}
       {error && <span id={errorId} className="field-error-msg">{error}</span>}
     </div>

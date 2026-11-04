@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +38,17 @@ const reachCodeStep = async () => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe("forgot-username progress cue", () => {
+  it("shows Email, Code and Username, with the email step current", () => {
+    mockBackend({});
+    renderFrom("/forgot-username");
+
+    const steps = within(screen.getByRole("list", { name: "Recovery progress" })).getAllByRole("listitem");
+    expect(steps.map((step) => step.textContent)).toEqual(["1Email", "2Code", "3Username"]);
+    expect(steps.map((step) => step.getAttribute("aria-current"))).toEqual(["step", null, null]);
+  });
 });
 
 describe("login: forgot username link", () => {
@@ -135,7 +146,7 @@ describe("forgot-username: same instructions and feedback as forgot password", (
     expect(screen.getByText(/verification code has been sent to/i)).toHaveTextContent(
       `A 6-digit verification code has been sent to ${EMAIL}.`,
     );
-    expect(screen.getByText(/Only the most recently sent code will work/)).toBeInTheDocument();
+    expect(screen.getByText(/Only the newest code works/)).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
     expect(screen.getByText("Resend available in 60s.")).toBeInTheDocument();
     await act(async () => {
