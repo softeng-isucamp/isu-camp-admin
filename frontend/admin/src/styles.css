@@ -4654,6 +4654,12 @@ td small {
   flex: 1 1 280px;
   min-width: 220px;
 }
+/* Locations stacks its search above the filter row, so there it spans the card instead of flexing. */
+.filters .filters-search-stacked {
+  flex: none;
+  align-self: stretch;
+  width: 100%;
+}
 .filters .filters-search .field-input {
   height: 46px;
   border-radius: 18px;

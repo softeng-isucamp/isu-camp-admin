@@ -812,7 +812,7 @@ export function Locations() {
         }}
       >
         <Field
-          className="filters-search"
+          className="filters-search filters-search-stacked"
           label="SEARCH LOCATIONS"
           aria-label="Search locations"
           placeholder="Search by building, room, office, lab, facility, or keyword..."
