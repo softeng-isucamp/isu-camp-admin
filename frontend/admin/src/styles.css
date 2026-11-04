@@ -4749,6 +4749,9 @@ td small {
   text-decoration: none;
   cursor: pointer;
 }
+.dashboard-link:hover {
+  background: #f4f8f6;
+}
 .dashboard-link:focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
