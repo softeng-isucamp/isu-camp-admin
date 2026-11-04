@@ -58,6 +58,7 @@ export function BuildingPicker<T extends BuildingPickerItem>({
   const listboxId = useId();
   const errorId = useId();
   const countId = useId();
+  const identifierId = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeOptionRef = useRef<HTMLLIElement | null>(null);
@@ -89,6 +90,8 @@ export function BuildingPicker<T extends BuildingPickerItem>({
 
   // A closed field shows what is selected; an open one shows what is being typed.
   const displayValue = open ? query : selected?.name ?? "";
+  // Same-named Buildings must stay distinguishable after one is chosen.
+  const selectedIdentifier = !open && selected ? identifierOf(selected) : null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -178,7 +181,7 @@ export function BuildingPicker<T extends BuildingPickerItem>({
           aria-autocomplete="list"
           aria-activedescendant={open && options.length ? `${listboxId}-${activeIndex}` : undefined}
           aria-invalid={error ? true : undefined}
-          aria-describedby={[open && trimmed ? countId : undefined, error ? errorId : undefined].filter(Boolean).join(" ") || undefined}
+          aria-describedby={[open && trimmed ? countId : undefined, selectedIdentifier ? identifierId : undefined, error ? errorId : undefined].filter(Boolean).join(" ") || undefined}
           autoComplete="off"
           className={cx("field-input parent-building-input", error ? "field-input-error" : "")}
           placeholder={selected ? selected.name : searchPlaceholder}
@@ -253,6 +256,7 @@ export function BuildingPicker<T extends BuildingPickerItem>({
         )}
       </div>
 
+      {selectedIdentifier && <span id={identifierId} className="parent-building-selected-id">{selectedIdentifier}</span>}
       {error && <span id={errorId} className="field-error-msg">{error}</span>}
     </div>
   );

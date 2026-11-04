@@ -4728,3 +4728,11 @@ td small {
   align-items: center;
   gap: 5px;
 }
+
+.parent-building-selected-id {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
