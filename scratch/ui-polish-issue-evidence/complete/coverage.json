@@ -1,0 +1,243 @@
+[
+  {
+    "id": 1,
+    "screen": "Login",
+    "observed": "Clear, focused layout; the password visibility button has an 18\u00d718px box.",
+    "suggestion": "Increase its clickable area while keeping the icon size; align recovery links consistently with their fields.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs01-login.png"
+    ]
+  },
+  {
+    "id": 2,
+    "screen": "Forgot password / username",
+    "observed": "Recovery appears as another white card over a dimmed login card; parts of the original login remain visible around it.",
+    "suggestion": "Use one recovery surface on the branded background, or more clearly distinguish the recovery dialog from the background. Add a compact Email \u2192 Code \u2192 Finish progress cue.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs02-recovery.png"
+    ]
+  },
+  {
+    "id": 3,
+    "screen": "Verification code",
+    "observed": "Six labelled boxes fit the narrow viewport; the resend countdown and Change email action are clear.",
+    "suggestion": "Preserve these behaviors. Shorten the surrounding copy and reserve stable space for errors so the controls do not jump.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs03-verification-code.png"
+    ]
+  },
+  {
+    "id": 4,
+    "screen": "New password",
+    "observed": "A five-line password checklist occupies much of the recovery card.",
+    "suggestion": "Use a more compact checklist and the same password-visibility control pattern as Change Password and Add Administrator.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs04-new-password.png"
+    ]
+  },
+  {
+    "id": 5,
+    "screen": "Dashboard Overview",
+    "observed": "Large hero and tall summary cards consume most of the first screen; operational content starts far down.",
+    "suggestion": "Compress the hero and cards to bring the map and recent activity higher. Keep values and their labels together.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs05-dashboard.png"
+    ]
+  },
+  {
+    "id": 6,
+    "screen": "Dashboard \u201cNew Location\u201d",
+    "observed": "The link points to `/locations`, rather than directly opening a creation form. That directory's Add Location flow creates indoor places only.",
+    "suggestion": "Rename it \u201cOpen Locations,\u201d or provide an explicit create choice that leads directly to the appropriate indoor-location or building workflow.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs06-new-location.png"
+    ]
+  },
+  {
+    "id": 7,
+    "screen": "Dashboard Analytics",
+    "observed": "Several full-width chart cards make a long page; range selection remains in the hero above the charts.",
+    "suggestion": "Keep a compact range/header visible while scrolling, add exact date ranges, and reduce repeated introductory space. Make chart units and definitions consistent in sentence case.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs07-analytics.png"
+    ]
+  },
+  {
+    "id": 8,
+    "screen": "Locations filters",
+    "observed": "Floor choices repeat visible labels such as \u201c1st Floor,\u201d \u201c2nd Floor,\u201d and \u201cGround Floor.\u201d",
+    "suggestion": "Normalize equivalent floor values before presenting them; sort in physical order. If values genuinely differ, disambiguate them. Add active-filter chips and a single Clear filters action.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs08-locations-filters.png"
+    ],
+    "caveat": "The screenshot locates the closed native floor selector. Duplicate option labels were read from its live DOM options; the native popup is not visible in this capture."
+  },
+  {
+    "id": 9,
+    "screen": "Locations hierarchy",
+    "observed": "The directory says \u201c67 locations,\u201d while pagination says \u201c1\u201310 of 52\u201d in the initial grouped view. These appear to count different things.",
+    "suggestion": "Label them explicitly: total places versus top-level records/buildings, or use one consistent count. Include child counts on building/floor groups.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs09-locations-hierarchy.png",
+      "scratch/ui-polish-issue-evidence/complete/obs09-locations-pagination.png"
+    ]
+  },
+  {
+    "id": 10,
+    "screen": "Locations Add/Edit dialog",
+    "observed": "Editing a Building still displays \u201cAdd a Room, Office, Laboratory, or Restroom under an existing Building.\u201d The indoor form places coordinates before required parent/floor fields.",
+    "suggestion": "Use entity-specific edit copy. Ask for name, type, building, and floor first; then show optional map position and photos.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs10-location-edit.png",
+      "scratch/ui-polish-issue-evidence/complete/obs11-indoor-create.png",
+      "scratch/ui-polish-issue-evidence/complete/obs12-location-photos.png"
+    ]
+  },
+  {
+    "id": 11,
+    "screen": "Indoor location creation",
+    "observed": "\u201cPick on map\u201d appears in the creation form even though the documented workflow requires saving the record first.",
+    "suggestion": "Explain that prerequisite next to the action, and give newly saved indoor places a direct \u201cPlace marker\u201d next step. Distinguish inherited routing from an optional indoor marker position in the helper text.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs11-indoor-create.png"
+    ]
+  },
+  {
+    "id": 12,
+    "screen": "Location photos",
+    "observed": "Photo controls add considerable content to an already scrolling dialog.",
+    "suggestion": "Keep optional photos collapsed until selected; show a concise count and thumbnail preview. Preserve the fixed save/cancel footer.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs12-location-photos.png"
+    ]
+  },
+  {
+    "id": 13,
+    "screen": "Map Editor, default",
+    "observed": "Tool dock, basemap switch, search, legend, issues tray, and inspector all compete for map area.",
+    "suggestion": "Give selection/editing a clearer hierarchy; collapse secondary overlays when an inspector opens, while keeping their state recoverable. Use concise tool instructions.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs13-map-overlays.png"
+    ]
+  },
+  {
+    "id": 14,
+    "screen": "Building footprint tool",
+    "observed": "A red validation message appears immediately at zero plotted points, before the user has done anything wrong.",
+    "suggestion": "Show neutral guidance such as \u201cPlace at least 3 corners\u201d; show an error after an invalid attempt. Add a clear Finish drawing action when valid.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/map-validation.png"
+    ]
+  },
+  {
+    "id": 15,
+    "screen": "Route Node tool",
+    "observed": "Building association is a long native select. The fixture includes repeated building names with different identifiers and many unnamed OSM buildings.",
+    "suggestion": "Use a searchable building picker, display name plus code, and clarify the available record sources. Preserve typed identity; do not merge records solely because their names match. The record duplication observed here is fixture-specific.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs15-route-node.png"
+    ],
+    "caveat": "The screenshot locates the closed association selector. Its 199 building choices and repeated fixture names were read from the live DOM options; the native popup is not visible."
+  },
+  {
+    "id": 16,
+    "screen": "Map issues tray",
+    "observed": "The fixture has 168 \u201cNo entrance\u201d issues, including many identically named unnamed buildings.",
+    "suggestion": "Add filtering/search and a distinguishing code or map context to each row. Keep the existing focus-on-map behavior. Treat the count as fixture data, not a production quality assessment.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs16-map-issues.png"
+    ],
+    "caveat": "Repeated unnamed records and issue counts are properties of the fixture dataset, not a production data assessment."
+  },
+  {
+    "id": 17,
+    "screen": "Building inspector",
+    "observed": "\u201cNot routable\u201d and entrance count appear near the top, but Add entrance is below the indoor location list and can require scrolling.",
+    "suggestion": "Put the action that resolves the routing problem beside that status. Keep indoor contents as a secondary expandable section.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs17-building-entrance.png",
+      "scratch/ui-polish-issue-evidence/complete/obs17-building-inspector.png"
+    ]
+  },
+  {
+    "id": 18,
+    "screen": "App Users",
+    "observed": "Search and two filters occupy only the left portion of a wide filter card. Search has a placeholder but no persistent visible label. \u201cShowing 60 users\u201d sits above a ten-row page.",
+    "suggestion": "Widen search, label it, align filters to a common baseline, add status filtering, and say \u201c60 matching users\u201d above pagination.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/obs18-app-users.png"
+    ]
+  },
+  {
+    "id": 19,
+    "screen": "Administrators",
+    "observed": "The account table is clear, but all actions are hidden in an ellipsis menu. Add Administrator uses a different password visibility pattern from other password forms.",
+    "suggestion": "Keep the menu, group access changes separately from password reset/removal, and reuse one password field component with a visibility toggle.",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/obs19-add-admin-password.png",
+      "scratch/ui-polish-issue-evidence/obs19-administrators.png"
+    ]
+  },
+  {
+    "id": 20,
+    "screen": "System Logs",
+    "observed": "Search is narrow enough to truncate its purpose; long absolute timestamps dominate rows. The detail dialog repeats most row information, and its category badge stretches across the dialog.",
+    "suggestion": "Give search flexible width and a persistent label. Add timezone information, use compact dates with full timestamps available, make the category badge content-sized, and emphasize the event's actual detail.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/obs20-system-logs-details.png",
+      "scratch/ui-polish-issue-evidence/obs20-system-logs.png"
+    ]
+  },
+  {
+    "id": 21,
+    "screen": "My Profile",
+    "observed": "Account actions are separated from Sign Out by the entire backup history; prototype controls overlay the page in development.",
+    "suggestion": "Keep account actions together, move backup administration into a clearly separate section or page, and remove prototype controls from the normal review/use flow. Resolve persistence first.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/obs21-profile-account-actions.png",
+      "scratch/ui-polish-issue-evidence/obs21-profile-signout.png",
+      "scratch/ui-polish-issue-evidence/profile-prototype.png"
+    ]
+  },
+  {
+    "id": 22,
+    "screen": "Backup history / schedule",
+    "observed": "Failed jobs use a muted badge similar to neutral states; schedule controls and ready archives look operational despite the prototype implementation.",
+    "suggestion": "Give failure a distinct icon/tone and an explicit \u201cView failure details\u201d action. State simulation status prominently until persistent controls are wired.",
+    "priority": "Medium",
+    "files": [
+      "scratch/ui-polish-issue-evidence/obs22-backup-prototype.png"
+    ]
+  },
+  {
+    "id": 23,
+    "screen": "Page not found",
+    "observed": "An essentially unstyled heading and paragraph sit at the top of an otherwise empty page, with no recovery action.",
+    "suggestion": "Apply the app's spacing and branded card style. Add \u201cGo to Dashboard\u201d and \u201cBack to Login.\u201d",
+    "priority": "Low",
+    "files": [
+      "scratch/ui-polish-issue-evidence/complete/obs23-not-found.png"
+    ]
+  }
+]
