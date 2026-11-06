@@ -12,6 +12,12 @@ vi.mock("react-leaflet", async () => (await import("../testing/mapEditorMocks"))
 vi.mock("../../../services/api", async () => (await import("../testing/mapEditorMocks")).apiMock());
 vi.mock("../../auth/AuthContext", async () => (await import("../testing/mapEditorMocks")).authContextMock());
 
+/** Reshape Footprint is a building-level edit in the inspector's ⋯ menu (there is no sticky footer). */
+const reshapeFromMenu = () => {
+  fireEvent.click(screen.getByRole("button", { name: /^More actions for / }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "▱ Reshape Footprint" }));
+};
+
 describe("Map Editor preview", () => {
   useMapEditorTestLifecycle();
 
@@ -116,7 +122,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
-    fireEvent.click(screen.getByRole("button", { name: "▱ Reshape Footprint" }));
+    reshapeFromMenu();
 
     expect(screen.getByRole("region", { name: "Change scope" })).toHaveTextContent(
       "only the linked Building Footprint geometry",
@@ -137,7 +143,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
-    fireEvent.click(screen.getByRole("button", { name: "▱ Reshape Footprint" }));
+    reshapeFromMenu();
     fireEvent.click(screen.getByRole("button", { name: "Update Building Footprint" }));
 
     await waitFor(() => expect(services.map.save).toHaveBeenCalledWith(expect.objectContaining({
@@ -196,7 +202,7 @@ describe("Map Editor preview", () => {
     expect(screen.queryByRole("region", { name: "Create Building" })).not.toBeInTheDocument();
   });
 
-  it("puts Add entrance under a Not routable status and offers it only once", async () => {
+  it("puts Add entrance in the access block under a Not routable status as the card's only solid primary action, and offers it only once", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue([
       { id: "building-bare", name: "Bare Hall", code: "BARE", classification: "College", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
     ]);
@@ -205,9 +211,40 @@ describe("Map Editor preview", () => {
 
     const card = screen.getByRole("complementary", { name: "Bare Hall object details" });
     const header = card.querySelector("header") as HTMLElement;
-    expect(header).toHaveTextContent("Not routable");
-    expect(within(header).getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+    expect(header).toHaveTextContent("Building");
+    expect(header).toHaveTextContent("Code BARE · College");
+    const access = within(card).getByRole("region", { name: "Walking access" });
+    expect(access).toHaveTextContent("Not routable");
+    expect(access).toHaveTextContent("No active entrance is linked to this building");
+    const add = within(access).getByRole("button", { name: "＋ Add entrance" });
+    expect(add).toHaveClass("inspector-primary-action");
+    expect(card.querySelectorAll(".inspector-primary-action")).toHaveLength(1);
+    expect(card.querySelector(".inspector-card-footer")).toBeNull();
     expect(within(card).getAllByRole("button", { name: "＋ Add entrance" })).toHaveLength(1);
+    // The overflow menu holds only building-level actions, not the entrance or indoor ones.
+    fireEvent.click(within(card).getByRole("button", { name: "More actions for Bare Hall" }));
+    expect(within(card).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["✎ Edit Details", "▱ Reshape Footprint", "🗑 Delete Building"]);
+    expect(within(card).getByRole("separator")).toBeInTheDocument();
+  });
+
+  it("closes only the inspector menu on Escape, keeping the selection, and clears the selection on the next Escape", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "building-bare", name: "Bare Hall", code: "BARE", classification: "College", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
+
+    const trigger = screen.getByRole("button", { name: "More actions for Bare Hall" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "✎ Edit Details" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("complementary", { name: "Bare Hall object details" })).toBeInTheDocument();
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Bare Hall object details" })).not.toBeInTheDocument());
   });
 
   it("does not render an ordinary marker for a positioned Building with a footprint", async () => {
@@ -285,7 +322,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor(["/map-editor?location=building-1"]);
 
-    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("Building content");
+    expect(await screen.findByRole("complementary", { name: "Engineering Hall object details" })).toHaveTextContent("Indoor locations");
     await waitFor(() => expect(mapFitBounds).toHaveBeenCalledWith(
       [[16.72, 121.689], [16.722, 121.691]],
       expect.objectContaining({ maxZoom: 19 }),
@@ -533,10 +570,10 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
 
     expect(screen.getByText("Unclassified")).toBeInTheDocument();
-    const buildingContent = screen.getByRole("region", { name: "Building content" });
-    fireEvent.click(within(buildingContent).getByRole("button", { name: /Building content/ }));
-    expect(within(buildingContent).queryByRole("button", { name: "＋ Add indoor location" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
+    const indoor = screen.getByRole("region", { name: "Indoor locations" });
+    fireEvent.click(within(indoor).getByRole("button", { name: /Indoor locations/ }));
+    expect(within(indoor).queryByRole("button", { name: "＋ Add indoor location" })).not.toBeInTheDocument();
+    expect(indoor).toHaveTextContent("Room 204");
   });
 
   it("shows a building room directory and associated entrances in the inspector", async () => {
@@ -556,23 +593,24 @@ describe("Map Editor preview", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
 
-    // Indoor contents are collapsed behind their count until asked for.
-    const contentToggle = screen.getByRole("button", { name: /Building content/ });
+    // Indoor contents are collapsed behind one heading with their count until asked for.
+    const contentToggle = screen.getByRole("button", { name: "Indoor locations · 1" });
     expect(contentToggle).toHaveAttribute("aria-expanded", "false");
-    expect(contentToggle).toHaveTextContent("1 place");
-    expect(screen.queryByRole("region", { name: "Building room directory" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Room 204")).not.toBeInTheDocument();
     fireEvent.click(contentToggle);
     expect(contentToggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("2nd Floor");
-    expect(screen.getByRole("region", { name: "Building room directory" })).toHaveTextContent("Room 204");
+    const indoor = screen.getByRole("region", { name: "Indoor locations" });
+    expect(indoor).toHaveTextContent("2nd Floor");
+    expect(indoor).toHaveTextContent("Room 204");
     expect(screen.getByRole("region", { name: "2nd Floor indoor locations" })).toHaveTextContent("Room · 204");
     expect(screen.getByRole("region", { name: "2nd Floor indoor locations" })).toHaveClass("inspector-floor-group");
-    expect(screen.getByRole("region", { name: "Building entrances" })).toHaveTextContent("Main Entrance");
-    expect(screen.getByRole("region", { name: "Building entrances" })).toHaveTextContent("16.72050, 121.68950");
-    const buildingContent = screen.getByRole("region", { name: "Building content" });
-    expect(within(buildingContent).getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Building entrances" })).toHaveTextContent("Main Entrance");
+    // Entrance coordinates are in the collapsed Details.
+    expect(screen.queryByText("16.72050, 121.68950")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByText("16.72050, 121.68950")).toBeInTheDocument();
+    expect(within(indoor).getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Floor Level for new Indoor Location")).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Building content" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Walking access" })).toBeInTheDocument();
     expect(screen.queryByText(/Move footprint/i)).not.toBeInTheDocument();
   });
@@ -816,6 +854,6 @@ describe("Map Editor preview", () => {
     fireEvent.click(buildingPolygon);
 
     expect(screen.getByRole("complementary", { name: "Routable Hall object details" })).toBeInTheDocument();
-    expect(screen.getByText("Routable", { selector: ".inspector-card-header p" })).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Walking access" })).getByText("Routable")).toBeInTheDocument();
   });
 });

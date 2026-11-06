@@ -1786,7 +1786,7 @@ td small {
 .inspector-domain-badge {
   margin-bottom: 4px;
   color: #005931;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1803,7 +1803,7 @@ td small {
 .inspector-card-header p {
   margin: 5px 0 0;
   color: #5c6d63;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -1854,7 +1854,9 @@ td small {
   cursor: pointer;
 }
 
-.inspector-overflow-menu button:hover:not(:disabled) { background: #edf5f0; }
+.inspector-overflow-menu button:hover:not(:disabled),
+.inspector-overflow-menu button:focus-visible { background: #edf5f0; outline: none; }
+.inspector-overflow-menu [role="separator"] { height: 1px; margin: 6px 4px; border: 0; background: var(--border); }
 .inspector-overflow-menu button.danger { color: #b42318; }
 .inspector-overflow-menu button:disabled { opacity: 0.46; cursor: not-allowed; }
 
@@ -4757,3 +4759,62 @@ td small {
   outline-offset: 2px;
   border-radius: 12px;
 }
+
+/* Building inspector: sections are separated by simple dividers rather than nested bordered panels; supporting text is at least 12px. */
+.inspector-section { margin: 0 18px; padding: 12px 0; border-bottom: 1px solid #e2ece5; color: #30453a; font-size: 13px; }
+.inspector-section:last-child { border-bottom: 0; }
+.inspector-section h3 { margin: 0; color: #18261e; font-size: 13px; font-weight: 800; }
+.inspector-section p { margin: 0; }
+.inspector-access-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.inspector-view-only { color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-access-status { margin-top: 6px; color: #18261e; }
+.inspector-access-explanation { margin-top: 2px; color: #4b5d53; line-height: 1.45; }
+.inspector-entrance-summary { margin-top: 8px; color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-entrance-list { display: grid; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
+.inspector-entrance-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 3px 0; overflow-wrap: anywhere; font-weight: 700; }
+.inspector-entrance-list em { flex: 0 0 auto; color: #17613b; font-size: 12px; font-style: normal; font-weight: 800; }
+.inspector-compact-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.inspector-compact-actions button {
+  padding: 6px 11px;
+  border: 1px solid #c9d8cf;
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #1f4a35;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.inspector-compact-actions button:hover { background: #edf5f0; }
+.inspector-compact-actions button.inspector-primary-action { border-color: #005931; background: #005931; color: white; }
+.inspector-compact-actions button.inspector-primary-action:hover { background: #004727; }
+.inspector-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: #18261e;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+.inspector-disclosure-count { color: #65756c; font-weight: 700; }
+.inspector-empty { margin-top: 6px; color: #4b5d53; line-height: 1.45; }
+.inspector-section .inspector-floor-group { margin-top: 6px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.inspector-floor-disclosure .inspector-disclosure { color: #0c7441; font-size: 12px; }
+.inspector-section .inspector-location-row { align-items: flex-start; padding: 6px 0 6px 18px; border-bottom: 0; }
+.inspector-section .inspector-location-row strong { font-size: 13px; overflow-wrap: anywhere; }
+.inspector-section .inspector-location-row > div > span { font-size: 12px; }
+.inspector-section .inspector-content-icon { width: 24px; height: 24px; flex-basis: 24px; }
+.inspector-details-list { margin: 6px 0 0; }
+.inspector-details-list > div { display: grid; grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1.2fr); gap: 10px; padding: 4px 0; font-size: 12px; }
+.inspector-details-list dt { color: #65756c; font-weight: 600; }
+.inspector-details-list dd { margin: 0; color: #1d2a23; font-weight: 700; overflow-wrap: anywhere; }
+.inspector-section .inspector-related-group button {
+  padding: 6px 10px; border: 1px solid #c9d8cf; border-radius: 10px; background: #f7faf8; color: #1f4a35; font-size: 12px; font-weight: 700; text-align: left;
+}
+.inspector-section .inspector-related-group strong { font-size: 12px; }
+.inspector-section .inspector-related-group span { font-size: 12px; }

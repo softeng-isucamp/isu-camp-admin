@@ -636,7 +636,6 @@ export function MapEditor() {
           setMode("place");
         },
         onToggleLinkEntrance: () => entranceLinking.setLinking((open) => !open),
-        onLinkExistingEntrance: () => entranceLinking.setLinking(true),
         onLinkEntrance: (node) => entranceLinking.linkExistingEntrance(view, node),
         onDelete: () => setDeleteConfirmation({ kind: "building", id: view.building.id, name: view.building.name }),
       }),

@@ -86,8 +86,9 @@ describe("Indoor marker permissions", () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
     if (screen.queryByRole("button", { name: "Select Placement Hall Building" })) fireEvent.click(screen.getByRole("button", { name: "Select Placement Hall Building" }));
-    fireEvent.click(await screen.findByRole("button", { name: "More actions for Placement Hall" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Mark indoor location/ }));
+    // Marking sits in the indoor section for someone who may add; an Add-only administrator has no ⋯ menu at all.
+    expect(screen.queryByRole("button", { name: "More actions for Placement Hall" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Mark indoor location/ }));
     const dialog = await screen.findByRole("dialog", { name: "Mark indoor location" });
     expect(within(dialog).getByText("Room 204")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reposition" })).not.toBeInTheDocument();

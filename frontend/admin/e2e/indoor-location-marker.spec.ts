@@ -10,8 +10,8 @@ test("an admin marks an existing room inside its building and the marker hides w
   await page.goto("/map-editor?location=osm-building-c5fb7a267a8ca63d");
   const inspector = page.getByRole("complementary", { name: /Administration Building object details/ });
   await expect(inspector).toBeVisible();
-  await inspector.getByRole("button", { name: /More actions for Administration Building/ }).click();
-  await page.getByRole("menuitem", { name: /Mark indoor location/ }).click();
+  // Marking an indoor location sits in the inspector's indoor section, not the overflow menu.
+  await inspector.getByRole("button", { name: /Mark indoor location/ }).click();
 
   const chooser = page.getByRole("dialog", { name: "Mark indoor location" });
   await expect(chooser).toBeVisible();

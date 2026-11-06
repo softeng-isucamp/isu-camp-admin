@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { allPermissions, canPerform, viewOnlyPermissions } from "../../../lib/permissions";
 import type { AdminPermissions, Building, Location, Pathway, RouteNode } from "../../../types";
@@ -24,63 +24,145 @@ const view: SelectedBuildingView = { building, location: undefined, associationI
 const noop = vi.fn();
 const buildingActions = {
   onReshape: noop, onEditDetails: noop, onAddIndoorLocation: noop, onMarkIndoorLocation: noop, onAddEntrance: noop,
-  onToggleLinkEntrance: noop, onLinkExistingEntrance: noop, onLinkEntrance: noop, onDelete: noop,
+  onToggleLinkEntrance: noop, onLinkEntrance: noop, onDelete: noop,
 };
-const buildingModel = (permissions: AdminPermissions, linkingEntrance = false) => buildingInspectorModel({
-  view, contentLocations: [], nodes: [], linkingEntrance, can: canWith(permissions), actions: buildingActions,
+const buildingModel = (permissions: AdminPermissions, linkingEntrance = false, selected: SelectedBuildingView = view, contentLocations: Location[] = []) => buildingInspectorModel({
+  view: selected, contentLocations, nodes: [], linkingEntrance, can: canWith(permissions), actions: buildingActions,
 });
+const buttonNames = () => screen.getAllByRole("button").map((button) => button.textContent);
 
 describe("Building inspector", () => {
-  it("offers everything to an administrator with every switch on", () => {
+  it("offers every action exactly once to an administrator with every switch on", () => {
     const model = buildingModel(allPermissions());
-    expect(model.primaryAction?.label).toBe("▱ Reshape Footprint");
-    expect(labels(model)).toEqual([
-      "✎ Edit Details", "＋ Add indoor location", "⌂ Mark indoor location", "＋ Add entrance", "↔ Link existing entrance", "🗑 Delete Building",
-    ]);
+    // No sticky footer: Reshape Footprint is a building-level edit beside Edit Details, and Delete is set apart.
+    expect(model.primaryAction).toBeUndefined();
+    expect(labels(model)).toEqual(["✎ Edit Details", "▱ Reshape Footprint", "🗑 Delete Building"]);
+    expect(model.overflowActions.map((action) => action.separatorBefore ?? false)).toEqual([false, false, true]);
+
+    renderDetails(model);
+    const names = buttonNames().filter((name): name is string => Boolean(name));
+    const all = [...labels(model), ...names];
+    for (const action of ["＋ Add entrance", "↔ Link existing entrance", "＋ Add indoor location", "⌂ Mark indoor location", "✎ Edit Details", "▱ Reshape Footprint"]) {
+      expect(all.filter((name) => name === action), action).toHaveLength(1);
+    }
+    // Entrance actions live only in the access block, indoor actions only in the indoor section.
+    expect(within(screen.getByRole("region", { name: "Walking access" })).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(["＋ Add entrance", "↔ Link existing entrance"]);
+    expect(within(screen.getByRole("region", { name: "Indoor locations" })).getAllByRole("button").map((button) => button.textContent))
+      .toEqual(expect.arrayContaining(["＋ Add indoor location", "⌂ Mark indoor location"]));
   });
 
-  it("is read-only for a view-only administrator: no primary action, no overflow actions, no buttons in the body", () => {
+  it("is read-only for a view-only administrator: no overflow actions, no mutation buttons, but the explanation and a View only note", () => {
     const model = buildingModel(viewOnlyPermissions());
     expect(model.primaryAction).toBeUndefined();
     expect(model.overflowActions).toEqual([]);
 
-    expect(model.statusAction).toBeUndefined();
-
     renderDetails(model);
-    // The only button left is the disclosure for the indoor contents; none of them acts on the building.
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["▾Building content0 places"]);
-    expect(screen.getByText("Indoor locations by floor")).toBeInTheDocument();
-    expect(screen.getByText("Entrance route nodes")).toBeInTheDocument();
+    // The only buttons left are disclosures; none of them acts on the building.
+    expect(buttonNames()).toEqual(["▾Indoor locations· 0", "▸Details"]);
+    expect(screen.getByText("View only")).toBeInTheDocument();
+    expect(screen.getByText("Not routable")).toBeInTheDocument();
+    expect(screen.getByText("No active entrance is linked to this building, so routes cannot reach it.")).toBeInTheDocument();
   });
 
   it("maps each switch to its own actions", () => {
-    expect(labels(buildingModel(only("add")))).toEqual(["＋ Add indoor location", "⌂ Mark indoor location", "＋ Add entrance"]);
-    expect(labels(buildingModel(only("edit")))).toEqual(["✎ Edit Details", "⌂ Mark indoor location", "↔ Link existing entrance"]);
-    expect(buildingModel(only("edit")).primaryAction?.label).toBe("▱ Reshape Footprint");
+    expect(labels(buildingModel(only("add")))).toEqual([]);
+    expect(labels(buildingModel(only("edit")))).toEqual(["✎ Edit Details", "▱ Reshape Footprint"]);
     expect(labels(buildingModel(only("delete")))).toEqual(["🗑 Delete Building"]);
     expect(buildingModel(only("changeUserStatus")).overflowActions).toEqual([]);
-  });
 
-  it("splits the body's entrance buttons between Add and Edit", () => {
-    const model = buildingModel(only("add"));
-    // Not routable: Add entrance sits under that status instead of in the body, so it is never shown twice.
-    expect(model.statusAction?.label).toBe("＋ Add entrance");
-    renderDetails(model);
-    expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "＋ Add entrance" })).not.toBeInTheDocument();
+    renderDetails(buildingModel(only("add")));
+    expect(buttonNames()).toEqual(expect.arrayContaining(["＋ Add entrance", "＋ Add indoor location", "⌂ Mark indoor location"]));
     expect(screen.queryByRole("button", { name: "↔ Link existing entrance" })).not.toBeInTheDocument();
   });
 
-  it("keeps Add entrance in the body once the building is routable, and offers no status action", () => {
-    const routable: SelectedBuildingView = { ...view, routable: true };
-    const model = buildingInspectorModel({ view: routable, contentLocations: [], nodes: [], linkingEntrance: false, can: canWith(only("add")), actions: buildingActions });
-    expect(model.statusAction).toBeUndefined();
-    renderDetails(model);
-    expect(screen.getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+  it("makes Add entrance the single solid primary action while the building is not routable and the user may add", () => {
+    renderDetails(buildingModel(only("add")));
+    const primaries = document.querySelectorAll(".inspector-primary-action");
+    expect(primaries).toHaveLength(1);
+    expect(primaries[0]).toHaveTextContent("＋ Add entrance");
   });
 
-  it("leaves the status action out without the Add switch", () => {
-    expect(buildingModel(only("edit")).statusAction).toBeUndefined();
+  it("offers no solid primary action when the building is routable, or when the user may not add", () => {
+    const routable: SelectedBuildingView = { ...view, entrances: [{ id: "n1", name: "Gate", nodeType: "Entrance", associatedPlaceId: "b1", lat: 1, lng: 1, status: "Active" }], routable: true };
+    const { unmount } = renderDetails(buildingModel(allPermissions(), false, routable));
+    expect(document.querySelector(".inspector-primary-action")).toBeNull();
+    expect(screen.getByRole("button", { name: "＋ Add entrance" })).toBeInTheDocument();
+    expect(screen.getByText("Routes can reach this building through 1 active entrance.")).toBeInTheDocument();
+    unmount();
+
+    renderDetails(buildingModel(only("edit")));
+    expect(document.querySelector(".inspector-primary-action")).toBeNull();
+    expect(screen.queryByRole("button", { name: "＋ Add entrance" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["no footprint", { ...view, building: { ...building, points: [[1, 1], [1, 2]] as [number, number][] } }, "The building has no footprint geometry, so routes cannot reach it."],
+    ["inactive", { ...view, building: { ...building, status: "Inactive" as const } }, "The building is inactive, so routes do not reach it."],
+    ["no entrance", view, "No active entrance is linked to this building, so routes cannot reach it."],
+    ["only unusable entrances", { ...view, entrances: [{ id: "n1", name: "Gate", nodeType: "Entrance" as const, associatedPlaceId: "b1", lat: 1, lng: 1, status: "Inactive" as const }] }, "The linked entrances are inactive or have no valid coordinates, so routes cannot reach this building."],
+  ])("explains why a building is not routable: %s", (_name, selected, sentence) => {
+    renderDetails(buildingModel(viewOnlyPermissions(), false, selected));
+    expect(screen.getByText(sentence)).toBeInTheDocument();
+  });
+
+  it("collapses a populated indoor section behind one heading with the count and shows types with icons", () => {
+    const rooms: Location[] = [
+      { id: "r1", name: "Computer Laboratory 1", code: "CL1", type: "Laboratory", parentId: "b1", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false },
+      { id: "r2", name: "Restroom", code: "RR", type: "Restroom", parentId: "b1", floor: "2nd Floor", status: "Active", lat: null, lng: null, positioned: false },
+    ];
+    renderDetails(buildingModel(allPermissions(), false, view, rooms));
+    const toggle = screen.getByRole("button", { name: "Indoor locations · 2" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Computer Laboratory 1")).not.toBeInTheDocument();
+    // The contextual actions stay available while the list is collapsed.
+    expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const floor = screen.getByRole("button", { name: "2nd Floor 2" });
+    expect(floor).toHaveAttribute("aria-expanded", "true");
+    expect(floor).toHaveAttribute("aria-controls");
+    expect(screen.getByText("Laboratory · CL1")).toBeInTheDocument();
+    expect(screen.getByText("Restroom · RR")).toBeInTheDocument();
+    expect(document.querySelectorAll(".inspector-content-icon svg")).toHaveLength(2);
+    fireEvent.click(floor);
+    expect(floor).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Computer Laboratory 1")).not.toBeInTheDocument();
+  });
+
+  it("states the empty indoor section once for an eligible building and offers Add when permitted", () => {
+    renderDetails(buildingModel(allPermissions()));
+    expect(screen.getAllByText(/No indoor locations/)).toHaveLength(1);
+    expect(screen.queryByText(/0 places/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "＋ Add indoor location" })).toBeInTheDocument();
+  });
+
+  it("explains that the classification must allow indoor locations first, and offers Edit Details only to someone who may edit", () => {
+    const facility: SelectedBuildingView = { ...view, building: { ...building, classification: "Facility" } };
+    const { unmount } = renderDetails(buildingModel(allPermissions(), false, facility));
+    expect(screen.getByText(/classification must allow indoor locations/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "＋ Add indoor location" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "⌂ Mark indoor location" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Indoor locations" })).getByRole("button", { name: "✎ Edit Details" })).toBeInTheDocument();
+    unmount();
+
+    const unclassified: SelectedBuildingView = { ...view, building: { ...building, classification: undefined } };
+    const second = renderDetails(buildingModel(only("add"), false, unclassified));
+    expect(screen.getByText(/This building has no classification\./)).toBeInTheDocument();
+    expect(screen.getByText(/classification must allow indoor locations/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "✎ Edit Details" })).not.toBeInTheDocument();
+    second.unmount();
+  });
+
+  it("labels the header Building with the campus code or a labelled OSM reference, plus the classification", () => {
+    const subtitle = (selected: SelectedBuildingView) => {
+      const model = buildingModel(allPermissions(), false, selected);
+      expect(model.objectLabel).toBe("Building");
+      return render(<>{model.subtitle}</>).container.textContent;
+    };
+    expect(subtitle(view)).toBe("Code HALL · College");
+    expect(subtitle({ ...view, building: { ...building, code: "OSM way 232896095" } })).toBe("OSM way 232896095 · College");
   });
 
   it("shows the entrance picker only to someone who may edit", () => {
