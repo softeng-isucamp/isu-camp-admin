@@ -178,6 +178,7 @@ export function buildingInspectorModel({
   } = view;
   const classification = selectedBuilding.classification ?? selectedBuildingLocation?.classification;
   const canContain = canContainLocations(classification);
+  const editDetailsInIndoorSection = !canContain && buildingContentLocations.length === 0;
   const unclassified = isUnclassifiedPlace({ type: "Place", classification });
   const identifier = identifierLine(view);
   // Adding an entrance creates a Route Node (Add); linking an existing one changes it (Edit); marking an indoor location counts as either.
@@ -254,7 +255,8 @@ export function buildingInspectorModel({
     // Building-level actions only: entrance actions live in the access block and indoor actions in the indoor section.
     // There is no sticky footer; Reshape Footprint is an edit like Edit Details, and Delete is set apart.
     overflowActions: [
-      ...(can("edit") ? [{ label: "✎ Edit Details", onSelect: actions.onEditDetails }] : []),
+      // While the indoor section offers Edit Details to fix the classification, the menu doesn't repeat it.
+      ...(can("edit") && !editDetailsInIndoorSection ? [{ label: "✎ Edit Details", onSelect: actions.onEditDetails }] : []),
       ...(can("edit") ? [{ label: "▱ Reshape Footprint", onSelect: actions.onReshape }] : []),
       ...(can("delete") ? [{ label: "🗑 Delete Building", tone: "danger" as const, separatorBefore: true, onSelect: actions.onDelete }] : []),
     ],

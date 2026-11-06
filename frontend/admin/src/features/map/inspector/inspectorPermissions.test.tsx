@@ -155,6 +155,12 @@ describe("Building inspector", () => {
     second.unmount();
   });
 
+  it("doesn't repeat Edit Details in the menu while the indoor section offers it", () => {
+    const facility: SelectedBuildingView = { ...view, building: { ...building, classification: "Facility" } };
+    expect(labels(buildingModel(allPermissions(), false, facility))).toEqual(["▱ Reshape Footprint", "🗑 Delete Building"]);
+    expect(labels(buildingModel(allPermissions()))).toContain("✎ Edit Details");
+  });
+
   it("labels the header Building with the campus code or a labelled OSM reference, plus the classification", () => {
     const subtitle = (selected: SelectedBuildingView) => {
       const model = buildingModel(allPermissions(), false, selected);

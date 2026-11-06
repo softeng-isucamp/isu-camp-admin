@@ -4807,7 +4807,7 @@ td small {
 .inspector-floor-disclosure .inspector-disclosure { color: #0c7441; font-size: 12px; }
 .inspector-section .inspector-location-row { align-items: flex-start; padding: 6px 0 6px 18px; border-bottom: 0; }
 .inspector-section .inspector-location-row strong { font-size: 13px; overflow-wrap: anywhere; }
-.inspector-section .inspector-location-row > div > span { font-size: 12px; }
+.inspector-section .inspector-location-row > div > span { font-size: 12px; color: #4b5d53; }
 .inspector-section .inspector-content-icon { width: 24px; height: 24px; flex-basis: 24px; }
 .inspector-details-list { margin: 6px 0 0; }
 .inspector-details-list > div { display: grid; grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1.2fr); gap: 10px; padding: 4px 0; font-size: 12px; }
