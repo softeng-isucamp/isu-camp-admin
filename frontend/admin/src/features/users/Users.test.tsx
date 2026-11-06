@@ -100,6 +100,8 @@ describe("Users account type", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
     const actions = screen.getAllByRole("menuitem").map((item) => item.textContent);
     expect(actions).toEqual(["View activity", "Deactivate account"]);
+    // Viewing and changing access sit in separate groups, as in the Administrators menu.
+    expect(within(screen.getByRole("menu")).getAllByRole("separator")).toHaveLength(1);
   });
 
   it("shows each account's status and labels the action to match", async () => {

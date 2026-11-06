@@ -162,6 +162,7 @@ function AppUserDirectory() {
                           >
                             View activity
                           </button>
+                          {can("changeUserStatus") && <div role="separator" />}
                           {can("changeUserStatus") && (
                             <button
                               role="menuitem"

@@ -1185,6 +1185,7 @@ export function Locations() {
                           >
                             View history
                           </button>
+                          {can("delete") && <div role="separator" />}
                           {can("delete") && (
                           <button
                             role="menuitem"

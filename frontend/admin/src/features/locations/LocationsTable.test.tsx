@@ -686,6 +686,11 @@ describe("Locations screen table and hierarchy toggle validation", () => {
       "3rd Floor",
       "4th Floor",
       "5th Floor",
+      "6th Floor",
+      "7th Floor",
+      "8th Floor",
+      "9th Floor",
+      "10th Floor",
     ]);
     const placeholder = Array.from((floorLevel as HTMLSelectElement).options).find((option) => option.value === "");
     expect(placeholder?.disabled).toBe(true);

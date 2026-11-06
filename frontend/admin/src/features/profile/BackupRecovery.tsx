@@ -178,7 +178,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
                 <button className="table-action menu-trigger" data-backup-trigger={backup.id} aria-label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} aria-expanded={menuId === backup.id}
                   disabled={locked || target !== null} onClick={() => setMenuId((current) => current === backup.id ? null : backup.id)}>•••</button>
                 {menuId === backup.id && <div className="row-action-menu" role="menu">
-                  {actions.map((entry) => <button key={entry.action} role="menuitem" className={entry.action === 'delete' ? 'danger' : undefined} onClick={() => open(entry.action, backup)}>{entry.label}</button>)}
+                  {actions.map((entry, index) => [entry.action === 'delete' && index > 0 && <div key="separator" role="separator" />, <button key={entry.action} role="menuitem" className={entry.action === 'delete' ? 'danger' : undefined} onClick={() => open(entry.action, backup)}>{entry.label}</button>])}
                 </div>}
               </div>}
             </td>
