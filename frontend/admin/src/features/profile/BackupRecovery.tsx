@@ -37,6 +37,8 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const [actionError, setActionError] = useState('');
   const [retry, setRetry] = useState(0);
   const [pollError, setPollError] = useState('');
+  // After a schedule save, the shown next run is the old schedule's until the server answers.
+  const [nextRunStale, setNextRunStale] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   // Async answers are checked against what is on screen now, and a cancel that lost its race is reported once.
   const jobRef = useRef(job);
@@ -55,6 +57,9 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     setSchedule(history.schedule);
     setAutomatic(history.automatic);
   };
+  // Re-reads the history after a change; a failure says so without undoing the change's own report.
+  const refresh = (live = () => true) => services.profile.history().then((history) => { if (live()) apply(history); })
+    .catch((cause) => { if (live()) setError(errorMessage(cause, "The backup history couldn't be refreshed. Reload the page to see the latest backups.")); });
   useEffect(() => {
     let live = true;
     setLoading(true); setError('');
@@ -90,8 +95,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     // A cancel that lost the race shows only "had already finished"; the history still refreshes.
     if (cancelAsked.current !== completedJobId) onSuccess(services.profile.isFixture ? 'Demo operation completed. No server data was changed.'
       : completedKind === 'restore' ? 'Data was restored successfully.' : 'Backup was created successfully.');
-    services.profile.history().then((history) => { if (live) apply(history); })
-      .catch((cause) => { if (live) setError(errorMessage(cause, "The backup history couldn't be refreshed. Reload the page to see the latest backups.")); });
+    void refresh(() => live);
     return () => { live = false; };
   }, [completedJobId, completedKind, onSuccess]);
   const create = async () => {
@@ -191,7 +195,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     {!loading && !error && automatic && (automatic.runs.length > 0 || schedule?.enabled) && <section className="profile-auto-history" aria-labelledby="auto-history-heading">
       <div className="profile-auto-heading">
         <h3 id="auto-history-heading">Automatic Backup History</h3>
-        {automatic.nextRunAt
+        {nextRunStale ? null : automatic.nextRunAt
           ? <span className="profile-muted">Next run: <time dateTime={automatic.nextRunAt}>{formatDateTime(automatic.nextRunAt)}</time></span>
           : <span className="profile-muted">No next run scheduled</span>}
       </div>
@@ -212,6 +216,10 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       onDeleted={() => { setItems((list) => list.filter((backup) => backup.id !== target.backup.id)); setTarget(null); onSuccess('Backup was deleted successfully.'); }} />}
     {stopping && <StopRestoreDialog returnTo={focusTargets()} onClose={() => setStopping(false)} onStop={() => void cancel()} />}
     {editingSchedule && schedule && <ScheduleDialog initial={schedule} onClose={() => setEditingSchedule(false)}
-      onSaved={(saved) => { setSchedule(saved); setEditingSchedule(false); onSuccess('Automatic backup settings saved.'); }} />}
+      onSaved={(saved) => {
+        setSchedule(saved); setEditingSchedule(false); onSuccess('Automatic backup settings saved.');
+        // The server computes the next run from the saved schedule.
+        setNextRunStale(true); void refresh().finally(() => setNextRunStale(false));
+      }} />}
   </Card>;
 }

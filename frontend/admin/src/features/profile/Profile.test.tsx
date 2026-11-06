@@ -507,6 +507,38 @@ describe('backup & recovery', () => {
       expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
     });
 
+    it('promises no next run once the schedule is turned off and saved', async () => {
+      history()
+        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: SCHEDULE, automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } })
+        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: RUNS } });
+      vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
+      page();
+      expect(within(await section()).getByText(/Next run:/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.click(within(dialog).getByRole('switch'));
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(await within(await section()).findByText('No next run scheduled')).toBeInTheDocument();
+      expect(within(await section()).queryByText(/Next run:/)).not.toBeInTheDocument();
+      expect(screen.getByText('Automatic backup settings saved.')).toBeInTheDocument();
+    });
+
+    it('shows the new next run after the run time is changed and saved', async () => {
+      history()
+        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: SCHEDULE, automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } })
+        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: { ...SCHEDULE, time: '04:00' }, automatic: { runs: RUNS, nextRunAt: '2026-10-10T20:00:00Z' } });
+      vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
+      page();
+      expect(within(await section()).getByText(/Next run:/).querySelector('time')).toHaveAttribute('datetime', '2026-10-10T18:30:00Z');
+      await userEvent.click(screen.getByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.clear(within(dialog).getByLabelText('Time'));
+      await userEvent.type(within(dialog).getByLabelText('Time'), '04:00');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(async () => expect(within(await section()).getByText(/Next run:/).querySelector('time')).toHaveAttribute('datetime', '2026-10-10T20:00:00Z'));
+      expect(screen.getByRole('button', { name: /Daily at 4:00 AM/ })).toBeInTheDocument();
+    });
+
     it('hides the section on a server that cannot read its own audit log', async () => {
       history({ automatic: undefined });
       page();
@@ -516,9 +548,12 @@ describe('backup & recovery', () => {
   });
 
   describe('schedule dialog', () => {
+    // The server keeps what it saved, so the history re-read after a save returns it.
+    const saveSchedule = () => vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => { history({ schedule: next }); return next; });
+
     it('saves a weekly schedule', async () => {
       history();
-      const save = vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
+      const save = saveSchedule();
       page();
       await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
       const dialog = screen.getByRole('dialog', { name: 'Automatic backups' });
@@ -540,7 +575,7 @@ describe('backup & recovery', () => {
 
     it('hides the schedule fields while the switch is off and still saves the schedule', async () => {
       history();
-      const save = vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
+      const save = saveSchedule();
       page();
       await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
       const dialog = screen.getByRole('dialog');
