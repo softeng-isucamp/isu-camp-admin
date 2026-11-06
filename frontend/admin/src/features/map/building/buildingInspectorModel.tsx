@@ -75,6 +75,10 @@ function Disclosure({ title, count, defaultOpen, children, className }: {
 }
 
 /** Indoor locations: one heading with the count, collapsed when populated; the indoor actions live here. */
+/** The indoor Locations inside one building: the same rule for the section and for the menu. */
+const indoorLocationsIn = (building: { id: string; name: string }, locations: Location[]) =>
+  locations.filter((location) => location.parentId === building.id || location.building === building.name);
+
 function IndoorLocationsSection({ view, contentLocations, canContain, canAdd, canMark, canEdit, actions }: {
   view: SelectedBuildingView;
   contentLocations: Location[];
@@ -85,7 +89,7 @@ function IndoorLocationsSection({ view, contentLocations, canContain, canAdd, ca
   actions: Pick<BuildingInspectorActions, "onAddIndoorLocation" | "onMarkIndoorLocation" | "onEditDetails">;
 }) {
   const { building } = view;
-  const children = contentLocations.filter((location) => location.parentId === building.id || location.building === building.name);
+  const children = indoorLocationsIn(building, contentLocations);
   const grouped = new Map<string, Location[]>();
   children.forEach((child) => {
     const floor = child.floor || "Unspecified Floor";
@@ -178,7 +182,7 @@ export function buildingInspectorModel({
   } = view;
   const classification = selectedBuilding.classification ?? selectedBuildingLocation?.classification;
   const canContain = canContainLocations(classification);
-  const editDetailsInIndoorSection = !canContain && buildingContentLocations.length === 0;
+  const editDetailsInIndoorSection = !canContain && indoorLocationsIn(selectedBuilding, buildingContentLocations).length === 0;
   const unclassified = isUnclassifiedPlace({ type: "Place", classification });
   const identifier = identifierLine(view);
   // Adding an entrance creates a Route Node (Add); linking an existing one changes it (Edit); marking an indoor location counts as either.

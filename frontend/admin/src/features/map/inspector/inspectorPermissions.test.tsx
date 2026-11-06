@@ -158,6 +158,9 @@ describe("Building inspector", () => {
   it("doesn't repeat Edit Details in the menu while the indoor section offers it", () => {
     const facility: SelectedBuildingView = { ...view, building: { ...building, classification: "Facility" } };
     expect(labels(buildingModel(allPermissions(), false, facility))).toEqual(["▱ Reshape Footprint", "🗑 Delete Building"]);
+    // Rooms in other buildings don't count: this building's own indoor list is still empty.
+    const elsewhere = { id: "room-x", name: "Other Room", type: "Room", parentId: "other-building", building: "Other Hall" } as Location;
+    expect(labels(buildingModel(allPermissions(), false, facility, [elsewhere]))).toEqual(["▱ Reshape Footprint", "🗑 Delete Building"]);
     expect(labels(buildingModel(allPermissions()))).toContain("✎ Edit Details");
   });
 
