@@ -299,7 +299,7 @@ Backup & Recovery on My Profile takes real `pg_dump` archives. These routes back
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/backups` | Stored archives, the running job if there is one, and which controls this server can serve |
+| `GET /api/backups` | Stored archives, the running job if there is one, the schedule's own run history, and which controls this server can serve |
 | `POST /api/backups` | Start a dump; returns a job to poll |
 | `POST /api/backups/<id>/restore` | Restore an archive; needs the caller's password |
 | `POST /api/backups/<id>/download` | Issue a one-time download link; needs the caller's password |
@@ -316,7 +316,7 @@ These are jobs rather than plain responses because of that runtime. The API runs
 
 ### Every control is advertised, not assumed
 
-`GET /api/backups` carries `canDownload`, `canDelete` and `schedule`, and a job carries `cancellable`. **A key that is missing hides its control**, which is what lets the frontend and the backend land separately: a build talking to a deployment that has only half of this offers only the half that works, rather than a button that 404s. An unreadable `schedule` — a deployment that has not applied `migrations/20261023_add_backup_schedule.sql` — is treated the same as a missing one.
+`GET /api/backups` carries `canDownload`, `canDelete`, `schedule` and `automatic`, and a job carries `cancellable`. **A key that is missing hides its control**, which is what lets the frontend and the backend land separately: a build talking to a deployment that has only half of this offers only the half that works, rather than a button that 404s. An unreadable `schedule` — a deployment that has not applied `migrations/20261023_add_backup_schedule.sql` — is treated the same as a missing one, and so is an unreadable `automatic`.
 
 ### Cancelling
 
@@ -356,6 +356,7 @@ Things to know:
 - **Retention deletes archives that people took by hand.** It keeps the newest `keep` files in the directory whoever made them, because the limit is about disk rather than about authorship. At today's ~75 MB a dump, the default is a little over 1 GB. It runs **after each completed backup**, so a button press is held to the same limit as a scheduled run — and **saving a schedule deletes nothing by itself**, so lowering `keep` is never a delete somebody did not expect.
 - **A missed night is picked up at startup.** If the newest archive is more than a day old, a backup runs two minutes after the process starts instead of waiting for the next scheduled minute, because a development machine is rarely awake at 02:30. A restart an hour after a successful run does not take another.
 - **Starting it in two processes is safe.** Each run is claimed by creating a `.claimed-<time>` marker in the backup directory with `O_EXCL`, so `flask --debug` (which runs the app twice) or a second gunicorn worker still produces one dump rather than two writing the same file. Because the marker outlives the process, a restart does not re-take a night that was already taken.
+- **The panel shows the run history**, under the archive list, as `automatic` on `GET /api/backups`: `{runs, nextRunAt}`, newest first, read back out of the audit rows below rather than off the disk. The archives cannot answer the question somebody checking an unattended backup is asking — a night that **failed** left no file, one that was **skipped** left nothing at all, and one that succeeded is deleted by retention a fortnight before anybody stops caring that it ran — so a run says `taken`, `failed` or `skipped`, and a `taken` run carries its archive, its size, and whether that archive is still stored. `nextRunAt` is absent when the schedule is off, because a time shown there would promise a backup nobody gets. A log that cannot be read leaves `automatic` out entirely: an empty history means "it has never run", which is not a claim a deployment without the audit table can honestly make.
 - **Every run reaches the audit log** as a `System` row with actor `scheduler` — `backup`, `backup failed`, or `backup skipped` when somebody's own job was already running. Download, delete, cancel and a schedule change are `System` rows too, naming the administrator who did it; a retention removal names the archive it took. No row ever carries a password or a download link. The Logs page shows these under All.
 
 An unfinished dump is no longer mistaken for a backup. `pg_dump` creates its output file immediately and fills it as it reads, so a run that died part way through — a dropped pooler connection mid `building_photo` has happened here — used to leave a truncated file that the panel listed as ready to restore from. A dump now writes `<id>.dump.partial` and is renamed to `<id>.dump` only once the tool has exited cleanly, and leftovers are swept before each automatic run.

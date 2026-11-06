@@ -274,6 +274,54 @@ def test_an_unreadable_schedule_is_left_out_rather_than_guessed(app, monkeypatch
     assert body["canDownload"] is True
 
 
+TAKEN_RUN = {
+    "id": "41", "at": "2026-11-04T18:30:12Z", "outcome": "taken",
+    "message": "", "archiveId": "20261104-183000Z",
+    "stored": True, "sizeBytes": 105,
+}
+
+
+def test_history_carries_the_schedules_own_runs_and_the_next_one(app, monkeypatch):
+    """What the archives cannot say: the nights, including the empty-handed ones."""
+
+    monkeypatch.setattr(backups_route, "recent_runs", lambda: [TAKEN_RUN])
+    monkeypatch.setattr(backups_route, "next_run", lambda schedule=None: "2026-11-05T18:30:00Z")
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().get("/api/backups").get_json()
+
+    assert body["automatic"] == {"runs": [TAKEN_RUN], "nextRunAt": "2026-11-05T18:30:00Z"}
+
+
+def test_an_off_schedule_reports_its_runs_and_no_next_one(app, monkeypatch):
+    """A time shown for a schedule that is off would promise a backup nobody gets."""
+
+    monkeypatch.setattr(backups_route, "recent_runs", lambda: [])
+    monkeypatch.setattr(backups_route, "next_run", lambda schedule=None: None)
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().get("/api/backups").get_json()
+
+    assert body["automatic"] == {"runs": []}
+
+
+def test_an_unreadable_run_history_is_left_out_rather_than_sent_as_empty(app, monkeypatch):
+    """Empty means "it has never run", which a deployment with no audit table
+    cannot honestly claim, so the panel hides the section instead."""
+
+    monkeypatch.setattr(backups_route, "recent_runs", lambda: None)
+
+    with app.app_context():
+        sign_in(monkeypatch)
+        body = app.test_client().get("/api/backups").get_json()
+
+    assert "automatic" not in body
+    # The archives and their controls are unaffected.
+    assert body["canDownload"] is True
+
+
 def test_history_describes_stored_archives_newest_first(app, monkeypatch, tmp_path):
     with app.app_context():
         sign_in(monkeypatch)

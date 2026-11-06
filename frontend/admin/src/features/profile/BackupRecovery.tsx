@@ -3,8 +3,8 @@ import { Badge, Button, Card, Empty, LoadingState } from '../../components/UI';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
-import type { BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
-import { isAutomatic, scheduleWhen, sizeText } from './backupFormat';
+import type { AutomaticHistory, BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
+import { isAutomatic, RUN_OUTCOMES, runText, scheduleWhen, sizeText } from './backupFormat';
 import { DeleteDialog, DownloadDialog, RestoreDialog, StopRestoreDialog } from './BackupDialogs';
 import { ScheduleDialog } from './BackupScheduleDialog';
 /** A job's own message when it is plain; the server appends raw exception text after a colon, which is replaced by a line for the kind of job. */
@@ -24,6 +24,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const [items, setItems] = useState<SystemBackup[]>([]);
   const [capabilities, setCapabilities] = useState<Pick<BackupHistory, 'canDownload' | 'canDelete'>>({});
   const [schedule, setSchedule] = useState<BackupSchedule>();
+  const [automatic, setAutomatic] = useState<AutomaticHistory>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [job, setJob] = useState<BackupJob | null>(null);
@@ -52,6 +53,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     setItems(history.items);
     setCapabilities({ canDownload: history.canDownload, canDelete: history.canDelete });
     setSchedule(history.schedule);
+    setAutomatic(history.automatic);
   };
   useEffect(() => {
     let live = true;
@@ -185,6 +187,24 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       </table>
       {!items.length && <Empty>No backups yet.</Empty>}
     </div>}
+    {/* The schedule's own runs. Shown whenever the server reports them and there is something to say: a night that failed left no archive above, and one that succeeded outlives its archive by a fortnight of retention. */}
+    {!loading && !error && automatic && (automatic.runs.length > 0 || schedule?.enabled) && <section className="profile-auto-history" aria-labelledby="auto-history-heading">
+      <div className="profile-auto-heading">
+        <h3 id="auto-history-heading">Automatic Backup History</h3>
+        {automatic.nextRunAt
+          ? <span className="profile-muted">Next run: <time dateTime={automatic.nextRunAt}>{formatDateTime(automatic.nextRunAt)}</time></span>
+          : <span className="profile-muted">No next run scheduled</span>}
+      </div>
+      {automatic.runs.length > 0
+        ? <ul className="profile-auto-runs">
+            {automatic.runs.map((run) => <li key={run.id}>
+              {run.at ? <time dateTime={run.at}>{formatDateTime(run.at)}</time> : <span>—</span>}
+              <Badge tone={RUN_OUTCOMES[run.outcome].tone}>{RUN_OUTCOMES[run.outcome].label}</Badge>
+              <span className="profile-muted">{runText(run)}</span>
+            </li>)}
+          </ul>
+        : <p className="profile-muted profile-auto-empty">No automatic backup has run yet.</p>}
+    </section>}
     {target?.action === 'download' && <DownloadDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)}
       onStarted={() => { setTarget(null); onSuccess('Download started. The link works once and expires shortly.'); }} />}
     {target?.action === 'restore' && <RestoreDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)} onStarted={(started) => { setJob(started); setTarget(null); }} />}

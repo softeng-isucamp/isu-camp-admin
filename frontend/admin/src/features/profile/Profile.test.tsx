@@ -462,6 +462,59 @@ describe('backup & recovery', () => {
     expect(within(await row(3)).queryByRole('button', { name: /Actions for backup/ })).not.toBeInTheDocument();
   });
 
+  describe('automatic history', () => {
+    type Automatic = NonNullable<Awaited<ReturnType<typeof services.profile.history>>['automatic']>;
+    const RUNS: Automatic['runs'] = [
+      { id: 'r4', at: '2026-10-09T18:30:12Z', outcome: 'taken', message: '', archiveId: 'b1', stored: true, sizeBytes: 5 * 1024 * 1024 },
+      { id: 'r3', at: '2026-10-08T18:30:09Z', outcome: 'taken', message: 'removed 1 archive past the 14 kept', archiveId: 'b0', stored: false },
+      { id: 'r2', at: '2026-10-07T18:30:00Z', outcome: 'failed', message: 'pg_dump is not installed on the server.' },
+      { id: 'r1', at: '2026-10-06T18:30:00Z', outcome: 'skipped', message: 'Another backup or restore is already running.' },
+    ];
+    const section = async () => screen.findByRole('region', { name: 'Automatic Backup History' });
+    const runs = async () => within(await section()).getAllByRole('listitem').map((item) => item.textContent);
+
+    it('lists what the schedule has done, newest first, with the next run due', async () => {
+      history({ automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } });
+      page();
+      expect(within(await section()).getByText(/Next run:/)).toBeInTheDocument();
+      expect(await runs()).toEqual([
+        expect.stringContaining('Taken5.00 MB'),
+        // The archive is gone, which is retention working rather than a failure.
+        expect.stringContaining('TakenArchive no longer stored · removed 1 archive past the 14 kept'),
+        expect.stringContaining('Failedpg_dump is not installed on the server.'),
+        expect.stringContaining('SkippedAnother backup or restore is already running.'),
+      ]);
+      expect(within(await section()).getAllByRole('listitem')[0].querySelector('time')).toHaveAttribute('datetime', '2026-10-09T18:30:12Z');
+    });
+
+    it('keeps the runs of a schedule that is now off, and promises no next one', async () => {
+      history({ schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: RUNS } });
+      page();
+      expect(within(await section()).getByText('No next run scheduled')).toBeInTheDocument();
+      expect(await runs()).toHaveLength(4);
+    });
+
+    it('says a schedule that is on has not run yet', async () => {
+      history({ automatic: { runs: [], nextRunAt: '2026-10-10T18:30:00Z' } });
+      page();
+      expect(within(await section()).getByText('No automatic backup has run yet.')).toBeInTheDocument();
+    });
+
+    it('hides the section when the server reports no history and nothing is scheduled', async () => {
+      history({ schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: [] } });
+      page();
+      await screen.findByRole('table');
+      expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
+    });
+
+    it('hides the section on a server that cannot read its own audit log', async () => {
+      history({ automatic: undefined });
+      page();
+      await screen.findByRole('table');
+      expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
+    });
+  });
+
   describe('schedule dialog', () => {
     it('saves a weekly schedule', async () => {
       history();

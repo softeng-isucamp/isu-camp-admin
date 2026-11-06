@@ -41,11 +41,25 @@ export const scheduleSchema = z.object({
   keep: z.number().int().min(1),
 }).refine((schedule) => (schedule.frequency === 'weekly') === (schedule.day !== null));
 export type BackupSchedule = z.infer<typeof scheduleSchema>;
-// A schedule the frontend cannot read (or in another time zone) hides the schedule control rather than the whole list.
+// One run of the automatic backup, read back out of the audit log: a night that failed left no archive, and one that succeeded outlives its archive by a fortnight of retention.
+const automaticRunSchema = z.object({
+  id: z.string(), at: z.string().datetime().nullable(), outcome: z.enum(['taken', 'failed', 'skipped']),
+  /** What retention removed, or why the run failed or was skipped. */
+  message: z.string().optional(),
+  archiveId: z.string().optional(),
+  /** Whether that archive is still stored; false once retention has deleted it. */
+  stored: z.boolean().optional(), sizeBytes: z.number().nonnegative().optional(),
+});
+export type AutomaticRun = z.infer<typeof automaticRunSchema>;
+// `nextRunAt` is absent when no run is due, which is how an off schedule says so.
+const automaticSchema = z.object({ runs: z.array(automaticRunSchema), nextRunAt: z.string().datetime().optional() });
+export type AutomaticHistory = z.infer<typeof automaticSchema>;
+// A schedule the frontend cannot read (or in another time zone) hides the schedule control rather than the whole list; a history it cannot read hides only the history.
 const historySchema = z.object({
   items: z.array(backupSchema), activeJob: jobSchema.nullish(),
   canDownload: z.boolean().optional(), canDelete: z.boolean().optional(),
   schedule: scheduleSchema.optional().catch(undefined),
+  automatic: automaticSchema.optional().catch(undefined),
 });
 export type BackupHistory = z.infer<typeof historySchema>;
 // One-time link the browser navigates to; refuses `javascript:` and other schemes. A root-relative path is the API's, not the page's.
@@ -75,12 +89,30 @@ const seedBackups = (now = Date.now()): SystemBackup[] => [
   { id: 'demo-backup-2', createdAt: new Date(now - 29 * HOUR).toISOString(), createdBy: 'admin_dean', sizeBytes: 204_800, scope: 'Demo campus data', status: 'ready' },
   { id: 'demo-backup-1', createdAt: new Date(now - 53 * HOUR).toISOString(), createdBy: 'scheduled', sizeBytes: 0, scope: 'Demo campus data', status: 'failed' },
 ];
+/** Scheduled runs the archives above cannot show: one whose archive retention has removed, one that failed, and one skipped by a restore. */
+const seedRuns = (now = Date.now()): AutomaticRun[] => [
+  { id: 'demo-run-4', at: new Date(now - 5 * HOUR).toISOString(), outcome: 'taken', archiveId: 'demo-backup-3', stored: true, sizeBytes: 212_992, message: '' },
+  { id: 'demo-run-3', at: new Date(now - 29 * HOUR).toISOString(), outcome: 'taken', archiveId: 'demo-backup-0', stored: false, message: 'removed 1 archive past the 14 kept' },
+  { id: 'demo-run-2', at: new Date(now - 53 * HOUR).toISOString(), outcome: 'failed', message: 'pg_dump is not installed on the server, so backups cannot run.' },
+  { id: 'demo-run-1', at: new Date(now - 77 * HOUR).toISOString(), outcome: 'skipped', message: 'Another backup or restore is already running.' },
+];
 const FIXTURE_SCHEDULE: BackupSchedule = { enabled: true, frequency: 'daily', day: null, time: '02:30', timeZone: 'Asia/Manila', keep: 14 };
+/** The next run the fixture's schedule would take, so the demo panel names a real time rather than a fixed one that drifts into the past. */
+const nextFixtureRun = (schedule: BackupSchedule, now = new Date()): string | undefined => {
+  if (!schedule.enabled) return undefined;
+  const [hours, minutes] = schedule.time.split(':').map(Number);
+  const due = new Date(now);
+  due.setHours(hours, minutes, 0, 0);
+  if (schedule.frequency === 'weekly') due.setDate(due.getDate() + (((schedule.day ?? 0) - due.getDay() + 7) % 7));
+  if (due <= now) due.setDate(due.getDate() + (schedule.frequency === 'weekly' ? 7 : 1));
+  return due.toISOString();
+};
 const TERMINAL: BackupJob['status'][] = ['succeeded', 'failed', 'cancelled'];
 
 /** Proposed HTTP contract; fixture jobs demonstrate UI states without copying data. */
 export function createProfileService(request: Request, fixture?: FixtureAccount, audit: Audit = () => {}, apiUrl: (path: string) => string = (path) => path) {
   let backups: SystemBackup[] = fixture ? seedBackups() : [];
+  const automaticRuns: AutomaticRun[] = fixture ? seedRuns() : [];
   let schedule: BackupSchedule = { ...FIXTURE_SCHEDULE };
   const jobs = new Map<string, { job: BackupJob; polls: number; actor: string; cancelRequested: boolean }>();
   let activeJob: BackupJob | null = null;
@@ -113,9 +145,11 @@ export function createProfileService(request: Request, fixture?: FixtureAccount,
     history: async () => {
       if (!fixture) return parseReply(historySchema, await request('/api/backups'), 'Backup history reply is malformed.');
       await superadmin();
+      const nextRunAt = nextFixtureRun(schedule);
       return {
         items: structuredClone(backups), activeJob: activeJob ? { ...activeJob } : null,
         canDownload: true, canDelete: true, schedule: { ...schedule },
+        automatic: { runs: structuredClone(automaticRuns), ...(nextRunAt ? { nextRunAt } : {}) },
       };
     },
     createBackup: async (): Promise<BackupJob> => fixture ? start('backup')
