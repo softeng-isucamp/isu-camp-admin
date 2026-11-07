@@ -4,9 +4,18 @@ A JSON column has two different nothings, and the one the schema means by "no
 permissions recorded" is SQL NULL. Assigning Python ``None`` stored the JSON
 scalar ``null`` instead - a value - which the migration's shape constraint
 rejects, because ``jsonb_typeof('null')`` is ``'null'`` and not ``'object'``.
-Creating a superadmin and promoting an administrator both assign ``None``
+Creating a superadmin and promoting an administrator both assigned ``None``
 deliberately, so both failed with a check violation on PostgreSQL while every
 SQLite and fake-store test passed. Neither carried the constraint (issue #145).
+
+Both of those writers are gone: the superadmins are a fixed set, so the API
+creates regular administrators only and nothing promotes or demotes. What the
+column stores through the API is therefore always an object, and SQL NULL is
+left to the migration and to the transfer procedure. The declaration is kept
+``none_as_null`` all the same - the distinction is a property of the column,
+not of whichever route happened to assign it - and the two control tests below
+still carry the constraint, so a route that assigns ``None`` again cannot
+quietly reintroduce the bug.
 
 These tests carry it. They run against PostgreSQL when ``ISU_TEST_DATABASE_URL``
 names a disposable one, applying the real migration file - which is where the
@@ -101,7 +110,11 @@ def app(request, monkeypatch, tmp_path):
 
         if backend == "postgresql":
             # The genuine article, run exactly as a deployment would run it.
-            db.session.execute(db.text(MIGRATION.read_text(encoding="utf-8")))
+            #
+            # Handed to the driver rather than to db.text, which reads ":id" -
+            # part of the route named in the column comment - as a bind
+            # parameter and refuses the script for a value nobody passed.
+            db.session.connection().exec_driver_sql(MIGRATION.read_text(encoding="utf-8"))
         else:
             for event in ("insert", "update"):
                 db.session.execute(db.text(SQLITE_CONSTRAINT.format(event=event)))
@@ -126,6 +139,16 @@ def add_admin(app, identifier, username, role="admin", permissions=None):
             permissions=permissions,
         ))
         db.session.commit()
+
+        if app.backend == "postgresql":
+            # An id supplied by hand does not advance the sequence, and
+            # POST /api/admins lets the database assign one - so the next
+            # create would be handed an id this row already holds.
+            db.session.execute(db.text(
+                "select setval(pg_get_serial_sequence('public.admin', 'id'),"
+                " (select max(id) from public.admin))"
+            ))
+            db.session.commit()
 
 
 def signed_in(app, admin_id=1):
@@ -200,39 +223,31 @@ def test_sql_null_itself_is_accepted(app):
 
 
 # ==========================================
-# Creating a superadmin
+# Creating an administrator
 # ==========================================
 
-NEW_SUPERADMIN = {
+NEW_ADMIN = {
     "username": "admin_new",
     "email": "admin_new@isu.edu.ph",
     "password": "Another-secret1!",
-    "role": "superadmin",
+    "role": "admin",
 }
 
+NEW_SUPERADMIN = {**NEW_ADMIN, "role": "superadmin"}
 
-def test_creating_a_superadmin_succeeds_and_stores_sql_null(app):
-    """The merge blocker: this answered 500 with a check violation."""
+
+def test_creating_a_superadmin_is_refused_and_writes_nothing(app):
+    """The route that used to store SQL NULL here. It no longer stores
+    anything: there are four superadmins and the API does not add a fifth."""
 
     add_admin(app, 1, "admin01", role="superadmin")
 
     response = signed_in(app).post("/api/admins", json=NEW_SUPERADMIN)
 
-    assert response.status_code == 201
-    assert response.json["admin"]["role"] == "superadmin"
-    assert response.json["admin"]["permissions"] is None
-    assert stored_is_sql_null(app, "admin_new") is True
-
-
-def test_creating_a_superadmin_ignores_any_permissions_it_is_sent(app):
-    """Ignored, not stored: a client may hold one form for both roles."""
-
-    add_admin(app, 1, "admin01", role="superadmin")
-
-    response = signed_in(app).post("/api/admins", json={**NEW_SUPERADMIN, "permissions": dict(ALL_ON)})
-
-    assert response.status_code == 201
-    assert stored_is_sql_null(app, "admin_new") is True
+    assert response.status_code == 409
+    assert response.json["code"] == "superadmin_set_fixed"
+    with app.app_context():
+        assert Admin.query.filter_by(username="admin_new").first() is None
 
 
 def test_creating_a_regular_administrator_stores_the_four_switches(app):
@@ -241,7 +256,7 @@ def test_creating_a_regular_administrator_stores_the_four_switches(app):
     add_admin(app, 1, "admin01", role="superadmin")
 
     response = signed_in(app).post("/api/admins", json={
-        **NEW_SUPERADMIN, "role": "admin", "permissions": dict(ALL_ON),
+        **NEW_ADMIN, "permissions": dict(ALL_ON),
     })
 
     assert response.status_code == 201
@@ -257,7 +272,7 @@ def test_a_new_administrator_with_no_permissions_named_stores_four_falses(app):
 
     add_admin(app, 1, "admin01", role="superadmin")
 
-    response = signed_in(app).post("/api/admins", json={**NEW_SUPERADMIN, "role": "admin"})
+    response = signed_in(app).post("/api/admins", json=NEW_ADMIN)
 
     assert response.status_code == 201
     assert stored_is_sql_null(app, "admin_new") is False
@@ -268,32 +283,26 @@ def test_a_new_administrator_with_no_permissions_named_stores_four_falses(app):
 
 
 # ==========================================
-# Promoting and demoting
+# The role route writes nothing
 # ==========================================
 
-def test_promoting_an_administrator_succeeds_and_stores_sql_null(app):
-    """The second half of the merge blocker, for the same reason."""
+def test_the_role_route_leaves_the_stored_column_alone(app):
+    """It used to assign ``None`` on a promotion and an object on a demotion,
+    which is where the bug lived. Now it answers 405 and both rows stand."""
 
     add_admin(app, 1, "admin01", role="superadmin")
     add_admin(app, 2, "admin02", permissions=dict(ALL_ON))
+    client = signed_in(app)
 
-    response = signed_in(app).put("/api/admins/2/role", json={"role": "superadmin"})
+    promoted = client.put("/api/admins/2/role", json={"role": "superadmin"})
+    demoted = client.put("/api/admins/2/role", json={"role": "admin"})
 
-    assert response.status_code == 200
-    assert response.json["admin"]["permissions"] is None
-    assert stored_is_sql_null(app, "admin02") is True
-
-
-def test_demoting_a_superadmin_stores_an_object_not_null(app):
-    add_admin(app, 1, "admin01", role="superadmin")
-    add_admin(app, 2, "admin02", role="superadmin")
-
-    response = signed_in(app).put("/api/admins/2/role", json={
-        "role": "admin", "permissions": dict(ALL_ON),
-    })
-
-    assert response.status_code == 200
+    assert (promoted.status_code, demoted.status_code) == (405, 405)
+    assert promoted.json["code"] == "superadmin_set_fixed"
     assert stored_is_sql_null(app, "admin02") is False
+    with app.app_context():
+        record = Admin.query.filter_by(username="admin02").one()
+        assert (record.role, record.permissions) == ("admin", ALL_ON)
 
 
 def test_setting_permissions_on_an_administrator_stores_an_object(app):
@@ -309,23 +318,4 @@ def test_setting_permissions_on_an_administrator_stores_an_object(app):
     with app.app_context():
         assert Admin.query.filter_by(username="admin02").one().permissions == {
             "add": True, "edit": False, "delete": False, "changeUserStatus": True,
-        }
-
-
-def test_a_promotion_round_trips_through_a_demotion(app):
-    """Both directions in one request sequence, which is how the bug was found:
-    the UI promotes and demotes the same row."""
-
-    add_admin(app, 1, "admin01", role="superadmin")
-    add_admin(app, 2, "admin02", permissions=dict(ALL_ON))
-    client = signed_in(app)
-
-    promoted = client.put("/api/admins/2/role", json={"role": "superadmin"})
-    demoted = client.put("/api/admins/2/role", json={"role": "admin"})
-
-    assert (promoted.status_code, demoted.status_code) == (200, 200)
-    assert stored_is_sql_null(app, "admin02") is False
-    with app.app_context():
-        assert Admin.query.filter_by(username="admin02").one().permissions == {
-            "add": False, "edit": False, "delete": False, "changeUserStatus": False,
         }

@@ -6,6 +6,7 @@ import pytest
 
 import admins as admins_module
 import auth as auth_module
+import services.superadmin as superadmin_module
 from admins import admins_bp
 from services.security import verify_password
 
@@ -138,6 +139,39 @@ class FakeAdmin:
     query = _QueryDescriptor()
 
 
+class FakeDesignation:
+    """Stands in for public.superadmin_designation.
+
+    Empty by default, which is the pre-migration state: no account is
+    designated, so nothing is protected and the existing rules are the only
+    ones that apply. ``designate`` is what a test uses to say "these are the
+    four".
+
+    Shares FakeQuery, so ``designated_admin_ids(lock=True)`` takes the same
+    row lock the administrator rows are taken under - which is how the
+    concurrency tests below can watch a designation land mid-request.
+    """
+
+    store = []
+    admin_id = FakeColumn("admin_id")
+
+    def __init__(self, admin_id):
+        self.admin_id = admin_id
+
+    class _QueryDescriptor:
+        def __get__(self, _instance, owner):
+            return FakeQuery(owner.store)
+
+    query = _QueryDescriptor()
+
+
+def designate(*admin_ids):
+    """Designates these accounts as the fixed superadmins."""
+
+    FakeDesignation.store = [FakeDesignation(admin_id) for admin_id in admin_ids]
+    return FakeDesignation.store
+
+
 class FakeSession:
     def __init__(self):
         self.added = []
@@ -221,9 +255,15 @@ def admin_directory(monkeypatch):
         FakeAdmin(id=1, username="admin01", password="password123", gmail="admin01@example.com", role="superadmin"),
         FakeAdmin(id=2, username="admin02", password="password456", gmail="admin02@example.com"),
     ])
+    # Nobody is designated unless a test says so. Account 1 is therefore an
+    # ordinary superadmin here, which keeps every rule that predates the fixed
+    # set under test as written - and is what a deployment looks like between
+    # this build and the migration.
+    designate()
     session = FakeSession()
     monkeypatch.setattr(admins_module, "Admin", FakeAdmin)
     monkeypatch.setattr(auth_module, "Admin", FakeAdmin)
+    monkeypatch.setattr(superadmin_module, "SuperadminDesignation", FakeDesignation)
     monkeypatch.setattr(admins_module.db, "session", session)
     monkeypatch.setattr(admins_module.db.func, "lower", lambda column: column, raising=False)
     monkeypatch.setattr(admins_module, "log_audit", lambda *args, **kwargs: None)
@@ -385,40 +425,12 @@ def test_creating_an_administrator_by_role_with_a_recent_confirmation():
     assert [record.role for record in created_accounts()] == ["admin"]
 
 
-def test_creating_a_superadmin_with_a_recent_confirmation():
-    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
-
-    assert response.status_code == 201
-    assert response.json["admin"]["role"] == "superadmin"
-    assert [record.role for record in created_accounts()] == ["superadmin"]
-
-
-def test_the_role_is_read_like_the_role_routes_does():
-    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": " SuperAdmin "})
-
-    assert response.status_code == 201
-    assert response.json["admin"]["role"] == "superadmin"
-
-
-def test_creating_a_superadmin_without_a_confirmation_is_refused(admin_directory):
-    response = signed_in(admins_app(), confirmed=False).post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
-
-    assert response.status_code == 403
-    assert response.json == {
-        "success": False,
-        "code": "password_confirmation_required",
-        "message": "Confirm your password to add an administrator.",
-    }
-    assert admin_directory.committed is False
-    assert created_accounts() == []
-
-
-def test_creating_a_superadmin_with_an_expired_confirmation_is_refused(admin_directory):
+def test_creating_with_an_expired_confirmation_is_refused(admin_directory):
     client = signed_in(admins_app())
     with client.session_transaction() as flask_session:
         flask_session["reauth_at"] = time.time() - 3600
 
-    response = client.post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+    response = client.post("/api/admins", json={**NEW_ACCOUNT, "role": "admin"})
 
     assert response.status_code == 403
     assert response.json["code"] == "password_confirmation_required"
@@ -427,10 +439,15 @@ def test_creating_a_superadmin_with_an_expired_confirmation_is_refused(admin_dir
 
 @pytest.mark.parametrize("role", ["owner", "", "root", 1, True, ["superadmin"], {"role": "admin"}])
 def test_an_unrecognized_role_is_a_field_error(role, admin_directory):
+    """Administrator is the only role a create may name now, so the message
+    names one choice. "superadmin" is not one of these: the route understands
+    it and refuses it by policy, which the fixed-set section covers.
+    """
+
     response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": role})
 
     assert response.status_code == 400
-    assert response.json["fields"] == {"role": "Role must be Administrator or Superadmin."}
+    assert response.json["fields"] == {"role": "Role must be Administrator."}
     assert admin_directory.committed is False
     assert created_accounts() == []
 
@@ -455,8 +472,8 @@ def test_a_plain_administrator_is_refused_before_a_password_is_asked_for(admin_d
 def test_a_confirmation_does_not_override_the_other_validation():
     client = signed_in(admins_app())
 
-    short = client.post("/api/admins", json={**NEW_ACCOUNT, "password": "short", "role": "superadmin"})
-    duplicate = client.post("/api/admins", json={**NEW_ACCOUNT, "username": "ADMIN02", "role": "superadmin"})
+    short = client.post("/api/admins", json={**NEW_ACCOUNT, "password": "short", "role": "admin"})
+    duplicate = client.post("/api/admins", json={**NEW_ACCOUNT, "username": "ADMIN02", "role": "admin"})
 
     assert short.status_code == 400 and "password" in short.json["fields"]
     assert duplicate.status_code == 409 and "username" in duplicate.json["fields"]
@@ -474,11 +491,12 @@ def test_incomplete_details_are_reported_before_a_missing_confirmation_is():
 
 def test_a_created_account_is_listed_with_its_role():
     client = signed_in(admins_app())
-    client.post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+    client.post("/api/admins", json={**NEW_ACCOUNT, "role": "admin"})
 
-    roles = {item["username"]: item["role"] for item in client.get("/api/admins").json["items"]}
+    listed = {item["username"]: item for item in client.get("/api/admins").json["items"]}
 
-    assert roles["admin03"] == "superadmin"
+    assert listed["admin03"]["role"] == "admin"
+    assert listed["admin03"]["isProtected"] is False
 
 
 @pytest.mark.parametrize(
@@ -838,249 +856,559 @@ def test_a_superadmin_self_edit_keeps_the_role():
 
 
 # ==========================================
-# ROLE CHANGES
+# THE FIXED SET OF SUPERADMINS
 # ==========================================
+
+# There are four superadmins, named in public.superadmin_designation, and the
+# portal cannot change which four. Promotion and demotion are gone, creating a
+# superadmin is refused, and nothing here can set a designated account's status
+# or permissions or remove it.
+#
+# Every refusal is checked for what it leaves behind as well as for its status
+# code: the point of the policy is that the stored rows do not move, so a test
+# that only read the response would not be testing it.
+
+FIXED_CODE = "superadmin_set_fixed"
+
+ROLE_FIXED_MESSAGE = (
+    "The superadmin accounts are fixed. Promoting and demoting administrators "
+    "is handled outside the portal."
+)
+
+CREATE_SUPERADMIN_MESSAGE = (
+    "New accounts are administrators. The superadmin accounts are fixed and "
+    "cannot be created here."
+)
+
+DESIGNATED_ACCOUNT_MESSAGE = (
+    "This is a designated superadmin account. Its role and its access are "
+    "managed outside the portal."
+)
+
 
 def role_of(admin_id):
     return next(item for item in FakeAdmin.store if item.id == admin_id).role
 
 
-def test_a_superadmin_promotes_an_administrator(admin_directory):
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "superadmin"})
-
-    assert response.status_code == 200
-    assert response.json["success"] is True
-    assert response.json["message"] == "admin02 was promoted to superadmin successfully."
-    assert response.json["admin"] == {
-        "id": "2", "username": "admin02", "email": "admin02@example.com",
-        "status": "Active", "role": "superadmin", "isCurrent": False,
-        # Promoting discards the switches: the role carries everything.
-        "permissions": None,
-    }
-    assert role_of(2) == "superadmin"
-    assert next(item for item in FakeAdmin.store if item.id == 2).permissions is None
-    assert admin_directory.committed is True
+def status_of(admin_id):
+    return next(item for item in FakeAdmin.store if item.id == admin_id).status
 
 
-def test_a_superadmin_demotes_another_superadmin(admin_directory):
-    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
-
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
-
-    assert response.status_code == 200
-    assert response.json["message"] == "admin02 was demoted to administrator successfully."
-    assert response.json["admin"]["role"] == "admin"
-    assert role_of(2) == "admin"
-    assert admin_directory.committed is True
+# A username and address that none of the five accounts above hold, for a
+# create made from inside ``the_four``.
+ANOTHER_ACCOUNT = {
+    "username": "admin_new", "email": "admin_new@example.com", "password": "Another-secret1!",
+}
 
 
-def test_a_demoted_superadmin_cannot_use_the_role_route_next(admin_directory):
-    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
-    client = signed_in(admins_app(), admin_id=2)
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+def the_four():
+    """A directory shaped like the policy: four designated superadmins.
 
-    # Same cookie as before the demotion: only the stored row changed.
-    response = client.put("/api/admins/1/role", json={"role": "admin"})
+    Accounts 1-4 are the designated set and 5 is a regular administrator, so a
+    test can act as one of the four on an ordinary colleague as well as on a
+    protected peer. The caller is account 1 unless a test says otherwise.
+    """
 
-    assert response.status_code == 403
-    assert response.json["code"] == "superadmin_required"
-    assert role_of(1) == "superadmin"
+    FakeAdmin.reset([
+        FakeAdmin(id=1, username="admin01", password="x", gmail="a@example.com", role="superadmin"),
+        FakeAdmin(id=2, username="admin02", password="x", gmail="b@example.com", role="superadmin"),
+        FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"),
+        FakeAdmin(id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin"),
+        FakeAdmin(id=5, username="admin05", password="x", gmail="e@example.com"),
+    ])
+    designate(1, 2, 3, 4)
+    return signed_in(admins_app(), admin_id=1)
 
+
+# ------------------------------------------------------------------
+# The role route does not change anybody's role
+# ------------------------------------------------------------------
 
 @pytest.mark.parametrize("role", ["superadmin", "admin"])
-def test_the_role_route_refuses_a_plain_administrator(role, admin_directory):
-    # The caller (2) acts on the superadmin (1), so only the role can refuse.
-    response = signed_in(admins_app(), admin_id=2).put("/api/admins/1/role", json={"role": role})
+def test_the_role_route_refuses_every_role_change(role, admin_directory):
+    """Both directions, and nothing is written for either."""
 
-    assert response.status_code == 403
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": role})
+
+    assert response.status_code == 405
     assert response.json == {
-        "success": False, "code": "superadmin_required", "message": "Superadmin access required",
+        "success": False, "code": FIXED_CODE, "message": ROLE_FIXED_MESSAGE,
     }
-    assert role_of(1) == "superadmin"
     assert role_of(2) == "admin"
     assert admin_directory.committed is False
 
 
+@pytest.mark.parametrize("admin_id", [1, 2, 99])
 @pytest.mark.parametrize("confirmed", [True, False])
-def test_the_role_route_refuses_a_plain_administrator_before_asking_for_a_password(confirmed):
-    response = signed_in(admins_app(), admin_id=2, confirmed=confirmed).put("/api/admins/99/role", json={})
+def test_the_role_route_answers_the_same_way_for_everything(admin_id, confirmed, admin_directory):
+    """A plain administrator, a superadmin, the caller's own row, an id that
+    does not exist, with and without a password confirmation.
+
+    One answer for all of them. A 404 for a missing account would say that a
+    real one would have worked; a 403 asking for a password would say that
+    confirming it would help.
+    """
+
+    client = signed_in(admins_app(), admin_id=admin_id, confirmed=confirmed)
+
+    response = client.put(f"/api/admins/{admin_id}/role", json={"role": "superadmin"})
+
+    assert response.status_code == 405
+    assert response.json["code"] == FIXED_CODE
+    assert admin_directory.committed is False
+
+
+def test_the_role_route_refuses_a_caller_who_is_not_signed_in():
+    """Not 401: the operation does not exist, so there is nobody for whom
+    signing in would make it exist."""
+
+    response = admins_app().test_client().put("/api/admins/2/role", json={"role": "superadmin"})
+
+    assert response.status_code == 405
+    assert response.json["code"] == FIXED_CODE
+    assert role_of(2) == "admin"
+
+
+@pytest.mark.parametrize("body", [None, {}, {"role": None}, {"role": "owner"}, ["superadmin"], 42])
+def test_the_role_route_does_not_read_its_body(body, admin_directory):
+    """Every body gets the policy, not a field error: there is no body that
+    this route would have accepted, so validating one would be theatre."""
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=body)
+
+    assert response.status_code == 405
+    assert response.json["message"] == ROLE_FIXED_MESSAGE
+    assert "fields" not in response.json
+
+
+def test_the_role_route_takes_no_lock_and_writes_no_audit(monkeypatch, admin_directory):
+    """It reads nothing at all, so a database that is down cannot change the
+    answer and nothing is logged against an account that did not move."""
+
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+    locked = []
+    monkeypatch.setattr(FakeQuery, "with_for_update", lambda self: locked.append(self) or self)
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "superadmin"})
+
+    assert response.status_code == 405
+    assert locked == []
+    assert audits == []
+    assert admin_directory.committed is False
+
+
+def test_a_designated_superadmin_cannot_be_demoted_either(admin_directory):
+    """The same 405. The route is gone for the four as well, not refused for
+    them - there is no account for which it is the right answer."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/2/role", json={"role": "admin"})
+
+    assert response.status_code == 405
+    assert response.json["code"] == FIXED_CODE
+    assert role_of(2) == "superadmin"
+    assert admin_directory.committed is False
+
+
+# ------------------------------------------------------------------
+# Creating a superadmin
+# ------------------------------------------------------------------
+
+def test_creating_a_superadmin_is_refused(admin_directory):
+    """Refused, not quietly downgraded: the caller asked for an account with
+    Backup & Recovery and everybody else's account, and a regular
+    administrator under the same username is a different account."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"})
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert response.json["message"] == CREATE_SUPERADMIN_MESSAGE
+    # Against the field the form holds, so a client that does know the policy
+    # can still show it where the role was chosen.
+    assert response.json["fields"] == {"role": CREATE_SUPERADMIN_MESSAGE}
+    assert created_accounts() == []
+    assert admin_directory.committed is False
+
+
+def test_the_refusal_reads_the_role_the_way_the_route_always_did():
+    """So " SuperAdmin " is the policy and not a typo."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": " SuperAdmin "})
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert created_accounts() == []
+
+
+def test_creating_a_superadmin_is_refused_before_a_password_is_asked_for():
+    """Nobody confirms a password for an answer that was always no."""
+
+    response = signed_in(admins_app(), confirmed=False).post(
+        "/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"},
+    )
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+
+
+def test_a_plain_administrator_is_still_refused_for_being_one(admin_directory):
+    """The role check comes first, so a caller who may not create accounts at
+    all is not told about the superadmin policy instead."""
+
+    response = signed_in(admins_app(), admin_id=2, confirmed=False).post(
+        "/api/admins", json={**NEW_ACCOUNT, "role": "superadmin"},
+    )
 
     assert response.status_code == 403
     assert response.json["code"] == "superadmin_required"
+    assert created_accounts() == []
 
 
-def test_the_role_route_requires_a_confirmed_password(admin_directory):
-    response = signed_in(admins_app(), admin_id=1, confirmed=False).put(
-        "/api/admins/2/role", json={"role": "superadmin"},
-    )
+def test_an_invalid_role_is_still_a_field_error():
+    """A typo and the policy are different answers: one is a bad request, the
+    other is a request the server understood and will not do."""
 
-    assert response.status_code == 403
-    assert response.json["code"] == "password_confirmation_required"
-    # Worded for a role change, not for the delete the default message names.
-    assert response.json["message"] == "Confirm your password to change this administrator's role."
-    assert role_of(2) == "admin"
-    assert admin_directory.committed is False
-
-
-def test_the_role_route_requires_a_recent_password_confirmation():
-    client = signed_in(admins_app(), admin_id=1, confirmed=False)
-    with client.session_transaction() as flask_session:
-        flask_session["reauth_at"] = time.time() - auth_module.REAUTH_MAX_AGE_SECONDS - 1
-
-    response = client.put("/api/admins/2/role", json={"role": "superadmin"})
-
-    assert response.status_code == 403
-    assert response.json["code"] == "password_confirmation_required"
-    assert role_of(2) == "admin"
-
-
-def test_the_role_route_asks_for_the_password_even_when_nothing_would_change():
-    response = signed_in(admins_app(), admin_id=1, confirmed=False).put(
-        "/api/admins/2/role", json={"role": "admin"},
-    )
-
-    assert response.status_code == 403
-    assert response.json["code"] == "password_confirmation_required"
-
-
-def test_the_permissions_route_words_the_confirmation_for_its_own_action():
-    """Not "delete this record": the prompt names what is about to happen."""
-
-    response = signed_in(admins_app(), admin_id=1, confirmed=False).put(
-        "/api/admins/2/permissions", json={"permissions": dict(ALL_ON)},
-    )
-
-    assert response.status_code == 403
-    assert response.json["message"] == (
-        "Confirm your password to change this administrator's permissions."
-    )
-
-
-def test_the_role_route_requires_a_signed_in_account():
-    response = admins_app().test_client().put("/api/admins/2/role", json={"role": "superadmin"})
-
-    assert response.status_code == 401
-    assert role_of(2) == "admin"
-
-
-def test_the_role_route_refuses_a_deactivated_superadmin():
-    next(item for item in FakeAdmin.store if item.id == 1).status = "inactive"
-
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "superadmin"})
-
-    assert response.status_code == 401
-    assert role_of(2) == "admin"
-
-
-def test_the_role_of_a_missing_administrator_is_not_found():
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/99/role", json={"role": "superadmin"})
-
-    assert response.status_code == 404
-    assert response.json["message"] == "Administrator not found."
-
-
-@pytest.mark.parametrize("body", [{}, {"role": ""}, {"role": "owner"}, {"role": "Superadmin2"}, {"role": 1}, {"role": None}])
-def test_the_role_must_be_one_of_the_two_roles(body, admin_directory):
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=body)
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": "owner"})
 
     assert response.status_code == 400
-    assert response.json["fields"] == {"role": "Role must be Administrator or Superadmin."}
-    assert role_of(2) == "admin"
-    assert admin_directory.committed is False
+    assert response.json["fields"] == {"role": "Role must be Administrator."}
+    assert "code" not in response.json
+    assert created_accounts() == []
 
 
-def test_a_role_body_must_be_an_object(admin_directory):
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=["superadmin"])
+def test_the_details_are_still_validated_before_the_policy():
+    """An incomplete body is reported as incomplete. Otherwise a client would
+    fix the role, resend, and only then hear about the email."""
+
+    response = signed_in(admins_app()).post("/api/admins", json={
+        **NEW_ACCOUNT, "email": "nope", "role": "superadmin",
+    })
 
     assert response.status_code == 400
-    assert "role" in response.json["fields"]
+    assert "email" in response.json["fields"]
 
 
-def test_an_account_cannot_change_its_own_role(admin_directory):
-    # A second superadmin is present, so only the self rule can refuse.
-    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
+@pytest.mark.parametrize("role", [None, "admin", " Admin "])
+def test_every_other_create_still_makes_a_regular_administrator(role, admin_directory):
+    """Omitted, null and "admin" all land on the same account."""
 
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json={"role": "admin"})
+    body = dict(NEW_ACCOUNT) if role is None else {**NEW_ACCOUNT, "role": role}
+
+    response = signed_in(admins_app()).post("/api/admins", json=body)
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "admin"
+    assert response.json["admin"]["isProtected"] is False
+    assert [record.role for record in created_accounts()] == ["admin"]
+
+
+def test_an_explicit_null_role_still_makes_an_administrator():
+    response = signed_in(admins_app()).post("/api/admins", json={**NEW_ACCOUNT, "role": None})
+
+    assert response.status_code == 201
+    assert response.json["admin"]["role"] == "admin"
+
+
+# ------------------------------------------------------------------
+# A designated account's status is not the portal's to set
+# ------------------------------------------------------------------
+
+@pytest.mark.parametrize("status", ["Inactive", "Active"])
+def test_a_designated_superadmin_s_status_cannot_be_set(status, admin_directory):
+    """Both directions. Containing a compromised account deactivates it
+    outside the portal; if the portal could switch it back on, the containment
+    would last until whoever took the account found the button."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/2/status", json={"status": status})
 
     assert response.status_code == 409
-    assert response.json["message"] == "You cannot change your own role."
-    assert role_of(1) == "superadmin"
+    assert response.json["code"] == FIXED_CODE
+    assert response.json["message"] == DESIGNATED_ACCOUNT_MESSAGE
+    assert status_of(2) == "active"
     assert admin_directory.committed is False
 
 
-def test_an_account_cannot_set_its_own_role_to_the_one_it_has(admin_directory):
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json={"role": "superadmin"})
+def test_a_designated_account_that_has_been_contained_stays_contained():
+    """Deactivated outside the portal, and the portal will not undo it."""
+
+    client = the_four()
+    next(item for item in FakeAdmin.store if item.id == 2).status = "inactive"
+
+    response = client.put("/api/admins/2/status", json={"status": "Active"})
 
     assert response.status_code == 409
-    assert response.json["message"] == "You cannot change your own role."
+    assert response.json["code"] == FIXED_CODE
+    assert status_of(2) == "inactive"
 
 
-@pytest.mark.parametrize("role, target_id", [("superadmin", 1), ("admin", 2)])
-def test_setting_the_role_it_already_has_is_a_no_op(role, target_id, admin_directory, monkeypatch):
-    audits = []
-    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
-    # A second superadmin, so the caller can act on account 1 or 2 alike.
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+@pytest.mark.parametrize("body", [None, {}, {"status": "Deleted"}, {"status": None}, [1]])
+def test_the_protection_is_answered_before_the_status_body(body, admin_directory):
+    """The refusal is about the account, not about what was asked for, so
+    there is no body - valid or not - that gets a different answer. No portal
+    request against one of the four is ever reported as having done anything.
+    """
 
-    response = signed_in(admins_app(), admin_id=3).put(f"/api/admins/{target_id}/role", json={"role": role})
+    client = the_four()
+
+    response = client.put("/api/admins/2/status", json=body)
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert admin_directory.committed is False
+
+
+def test_setting_a_designated_account_to_the_status_it_already_has_is_refused(admin_directory):
+    """Not the usual "already active" 200: that reads as a request that
+    worked, and no request against one of the four does."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/2/status", json={"status": "Active"})
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+
+
+def test_a_designated_account_cannot_deactivate_itself_either():
+    """The self rule and the designation both refuse it; the designation is
+    the one that answers, because it is the reason that will not change."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/1/status", json={"status": "Inactive"})
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert status_of(1) == "active"
+
+
+def test_an_ordinary_administrator_is_still_deactivated_by_the_four(admin_directory):
+    """The protection is for the four accounts, not for the directory: a
+    superadmin's ordinary work on a colleague is untouched."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/5/status", json={"status": "Inactive"})
 
     assert response.status_code == 200
-    assert response.json["admin"]["role"] == role
-    assert response.json["message"].endswith(
-        "is already a superadmin." if role == "superadmin" else "is already an administrator."
-    )
-    assert audits == []
+    assert status_of(5) == "inactive"
+    assert admin_directory.committed is True
+
+
+def test_a_designated_account_s_permissions_cannot_be_configured(admin_directory):
+    """Refused for being designated rather than for being a superadmin, so
+    the frontend gets the code it can act on."""
+
+    client = the_four()
+
+    response = client.put("/api/admins/2/permissions", json={"permissions": dict(ALL_ON)})
+
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert response.json["message"] == DESIGNATED_ACCOUNT_MESSAGE
     assert admin_directory.committed is False
 
 
-def test_promoting_is_audited_against_the_affected_account(monkeypatch):
-    audits = []
-    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+def test_an_undesignated_superadmin_is_still_refused_for_being_one(admin_directory):
+    """Which is every superadmin until the migration is applied. Their
+    switches are still not configurable - the role carries everything."""
 
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "superadmin"})
+    response = signed_in(admins_app(), admin_id=2).put(
+        "/api/admins/1/permissions", json={"permissions": dict(ALL_ON)},
+    )
+    # Account 2 is a plain administrator, so it is refused for that first.
+    assert response.status_code == 403
 
-    assert audits == [("Admin", None, "promote", "Administrator", 2, "admin02")]
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+    response = signed_in(admins_app(), admin_id=1).put(
+        "/api/admins/3/permissions", json={"permissions": dict(ALL_ON)},
+    )
 
-
-def test_demoting_is_audited_against_the_affected_account(monkeypatch):
-    audits = []
-    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
-    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
-
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
-
-    assert audits == [("Admin", None, "demote", "Administrator", 2, "admin02")]
-
-
-def test_a_refused_role_change_writes_no_audit_entry(monkeypatch):
-    audits = []
-    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
-
-    signed_in(admins_app(), admin_id=2).put("/api/admins/1/role", json={"role": "admin"})
-    signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json={"role": "admin"})
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "owner"})
-
-    assert audits == []
+    assert response.status_code == 409
+    assert response.json["message"] == (
+        "Superadmins always have every permission, so there is nothing to restrict."
+    )
+    assert "code" not in response.json
 
 
-def test_a_failed_role_write_rolls_back(admin_directory, monkeypatch):
-    def broken_commit():
-        raise RuntimeError("database offline")
+def test_a_designated_account_cannot_be_deleted():
+    """Through the route that is gone for everybody, which is the stronger
+    form of the protection: nothing can address a delete at one of the four."""
 
-    monkeypatch.setattr(admin_directory, "commit", broken_commit)
+    client = the_four()
 
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "superadmin"})
+    response = client.delete("/api/admins/2")
 
-    assert response.status_code == 500
-    assert response.json["message"] == "Failed to update the administrator's role."
-    assert admin_directory.rolled_back is True
+    assert response.status_code == 405
+    assert [record.id for record in FakeAdmin.store] == [1, 2, 3, 4, 5]
 
 
-# Zero active superadmins. A real caller is an active superadmin who cannot
-# target themselves, so the caller always remains and these rules are reached
-# only with the guards skipped and a caller who is not in the directory.
+# ------------------------------------------------------------------
+# What the listing tells the frontend
+# ------------------------------------------------------------------
 
-LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
+def test_the_listing_marks_the_designated_accounts():
+    client = the_four()
+
+    items = {item["username"]: item["isProtected"] for item in client.get("/api/admins").json["items"]}
+
+    assert items == {
+        "admin01": True, "admin02": True, "admin03": True, "admin04": True, "admin05": False,
+    }
+
+
+def test_the_listing_still_carries_the_role_of_a_protected_account():
+    """Hidden actions, visible label: a reader has to be able to see who the
+    superadmins are, and #167's explanation hangs off the role, not off the
+    protection alone."""
+
+    client = the_four()
+
+    roles = {item["username"]: item["role"] for item in client.get("/api/admins").json["items"]}
+
+    assert roles == {
+        "admin01": "superadmin", "admin02": "superadmin", "admin03": "superadmin",
+        "admin04": "superadmin", "admin05": "admin",
+    }
+
+
+def test_nothing_is_marked_protected_before_the_migration():
+    """An empty designation table is "nobody is designated", and the existing
+    rules are then the only ones in force - not "everybody is protected"."""
+
+    items = signed_in(admins_app()).get("/api/admins").json["items"]
+
+    assert all(item["isProtected"] is False for item in items)
+
+
+def test_a_plain_administrator_sees_the_same_marks():
+    """The directory is already readable by every active administrator, and
+    which accounts are the fixed four is not a secret from a colleague."""
+
+    the_four()
+
+    items = signed_in(admins_app(), admin_id=5).get("/api/admins").json["items"]
+
+    assert [item["isProtected"] for item in items] == [True, True, True, True, False]
+
+
+def test_a_protected_account_keeps_its_mark_through_a_self_edit():
+    """The response's ``admin`` object is merged into the row the client holds,
+    so one that reported the caller unprotected would undo the flag."""
+
+    the_four()
+    client = signed_in(admins_app(), admin_id=2)
+
+    response = client.put("/api/admins/2", json={
+        "username": "admin02", "email": "admin02@example.com",
+    })
+
+    assert response.status_code == 200
+    assert response.json["admin"]["isProtected"] is True
+    assert response.json["admin"]["role"] == "superadmin"
+
+
+def test_the_full_shape_of_a_listed_account():
+    """Every key the contract carries, so a field cannot be dropped or
+    renamed without a test saying so."""
+
+    the_four()
+
+    items = {item["username"]: item for item in signed_in(admins_app(), admin_id=5).get("/api/admins").json["items"]}
+
+    assert items["admin05"] == {
+        "id": "5", "username": "admin05", "email": "e@example.com",
+        "status": "Active", "role": "admin", "isProtected": False,
+        "isCurrent": True, "permissions": None,
+    }
+    assert items["admin02"] == {
+        "id": "2", "username": "admin02", "email": "b@example.com",
+        "status": "Active", "role": "superadmin", "isProtected": True,
+        "isCurrent": False, "permissions": None,
+    }
+
+
+# ------------------------------------------------------------------
+# A designated superadmin's own account still works
+# ------------------------------------------------------------------
+
+def test_one_of_the_four_still_edits_their_own_details():
+    """What is protected is who holds the role, not the account's password.
+    Otherwise the protection would be a reason to keep a stale one."""
+
+    the_four()
+    client = signed_in(admins_app(), admin_id=2)
+
+    response = client.put("/api/admins/2", json={
+        "username": "renamed", "email": "renamed@example.com", "password": "Another-secret1!",
+    })
+
+    assert response.status_code == 200
+    record = next(item for item in FakeAdmin.store if item.id == 2)
+    assert (record.username, record.gmail) == ("renamed", "renamed@example.com")
+    assert verify_password(record.password, "Another-secret1!")[0]
+
+
+def test_one_of_the_four_still_receives_a_reset_code(admin_directory):
+    """The way a locked-out superadmin gets back in, and it goes to their own
+    inbox. Protecting the account must not mean nobody can help them."""
+
+    the_four()
+
+    response = signed_in(admins_app(), admin_id=5).post("/api/admins/2/password-reset")
+
+    assert response.status_code == 200
+    assert admin_directory.reset_codes_sent == ["admin02"]
+
+
+def test_one_of_the_four_still_creates_and_configures_administrators(admin_directory):
+    """The role still means what it meant. Only who holds it is fixed."""
+
+    client = the_four()
+
+    created = client.post("/api/admins", json=ANOTHER_ACCOUNT)
+    configured = client.put("/api/admins/5/permissions", json={"permissions": dict(ALL_ON)})
+
+    assert (created.status_code, configured.status_code) == (201, 200)
+    assert permissions_of(5) == ALL_ON
+
+
+def test_the_role_check_on_the_next_request_still_reads_the_row():
+    """Sessions after an access change: nothing caches the role, so an account
+    deactivated outside the portal is refused on its next request rather than
+    at its next sign-in."""
+
+    client = the_four()
+    assert client.post("/api/admins", json=ANOTHER_ACCOUNT).status_code == 201
+
+    # Same session cookie; only the stored row changed, as a containment
+    # procedure run against the database would change it.
+    next(item for item in FakeAdmin.store if item.id == 1).status = "inactive"
+    response = client.post("/api/admins", json={
+        **ANOTHER_ACCOUNT, "username": "admin_other", "email": "other@example.com",
+    })
+
+    assert response.status_code == 401
+    assert not any(record.username == "admin_other" for record in FakeAdmin.store)
+
+
+# Zero active superadmins. Deactivation is the only way left to take a
+# superadmin's access away, and a real caller is an active superadmin who
+# cannot target themselves, so the caller always remains and these rules are
+# reached only with the guards skipped and a caller who is not in the
+# directory.
+#
+# This rule survives the fixed set because the two answer for different rows. A
+# designated account is refused whatever it would leave behind; this one
+# protects an *undesignated* superadmin, which is what every superadmin row
+# looks like on a deployment that has the new build and not yet the migration.
+
+LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required."
 
 
 @pytest.fixture
@@ -1092,15 +1420,6 @@ def lone_superadmin(guards_passed):
         FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com"),
     ])
     return signed_in(admins_app(), admin_id=2)
-
-
-def test_demoting_the_last_active_superadmin_is_refused(lone_superadmin, admin_directory):
-    response = lone_superadmin.put("/api/admins/1/role", json={"role": "admin"})
-
-    assert response.status_code == 409
-    assert response.json["message"] == LAST_SUPERADMIN_MESSAGE
-    assert role_of(1) == "superadmin"
-    assert admin_directory.committed is False
 
 
 def test_deactivating_the_last_active_superadmin_is_refused(lone_superadmin, admin_directory):
@@ -1117,40 +1436,34 @@ def test_a_deactivated_superadmin_does_not_count_as_active(lone_superadmin):
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
     ))
 
-    assert lone_superadmin.put("/api/admins/1/role", json={"role": "admin"}).json["message"] == LAST_SUPERADMIN_MESSAGE
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Inactive"}).json["message"] == LAST_SUPERADMIN_MESSAGE
 
 
-def test_another_active_superadmin_lets_each_change_through(lone_superadmin):
+def test_another_active_superadmin_lets_the_deactivation_through(lone_superadmin):
     FakeAdmin.store.append(FakeAdmin(id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin"))
 
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Inactive"}).status_code == 200
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Active"}).status_code == 200
-    assert lone_superadmin.put("/api/admins/1/role", json={"role": "admin"}).status_code == 200
-    assert role_of(1) == "admin"
 
 
-def test_changing_an_account_that_is_not_an_active_superadmin_ignores_the_rule(lone_superadmin):
-    # Accounts 2 and 3 are plain administrators, so none of this touches the count.
-    assert lone_superadmin.put("/api/admins/3/role", json={"role": "admin"}).status_code == 200
+def test_deactivating_an_account_that_is_not_an_active_superadmin_ignores_the_rule(lone_superadmin):
+    # Account 3 is a plain administrator, so none of this touches the count.
     assert lone_superadmin.put("/api/admins/3/status", json={"status": "Inactive"}).status_code == 200
     assert lone_superadmin.put(
         "/api/admins/3/permissions", json={"permissions": dict(ALL_OFF)},
     ).status_code == 200
 
 
-def test_a_deactivated_last_superadmin_can_be_demoted_and_configured(lone_superadmin):
-    # Already inactive, so it is not an active superadmin whose loss counts.
+def test_the_rule_does_not_protect_a_superadmin_that_is_already_deactivated(lone_superadmin):
+    """Nor does it stop one being reactivated, which is the only way an
+    undesignated superadmin's access comes back now that promotion is gone."""
+
     FakeAdmin.store.append(FakeAdmin(
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
     ))
 
-    assert lone_superadmin.put("/api/admins/4/role", json={"role": "admin"}).status_code == 200
-    # Demoted, so its switches can now be set - the rule that protects the last
-    # active superadmin does not protect a deactivated one from either change.
-    assert lone_superadmin.put(
-        "/api/admins/4/permissions", json={"permissions": dict(ALL_ON)},
-    ).status_code == 200
+    assert lone_superadmin.put("/api/admins/4/status", json={"status": "Inactive"}).status_code == 200
+    assert lone_superadmin.put("/api/admins/4/status", json={"status": "Active"}).status_code == 200
 
 
 def _start(send, client):
@@ -1193,10 +1506,13 @@ def _peer_superadmins_act_together(monkeypatch, request_for):
     return first_outcome["response"].status_code, second_outcome["response"].status_code
 
 
-# The two ways one superadmin can strip another's access now that removal is
-# gone. Setting permissions is not among them: it refuses a superadmin target.
+# The only way one superadmin can strip another's access now that removal and
+# demotion are both gone. Setting permissions is not one: it refuses a
+# superadmin target. Deactivating a *designated* superadmin is refused too, so
+# this is reachable only between two undesignated ones - which is what the
+# whole directory looks like before the migration, and the window this still
+# has to hold through.
 PEER_REQUESTS = {
-    "demote": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "admin"}),
     "deactivate": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
 }
 
@@ -1215,19 +1531,21 @@ def test_two_superadmins_cannot_remove_each_others_access_at_once(monkeypatch, o
     assert active_superadmins()
 
 
-@pytest.mark.parametrize("operation", sorted(PEER_REQUESTS))
-def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_superadmin(monkeypatch, operation):
-    """Account 1 is the only active superadmin and acts on account 2, which is
-    not an active superadmin yet. While that request is in flight, 2 is enabled
-    and then tries to demote 1."""
+def test_a_superadmin_reactivated_mid_request_cannot_leave_the_directory_empty(monkeypatch):
+    """Account 1 is the only active superadmin and deactivates account 2, an
+    inactive superadmin that does not count towards the rule yet. While that
+    request is in flight, 2 is reactivated and then tries to deactivate 1.
+
+    Reactivation is the only write left that can hand superadmin access back,
+    so it is the one that has to queue behind the request already deciding
+    from the directory.
+    """
 
     target = FakeAdmin.store[1]
-    if operation == "deactivate":
-        target.role, target.status = "admin", "active"
-        enable = lambda client: client.put("/api/admins/2/role", json={"role": "superadmin"})
-    else:
-        target.role, target.status = "superadmin", "inactive"
-        enable = lambda client: client.put("/api/admins/2/status", json={"status": "Active"})
+    target.role, target.status = "superadmin", "inactive"
+    # A third account, so deactivating the target is not also the last active
+    # administrator - that rule answers first and this one would never run.
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com"))
     app = admins_app()
     in_check = threading.Event()
     proceed = threading.Event()
@@ -1241,13 +1559,18 @@ def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_super
         return result
 
     monkeypatch.setattr(admins_module, "_is_last_active_superadmin", paused_after_check)
-    initial, initial_outcome = _start(lambda client: PEER_REQUESTS[operation](client, 2), signed_in(app, admin_id=1))
+    initial, initial_outcome = _start(
+        lambda client: PEER_REQUESTS["deactivate"](client, 2), signed_in(app, admin_id=1),
+    )
     assert in_check.wait(timeout=5)
-    enabling, enabled = _start(enable, signed_in(app, admin_id=1))
+    enabling, enabled = _start(
+        lambda client: client.put("/api/admins/2/status", json={"status": "Active"}),
+        signed_in(app, admin_id=1),
+    )
     enabling.join(timeout=0.3)
     waiting = enabling.is_alive()
     relinquishing, relinquished = _start(
-        lambda client: client.put("/api/admins/1/role", json={"role": "admin"}),
+        lambda client: client.put("/api/admins/1/status", json={"status": "Inactive"}),
         signed_in(app, admin_id=2),
     )
     relinquishing.join(timeout=0.3)
@@ -1257,21 +1580,64 @@ def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_super
 
     assert active_superadmins(), "the in-flight request removed the last active superadmin"
     assert initial_outcome["response"].status_code == 200
+    # Account 2 was still inactive when its own request was judged.
     assert relinquished["response"].status_code in (401, 403)
-    # Enabling the target is a write too, so it waits behind the request in flight.
+    # Reactivating the target is a write too, so it waits behind the request in flight.
     assert waiting
     assert enabled["response"].status_code == 200
 
 
+def test_a_designation_committed_mid_request_refuses_the_deactivation(monkeypatch):
+    """The concurrency case the fixed set adds: account 2 becomes one of the
+    four while a request to deactivate it is between the guard and the lock.
+
+    The refusal proves the designated set is read *under* the lock rather than
+    before it. Read any earlier, this request would have seen an unprotected
+    account and deactivated one of the four.
+    """
+
+    FakeAdmin.store[1].role = "superadmin"
+    app = admins_app()
+    past_guard = threading.Event()
+    proceed = threading.Event()
+    original = admins_module.superadmin_required
+
+    def paused_after_guard(*args):
+        result = original(*args)
+        if not past_guard.is_set():
+            past_guard.set()
+            assert proceed.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(admins_module, "superadmin_required", paused_after_guard)
+    pending, outcome = _start(
+        lambda client: client.put("/api/admins/2/status", json={"status": "Inactive"}),
+        signed_in(app, admin_id=1),
+    )
+    assert past_guard.wait(timeout=5)
+    # The transfer procedure commits, as it would against the live database.
+    designate(1, 2)
+    proceed.set()
+    pending.join(timeout=5)
+
+    response = outcome["response"]
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert status_of(2) == "active"
+
+
 STALE_CALLER_REQUESTS = {
-    "promote": lambda client: client.put("/api/admins/3/role", json={"role": "superadmin"}),
     "deactivate": lambda client: client.put("/api/admins/3/status", json={"status": "Inactive"}),
     "permissions": lambda client: client.put("/api/admins/3/permissions", json={"permissions": dict(ALL_ON)}),
 }
 
 
 @pytest.mark.parametrize("operation", sorted(STALE_CALLER_REQUESTS))
-def test_a_caller_demoted_between_the_guard_and_the_lock_is_refused(monkeypatch, operation):
+def test_a_caller_deactivated_between_the_guard_and_the_lock_is_refused(monkeypatch, operation):
+    """Deactivation rather than demotion, which is gone: the caller loses its
+    superadmin access while its own request waits for the lock, and is judged
+    again from the rows the lock returns."""
+
     FakeAdmin.store[1].role = "superadmin"
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com"))
     app = admins_app()
@@ -1289,20 +1655,20 @@ def test_a_caller_demoted_between_the_guard_and_the_lock_is_refused(monkeypatch,
     monkeypatch.setattr(admins_module, "superadmin_required", paused_after_guard)
     stale, outcome = _start(STALE_CALLER_REQUESTS[operation], signed_in(app, admin_id=2))
     assert past_guard.wait(timeout=5)
-    demoted = signed_in(app, admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
-    assert demoted.status_code == 200
+    stripped = signed_in(app, admin_id=1).put("/api/admins/2/status", json={"status": "Inactive"})
+    assert stripped.status_code == 200
     proceed.set()
     stale.join(timeout=5)
 
     response = outcome["response"]
-    assert response.status_code == 403
-    assert response.json["code"] == "superadmin_required"
+    # 401 for a deactivated caller, which is how that session ends; what this
+    # tests is that the stale caller is judged again and not served.
+    assert response.status_code in (401, 403)
     account = next(item for item in FakeAdmin.store if item.id == 3)
     assert (account.role, account.status) == ("admin", "active")
 
 
 LOCKING_REQUESTS = {
-    "role": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "superadmin"}),
     "status": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
     "permissions": lambda client, target: client.put(
         f"/api/admins/{target}/permissions", json={"permissions": dict(ALL_ON)},
@@ -1312,7 +1678,8 @@ LOCKING_REQUESTS = {
 
 @pytest.mark.parametrize("target", [2, 1, 99], ids=["a plain administrator", "the caller", "a missing account"])
 @pytest.mark.parametrize("operation", sorted(LOCKING_REQUESTS))
-def test_every_role_status_and_permission_request_locks_the_whole_directory_first(monkeypatch, operation, target):
+def test_every_status_and_permission_request_locks_the_whole_directory_first(monkeypatch, operation, target):
+    designate(1)
     locked = []
     original = FakeQuery._matching
 
@@ -1325,10 +1692,13 @@ def test_every_role_status_and_permission_request_locks_the_whole_directory_firs
 
     LOCKING_REQUESTS[operation](signed_in(admins_app(), admin_id=1), target)
 
-    # One lock over every row, taken whatever the request goes on to decide.
-    assert len(locked) == 1
-    assert locked[0]._filters == []
-    # And it does not outlive the request, whether it wrote or was refused.
+    # Two locks over every row of each table, taken whatever the request goes
+    # on to decide: the administrators first, then the designated set, in the
+    # order the transfer procedure takes them.
+    assert len(locked) == 2
+    assert [read._filters for read in locked] == [[], []]
+    assert [len(read.store) for read in locked] == [2, 1]
+    # And neither outlives the request, whether it wrote or was refused.
     assert FakeAdmin._lock_owner is None
 
 
@@ -1499,7 +1869,7 @@ def test_a_superadmins_permissions_cannot_be_configured(admin_directory):
 
     assert response.status_code == 409
     assert response.json["message"] == (
-        "Superadmins always have every permission. Demote them first to restrict them."
+        "Superadmins always have every permission, so there is nothing to restrict."
     )
     assert permissions_of(2) is None
     assert admin_directory.committed is False
@@ -1553,8 +1923,12 @@ def test_a_failed_permission_write_releases_the_lock(admin_directory, monkeypatc
 
 
 # ==========================================
-# PERMISSIONS ON CREATE AND ON A ROLE CHANGE
+# PERMISSIONS ON CREATE
 # ==========================================
+
+# There is no longer a demotion to land on a set of switches, nor a promotion
+# to discard one: creating the account is the only place a request names them
+# besides the permissions route itself.
 
 def test_a_new_administrator_starts_with_nothing(admin_directory):
     """Not everything: an account being set up has not been given anything."""
@@ -1578,15 +1952,17 @@ def test_a_new_administrator_can_be_created_with_permissions():
     }
 
 
-def test_a_new_superadmin_stores_no_permissions():
+def test_a_superadmin_cannot_be_created_with_permissions_either():
+    """The policy answers first. There is no body that creates a superadmin,
+    so a well-formed set of switches does not make one."""
+
     response = signed_in(admins_app()).post("/api/admins", json={
         **NEW_ACCOUNT, "role": "superadmin", "permissions": dict(ALL_ON),
     })
 
-    assert response.status_code == 201
-    assert response.json["admin"]["permissions"] is None
-    # Ignored rather than refused: a client may hold one form for both roles.
-    assert created_accounts()[0].permissions is None
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert created_accounts() == []
 
 
 def test_creating_with_a_partial_set_is_a_field_error(admin_directory):
@@ -1597,67 +1973,6 @@ def test_creating_with_a_partial_set_is_a_field_error(admin_directory):
     assert response.status_code == 400
     assert "permissions" in response.json["fields"]
     assert created_accounts() == []
-
-
-def test_a_demoted_superadmin_starts_with_nothing(admin_directory):
-    """There is nothing to carry over - a superadmin's switches were never
-    configured - and carrying over "everything" would make a demotion a
-    formality."""
-
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
-
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
-
-    assert response.status_code == 200
-    assert response.json["admin"]["permissions"] == ALL_OFF
-    assert permissions_of(3) == ALL_OFF
-
-
-def test_a_demotion_can_name_the_permissions_to_land_on():
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
-
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin",
-        "permissions": {"add": True, "edit": True, "delete": False, "changeUserStatus": True},
-    })
-
-    assert response.status_code == 200
-    assert permissions_of(3) == {"add": True, "edit": True, "delete": False, "changeUserStatus": True}
-
-
-def test_a_promotion_discards_the_switches(admin_directory):
-    FakeAdmin.store[1].permissions = dict(ALL_ON)
-
-    response = signed_in(admins_app()).put("/api/admins/2/role", json={"role": "superadmin"})
-
-    assert response.status_code == 200
-    assert response.json["admin"]["permissions"] is None
-    assert permissions_of(2) is None
-
-
-def test_a_role_change_that_changes_nothing_keeps_the_switches():
-    """The no-op reply returns before any write, so a repeated demotion of an
-    account that is already an administrator does not reset it to nothing."""
-
-    FakeAdmin.store[1].permissions = dict(ALL_ON)
-
-    response = signed_in(admins_app()).put("/api/admins/2/role", json={"role": "admin"})
-
-    assert response.status_code == 200
-    assert response.json["message"] == "admin02 is already an administrator."
-    assert permissions_of(2) == ALL_ON
-
-
-def test_a_demotion_with_a_partial_set_is_a_field_error():
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
-
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin", "permissions": {"edit": True},
-    })
-
-    assert response.status_code == 400
-    assert "permissions" in response.json["fields"]
-    assert role_of(3) == "superadmin"
 
 
 # ==========================================
@@ -1693,54 +2008,21 @@ def test_omitting_permissions_still_defaults_on_create(admin_directory):
     assert created_accounts()[0].permissions == ALL_OFF
 
 
-def test_creating_a_superadmin_with_an_explicit_null_is_still_accepted():
-    """Ignored rather than refused, as documented: a client may hold one form
-    for both roles, and a field that cannot apply must not fail the request."""
+def test_asking_for_a_superadmin_with_an_explicit_null_is_still_the_policy():
+    """A null is a wrong shape and the role is refused by policy; the policy
+    answers, because it is the part that will not change by fixing the body."""
 
     response = signed_in(admins_app()).post("/api/admins", json={
         **NEW_ACCOUNT, "role": "superadmin", "permissions": None,
     })
 
-    assert response.status_code == 201
-    assert response.json["admin"]["permissions"] is None
-    assert created_accounts()[0].permissions is None
-
-
-def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_directory):
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
-
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin", "permissions": None,
-    })
-
-    assert response.status_code == 400
-    assert "permissions" in response.json["fields"]
-    assert role_of(3) == "superadmin"
-    assert admin_directory.committed is False
-
-
-def test_omitting_permissions_still_defaults_on_a_demotion():
-    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
-
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
-
-    assert response.status_code == 200
-    assert permissions_of(3) == ALL_OFF
-
-
-def test_promoting_with_an_explicit_null_permissions_is_accepted():
-    """A promotion discards the switches whatever it was sent."""
-
-    response = signed_in(admins_app()).put("/api/admins/2/role", json={
-        "role": "superadmin", "permissions": None,
-    })
-
-    assert response.status_code == 200
-    assert permissions_of(2) is None
+    assert response.status_code == 409
+    assert response.json["code"] == FIXED_CODE
+    assert created_accounts() == []
 
 
 def test_setting_permissions_to_an_explicit_null_is_still_a_field_error(admin_directory):
-    """This route always refused it; the create and demote paths now agree."""
+    """This route always refused it, and the create path agrees."""
 
     response = signed_in(admins_app()).put("/api/admins/2/permissions", json={"permissions": None})
 
