@@ -34,7 +34,7 @@ describe("Map Editor preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
 
     const locationCard = screen.getByRole("complementary", { name: "Library object details" });
-    expect(locationCard).toHaveTextContent("[Locations]");
+    expect(locationCard).toHaveTextContent("Facility");
     expect(locationCard).toHaveTextContent("Campus library services");
     expect(locationCard).toHaveTextContent("books, study");
     expect(locationCard).toHaveTextContent("16.720500, 121.689500");

@@ -34,6 +34,8 @@ export interface InspectorCardModel {
   /** One line under the title (for example a code and classification). */
   subtitle?: ReactNode;
   status?: string;
+  /** True when the administrator may take none of this object's actions; the header then says "View only". */
+  viewOnly?: boolean;
   readOnly?: boolean;
   summary: InspectorSummaryItem[];
   details?: ReactNode;
@@ -52,11 +54,14 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
   const [provenanceOpen, setProvenanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
   const provenanceId = useId();
 
   useEffect(() => {
     setMenuOpen(false);
     setProvenanceOpen(false);
+    // A newly selected object opens at its title; edits to the same object keep the scroll position.
+    if (cardRef.current) cardRef.current.scrollTop = 0;
   }, [object.id, object.kind]);
 
   useEffect(() => {
@@ -104,6 +109,7 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
 
   return (
     <aside
+      ref={cardRef}
       className="inspector-card-hud map-glass-panel"
       aria-label={`${object.title} object details`}
     >
@@ -113,6 +119,7 @@ export function InspectorCardHUD({ object, onClose }: InspectorCardHUDProps) {
           <h2>{object.title}</h2>
           {object.subtitle && <p className="inspector-card-subtitle">{object.subtitle}</p>}
           {object.status && <p>{object.status}</p>}
+          {object.viewOnly && <p className="inspector-view-only">View only</p>}
         </div>
         <div className="inspector-card-controls" ref={menuRef} onKeyDown={onControlsKeyDown}>
           {/* An admin who may do nothing with this object gets no ⋯ trigger either. */}

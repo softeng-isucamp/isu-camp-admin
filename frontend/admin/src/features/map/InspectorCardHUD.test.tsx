@@ -158,4 +158,25 @@ describe("InspectorCardHUD", () => {
       expect(trigger).toHaveAttribute("aria-expanded", "false");
     });
   });
+
+  it("resets the card scroll to the top when another object is selected, but not while the same object is edited", () => {
+    const { rerender } = render(<InspectorCardHUD object={baseObject()} onClose={vi.fn()} />);
+    const card = screen.getByRole("complementary", { name: "Engineering West Hall object details" });
+    card.scrollTop = 120;
+    rerender(<InspectorCardHUD object={{ ...baseObject(), status: "Edited" }} onClose={vi.fn()} />);
+    expect(card.scrollTop).toBe(120);
+
+    rerender(<InspectorCardHUD object={{ ...baseObject(), id: "building-2", title: "Other" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("complementary", { name: "Other object details" }).scrollTop).toBe(0);
+
+    screen.getByRole("complementary", { name: "Other object details" }).scrollTop = 80;
+    rerender(<InspectorCardHUD object={{ ...baseObject(), id: "building-2", kind: "campus_location", title: "Other" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("complementary", { name: "Other object details" }).scrollTop).toBe(0);
+  });
+
+  it("shows a quiet View only note in the header when the model says so", () => {
+    render(<InspectorCardHUD object={{ ...baseObject(), viewOnly: true, overflowActions: [] }} onClose={vi.fn()} />);
+    expect(screen.getByText("View only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /More actions/ })).not.toBeInTheDocument();
+  });
 });

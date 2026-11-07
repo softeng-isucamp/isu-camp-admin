@@ -148,7 +148,8 @@ describe("Map Editor preview", () => {
       nodeType: "Junction",
       associatedPlaceId: null,
     })));
-    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction Route Node");
+    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Route node");
+    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction · Active");
   });
 
   it("persists converting an Entrance to a Junction and restores truthful UI when persistence fails", async () => {
@@ -164,13 +165,13 @@ describe("Map Editor preview", () => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
     fireEvent.click(await screen.findByRole("button", { name: "North Entrance Route Node" }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Standard Node" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Junction" }));
 
     await waitFor(() => expect(updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
       id: "node-a", nodeType: "Junction", associatedPlaceId: null,
     })));
     expect(await screen.findByRole("alert")).toHaveTextContent("Route Node update failed");
-    expect(screen.getByRole("complementary", { name: "North Entrance object details" })).toHaveTextContent("Entrance Route Node");
+    expect(screen.getByRole("complementary", { name: "North Entrance object details" })).toHaveTextContent("Entrance");
   });
 
   it("shows canonical Buildings for an Entrance association without persisting the selection", async () => {

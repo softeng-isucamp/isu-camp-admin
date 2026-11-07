@@ -816,7 +816,7 @@ export function MapEditor() {
 
           {inspectorModel && inspectorOpen && (
             <>
-              {error && <div className="absolute right-4 top-4 z-[902] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
+              {error && <div className="absolute right-4 top-4 z-[904] max-w-sm rounded-xl border border-red-200 bg-red-50 p-2 text-xs text-red-700 shadow" role="alert">{error}</div>}
               <InspectorCardHUD object={inspectorModel} onClose={() => setSelected(null)} />
             </>
           )}

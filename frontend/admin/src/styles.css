@@ -1884,13 +1884,13 @@ td small {
   gap: 12px;
   padding: 8px 0;
   border-bottom: 1px solid #edf1ee;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-summary dt,
 .inspector-provenance-content dt { color: #65756c; font-weight: 600; }
 .inspector-summary dd,
-.inspector-provenance-content dd { margin: 0; color: #1d2a23; font-weight: 800; overflow-wrap: anywhere; }
+.inspector-provenance-content dd { margin: 0; color: #1d2a23; font-weight: 700; overflow-wrap: anywhere; }
 
 .inspector-related-section {
   margin: 6px 18px 12px;
@@ -1937,7 +1937,7 @@ td small {
   margin: 4px 18px 12px;
 }
 
-.inspector-point-inputs label { color: #65756c; font-size: 10px; font-weight: 800; }
+.inspector-point-inputs label { color: #65756c; font-size: 12px; font-weight: 700; }
 .inspector-point-inputs input {
   width: 100%;
   margin-top: 4px;
@@ -1945,7 +1945,7 @@ td small {
   border: 1px solid #d8e2dc;
   border-radius: 9px;
   color: #1d2a23;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-edit-fields {
@@ -1958,8 +1958,8 @@ td small {
   display: grid;
   gap: 4px;
   color: #65756c;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .inspector-edit-fields input,
@@ -1971,14 +1971,14 @@ td small {
   border-radius: 9px;
   background: white;
   color: #1d2a23;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .inspector-picker-label {
   color: #65756c;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .inspector-status-action {
@@ -2022,7 +2022,7 @@ td small {
   border-radius: 10px;
   background: #fff2f0;
   color: #9b241b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-inline-actions {
@@ -2039,7 +2039,7 @@ td small {
   border-radius: 999px;
   background: #edf7f0;
   color: #005931;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 .inspector-inline-actions button {
@@ -2049,10 +2049,10 @@ td small {
   border-radius: 999px;
   background: #f7faf8;
   color: #365047;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
-.inspector-inline-actions button:last-child { border-color: #005931; background: #005931; color: white; }
+.inspector-inline-actions button.inspector-primary-action { border-color: #005931; background: #005931; color: white; }
 .inspector-inline-actions button:disabled { opacity: 0.45; }
 
 .inspector-action-notice {
@@ -4818,3 +4818,21 @@ td small {
 }
 .inspector-section .inspector-related-group strong { font-size: 12px; }
 .inspector-section .inspector-related-group span { font-size: 12px; }
+
+/* Map Editor inspector cards other than Building: the same divider rhythm and 12px floor. */
+.inspector-card-header p.inspector-view-only { margin-top: 4px; }
+.inspector-section .inspector-edit-fields { margin-top: 8px; }
+.inspector-section .inspector-hint,
+.inspector-hint { display: block; margin-top: 4px; color: #4b5d53; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.inspector-section p.inspector-notice { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #f3f8f5; color: #30453a; font-size: 12px; font-weight: 600; }
+.inspector-section .inspector-point-inputs,
+.inspector-section .inspector-point-selector { margin-left: 0; margin-right: 0; }
+.inspector-modes { margin: 10px 0 0; padding: 0; border: 0; }
+.inspector-modes legend { padding: 0; color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-modes > div { display: flex; gap: 16px; margin-top: 6px; }
+.inspector-modes label { display: flex; align-items: center; gap: 6px; color: #1d2a23; font-size: 12px; font-weight: 700; }
+.inspector-modes label:has(input:disabled) { opacity: 0.6; }
+.inspector-section .inspector-inline-actions { margin: 10px 0 0; }
+.inspector-section .inspector-secondary-action { width: 100%; margin: 10px 0 0; }
+.inspector-section .inspector-validation { margin-top: 10px; }
+.map-search-box-open { z-index: 903; }

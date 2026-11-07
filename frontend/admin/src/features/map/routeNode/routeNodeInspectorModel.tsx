@@ -60,18 +60,20 @@ export function routeNodeInspectorModel({
     kind: node.nodeType === "Entrance" ? "entrance_route_node" : "route_node",
     title: node.name,
     domain: "Walking Network",
-    status: node.nodeType === "Entrance" ? "Entrance Route Node" : `${node.nodeType} Route Node`,
+    objectLabel: node.nodeType === "Entrance" ? "Entrance" : "Route node",
+    // The type names the object for an entrance; any other node says which kind of node it is.
+    subtitle: `${node.nodeType === "Entrance" ? "" : `${node.nodeType} · `}${node.status ?? "Active"}`,
+    viewOnly: !can("edit") && !can("delete"),
     summary: [
-      { label: "Node Type", value: node.nodeType },
-      { label: "Lifecycle", value: node.status ?? "Active" },
-      { label: "Associated Building", value: associatedBuilding?.name ?? (node.associatedPlaceId ? "Missing" : "None") },
+      ...(node.nodeType === "Entrance" || node.associatedPlaceId
+        ? [{ label: "Associated Building", value: associatedBuilding?.name ?? (node.associatedPlaceId ? "Missing" : "None") }]
+        : []),
       { label: "Connected Pathways", value: String(connectedPaths) },
-      { label: "Latitude", value: node.lat.toFixed(6) },
-      { label: "Longitude", value: node.lng.toFixed(6) },
+      { label: "Coordinates", value: `${node.lat.toFixed(6)}, ${node.lng.toFixed(6)}` },
     ],
     // The metadata form and its Update button are edits, so a view-only administrator sees the summary alone.
     details: can("edit") ? (
-      <section className="inspector-related-section" aria-label="Edit Route Node metadata">
+      <section className="inspector-section" aria-label="Edit Route Node metadata">
         <h3>Route Node metadata</h3>
         <div className="inspector-edit-fields">
           <label> Name
@@ -103,20 +105,20 @@ export function routeNodeInspectorModel({
                 labelClassName="inspector-picker-label"
                 compact
               />
-              <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Update action.</span>
+              <span className="inspector-hint">Saved with the Route Node Update action.</span>
             </div>
           )}
         </div>
         <div className="inspector-inline-actions">
           <button type="button" onClick={nodeFrame.cancel} disabled={!nodeFrame.dirty}>Cancel</button>
-          <button type="button" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
+          <button type="button" className="inspector-primary-action" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
         </div>
       </section>
     ) : undefined,
     primaryAction: can("edit") ? { label: node.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: onMove } : undefined,
     overflowActions: [
       ...(node.nodeType === "Entrance" && can("edit") ? [{
-        label: "⎋ Convert to Standard Node",
+        label: "⎋ Convert to Junction",
         tone: "danger" as const,
         onSelect: () => {
           const updated = { ...node, nodeType: "Junction" as const, associatedPlaceId: null };
@@ -125,7 +127,7 @@ export function routeNodeInspectorModel({
             before: node,
             after: updated,
             context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-            description: `Convert ${node.name} to a standard Route Node`,
+            description: `Convert ${node.name} to a Junction`,
           }).then((result) => {
             if (!result.ok) {
               setError(result.message);
@@ -141,6 +143,7 @@ export function routeNodeInspectorModel({
       ...(can("delete") ? [{
         label: "🗑 Delete Route Node",
         tone: "danger" as const,
+        separatorBefore: true,
         onSelect: () => {
           onDelete({ kind: "route_node", id: node.id, name: node.name, impact: calculateDeleteImpact({ object: node, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
         },

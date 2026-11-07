@@ -77,8 +77,7 @@ describe("Map Editor preview", () => {
     fireEvent.click((await screen.findAllByRole("button", { name: `Path Point at ${importedPoint.join(",")}` }))[0]);
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.72095" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6895" } });
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ id: generatedMapFixture.pathways[0].id })));
   });
@@ -100,8 +99,7 @@ describe("Map Editor preview", () => {
     expect(screen.queryByRole("button", { name: "✥ Drag Path Point" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
       pathPoints: [[16.7209, 121.6897]],
@@ -225,8 +223,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
     fireEvent.change(screen.getByLabelText("Path Point longitude"), { target: { value: "121.6899" } });
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6899],[16.721,121.69]]");
   });
 
@@ -327,8 +324,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(screen.getByLabelText("Path Point latitude"), { target: { value: "16.7209" } });
     fireEvent.change(screen.getByLabelText("Pathway shade"), { target: { value: "Unshaded" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Path Point #1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "✓ Update Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({
       id: "path-1",
@@ -337,7 +333,7 @@ describe("Map Editor preview", () => {
       pathPoints: [[16.7209, 121.6897], [16.7208, 121.6898]],
     })));
     expect(screen.getByLabelText("Pathway shade")).toHaveValue("Unshaded");
-    expect(screen.getByText("Unshaded · Walkway · One-way · Open")).toBeInTheDocument();
+    expect(screen.getByText("Unshaded · Walkway · One-way · Active")).toBeInTheDocument();
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-positions", "[[16.7205,121.6895],[16.7209,121.6897],[16.7208,121.6898],[16.721,121.69]]");
   });
 

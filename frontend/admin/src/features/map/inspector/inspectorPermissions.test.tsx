@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { allPermissions, canPerform, viewOnlyPermissions } from "../../../lib/permissions";
 import type { AdminPermissions, Building, Location, Pathway, RouteNode } from "../../../types";
@@ -6,7 +6,7 @@ import { buildingInspectorModel } from "../building/buildingInspectorModel";
 import type { SelectedBuildingView } from "../building/selectedBuilding";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import { locationInspectorModel } from "../location/locationInspectorModel";
-import { selectedPathwayInspectorModel } from "../pathway/pathwayInspectorModel";
+import { pathPointInspectorModel, selectedPathwayInspectorModel } from "../pathway/pathwayInspectorModel";
 import { routeNodeInspectorModel } from "../routeNode/routeNodeInspectorModel";
 
 // How each inspector card answers the signed-in administrator's switches: an action the
@@ -190,6 +190,33 @@ describe("Location inspector", () => {
     location: room, buildings: [building], locations: [room], can: canWith(permissions), onEditDetails: noop,
   });
 
+  it("shows the parent building, floor and an unplaced marker, with lifecycle beside identity", () => {
+    const model = locationModel(allPermissions());
+    expect(model.objectLabel).toBe("Indoor location");
+    expect(render(<>{model.subtitle}</>).container.textContent).toBe("Room · R1 · Active");
+    expect(model.summary).toEqual(expect.arrayContaining([
+      { label: "Parent building", value: "Hall" }, { label: "Map marker", value: "Not placed" },
+    ]));
+    expect(model.summary.some((item) => item.label === "Lifecycle")).toBe(false);
+  });
+
+  it("shows Placed with coordinates once the location has a marker", () => {
+    const placed = { ...room, lat: 1.5, lng: 2.5, positioned: true };
+    const model = locationInspectorModel({ location: placed, buildings: [building], locations: [placed], can: canWith(allPermissions()), onEditDetails: noop });
+    expect(model.summary).toEqual(expect.arrayContaining([{ label: "Map marker", value: "Placed" }, { label: "Coordinates", value: "1.500000, 2.500000" }]));
+  });
+
+  it("resolves the parent as a Place, never by a bare id shared with another Location type", () => {
+    const impostor: Location = { id: "b1", name: "Not a place", code: "X", type: "Office", parentId: null, status: "Active", lat: null, lng: null, positioned: false };
+    const model = locationInspectorModel({ location: room, buildings: [], locations: [impostor, room], can: canWith(allPermissions()), onEditDetails: noop });
+    expect(model.summary).toEqual(expect.arrayContaining([{ label: "Parent building", value: "—" }]));
+  });
+
+  it("says View only to someone who may not edit", () => {
+    expect(locationModel(viewOnlyPermissions()).viewOnly).toBe(true);
+    expect(locationModel(allPermissions()).viewOnly).toBe(false);
+  });
+
   it("offers Edit Details with the Edit switch only", () => {
     expect(labels(locationModel(allPermissions()))).toEqual(["✎ Edit Details"]);
     expect(labels(locationModel(only("edit")))).toEqual(["✎ Edit Details"]);
@@ -212,7 +239,9 @@ describe("Route Node inspector", () => {
   it("offers move, metadata, conversion and delete to a full administrator", () => {
     const model = nodeModel(allPermissions());
     expect(model.primaryAction?.label).toBe("✥ Move Entrance");
-    expect(labels(model)).toEqual(["⎋ Convert to Standard Node", "🗑 Delete Route Node"]);
+    expect(labels(model)).toEqual(["⎋ Convert to Junction", "🗑 Delete Route Node"]);
+    expect(model.overflowActions.map((action) => action.separatorBefore ?? false)).toEqual([false, true]);
+    expect(model.objectLabel).toBe("Entrance");
     renderDetails(model);
     expect(screen.getByRole("button", { name: "Update Route Node" })).toBeInTheDocument();
   });
@@ -222,6 +251,26 @@ describe("Route Node inspector", () => {
     expect(model.primaryAction).toBeUndefined();
     expect(model.details).toBeUndefined();
     expect(model.overflowActions).toEqual([]);
+    expect(model.viewOnly).toBe(true);
+    expect(nodeModel(allPermissions()).viewOnly).toBe(false);
+  });
+
+  it("labels a Junction Route node and puts its type and lifecycle in the header", () => {
+    const junction = { ...node, nodeType: "Junction" as const, associatedPlaceId: null };
+    const model = routeNodeInspectorModel({
+      node: junction, can: canWith(allPermissions()), frame: { frame: null, dirty: false } as never, workflow: {} as never,
+      nodes: [junction], pathways: [], buildings: [], locations: [], campusBoundary: [], buildingAssociationOptions: [],
+      savingAction: null, onError: noop, onNodeUpdated: noop, onMove: noop, onDelete: noop,
+    });
+    expect(model.objectLabel).toBe("Route node");
+    expect(model.subtitle).toBe("Junction · Active");
+    expect(model.summary.map((item) => item.label)).toEqual(["Connected Pathways", "Coordinates"]);
+  });
+
+  it("keeps Cancel neutral beside Update: only Update carries the primary class", () => {
+    renderDetails(nodeModel(allPermissions()));
+    expect(screen.getByRole("button", { name: "Update Route Node" })).toHaveClass("inspector-primary-action");
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toHaveClass("inspector-primary-action");
   });
 
   it("leaves only Delete with the Delete switch, and moving and metadata with the Edit switch", () => {
@@ -230,38 +279,99 @@ describe("Route Node inspector", () => {
     const editing = nodeModel(only("edit"));
     expect(editing.primaryAction?.label).toBe("✥ Move Entrance");
     expect(editing.details).toBeDefined();
-    expect(labels(editing)).toEqual(["⎋ Convert to Standard Node"]);
+    expect(labels(editing)).toEqual(["⎋ Convert to Junction"]);
   });
 });
 
 describe("Pathway inspector", () => {
-  const path = { id: "p1", name: "Walk", sourceNodeId: "a", destinationNodeId: "b", direction: "Two-way", status: "Active", pathPoints: [] } as unknown as Pathway;
+  const path = { id: "p1", name: "Walk", sourceNodeId: "a", destinationNodeId: "b", direction: "Two-way", status: "Active", shade: "Mostly Shaded", type: "Walkway", allowedModes: ["Walking"], pathPoints: [] } as unknown as Pathway;
+  const editor = (overrides: Record<string, unknown> = {}) => ({
+    currentPathways: [path], pathwayFrame: { ...path }, pathwayFrameIssues: [], pathwayFrameDirty: false,
+    setPathwayDraft: noop, adoptSuggestedPathwayName: noop, switchEndpoints: noop, ...overrides,
+  } as never);
   const pathwayModel = (permissions: AdminPermissions) => selectedPathwayInspectorModel({
-    pathway: {
-      currentPathways: [path], pathwayFrame: null, pathwayFrameIssues: [], pathwayFrameDirty: false,
-      setPathwayDraft: noop, adoptSuggestedPathwayName: noop, switchEndpoints: noop,
-    } as never,
+    pathway: editor(),
     path, nodes: [], buildings: [], savingAction: null, can: canWith(permissions),
     onSelect: noop, onApply: noop, onCancel: noop, onReshape: noop, onDelete: noop,
   });
 
-  it("offers update, cancel, reshape and delete to a full administrator", () => {
+  it("offers update, cancel, reshape and delete once each to a full administrator", () => {
     const model = pathwayModel(allPermissions());
     expect(model.primaryAction?.label).toBe("Update Pathway");
-    expect(labels(model)).toEqual(["Cancel changes", "⌁ Reshape Pathway", "🗑 Delete Pathway"]);
+    // Cancel and Reshape live in the card body; the menu holds only Delete, set apart.
+    expect(labels(model)).toEqual(["🗑 Delete Pathway"]);
+    expect(model.overflowActions[0].separatorBefore).toBe(true);
     renderDetails(model);
-    expect(screen.getByRole("button", { name: "⌁ Reshape Pathway" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "⌁ Reshape Pathway" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+    expect(model.objectLabel).toBe("Pathway");
+    expect(model.subtitle).toBe("Two-way · Active");
   });
 
-  it("is read-only for a view-only administrator", () => {
+  it("shows type, shade and allowed modes as read-only facts to a view-only administrator", () => {
     const model = pathwayModel(viewOnlyPermissions());
     expect(model.primaryAction).toBeUndefined();
     expect(model.details).toBeUndefined();
     expect(model.overflowActions).toEqual([]);
+    expect(model.viewOnly).toBe(true);
+    expect(model.summary).toEqual(expect.arrayContaining([
+      { label: "Way type", value: "Walkway" }, { label: "Shade", value: "Mostly Shaded" }, { label: "Allowed modes", value: "Walking" },
+    ]));
+    // Someone who may edit reads these in the inputs instead.
+    expect(pathwayModel(allPermissions()).summary.map((item) => item.label)).toEqual(["Source Route Node", "Destination Route Node"]);
+  });
+
+  it("explains the disabled Vehicle checkbox on a Walkway", () => {
+    renderDetails(pathwayModel(allPermissions()));
+    const vehicle = screen.getByRole("checkbox", { name: "Vehicle" });
+    expect(vehicle).toBeDisabled();
+    expect(vehicle).toHaveAccessibleDescription("Walkways allow walking only.");
   });
 
   it("splits Edit and Delete", () => {
-    expect(labels(pathwayModel(only("edit")))).toEqual(["Cancel changes", "⌁ Reshape Pathway"]);
+    expect(labels(pathwayModel(only("edit")))).toEqual([]);
     expect(labels(pathwayModel(only("delete")))).toEqual(["🗑 Delete Pathway"]);
+    expect(pathwayModel(only("edit")).primaryAction?.label).toBe("Update Pathway");
+  });
+});
+
+describe("Path Point inspector", () => {
+  const parent = { id: "p1", name: "Walk", sourceNodeId: "a", destinationNodeId: "b", direction: "Two-way", status: "Active", shade: "Unshaded", type: "Walkway", pathPoints: [[1, 1]] } as unknown as Pathway;
+  const pointModel = (permissions: AdminPermissions) => pathPointInspectorModel({
+    pathway: {
+      activePathway: parent, pathwayFrame: { ...parent }, pathwayFrameIssues: [], pathwayFrameDirty: false, editingPathId: "p1",
+      setPathwayDraft: noop, pathPoints: [[1, 1]], setPathPoints: noop, selectedPathPointIndex: 0, setSelectedPathPointIndex: noop,
+      pathDraftDirty: false, setPathDraftDirty: noop, canModify: true,
+    } as never,
+    id: "p1:point:0", nodes: [], savingAction: null, can: canWith(permissions), onSelect: noop, onApply: noop, onCancel: noop, onStartConversion: noop,
+  })!;
+
+  it("offers the parent status exactly as the Pathway card does: Active and Closed, showing Active for an Active parent", () => {
+    renderDetails(pointModel(allPermissions()));
+    const select = screen.getByRole("combobox", { name: "Pathway status" });
+    expect(select).toHaveValue("Active");
+    expect(within(select).getAllByRole("option").map((option) => option.textContent)).toEqual(["Active", "Closed"]);
+    cleanup();
+    renderDetails(selectedPathwayInspectorModel({
+      pathway: { currentPathways: [parent], pathwayFrame: { ...parent }, pathwayFrameIssues: [], pathwayFrameDirty: false, setPathwayDraft: noop, adoptSuggestedPathwayName: noop, switchEndpoints: noop } as never,
+      path: parent, nodes: [], buildings: [], savingAction: null, can: canWith(allPermissions()), onSelect: noop, onApply: noop, onCancel: noop, onReshape: noop, onDelete: noop,
+    }));
+    const pathwaySelect = screen.getByRole("combobox", { name: "Pathway status" });
+    expect(pathwaySelect).toHaveValue("Active");
+    expect(within(pathwaySelect).getAllByRole("option").map((option) => option.textContent)).toEqual(["Active", "Closed"]);
+  });
+
+  it("repeats neither Update nor Cancel in the menu, and sets Remove apart", () => {
+    const model = pointModel(allPermissions());
+    expect(model.primaryAction?.label).toBe("Update Pathway");
+    expect(labels(model)).toEqual(["Convert to Route Node", "↩ Inspect Parent Pathway", "🗑 Remove Path Point"]);
+    expect(model.overflowActions.map((action) => action.separatorBefore ?? false)).toEqual([false, false, true]);
+    expect(model.objectLabel).toBe("Path point");
+    expect(model.subtitle).toBe("Point 1 of 1 · Walk");
+  });
+
+  it("reads View only when the administrator may neither edit nor add", () => {
+    expect(pointModel(viewOnlyPermissions()).viewOnly).toBe(true);
+    expect(pointModel(allPermissions()).viewOnly).toBe(false);
   });
 });
