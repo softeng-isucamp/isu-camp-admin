@@ -5,6 +5,8 @@ import { createLocalAdmins } from "./localAdmins";
 import { allPermissions, viewOnlyPermissions } from "../lib/permissions";
 
 const PASSWORD = "password123";
+/** The reasons every real demotion must now carry. */
+const DEMOTE = { reasons: ["role_changed"] };
 
 const setup = (storage: Storage | null = null) => {
   const adapter = createLocalAdapter({ locations: [] }, storage);
@@ -141,7 +143,7 @@ describe("fixture refusals for a plain administrator", () => {
   });
 
   it("refuses a role change", async () => {
-    const error = await failure(fixture.admins.setRole("3", "admin"));
+    const error = await failure(fixture.admins.setRole("3", "admin", DEMOTE));
     expect(error).toBeInstanceOf(SuperadminRequiredError);
     expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("superadmin");
   });
@@ -275,7 +277,7 @@ describe("fixture role changes", () => {
     });
     expect((await fixture.admins.list()).find((account) => account.id === "2")?.role).toBe("superadmin");
 
-    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ username: "admin_dean", role: "admin" });
+    await expect(fixture.admins.setRole("3", "admin", DEMOTE)).resolves.toMatchObject({ username: "admin_dean", role: "admin" });
     expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("admin");
   });
 
@@ -288,7 +290,7 @@ describe("fixture role changes", () => {
   });
 
   it("takes effect on the demoted account's very next request", async () => {
-    await fixture.admins.setRole("3", "admin");
+    await fixture.admins.setRole("3", "admin", DEMOTE);
     await fixture.adapter.auth.login("admin_dean", PASSWORD);
 
     expect(await failure(fixture.admins.setStatus("2", "Inactive"))).toBeInstanceOf(SuperadminRequiredError);
@@ -296,26 +298,75 @@ describe("fixture role changes", () => {
 
   it("records a promotion and a demotion against the account", async () => {
     await fixture.admins.setRole("2", "superadmin");
-    await fixture.admins.setRole("3", "admin");
+    await fixture.admins.setRole("3", "admin", DEMOTE);
 
     expect(fixture.audit).toHaveBeenNthCalledWith(1, "Promoted Administrator", "admin_registrar", "2");
-    expect(fixture.audit).toHaveBeenNthCalledWith(2, "Demoted Administrator", "admin_dean", "3");
+    expect(fixture.audit).toHaveBeenNthCalledWith(2, "Demoted Administrator", "admin_dean", "3", { reasons: ["role_changed"] });
+  });
+
+  describe("demotion reasons", () => {
+    const roleOf = async (id: string) => (await fixture.admins.list()).find((account) => account.id === id)?.role;
+    const refusal = (options?: Parameters<typeof fixture.admins.setRole>[2]) => failure(fixture.admins.setRole("3", "admin", options));
+
+    it("records several distinct reasons and the trimmed explanation on the demotion event", async () => {
+      await fixture.admins.setRole("3", "admin", { reasons: ["left_team", "other"], otherReason: "  Moved to the library.  " });
+      expect(fixture.audit).toHaveBeenCalledOnce();
+      expect(fixture.audit).toHaveBeenCalledWith("Demoted Administrator", "admin_dean", "3",
+        { reasons: ["left_team", "other"], otherReason: "Moved to the library." });
+    });
+
+    it("omits the explanation when Other is not selected", async () => {
+      await fixture.admins.setRole("3", "admin", { reasons: ["security_concern", "role_changed"] });
+      expect(fixture.audit.mock.calls[0][3]).toEqual({ reasons: ["security_concern", "role_changed"] });
+    });
+
+    it.each([
+      ["missing", undefined, "reasons"],
+      ["empty", { reasons: [] }, "reasons"],
+      ["not an array", { reasons: "other" as never }, "reasons"],
+      ["unknown code", { reasons: ["because"] }, "reasons"],
+      ["duplicate", { reasons: ["left_team", "left_team"] }, "reasons"],
+      ["Other without an explanation", { reasons: ["other"] }, "otherReason"],
+      ["Other with a blank explanation", { reasons: ["other"], otherReason: "  \n " }, "otherReason"],
+      ["Other over 500 characters", { reasons: ["other"], otherReason: "x".repeat(501) }, "otherReason"],
+      ["an explanation without Other", { reasons: ["left_team"], otherReason: "stray" }, "otherReason"],
+    ])("refuses %s with a %s field error and changes nothing", async (_name, options, field) => {
+      expect(await refusal(options)).toMatchObject({ fieldErrors: { [field]: expect.any(String) } });
+      expect(await roleOf("3")).toBe("superadmin");
+      expect(fixture.audit).not.toHaveBeenCalled();
+    });
+
+    it("accepts an explanation of exactly 500 trimmed characters", async () => {
+      await fixture.admins.setRole("3", "admin", { reasons: ["other"], otherReason: ` ${"x".repeat(500)} ` });
+      expect(await roleOf("3")).toBe("admin");
+    });
+
+    it("asks for no reasons on a promotion and logs none", async () => {
+      await fixture.admins.setRole("2", "superadmin");
+      expect(fixture.audit).toHaveBeenCalledWith("Promoted Administrator", "admin_registrar", "2");
+    });
+
+    it("writes no demotion event for an account that is already an administrator", async () => {
+      await expect(fixture.admins.setRole("2", "admin")).resolves.toMatchObject({ role: "admin" });
+      await expect(fixture.admins.setRole("2", "admin", DEMOTE)).resolves.toMatchObject({ role: "admin" });
+      expect(fixture.audit).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses to change the signed-in account's own role, even to the role it holds", async () => {
-    expect(await failure(fixture.admins.setRole("1", "admin"))).toMatchObject({ message: "You cannot change your own role." });
+    expect(await failure(fixture.admins.setRole("1", "admin", DEMOTE))).toMatchObject({ message: "You cannot change your own role." });
     expect(await failure(fixture.admins.setRole("1", "superadmin"))).toMatchObject({ message: "You cannot change your own role." });
     expect((await fixture.admins.list()).find((account) => account.id === "1")?.role).toBe("superadmin");
   });
 
   it("succeeds without a write or an audit entry when the account already holds the role", async () => {
-    await expect(fixture.admins.setRole("2", "admin")).resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.setRole("2", "admin", DEMOTE)).resolves.toMatchObject({ role: "admin" });
     await expect(fixture.admins.setRole("3", "superadmin")).resolves.toMatchObject({ role: "superadmin" });
     expect(fixture.audit).not.toHaveBeenCalled();
   });
 
   it("reports an unknown account and an unknown role", async () => {
-    expect(await failure(fixture.admins.setRole("missing", "admin"))).toMatchObject({ message: "That administrator no longer exists. Reload the page." });
+    expect(await failure(fixture.admins.setRole("missing", "admin", DEMOTE))).toMatchObject({ message: "That administrator no longer exists. Reload the page." });
     const error = await failure(fixture.admins.setRole("2", "owner" as never));
     expect(error).toMatchObject({
       message: "Role must be Administrator or Superadmin.",
@@ -345,7 +396,7 @@ describe("fixture last-superadmin rule", () => {
   });
 
   it("refuses to demote or deactivate the only active superadmin", async () => {
-    expect(await failure(fixture.admins.setRole("3", "admin"))).toMatchObject({ message: LAST_SUPERADMIN });
+    expect(await failure(fixture.admins.setRole("3", "admin", DEMOTE))).toMatchObject({ message: LAST_SUPERADMIN });
     expect(await failure(fixture.admins.setStatus("3", "Inactive"))).toMatchObject({ message: LAST_SUPERADMIN });
 
     const dean = (await fixture.admins.list()).find((account) => account.id === "3");
@@ -356,7 +407,7 @@ describe("fixture last-superadmin rule", () => {
   it("lets it through once another active superadmin exists", async () => {
     await fixture.admins.setRole("2", "superadmin");
 
-    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.setRole("3", "admin", DEMOTE)).resolves.toMatchObject({ role: "admin" });
   });
 
   it("does not count a deactivated superadmin, nor refuse changing one", async () => {
@@ -365,7 +416,7 @@ describe("fixture last-superadmin rule", () => {
     accounts.find((account) => account.id === "1")!.role = "superadmin";
     accounts.find((account) => account.id === "3")!.status = "Inactive";
 
-    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin" });
+    await expect(fixture.admins.setRole("3", "admin", DEMOTE)).resolves.toMatchObject({ role: "admin" });
   });
 });
 
@@ -404,10 +455,10 @@ describe("fixture password confirmation for role and permission changes", () => 
   });
 
   it("asks before it looks at the account, the role or who is asking", async () => {
-    expect(await failure(fixture.admins.setRole("missing", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setRole("missing", "admin", DEMOTE))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setRole("2", "owner" as never))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.setRole("1", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
-    expect(await failure(fixture.admins.setRole("2", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setRole("1", "admin", DEMOTE))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setRole("2", "admin", DEMOTE))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setPermissions("missing", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setPermissions("1", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
@@ -415,7 +466,7 @@ describe("fixture password confirmation for role and permission changes", () => 
   it("refuses a plain administrator outright, never with a password prompt", async () => {
     await fixture.adapter.auth.login("admin_registrar", PASSWORD);
 
-    expect(await failure(fixture.admins.setRole("3", "admin"))).toBeInstanceOf(SuperadminRequiredError);
+    expect(await failure(fixture.admins.setRole("3", "admin", DEMOTE))).toBeInstanceOf(SuperadminRequiredError);
     expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(SuperadminRequiredError);
   });
 
@@ -426,7 +477,7 @@ describe("fixture password confirmation for role and permission changes", () => 
 
     vi.advanceTimersByTime(5 * 60 * 1000 + 1);
 
-    expect(await failure(fixture.admins.setRole("2", "admin"))).toBeInstanceOf(PasswordConfirmationRequiredError);
+    expect(await failure(fixture.admins.setRole("2", "admin", DEMOTE))).toBeInstanceOf(PasswordConfirmationRequiredError);
     expect(await failure(fixture.admins.setPermissions("2", viewOnlyPermissions()))).toBeInstanceOf(PasswordConfirmationRequiredError);
   });
 
@@ -658,15 +709,15 @@ describe("fixture administrator permissions", () => {
   });
 
   it("starts a demoted superadmin view only", async () => {
-    await expect(fixture.admins.setRole("3", "admin")).resolves.toMatchObject({ role: "admin", permissions: viewOnlyPermissions() });
+    await expect(fixture.admins.setRole("3", "admin", DEMOTE)).resolves.toMatchObject({ role: "admin", permissions: viewOnlyPermissions() });
   });
 
   it("starts a demoted superadmin with the switches given, and refuses an incomplete set before demoting", async () => {
     const given = { add: true, edit: false, delete: false, changeUserStatus: false };
-    expect(await failure(fixture.admins.setRole("3", "admin", { add: true } as never))).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
+    expect(await failure(fixture.admins.setRole("3", "admin", { ...DEMOTE, permissions: { add: true } as never }))).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
     expect((await fixture.admins.list()).find((account) => account.id === "3")?.role).toBe("superadmin");
 
-    await expect(fixture.admins.setRole("3", "admin", given)).resolves.toMatchObject({ permissions: given });
+    await expect(fixture.admins.setRole("3", "admin", { ...DEMOTE, permissions: given })).resolves.toMatchObject({ permissions: given });
   });
 
   it("discards the switches when an administrator is promoted, and view-only comes back on a later demotion", async () => {
@@ -675,7 +726,7 @@ describe("fixture administrator permissions", () => {
     await expect(fixture.adapter.auth.login("admin_registrar", PASSWORD)).resolves.not.toHaveProperty("permissions");
     await fixture.adapter.auth.login("admin_justine", PASSWORD);
     await fixture.adapter.auth.confirmPassword(PASSWORD);
-    await expect(fixture.admins.setRole("2", "admin")).resolves.toMatchObject({ permissions: viewOnlyPermissions() });
+    await expect(fixture.admins.setRole("2", "admin", DEMOTE)).resolves.toMatchObject({ permissions: viewOnlyPermissions() });
   });
 });
 

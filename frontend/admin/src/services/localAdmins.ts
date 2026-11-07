@@ -4,6 +4,11 @@ import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
 import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
 import { viewOnlyPermissions } from "../lib/permissions";
+import {
+  OTHER_REASON_MAX, OTHER_REASON_REQUIRED_MESSAGE, OTHER_REASON_TOO_LONG_MESSAGE,
+  REASONS_REQUIRED_MESSAGE, isDemotionReasonCode,
+} from "../lib/demotionReasons";
+import type { SetRoleOptions } from "./api";
 
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const ROLE_MESSAGE = "Role must be Administrator or Superadmin.";
@@ -13,7 +18,7 @@ const LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Pro
 type Directory = ReturnType<typeof createLocalAdapter>["directory"];
 
 /** Records one administrator action in the fixture's System Logs. */
-type Audit = (action: string, target: string, targetId: string) => void;
+type Audit = (action: string, target: string, targetId: string, extra?: { reasons?: string[]; otherReason?: string }) => void;
 
 /**
  * The fixture's administrator accounts, with the server's authorization and
@@ -52,6 +57,25 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       throw fieldError("permissions", PERMISSIONS_MESSAGE);
     }
     return Object.fromEntries(keys.map((key) => [key, record[key] as boolean])) as unknown as AdminPermissions;
+  };
+
+  /**
+   * The server's reason checks, run for a real demotion only (an already-admin no-op is not
+   * judged). Distinct known codes, "other" with a trimmed 1-500 character explanation and no
+   * explanation without it; refusals name `reasons` or `otherReason`. Returns what is logged.
+   */
+  const readDemotionReasons = (reasons: unknown, otherReason: unknown): { reasons: string[]; otherReason?: string } => {
+    if (!Array.isArray(reasons) || reasons.length === 0) throw fieldError("reasons", REASONS_REQUIRED_MESSAGE);
+    if (!reasons.every(isDemotionReasonCode)) throw fieldError("reasons", "Choose from the listed reasons only.");
+    if (new Set(reasons).size !== reasons.length) throw fieldError("reasons", "Each reason can be selected once.");
+    if (!reasons.includes("other")) {
+      if (otherReason !== undefined && otherReason !== null) throw fieldError("otherReason", "Only add an explanation when Other reason is selected.");
+      return { reasons: [...reasons] };
+    }
+    if (typeof otherReason !== "string" || !otherReason.trim()) throw fieldError("otherReason", OTHER_REASON_REQUIRED_MESSAGE);
+    const trimmed = otherReason.trim();
+    if (trimmed.length > OTHER_REASON_MAX) throw fieldError("otherReason", OTHER_REASON_TOO_LONG_MESSAGE);
+    return { reasons: [...reasons], otherReason: trimmed };
   };
 
   /** The server's identity checks, in its order; the password is only checked when given or required. */
@@ -151,22 +175,25 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
 
     /**
      * Setting the role an account already holds succeeds without a change or a log entry.
-     * Demoting takes the switches the account starts with (view only when omitted);
-     * promoting discards them.
+     * Demoting takes the switches the account starts with (view only when omitted) and the
+     * reasons, validated as the server does; promoting discards the switches and takes no reasons.
      */
-    setRole: async (id: string, role: AdminRole, permissions?: AdminPermissions): Promise<AdminAccount> => {
+    setRole: async (id: string, role: AdminRole, { permissions, reasons, otherReason }: SetRoleOptions = {}): Promise<AdminAccount> => {
       const caller = requireSuperadmin();
       requireConfirmation("Confirm your password to change this administrator's role.");
       const record = find(id);
       if (role !== "admin" && role !== "superadmin") throw fieldError("role", ROLE_MESSAGE);
       if (record.id === caller.id) throw new Error("You cannot change your own role.");
       if (record.role === role) return asAccount(record);
+      // Judged after the no-op, so an already-admin target is never refused over reasons it does not need.
+      const demotion = role === "admin" ? readDemotionReasons(reasons, otherReason) : undefined;
       if (role === "admin" && isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
       const demotedWith = role === "admin" ? (permissions ? readPermissions(permissions) : viewOnlyPermissions()) : undefined;
       record.role = role;
       if (demotedWith) record.permissions = demotedWith;
       else delete record.permissions;
-      audit(role === "superadmin" ? "Promoted Administrator" : "Demoted Administrator", record.username, record.id);
+      if (role === "superadmin") audit("Promoted Administrator", record.username, record.id);
+      else audit("Demoted Administrator", record.username, record.id, demotion);
       return asAccount(record);
     },
 

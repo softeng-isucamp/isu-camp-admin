@@ -211,3 +211,46 @@ describe("Logs search requests", () => {
     expect(await screen.findByText("Matched Target")).toBeInTheDocument();
   });
 });
+
+describe("Logs demotion reasons", () => {
+  const demotion = (extra: Partial<AuditEntry>): AuditEntry => ({
+    id: "demotion", actor: "admin_justine", action: "Demoted Administrator", target: "admin_dean",
+    createdAt: fixtureTimestamp, category: "Admin", ...extra,
+  });
+  const openDetails = async (entry: AuditEntry) => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({ items: [entry], total: 1, page: 1, pageSize: 10 });
+    renderLogs();
+    await userEvent.click(await screen.findByRole("button", { name: "View Details" }));
+    return screen.getByRole("dialog", { name: "Log Details" });
+  };
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("shows readable reason labels and the explanation", async () => {
+    const dialog = await openDetails(demotion({ reasons: ["left_team", "other"], otherReason: "Moved to the library." }));
+    const items = within(dialog).getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toEqual(["No longer part of the team", "Other reason"]);
+    expect(within(dialog).getByText("Moved to the library.")).toBeInTheDocument();
+  });
+
+  it("keeps text that looks like HTML literal", async () => {
+    const markup = `<img src=x onerror="alert(1)"><b>bold</b>`;
+    const dialog = await openDetails(demotion({ reasons: ["other"], otherReason: markup }));
+    expect(within(dialog).getByText(markup)).toBeInTheDocument();
+    expect(dialog.querySelector("img")).toBeNull();
+    expect(dialog.querySelector("b")).toBeNull();
+  });
+
+  it("shows a code it does not know as received, and nothing for an entry without reasons", async () => {
+    const dialog = await openDetails(demotion({ reasons: ["future_code"] }));
+    expect(within(dialog).getByText("future_code")).toBeInTheDocument();
+    cleanup();
+    vi.restoreAllMocks();
+    const plain = await openDetails(demotion({ detail: "Plain note" }));
+    expect(within(plain).getByText("Plain note")).toBeInTheDocument();
+    expect(within(plain).queryByText("Reasons")).not.toBeInTheDocument();
+  });
+});

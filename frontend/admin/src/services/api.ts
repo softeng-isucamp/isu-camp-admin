@@ -95,7 +95,8 @@ type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; create
 /** Accounts predate the status column, so anything unrecognized reads as Active. */
 export const parseAccountStatus = (raw: unknown): AccountStatus =>
   String(raw ?? "").trim().toLowerCase() === "inactive" ? "Inactive" : "Active";
-type BackendAudit = { id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
+export type SetRoleOptions = { permissions?: AdminPermissions; reasons?: string[]; otherReason?: string };
+type BackendAudit = { reasons?: unknown; otherReason?: unknown; other_reason?: unknown; id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
   if (id === undefined || typeof raw.username !== "string") throw new InvalidResponseError("Backend returned a malformed user record.");
@@ -103,7 +104,13 @@ export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new InvalidResponseError("Backend returned a malformed audit record.");
-  return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: raw.detail == null ? undefined : String(raw.detail), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
+  // Demotion reasons may sit on the entry or inside a structured `detail`; anything else stays plain text.
+  const structured = typeof raw.detail === "object" && raw.detail !== null && !Array.isArray(raw.detail) ? raw.detail as BackendAudit & { text?: unknown; message?: unknown } : undefined;
+  const source = { reasons: raw.reasons ?? structured?.reasons, other: raw.otherReason ?? raw.other_reason ?? structured?.otherReason ?? structured?.other_reason };
+  const reasons = Array.isArray(source.reasons) ? source.reasons.filter((code): code is string => typeof code === "string") : [];
+  const otherReason = typeof source.other === "string" && source.other.trim() ? source.other : undefined;
+  const detailText = structured ? (typeof structured.text === "string" ? structured.text : typeof structured.message === "string" ? structured.message : undefined) : raw.detail == null ? undefined : String(raw.detail);
+  return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: detailText, ...(reasons.length ? { reasons } : {}), ...(otherReason ? { otherReason } : {}), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
 };
 
 const dashboardMetricsSchema = z.object({
@@ -790,7 +797,19 @@ export interface Services {
    * - `PUT /api/admins/:id/permissions` takes `{ permissions }` (all four booleans) and
    *   returns `{ admin }`; 409 for oneself or a superadmin.
    * - `PUT /api/admins/:id/role` takes `permissions` when demoting to `admin` (view only
-   *   when omitted); promoting discards the stored switches.
+   *   when omitted); promoting discards the stored switches. Demoting also takes
+   *   `reasons` (#166): a nonempty array of distinct codes from `role_changed`,
+   *   `left_team`, `granted_by_mistake`, `security_concern` and `other`, plus a trimmed
+   *   `otherReason` of 1-500 characters when, and only when, `other` is selected.
+   *   Invalid input is a 400 with `fields` keyed `reasons` / `otherReason`; nothing is
+   *   changed or logged. Promotion sends neither. Deploy this frontend with or just
+   *   before the backend: sending reasons is harmless before the backend requires them,
+   *   but an older frontend cannot demote once it does.
+   * - System Logs: the demotion event is expected to expose the reasons. The wire shape
+   *   is not fixed by #166, so the portal reads `reasons` (array of codes) and
+   *   `otherReason` (or `other_reason`) either on the log entry or inside `detail` when
+   *   that is a structured object, and otherwise shows `detail` as plain text. Unknown
+   *   codes are shown as received. All of it is rendered as text, never as HTML.
    * `GET /api/me` must read permissions from the database each time. The portal
    * refreshes on window focus/visibility (at most once per 30s), and immediately
    * after a write returns 403 with `code: "PERMISSION_DENIED"`. Every write must
@@ -813,9 +832,11 @@ export interface Services {
     setStatus(id: string, status: AccountStatus): Promise<AdminAccount>;
     /**
      * Promotes an administrator to superadmin or demotes a superadmin; returns the updated account.
-     * `permissions` only applies when demoting: the switches the account starts with (view only when omitted).
+     * Demoting only: `permissions` are the switches the account starts with (view only when omitted),
+     * and `reasons` (with `otherReason` when `other` is among them) are required by the server and
+     * recorded in the audit event. Promoting ignores all three.
      */
-    setRole(id: string, role: AdminRole, permissions?: AdminPermissions): Promise<AdminAccount>;
+    setRole(id: string, role: AdminRole, options?: SetRoleOptions): Promise<AdminAccount>;
     /** Replaces a regular administrator's permissions; returns the updated account. */
     setPermissions(id: string, permissions: AdminPermissions): Promise<AdminAccount>;
     /** Emails a password reset code to that account's own address. */
@@ -885,6 +906,7 @@ const addAudit = (
   target: string,
   category: AuditEntry["category"] = "Admin",
   targetId?: string,
+  extra: Pick<AuditEntry, "reasons" | "otherReason"> = {},
 ) => {
   localAuditEntries.unshift({
     id: `a-${Date.now()}`,
@@ -892,6 +914,7 @@ const addAudit = (
     action,
     target,
     targetId,
+    ...extra,
     createdAt: "Just now",
     category,
   });
@@ -901,8 +924,8 @@ const localAuditEntries: AuditEntry[] = createMockAuditLogs();
 const localUsers: UserAccount[] = createMockUsers();
 // The fixture's administrator directory is the adapter's sign-in accounts, so
 // the row marked current and the rules applied follow whoever signed in.
-const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId) =>
-  addAudit(action, target, "Admin", targetId));
+const localAdmins = createLocalAdmins(localAdapter.directory, (action, target, targetId, extra) =>
+  addAudit(action, target, "Admin", targetId, extra));
 
 /**
  * A missing or unrecognized role means a plain administrator, never a superadmin.
@@ -1674,16 +1697,25 @@ export const services: Services = {
       return wait(await localAdmins.setStatus(id, status));
     },
 
-    setRole: async (id, role, permissions) => {
+    setRole: async (id, role, options = {}) => {
       if (USE_HTTP_API) {
+        const { permissions, reasons, otherReason } = options;
         const response = await apiJson<{ admin: AdminAccount }>(
           `/api/admins/${encodeURIComponent(id)}/role`,
-          // The switches only travel with a demotion; promoting discards them.
-          { method: "PUT", body: JSON.stringify({ role, ...(role === "admin" && permissions ? { permissions } : {}) }) },
+          // The switches and reasons only travel with a demotion; promoting sends neither.
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              role,
+              ...(role === "admin" && permissions ? { permissions } : {}),
+              ...(role === "admin" && reasons ? { reasons } : {}),
+              ...(role === "admin" && otherReason !== undefined ? { otherReason } : {}),
+            }),
+          },
         );
         return normalizeAdmin(response.admin);
       }
-      return wait(await localAdmins.setRole(id, role, permissions));
+      return wait(await localAdmins.setRole(id, role, options));
     },
 
     setPermissions: async (id, permissions) => {

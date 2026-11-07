@@ -1587,14 +1587,55 @@ describe("real administrators service boundary", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ role: "superadmin" });
   });
 
+  it("sends the reasons and the explanation only with a demotion", async () => {
+    const { services: admins } = await httpServices();
+    const reply = { success: true, admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", isCurrent: false } };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply));
+
+    await admins.admins.setRole("2", "admin", { reasons: ["left_team", "other"], otherReason: "Moved to the registrar." });
+    await admins.admins.setRole("2", "admin", { reasons: ["security_concern"] });
+    await admins.admins.setRole("2", "superadmin", { reasons: ["other"], otherReason: "ignored" });
+
+    const [both, single, promote] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(both).toEqual({ role: "admin", reasons: ["left_team", "other"], otherReason: "Moved to the registrar." });
+    expect(single).toEqual({ role: "admin", reasons: ["security_concern"] });
+    expect(promote).toEqual({ role: "superadmin" });
+  });
+
+  it("surfaces reasons and otherReason field errors from a refused demotion", async () => {
+    const { services: admins } = await httpServices();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json(
+      { message: "Invalid request", fields: { reasons: "Select at least one reason.", otherReason: "Explanation is too long." } }, 400));
+
+    const error = await admins.admins.setRole("2", "admin", { reasons: [] }).then(() => null, (cause: unknown) => cause);
+    expect(error).toMatchObject({ fieldErrors: { reasons: "Select at least one reason.", otherReason: "Explanation is too long." } });
+  });
+
+  it("reads demotion reasons from a log entry, from a structured detail, or leaves plain detail alone", async () => {
+    const { services: http } = await httpServices();
+    const base = { actor: "a", action: "Demoted Administrator", target: "t", created_at: "2026-11-01T00:00:00Z", category: "Admin" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ items: [
+      { ...base, id: 1, reasons: ["left_team", "other"], otherReason: "<b>x</b>" },
+      { ...base, id: 2, detail: { reasons: ["role_changed"], other_reason: "" } },
+      { ...base, id: 3, detail: "Plain text" },
+    ], total: 3, page: 1, pageSize: 20 }));
+
+    const { items } = await http.logs.list();
+    expect(items[0]).toMatchObject({ reasons: ["left_team", "other"], otherReason: "<b>x</b>" });
+    expect(items[1]).toMatchObject({ reasons: ["role_changed"] });
+    expect(items[1]).not.toHaveProperty("otherReason");
+    expect(items[2]).toMatchObject({ detail: "Plain text" });
+    expect(items[2]).not.toHaveProperty("reasons");
+  });
+
   it("sends the starting switches with a demotion, and none with a promotion", async () => {
     const { services: admins } = await httpServices();
     const starting = { add: false, edit: true, delete: false, changeUserStatus: false };
     const reply = { success: true, admin: { id: "2", username: "staff", email: "", status: "Active", role: "admin", isCurrent: false } };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => json(reply));
 
-    await admins.admins.setRole("2", "admin", starting);
-    await admins.admins.setRole("2", "superadmin", starting);
+    await admins.admins.setRole("2", "admin", { permissions: starting });
+    await admins.admins.setRole("2", "superadmin", { permissions: starting });
 
     const [demote, promote] = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
     expect(demote).toEqual({ role: "admin", permissions: starting });
