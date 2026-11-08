@@ -3859,6 +3859,16 @@ td small {
 .filter-combobox-popover {
   min-width: 280px;
 }
+/* Flipped by FittedPopover when the default place would run off screen (or past the filter card). */
+.parent-building-popover.aligns-end {
+  left: auto;
+  right: 0;
+}
+.parent-building-popover.opens-up,
+.row-action-menu.opens-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
 .filter-combobox-group {
   margin: 0;
   padding: 0;

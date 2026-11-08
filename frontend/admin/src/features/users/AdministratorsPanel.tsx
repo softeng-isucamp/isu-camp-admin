@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
+import { FittedPopover } from "../../components/FittedPopover";
 import type { useFeedback } from "../../components/Feedback";
 import { PasswordField } from "../../components/PasswordField";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
@@ -368,7 +369,7 @@ export function AdministratorsPanel({ feedback }: {
                       •••
                     </button>
                     {actionMenuId === account.id && (
-                      <div className="row-action-menu" role="menu">
+                      <FittedPopover className="row-action-menu" role="menu">
                         <button role="menuitem" onClick={() => viewActivity(account)}>
                           View activity
                         </button>
@@ -417,7 +418,7 @@ export function AdministratorsPanel({ feedback }: {
                         >
                           Send password reset code
                         </button>
-                      </div>
+                      </FittedPopover>
                     )}
                   </div>
                 </td>

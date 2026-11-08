@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Empty, LoadingState, Stamp, TimeZoneTag } from '../../components/UI';
+import { FittedPopover } from '../../components/FittedPopover';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
@@ -183,9 +184,9 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
               {actions.length > 0 && <div style={{ display: 'inline-flex' }} ref={menuId === backup.id ? menuRef : undefined}>
                 <button className="table-action menu-trigger" data-backup-trigger={backup.id} aria-label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} aria-expanded={menuId === backup.id}
                   disabled={locked || target !== null} onClick={() => setMenuId((current) => current === backup.id ? null : backup.id)}>•••</button>
-                {menuId === backup.id && <div className="row-action-menu" role="menu">
+                {menuId === backup.id && <FittedPopover className="row-action-menu" role="menu">
                   {actions.map((entry, index) => [entry.action === 'delete' && index > 0 && <div key="separator" role="separator" />, <button key={entry.action} role="menuitem" className={entry.action === 'delete' ? 'danger' : undefined} onClick={() => open(entry.action, backup)}>{entry.label}</button>])}
-                </div>}
+                </FittedPopover>}
               </div>}
             </td>
           </tr>;
