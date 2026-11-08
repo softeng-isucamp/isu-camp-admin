@@ -10,8 +10,18 @@ import pytest
 from flask import Flask
 
 from extensions import db
+# Imported for its side effect as well as its use: the audit table has to be in
+# the metadata before the fixture creates it, because the history the panel
+# shows is read back out of it.
+from model.audit_log import AuditLog
 from model.backup_schedule import ROW_ID, BackupSchedule
 from services import backup_jobs, backup_schedule
+
+# SQLite autoincrements an INTEGER primary key and not a BIGINT one, so an
+# audit row inserted here would fail a NOT NULL constraint that Postgres fills
+# from a sequence. The variant applies to SQLite only, which leaves the real
+# column as it is and lets these tests write history the way the server does.
+AuditLog.__table__.c.id.type = db.BigInteger().with_variant(db.Integer(), "sqlite")
 
 
 @pytest.fixture
@@ -570,7 +580,7 @@ def test_retention_is_named_in_the_record(app, monkeypatch, tmp_path, recorded):
 
     # One row for the night, plus one naming the archive retention removed.
     nightly = next(row for row in recorded if row[2] == "backup")
-    assert "removed 1 archive(s) past the 1 kept" in nightly[5]
+    assert "removed 1 archive past the 1 kept" in nightly[5]
     assert [row[2] for row in recorded if row[2] == "delete backup"] == ["delete backup"]
 
 
@@ -589,6 +599,132 @@ def test_a_broken_audit_write_does_not_lose_the_backup(app, monkeypatch):
 
     assert job["status"] == "succeeded"
     assert len(backup_jobs.list_backups()) == 1
+
+def record_run(action, detail="", target_id=None, actor=None, minutes_ago=0):
+    """Writes one audit row the way an unattended run leaves it behind."""
+
+    row = AuditLog(
+        category="System",
+        actor=actor or backup_schedule.AUDIT_ACTOR,
+        action=action,
+        target="Database",
+        target_id=target_id,
+        detail=detail,
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+    )
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+# ==========================================
+# THE HISTORY THE PANEL SHOWS
+# ==========================================
+
+def test_a_completed_night_comes_back_with_the_archive_it_made(app, monkeypatch):
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app)
+        runs = backup_schedule.recent_runs()
+
+    archive = backup_jobs.list_backups()[0]
+    assert [run["outcome"] for run in runs] == ["taken"]
+    assert runs[0]["archiveId"] == archive["id"]
+    assert runs[0]["stored"] is True
+    assert runs[0]["sizeBytes"] == archive["sizeBytes"]
+    # Nothing expired, so there is nothing to add beside the outcome.
+    assert runs[0]["message"] == ""
+    # The frontend parses this with z.string().datetime(), which wants a Z.
+    assert runs[0]["at"].endswith("Z")
+
+
+def test_what_retention_removed_is_what_the_run_says(app, monkeypatch, tmp_path):
+    save(app, keep=1)
+    store_archive(tmp_path, "20261009-120000Z", "2026-10-09T12:00:00Z")
+    fake_dump(monkeypatch)
+
+    with app.app_context():
+        backup_schedule.run_backup_now(app, keep=1)
+        runs = backup_schedule.recent_runs()
+
+    assert runs[0]["message"] == "removed 1 archive past the 1 kept"
+
+
+def test_a_night_that_left_no_archive_is_still_in_the_history(app):
+    """The whole reason this is read from the log: a failure has no file."""
+
+    with app.app_context():
+        record_run("backup failed", "pg_dump is not installed on the server.", minutes_ago=10)
+        record_run("backup skipped", "Another backup or restore is already running.", minutes_ago=5)
+        runs = backup_schedule.recent_runs()
+
+    assert [(run["outcome"], run["message"]) for run in runs] == [
+        ("skipped", "Another backup or restore is already running."),
+        ("failed", "pg_dump is not installed on the server."),
+    ]
+    # Neither names an archive, so neither offers one to look for.
+    assert all("archiveId" not in run for run in runs)
+
+
+def test_a_run_whose_archive_retention_has_since_deleted_says_so(app):
+    with app.app_context():
+        record_run("backup", "Automatic backup 20260901-023000Z completed",
+                   target_id="20260901-023000Z")
+        runs = backup_schedule.recent_runs()
+
+    assert runs[0]["archiveId"] == "20260901-023000Z"
+    assert runs[0]["stored"] is False
+    assert "sizeBytes" not in runs[0]
+
+
+def test_only_the_schedules_own_runs_are_listed(app):
+    """The table above already shows a backup somebody started by hand."""
+
+    with app.app_context():
+        record_run("start backup", "Started backup job 1", actor="admin01")
+        record_run("delete backup", "Retention removed archive 20260901-023000Z",
+                   actor=backup_schedule.ACTOR)
+        record_run("backup", "Automatic backup 20260902-023000Z completed",
+                   target_id="20260902-023000Z")
+        runs = backup_schedule.recent_runs()
+
+    assert [run["outcome"] for run in runs] == ["taken"]
+
+
+def test_the_history_is_newest_first_and_bounded(app):
+    with app.app_context():
+        for minutes in range(5):
+            record_run("backup failed", f"night {minutes}", minutes_ago=minutes)
+        runs = backup_schedule.recent_runs(limit=3)
+
+    assert [run["message"] for run in runs] == ["night 0", "night 1", "night 2"]
+
+
+def test_a_history_that_cannot_be_read_is_not_an_empty_history(app):
+    """An unreadable log hides the panel's section; an empty one is a fact."""
+
+    with app.app_context():
+        assert backup_schedule.recent_runs() == []
+        db.session.execute(db.text("DROP TABLE public.audit_log"))
+        db.session.commit()
+        assert backup_schedule.recent_runs() is None
+
+
+def test_there_is_no_next_run_when_the_schedule_is_off(app):
+    save(app, enabled=False)
+    with app.app_context():
+        assert backup_schedule.next_run() is None
+
+
+def test_the_next_run_is_the_one_the_timer_is_waiting_for(app):
+    schedule = save(app, enabled=True, at_time="02:30")
+    with app.app_context():
+        due = backup_schedule.next_run()
+
+    expected = backup_schedule.next_run_after(datetime.now(timezone.utc), schedule)
+    assert due == backup_jobs.iso_utc(expected)
+
 
 # ==========================================
 # PICKING UP A SAVED CHANGE
