@@ -76,6 +76,19 @@ ACTOR = "scheduled"
 # made it, and "scheduled" would read there as a person.
 AUDIT_ACTOR = "scheduler"
 
+# The actions ``_record`` writes, and what the panel calls each outcome. The
+# history is read back out of exactly the rows the timer wrote, so this mapping
+# is the one place that has to agree with itself.
+RUN_OUTCOMES = {
+    "backup": "taken",
+    "backup failed": "failed",
+    "backup skipped": "skipped",
+}
+
+# How many runs the panel is sent. A fortnight covers the default retention,
+# and the extra leaves room for the nights that failed and left no archive.
+RUNS_SHOWN = 20
+
 # A missed night is picked up this long after start, not immediately: a dump
 # competes with everything else a booting server is doing, and a restart loop
 # should not fire one on every attempt.
@@ -555,11 +568,139 @@ def run_backup_now(app=None, keep=None):
     archive_id = stored[0]["id"] if stored else None
     detail = f"Automatic backup {archive_id} completed"
     if expired:
-        detail += f"; removed {len(expired)} archive(s) past the {keep} kept"
+        # Written to read as a sentence because this is also what the panel's
+        # automatic history shows beside the run - see ``recent_runs``.
+        plural = "" if len(expired) == 1 else "s"
+        detail += f"; removed {len(expired)} archive{plural} past the {keep} kept"
 
     logger.info("%s", detail)
     _record(app, "backup", archive_id, detail)
     return view
+
+
+# ==========================================
+# What the Automatic Backup Has Done
+# ==========================================
+
+# The panel lists archives, which cannot answer the question somebody checking
+# an unattended backup is actually asking. A night that failed left no file; a
+# night that succeeded is deleted by retention a fortnight later while the fact
+# that it ran is the thing being looked for; and a night that was skipped
+# because somebody was restoring left nothing at all. The audit rows the timer
+# writes are the only record of those, so the history is read back out of them.
+
+
+def _run_message(outcome, detail, archive_id):
+    """The part of an audit row's detail worth showing beside its outcome.
+
+    A successful run's detail names the archive and then, after a semicolon,
+    what retention removed. The archive id travels as its own field, so only
+    the clause after the semicolon is left to say - and a run that expired
+    nothing has nothing to add. A failed or skipped run's detail is the reason,
+    which is the whole point of showing it.
+    """
+
+    detail = (detail or "").strip()
+    if outcome != "taken":
+        return detail
+    return detail.partition("; ")[2].strip()
+
+
+def _stored_sizes():
+    """The size of every stored archive, by id, for runs that still have one."""
+
+    try:
+        return {item["id"]: item["sizeBytes"] for item in list_backups()}
+    except Exception:
+        logger.warning("The stored archives could not be read", exc_info=True)
+        return {}
+
+
+def recent_runs(limit=RUNS_SHOWN):
+    """What the automatic backup has done lately, newest first.
+
+    Returns None when the rows cannot be read at all - a deployment without the
+    audit migration, or one whose database is briefly away - so the route can
+    leave the key out and the panel can hide the section. An empty list is a
+    different answer and is returned as one: it means the schedule has never
+    taken a night, which is worth showing.
+
+    Only the timer's own rows, matched on actor and action: a backup somebody
+    started from the panel is already in the table above, and the archives
+    retention removed are audited separately as deletes.
+    """
+
+    try:
+        from model.audit_log import AuditLog
+    except (ImportError, ModuleNotFoundError):
+        return None
+
+    try:
+        rows = (
+            db.session.query(AuditLog)
+            .filter(
+                AuditLog.actor == AUDIT_ACTOR,
+                AuditLog.action.in_(tuple(RUN_OUTCOMES)),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(max(1, int(limit)))
+            .all()
+        )
+    except Exception:
+        db.session.rollback()
+        logger.warning("The automatic backup history could not be read", exc_info=True)
+        return None
+
+    sizes = _stored_sizes() if rows else {}
+
+    runs = []
+    for row in rows:
+        outcome = RUN_OUTCOMES[row.action]
+        taken = row.created_at
+        if taken is None:
+            # Every row has one in practice; a row that somehow does not is
+            # still a run that happened, and the outcome is the useful part.
+            at = None
+        else:
+            if taken.tzinfo is None:
+                at = iso_utc(taken.replace(tzinfo=timezone.utc))
+            else:
+                at = iso_utc(taken)
+
+        run = {
+            "id": str(row.id),
+            "at": at,
+            "outcome": outcome,
+            "message": _run_message(outcome, row.detail, row.target_id),
+        }
+
+        archive_id = row.target_id if outcome == "taken" else None
+        if archive_id:
+            run["archiveId"] = archive_id
+            # Said rather than implied, because "no size" and "the archive has
+            # since been deleted" are different things to show.
+            run["stored"] = archive_id in sizes
+            if archive_id in sizes:
+                run["sizeBytes"] = sizes[archive_id]
+
+        runs.append(run)
+
+    return runs
+
+
+def next_run(schedule=None):
+    """When the next automatic backup is due, or None when none is.
+
+    None covers both "switched off" and "no schedule this server can read":
+    either way there is no next run to promise, and a time shown for a schedule
+    that is off would be a backup nobody is going to get.
+    """
+
+    if schedule is None:
+        schedule = read_schedule()
+    if not schedule or not schedule.get("enabled"):
+        return None
+    return iso_utc(next_run_after(datetime.now(timezone.utc), schedule))
 
 
 # ==========================================

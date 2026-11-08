@@ -1,4 +1,4 @@
-import type { BackupSchedule, SystemBackup } from '../../services/profile';
+import type { AutomaticRun, BackupSchedule, SystemBackup } from '../../services/profile';
 
 export const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 /** The server marks archives taken by its own schedule with this `createdBy`. */
@@ -13,3 +13,18 @@ export const scheduleWhen = (schedule: BackupSchedule) =>
   `${schedule.frequency === 'daily' ? 'Daily' : `Weekly on ${DAYS[schedule.day ?? 0]}`} at ${timeText(schedule.time)}`;
 /** Who made a backup, for dialog subtitles. */
 export const origin = (backup: SystemBackup) => isAutomatic(backup) ? 'the automatic schedule' : backup.createdBy;
+/** What each outcome of a scheduled run is called, and how it is toned. The panel has only these two tones, and a failed archive above is grey for the same reason. */
+export const RUN_OUTCOMES: Record<AutomaticRun['outcome'], { label: string; tone: 'green' | 'grey' }> = {
+  taken: { label: 'Taken', tone: 'green' },
+  failed: { label: 'Failed', tone: 'grey' },
+  skipped: { label: 'Skipped', tone: 'grey' },
+};
+/** One line about a scheduled run: what it produced, or why it produced nothing. */
+export const runText = (run: AutomaticRun) => {
+  if (run.outcome === 'failed') return run.message || 'The backup did not finish.';
+  if (run.outcome === 'skipped') return run.message || 'Another backup or restore was already running.';
+  // A run keeps its place in the history after retention has deleted what it made, so the archive is described rather than assumed to be there.
+  const archive = run.stored === false ? 'Archive no longer stored'
+    : run.sizeBytes !== undefined ? sizeText(run.sizeBytes) : '';
+  return [archive, run.message].filter(Boolean).join(' · ') || 'Backup stored';
+};

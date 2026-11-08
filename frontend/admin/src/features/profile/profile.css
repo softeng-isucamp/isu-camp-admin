@@ -38,10 +38,22 @@
 .sidebar-profile-link:hover, .sidebar-profile-link[aria-current="page"] { background: #ffffff12; }
 .sidebar-profile-link:focus-visible, .profile-page .btn:focus-visible, .content > header a:focus-visible { outline: 2px solid #68b184; outline-offset: 4px; }
 .minimized-profile-container > a { display: grid; place-items: center; text-decoration: none; }
+.profile-auto-history { margin: 4px 24px 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.profile-auto-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.profile-auto-heading h3 { margin: 0; font-size: 15px; }
+.profile-auto-runs { list-style: none; margin: 0; padding: 0; }
+.profile-auto-runs li { display: grid; grid-template-columns: 190px 76px 1fr; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.profile-auto-runs li:last-child { border-bottom: 0; }
+.profile-auto-runs .badge { justify-self: start; }
+.profile-auto-runs .profile-muted { overflow-wrap: anywhere; }
+.profile-auto-empty { margin: 0; }
 @media (max-width: 700px) {
   .profile-account { flex-direction: column; align-items: stretch; }
   .profile-actions .btn { flex: 1; }
   .profile-backups .table-heading { flex-direction: column; }
+  .profile-auto-history { margin: 4px 16px 16px; }
+  .profile-auto-runs li { grid-template-columns: 1fr auto; }
+  .profile-auto-runs li .profile-muted { grid-column: 1 / -1; }
 }
 /* Sign Out sits with the other account actions: secondary in weight, destructive in colour. */
 .profile-actions .profile-signout { color: var(--danger); border: 1px solid #efc4c4; background: #fff; }

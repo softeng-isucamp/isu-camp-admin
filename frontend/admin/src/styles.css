@@ -4837,3 +4837,22 @@ p.inspector-notice { margin: 10px 18px 0; padding: 8px 10px; border-radius: 10px
 .inspector-section .inspector-secondary-action { width: 100%; margin: 10px 0 0; }
 .inspector-section .inspector-validation { margin-top: 10px; }
 .map-search-box-open { z-index: 903; }
+/* Demotion reasons: spaced from the permissions editor and password field that follow */
+.demotion-reasons {
+  margin-bottom: 16px;
+}
+.demotion-reasons .field-group {
+  margin-top: 12px;
+}
+.demotion-reasons small {
+  color: #64716a;
+  font-size: 11px;
+}
+.log-reasons ul {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+}
+.log-other-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

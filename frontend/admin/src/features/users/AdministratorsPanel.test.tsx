@@ -427,6 +427,10 @@ describe("Changing an administrator's role", () => {
     vi.restoreAllMocks();
   });
 
+  const chooseReasons = (...labels: string[]) => {
+    for (const label of labels) fireEvent.click(screen.getByRole("checkbox", { name: new RegExp(`^${label}`) }));
+  };
+
   const confirmWith = (password: string, button: string) => {
     fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: password } });
     fireEvent.click(screen.getByRole("button", { name: button }));
@@ -485,9 +489,10 @@ describe("Changing an administrator's role", () => {
     for (const name of ["Add", "Edit", "Delete", "Change app user status"]) {
       expect(within(dialog).getByRole("checkbox", { name: new RegExp(`^${name}`) })).not.toBeChecked();
     }
+    chooseReasons("Role changed");
     confirmWith("password123", "Make Administrator");
 
-    await waitFor(() => expect(setRole).toHaveBeenCalledWith("3", "admin", viewOnlyPermissions()));
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("3", "admin", { permissions: viewOnlyPermissions(), reasons: ["role_changed"] }));
     expect(await screen.findByText("admin_dean was demoted to administrator successfully.")).toBeInTheDocument();
   });
 
@@ -562,6 +567,7 @@ describe("Changing an administrator's role", () => {
 
     openRowMenu("admin_dean");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+    chooseReasons("Role changed");
     confirmWith("password123", "Make Administrator");
 
     expect(await screen.findByText("At least one active superadmin is required. Promote another account first."))
@@ -600,9 +606,13 @@ describe("Changing an administrator's role", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^Edit/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^Change app user status/ }));
+    chooseReasons("Role changed");
     confirmWith("password123", "Make Administrator");
 
-    await waitFor(() => expect(setRole).toHaveBeenCalledWith("3", "admin", { add: false, edit: true, delete: false, changeUserStatus: true }));
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("3", "admin", {
+      permissions: { add: false, edit: true, delete: false, changeUserStatus: true },
+      reasons: ["role_changed"],
+    }));
   });
 
   it("starts the next demotion view only again", async () => {
@@ -616,6 +626,189 @@ describe("Changing an administrator's role", () => {
     openRowMenu("admin_dean");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
     expect(screen.getByRole("checkbox", { name: /^Add/ })).not.toBeChecked();
+  });
+
+  describe("demotion reasons", () => {
+    const openDemotion = async () => {
+      await openAdministrators();
+      openRowMenu("admin_dean");
+      fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+      return screen.getByRole("dialog", { name: "Make administrator?" });
+    };
+    const otherBox = () => screen.getByRole("textbox", { name: /explain the other reason/i });
+    const lastCall = (setRole: { mock: { calls: unknown[][] } }) => setRole.mock.calls.at(-1)!;
+
+    beforeEach(() => {
+      vi.spyOn(services.auth, "confirmPassword").mockResolvedValue(undefined);
+    });
+
+    it("lists the five reasons with their explanations, before the password field", async () => {
+      const dialog = await openDemotion();
+      const group = within(dialog).getByRole("group", { name: /reasons for demotion/i });
+      for (const [label, text] of [
+        ["Role changed", "Their current responsibilities no longer require superadmin access."],
+        ["No longer part of the team", "They have left the team or are no longer responsible for the system."],
+        ["Access granted by mistake", "Their superadmin role was assigned unintentionally."],
+        ["Security concern", "Their account or access may pose a security risk."],
+        ["Other reason", "A reason not covered by the options above."],
+      ]) {
+        expect(within(group).getByRole("checkbox", { name: new RegExp(`^${label}`) })).toHaveAccessibleDescription(text);
+      }
+      expect(within(dialog).getByText(/stays active as a regular administrator/)).toBeInTheDocument();
+      const password = within(dialog).getByLabelText("Confirm your password");
+      expect(group.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("sends several selected reasons as distinct codes and no explanation without Other", async () => {
+      const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+      await openDemotion();
+      chooseReasons("Security concern", "Role changed");
+      expect(screen.queryByRole("textbox", { name: /explain the other reason/i })).not.toBeInTheDocument();
+      confirmWith("password123", "Make Administrator");
+
+      await waitFor(() => expect(setRole).toHaveBeenCalledOnce());
+      const options = lastCall(setRole)[2] as Record<string, unknown>;
+      expect(options.reasons).toEqual(["role_changed", "security_concern"]);
+      expect(options).not.toHaveProperty("otherReason");
+    });
+
+    it("shows the explanation only while Other is checked, warns about sensitive data, and omits it once unchecked", async () => {
+      const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+      const dialog = await openDemotion();
+      chooseReasons("Other reason");
+      expect(within(dialog).getByText(/passwords or sensitive personal information/)).toBeInTheDocument();
+      fireEvent.change(otherBox(), { target: { value: "Typed then dropped" } });
+      chooseReasons("Other reason");
+      expect(screen.queryByRole("textbox", { name: /explain the other reason/i })).not.toBeInTheDocument();
+      chooseReasons("Role changed");
+      confirmWith("password123", "Make Administrator");
+
+      await waitFor(() => expect(setRole).toHaveBeenCalledOnce());
+      expect(lastCall(setRole)[2]).not.toHaveProperty("otherReason");
+    });
+
+    it("sends the trimmed explanation, and accepts exactly 500 characters", async () => {
+      const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+      await openDemotion();
+      chooseReasons("Other reason");
+      fireEvent.change(otherBox(), { target: { value: `  ${"😀".repeat(500)}  ` } });
+      confirmWith("password123", "Make Administrator");
+
+      await waitFor(() => expect(setRole).toHaveBeenCalledOnce());
+      expect(lastCall(setRole)[2]).toMatchObject({ reasons: ["other"], otherReason: "😀".repeat(500) });
+    });
+
+    it.each([
+      ["blank", "   ", "Explain the other reason."],
+      ["over 500 characters", "x".repeat(501), "Keep the explanation to 500 characters or fewer."],
+    ])("refuses a %s explanation inline, before any password check or request", async (_name, text, message) => {
+      const setRole = vi.spyOn(services.admins, "setRole");
+      await openDemotion();
+      chooseReasons("Other reason");
+      fireEvent.change(otherBox(), { target: { value: text } });
+      confirmWith("password123", "Make Administrator");
+
+      const error = await screen.findByText(message);
+      expect(otherBox()).toHaveAttribute("aria-invalid", "true");
+      expect(otherBox().getAttribute("aria-describedby")).toContain(error.id);
+      expect(services.auth.confirmPassword).not.toHaveBeenCalled();
+      expect(setRole).not.toHaveBeenCalled();
+      // Fixing the text clears the error.
+      fireEvent.change(otherBox(), { target: { value: "Fine" } });
+      expect(screen.queryByText(message)).not.toBeInTheDocument();
+    });
+
+    it("blocks the button and Enter in the password field until a reason is selected", async () => {
+      const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+      const dialog = await openDemotion();
+      const password = screen.getByLabelText("Confirm your password");
+      fireEvent.change(password, { target: { value: "password123" } });
+      fireEvent.keyDown(password, { key: "Enter" });
+
+      const error = await within(dialog).findByText("Select at least one reason for this demotion.");
+      const group = within(dialog).getByRole("group", { name: /reasons for demotion/i });
+      expect(group).toHaveAttribute("aria-invalid", "true");
+      expect(group.getAttribute("aria-describedby")).toBe(error.id);
+      expect(services.auth.confirmPassword).not.toHaveBeenCalled();
+      expect(setRole).not.toHaveBeenCalled();
+
+      // Choosing a reason clears the error, and Enter now submits.
+      chooseReasons("Access granted by mistake");
+      expect(within(dialog).queryByText("Select at least one reason for this demotion.")).not.toBeInTheDocument();
+      fireEvent.keyDown(password, { key: "Enter" });
+      await waitFor(() => expect(setRole).toHaveBeenCalledOnce());
+      expect(lastCall(setRole)[2]).toMatchObject({ reasons: ["granted_by_mistake"] });
+    });
+
+    it("keeps the selections, the explanation and the permissions through a password error", async () => {
+      vi.spyOn(services.auth, "confirmPassword").mockRejectedValue(new Error("Password is incorrect"));
+      const setRole = vi.spyOn(services.admins, "setRole");
+      await openDemotion();
+      chooseReasons("Security concern", "Other reason", "Edit");
+      fireEvent.change(otherBox(), { target: { value: "Shared an account" } });
+      confirmWith("wrong", "Make Administrator");
+
+      expect(await screen.findByText("Password is incorrect")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: /^Security concern/ })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /^Other reason/ })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /^Edit/ })).toBeChecked();
+      expect(otherBox()).toHaveValue("Shared an account");
+      expect(setRole).not.toHaveBeenCalled();
+    });
+
+    it("keeps the selections through a server refusal and maps its field errors inline", async () => {
+      const refusal = Object.assign(new Error("Invalid request"), {
+        fieldErrors: { reasons: "Choose from the listed reasons only.", otherReason: "Explanation is too long." },
+      });
+      vi.spyOn(services.admins, "setRole").mockRejectedValue(refusal);
+      const dialog = await openDemotion();
+      chooseReasons("Other reason");
+      fireEvent.change(otherBox(), { target: { value: "Reason" } });
+      confirmWith("password123", "Make Administrator");
+
+      const groupError = await within(dialog).findByText("Choose from the listed reasons only.");
+      expect(within(dialog).getByRole("group", { name: /reasons for demotion/i }).getAttribute("aria-describedby")).toBe(groupError.id);
+      expect(otherBox()).toHaveAttribute("aria-invalid", "true");
+      expect(within(dialog).getByText("Explanation is too long.")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: /^Other reason/ })).toBeChecked();
+      expect(otherBox()).toHaveValue("Reason");
+    });
+
+    it("forgets the selections after cancel and after a successful demotion", async () => {
+      vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
+      await openDemotion();
+      chooseReasons("Security concern", "Other reason");
+      fireEvent.change(otherBox(), { target: { value: "Kept?" } });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      openRowMenu("admin_dean");
+      fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+      expect(screen.getByRole("checkbox", { name: /^Security concern/ })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /^Other reason/ })).not.toBeChecked();
+      chooseReasons("Other reason");
+      expect(otherBox()).toHaveValue("");
+
+      chooseReasons("Role changed");
+      fireEvent.change(otherBox(), { target: { value: "Done" } });
+      confirmWith("password123", "Make Administrator");
+      expect(await screen.findByText("admin_dean was demoted to administrator successfully.")).toBeInTheDocument();
+
+      openRowMenu("admin_dean");
+      fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+      expect(screen.getByRole("checkbox", { name: /^Role changed/ })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /^Other reason/ })).not.toBeChecked();
+    });
+
+    it("offers no reasons when promoting, and sends none", async () => {
+      const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...directory[1], role: "superadmin" });
+      await openAdministrators();
+      openRowMenu("admin_registrar");
+      fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+      expect(screen.queryByRole("group", { name: /reasons for demotion/i })).not.toBeInTheDocument();
+      confirmWith("password123", "Make Superadmin");
+
+      await waitFor(() => expect(setRole).toHaveBeenCalledWith("2", "superadmin"));
+    });
   });
 });
 
@@ -1074,6 +1267,7 @@ describe.each(["add", "permissions", "promote", "demote"] as const)("Pending adm
         : action === "promote" ? "Make superadmin" : "Make administrator";
       fireEvent.click(screen.getByRole("menuitem", { name: menuItem }));
       if (action === "permissions") fireEvent.click(screen.getByRole("checkbox", { name: /^Edit/ }));
+      if (action === "demote") fireEvent.click(screen.getByRole("checkbox", { name: /^Role changed/ }));
     }
   }
 

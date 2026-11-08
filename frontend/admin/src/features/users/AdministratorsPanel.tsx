@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
@@ -7,9 +7,12 @@ import { PasswordField } from "../../components/PasswordField";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
-import { services } from "../../services/api";
+import { services, type SetRoleOptions } from "../../services/api";
 import { errorMessage, SuperadminRequiredError } from "../../services/errors";
 import { firstPasswordIssue } from "../../services/passwordRules";
+import {
+  DEMOTION_REASONS, OTHER_REASON_MAX, demotionReasonIssues, type DemotionReasonCode,
+} from "../../lib/demotionReasons";
 import { PERMISSION_ACTIONS, allPermissions, samePermissions, viewOnlyPermissions } from "../../lib/permissions";
 import type { AdminAccount, AdminAccountDraft, AdminPermissions, AdminRole } from "../../types";
 import { PermissionsEditor } from "./PermissionsEditor";
@@ -100,6 +103,10 @@ export function AdministratorsPanel({ feedback }: {
   const [draft, setDraft] = useState<AdminAccountDraft>(blankDraft());
   // The switches the open dialog is editing: a new administrator's, an existing one's, or a demoted superadmin's.
   const [permissions, setPermissions] = useState<AdminPermissions>(viewOnlyPermissions());
+  // The demotion dialog's reasons; kept through password and server errors, cleared on cancel, close and success.
+  const [reasons, setReasons] = useState<DemotionReasonCode[]>([]);
+  const [otherReason, setOtherReason] = useState("");
+  const reasonsId = useId();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [actionMenuId, setActionMenuId] = useState<string | null>(null);
@@ -124,6 +131,8 @@ export function AdministratorsPanel({ feedback }: {
     setDialog(null);
     setDraft(blankDraft());
     setPermissions(viewOnlyPermissions());
+    setReasons([]);
+    setOtherReason("");
     setError("");
     setFieldErrors({});
     passwordConfirmation.reset();
@@ -135,6 +144,8 @@ export function AdministratorsPanel({ feedback }: {
     setError("");
     setFieldErrors({});
     passwordConfirmation.reset();
+    setReasons([]);
+    setOtherReason("");
     setPermissions(switches);
     setActionMenuId(null);
     setDialog(next);
@@ -216,8 +227,8 @@ export function AdministratorsPanel({ feedback }: {
   });
 
   const setRole = useMutation({
-    mutationFn: ({ account, role, switches }: { account: AdminAccount; role: AdminRole; switches?: AdminPermissions }) =>
-      switches ? services.admins.setRole(account.id, role, switches) : services.admins.setRole(account.id, role),
+    mutationFn: ({ account, role, options }: { account: AdminAccount; role: AdminRole; options?: SetRoleOptions }) =>
+      options ? services.admins.setRole(account.id, role, options) : services.admins.setRole(account.id, role),
     onSuccess: async (saved) => {
       await refresh();
       feedback.reportSuccess(
@@ -281,9 +292,25 @@ export function AdministratorsPanel({ feedback }: {
 
   const confirmRoleChange = async (account: AdminAccount, role: AdminRole) => {
     setError("");
+    setFieldErrors({});
+    // Every submission, Enter included, needs a reason before the password is even checked.
+    const wantsOther = reasons.includes("other");
+    if (role === "admin") {
+      const issues = demotionReasonIssues(reasons, otherReason);
+      if (Object.keys(issues).length) {
+        setFieldErrors(issues);
+        return;
+      }
+    }
     if (!await confirmSubmission()) return;
-    // The switches only mean something to an administrator, so a promotion sends none.
-    setRole.mutate({ account, role, ...(role === "admin" ? { switches: permissions } : {}) });
+    // The switches and reasons only mean something to a demotion, so a promotion sends neither.
+    setRole.mutate({
+      account,
+      role,
+      ...(role === "admin"
+        ? { options: { permissions, reasons, ...(wantsOther ? { otherReason: otherReason.trim() } : {}) } }
+        : {}),
+    });
   };
 
   return (
@@ -601,11 +628,31 @@ export function AdministratorsPanel({ feedback }: {
               <>
                 <strong>{dialog.account.username}</strong> keeps their account and can still sign in. They can no longer see
                 this list, add or deactivate administrators, change roles or run backups — their next attempt will be
-                refused. They start with view only; turn on what they still need.
+                refused. Demotion removes superadmin privileges; the account stays active as a regular administrator.
+                They start with view only; turn on what they still need.
               </>
             )}
           </p>
           {error && <div role="alert" className="admin-form-error">{error}</div>}
+          {dialog.role === "admin" && (
+            <DemotionReasons
+              id={reasonsId}
+              selected={reasons}
+              otherReason={otherReason}
+              errors={fieldErrors}
+              disabled={setRole.isPending || passwordConfirmation.confirming}
+              onToggle={(code, checked) => {
+                setReasons((current) => checked
+                  ? DEMOTION_REASONS.map((reason) => reason.code).filter((known) => known === code || current.includes(known))
+                  : current.filter((known) => known !== code));
+                setFieldErrors((current) => ({ ...current, reasons: "", ...(code === "other" ? { otherReason: "" } : {}) }));
+              }}
+              onOtherReasonChange={(value) => {
+                setOtherReason(value);
+                setFieldErrors((current) => ({ ...current, otherReason: "" }));
+              }}
+            />
+          )}
           {dialog.role === "admin" && (
             <PermissionsEditor
               value={permissions}
@@ -638,5 +685,72 @@ export function AdministratorsPanel({ feedback }: {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * The reasons for a demotion: a checkbox group (at least one) and, only while "Other" is
+ * checked, a required explanation. Errors are tied to the group or the explanation.
+ */
+function DemotionReasons({ id, selected, otherReason, errors, disabled, onToggle, onOtherReasonChange }: {
+  id: string;
+  selected: DemotionReasonCode[];
+  otherReason: string;
+  errors: Record<string, string>;
+  disabled: boolean;
+  onToggle: (code: DemotionReasonCode, checked: boolean) => void;
+  onOtherReasonChange: (value: string) => void;
+}) {
+  const groupError = errors.reasons;
+  const otherError = errors.otherReason;
+  const length = Array.from(otherReason.trim()).length;
+  return (
+    <fieldset
+      className="permissions-editor demotion-reasons"
+      disabled={disabled}
+      aria-invalid={groupError ? true : undefined}
+      aria-describedby={groupError ? `${id}-error` : undefined}
+    >
+      <legend className="permissions-editor-label">REASONS FOR DEMOTION (SELECT ALL THAT APPLY)</legend>
+      <ul className="permissions-editor-options">
+        {DEMOTION_REASONS.map(({ code, label, description }) => (
+          <li key={code} className="permissions-editor-option">
+            <input
+              type="checkbox"
+              id={`${id}-${code}`}
+              aria-describedby={`${id}-${code}-desc`}
+              checked={selected.includes(code)}
+              onChange={(event) => onToggle(code, event.target.checked)}
+            />
+            <label htmlFor={`${id}-${code}`}>
+              <strong>{label}</strong>
+              <small id={`${id}-${code}-desc`}>{description}</small>
+            </label>
+          </li>
+        ))}
+      </ul>
+      {groupError && <div id={`${id}-error`} role="alert" className="field-error-msg">{groupError}</div>}
+      {selected.includes("other") && (
+        <div className="field-group">
+          <label className="field-label" htmlFor={`${id}-other-text`}>
+            EXPLAIN THE OTHER REASON<span className="field-required" aria-hidden="true">*</span>
+          </label>
+          <textarea
+            id={`${id}-other-text`}
+            className={`field-input${otherError ? " field-input-error" : ""}`}
+            rows={3}
+            required
+            value={otherReason}
+            aria-invalid={otherError ? true : undefined}
+            aria-describedby={`${id}-other-hint${otherError ? ` ${id}-other-error` : ""}`}
+            onChange={(event) => onOtherReasonChange(event.target.value)}
+          />
+          <small id={`${id}-other-hint`}>
+            Do not include passwords or sensitive personal information. {length}/{OTHER_REASON_MAX} characters.
+          </small>
+          {otherError && <div id={`${id}-other-error`} role="alert" className="field-error-msg">{otherError}</div>}
+        </div>
+      )}
+    </fieldset>
   );
 }
