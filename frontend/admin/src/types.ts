@@ -172,6 +172,10 @@ export interface AuditEntry {
   target: string;
   targetId?: string;
   detail?: string;
+  /** Superadmin demotion only: the reason codes the actor selected. */
+  reasons?: string[];
+  /** Superadmin demotion only: the actor's explanation for "other". Free text, shown as text. */
+  otherReason?: string;
   createdAt: string;
   category: "Admin" | "User" | "System";
 }

@@ -57,6 +57,7 @@ describe("Administrator accounts over the fixture backend", () => {
 
     openRowMenu("admin_registrar");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Role changed/ }));
     typePassword();
     fireEvent.click(screen.getByRole("button", { name: "Make Administrator" }));
     expect(await screen.findByText("admin_registrar was demoted to administrator successfully.")).toBeInTheDocument();
@@ -133,11 +134,35 @@ describe("Administrator accounts over the fixture backend", () => {
     openRowMenu("admin_dean");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /^Edit/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Role changed/ }));
     typePassword();
     fireEvent.click(screen.getByRole("button", { name: "Make Administrator" }));
 
     expect(await screen.findByText("admin_dean was demoted to administrator successfully.")).toBeInTheDocument();
     expect(within(screen.getByText("admin_dean").closest("tr")!).getByText("View + Edit")).toBeInTheDocument();
+  });
+
+  it("records the chosen reasons and the explanation on the demotion event for System Logs", async () => {
+    await openAdministrators();
+
+    // The fixture is shared module state, so promote an account to have one to demote.
+    openRowMenu("admin_viewer");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make superadmin" }));
+    typePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Make Superadmin" }));
+    await screen.findByText("admin_viewer was promoted to superadmin successfully.");
+
+    openRowMenu("admin_viewer");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make administrator" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^No longer part of the team/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Other reason/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: /explain the other reason/i }), { target: { value: "  Moved to <i>another</i> unit.  " } });
+    typePassword();
+    fireEvent.click(screen.getByRole("button", { name: "Make Administrator" }));
+
+    expect(await screen.findByText("admin_viewer was demoted to administrator successfully.")).toBeInTheDocument();
+    const entry = (await services.logs.list("Admin", "admin_viewer")).items.find((item) => item.action === "Demoted Administrator");
+    expect(entry).toMatchObject({ reasons: ["left_team", "other"], otherReason: "Moved to <i>another</i> unit." });
   });
 });
 

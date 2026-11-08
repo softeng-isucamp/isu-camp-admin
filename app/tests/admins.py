@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 
@@ -345,6 +346,9 @@ NEW_ACCOUNT = {"username": "admin03", "email": "admin03@example.com", "password"
 # administrator both hold, so it is never spelled as four trues here.
 ALL_ON = {key: True for key in auth_module.PERMISSION_KEYS}
 ALL_OFF = {key: False for key in auth_module.PERMISSION_KEYS}
+
+# A demotion must say why (issue #166); everything not about the reasons sends one.
+DEMOTE = {"role": "admin", "reasons": ["role_changed"]}
 
 
 def created_accounts():
@@ -865,7 +869,7 @@ def test_a_superadmin_promotes_an_administrator(admin_directory):
 def test_a_superadmin_demotes_another_superadmin(admin_directory):
     next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
 
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=DEMOTE)
 
     assert response.status_code == 200
     assert response.json["message"] == "admin02 was demoted to administrator successfully."
@@ -877,10 +881,10 @@ def test_a_superadmin_demotes_another_superadmin(admin_directory):
 def test_a_demoted_superadmin_cannot_use_the_role_route_next(admin_directory):
     next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
     client = signed_in(admins_app(), admin_id=2)
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=DEMOTE)
 
     # Same cookie as before the demotion: only the stored row changed.
-    response = client.put("/api/admins/1/role", json={"role": "admin"})
+    response = client.put("/api/admins/1/role", json=DEMOTE)
 
     assert response.status_code == 403
     assert response.json["code"] == "superadmin_required"
@@ -936,7 +940,7 @@ def test_the_role_route_requires_a_recent_password_confirmation():
 
 def test_the_role_route_asks_for_the_password_even_when_nothing_would_change():
     response = signed_in(admins_app(), admin_id=1, confirmed=False).put(
-        "/api/admins/2/role", json={"role": "admin"},
+        "/api/admins/2/role", json=DEMOTE,
     )
 
     assert response.status_code == 403
@@ -1000,7 +1004,7 @@ def test_an_account_cannot_change_its_own_role(admin_directory):
     # A second superadmin is present, so only the self rule can refuse.
     next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
 
-    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json={"role": "admin"})
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json=DEMOTE)
 
     assert response.status_code == 409
     assert response.json["message"] == "You cannot change your own role."
@@ -1047,17 +1051,145 @@ def test_demoting_is_audited_against_the_affected_account(monkeypatch):
     monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
     next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
 
-    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=DEMOTE)
 
-    assert audits == [("Admin", None, "demote", "Administrator", 2, "admin02")]
+    assert len(audits) == 1
+    assert audits[0][:5] == ("Admin", None, "demote", "Administrator", 2)
+    assert json.loads(audits[0][5]) == {
+        "kind": "demotion", "targetName": "admin02", "reasons": ["role_changed"], "otherReason": None,
+    }
+
+
+# ==========================================
+# DEMOTION REASONS (issue #166)
+# ==========================================
+
+@pytest.fixture
+def superadmin_target(monkeypatch):
+    """Account 2 is a second superadmin; returns the audit calls the route makes."""
+    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+    return audits
+
+
+def demote(body):
+    return signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json=body)
+
+
+def test_a_demotion_records_several_reasons_in_canonical_order(superadmin_target, admin_directory):
+    response = demote({"role": "admin", "reasons": ["security_concern", "role_changed", "left_team"]})
+
+    assert response.status_code == 200
+    assert role_of(2) == "admin"
+    assert admin_directory.committed is True
+    assert json.loads(superadmin_target[0][5])["reasons"] == ["role_changed", "left_team", "security_concern"]
+
+
+def test_other_reason_is_trimmed_and_kept_whole(superadmin_target):
+    explanation = "x" * 500
+    response = demote({"role": "admin", "reasons": ["other"], "otherReason": f"  {explanation}\n"})
+
+    assert response.status_code == 200
+    stored = json.loads(superadmin_target[0][5])
+    assert stored["reasons"] == ["other"]
+    assert stored["otherReason"] == explanation
+
+
+@pytest.mark.parametrize("body, field, message", [
+    ({"role": "admin"}, "reasons", "Choose at least one reason for the demotion."),
+    ({"role": "admin", "reasons": None}, "reasons", "Choose at least one reason for the demotion."),
+    ({"role": "admin", "reasons": []}, "reasons", "Choose at least one reason for the demotion."),
+    ({"role": "admin", "reasons": "role_changed"}, "reasons", "Choose at least one reason for the demotion."),
+    ({"role": "admin", "reasons": {"role_changed": True}}, "reasons", "Choose at least one reason for the demotion."),
+    ({"role": "admin", "reasons": ["fired"]}, "reasons", "Choose reasons from the list."),
+    ({"role": "admin", "reasons": [1]}, "reasons", "Choose reasons from the list."),
+    ({"role": "admin", "reasons": [None]}, "reasons", "Choose reasons from the list."),
+    ({"role": "admin", "reasons": ["Role_Changed"]}, "reasons", "Choose reasons from the list."),
+    ({"role": "admin", "reasons": ["left_team", "left_team"]}, "reasons", "Choose each reason only once."),
+    ({"role": "admin", "reasons": ["other"]}, "otherReason", "Explain the other reason."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": None}, "otherReason", "Explain the other reason."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": ""}, "otherReason", "Explain the other reason."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": " \t\n "}, "otherReason", "Explain the other reason."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": 5}, "otherReason", "The other reason must be text."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": ["why"]}, "otherReason", "The other reason must be text."),
+    ({"role": "admin", "reasons": ["other"], "otherReason": "x" * 501}, "otherReason",
+     "Keep the other reason to 500 characters or fewer."),
+    ({"role": "admin", "reasons": ["left_team"], "otherReason": "moved"}, "otherReason",
+     "Only explain a reason when Other reason is chosen."),
+    ({"role": "admin", "reasons": ["left_team"], "otherReason": ""}, "otherReason",
+     "Only explain a reason when Other reason is chosen."),
+])
+def test_invalid_reasons_are_field_errors_that_change_nothing(body, field, message, superadmin_target, admin_directory):
+    response = demote(body)
+
+    assert response.status_code == 400
+    assert response.json == {"success": False, "message": message, "fields": {field: message}}
+    assert role_of(2) == "superadmin"
+    assert superadmin_target == []
+    assert admin_directory.committed is False
+
+
+def test_the_password_is_asked_for_before_the_reasons_are_read(superadmin_target):
+    plain = signed_in(admins_app(), admin_id=1, confirmed=False).put(
+        "/api/admins/2/role", json={"role": "admin"},
+    )
+
+    assert plain.status_code == 403
+    assert plain.json["code"] == "password_confirmation_required"
+    assert role_of(2) == "superadmin"
+
+
+def test_the_last_superadmin_rule_answers_before_the_reasons(lone_superadmin):
+    response = lone_superadmin.put("/api/admins/1/role", json={"role": "admin"})
+
+    assert response.status_code == 409
+    assert response.json["message"] == LAST_SUPERADMIN_MESSAGE
+
+
+def test_a_promotion_needs_no_reasons_and_ignores_any_sent(monkeypatch):
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={
+        "role": "superadmin", "reasons": ["nonsense"], "otherReason": 7,
+    })
+
+    assert response.status_code == 200
+    assert audits == [("Admin", None, "promote", "Administrator", 2, "admin02")]
+
+
+def test_demoting_an_administrator_is_a_no_op_without_reasons_or_an_event(monkeypatch, admin_directory):
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+
+    response = signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+
+    assert response.status_code == 200
+    assert response.json["message"] == "admin02 is already an administrator."
+    assert "demoted" not in response.json["message"]
+    assert audits == []
+    assert admin_directory.committed is False
+
+
+def test_a_failed_demotion_commit_rolls_back_the_role_and_its_event(superadmin_target, admin_directory, monkeypatch):
+    def broken_commit():
+        raise RuntimeError("database offline")
+
+    monkeypatch.setattr(admin_directory, "commit", broken_commit)
+
+    response = demote({"role": "admin", "reasons": ["other"], "otherReason": "Left for another office"})
+
+    assert response.status_code == 500
+    assert admin_directory.rolled_back is True
 
 
 def test_a_refused_role_change_writes_no_audit_entry(monkeypatch):
     audits = []
     monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
 
-    signed_in(admins_app(), admin_id=2).put("/api/admins/1/role", json={"role": "admin"})
-    signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json={"role": "admin"})
+    signed_in(admins_app(), admin_id=2).put("/api/admins/1/role", json=DEMOTE)
+    signed_in(admins_app(), admin_id=1).put("/api/admins/1/role", json=DEMOTE)
     signed_in(admins_app(), admin_id=1).put("/api/admins/2/role", json={"role": "owner"})
 
     assert audits == []
@@ -1095,7 +1227,7 @@ def lone_superadmin(guards_passed):
 
 
 def test_demoting_the_last_active_superadmin_is_refused(lone_superadmin, admin_directory):
-    response = lone_superadmin.put("/api/admins/1/role", json={"role": "admin"})
+    response = lone_superadmin.put("/api/admins/1/role", json=DEMOTE)
 
     assert response.status_code == 409
     assert response.json["message"] == LAST_SUPERADMIN_MESSAGE
@@ -1117,7 +1249,7 @@ def test_a_deactivated_superadmin_does_not_count_as_active(lone_superadmin):
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
     ))
 
-    assert lone_superadmin.put("/api/admins/1/role", json={"role": "admin"}).json["message"] == LAST_SUPERADMIN_MESSAGE
+    assert lone_superadmin.put("/api/admins/1/role", json=DEMOTE).json["message"] == LAST_SUPERADMIN_MESSAGE
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Inactive"}).json["message"] == LAST_SUPERADMIN_MESSAGE
 
 
@@ -1126,13 +1258,13 @@ def test_another_active_superadmin_lets_each_change_through(lone_superadmin):
 
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Inactive"}).status_code == 200
     assert lone_superadmin.put("/api/admins/1/status", json={"status": "Active"}).status_code == 200
-    assert lone_superadmin.put("/api/admins/1/role", json={"role": "admin"}).status_code == 200
+    assert lone_superadmin.put("/api/admins/1/role", json=DEMOTE).status_code == 200
     assert role_of(1) == "admin"
 
 
 def test_changing_an_account_that_is_not_an_active_superadmin_ignores_the_rule(lone_superadmin):
     # Accounts 2 and 3 are plain administrators, so none of this touches the count.
-    assert lone_superadmin.put("/api/admins/3/role", json={"role": "admin"}).status_code == 200
+    assert lone_superadmin.put("/api/admins/3/role", json=DEMOTE).status_code == 200
     assert lone_superadmin.put("/api/admins/3/status", json={"status": "Inactive"}).status_code == 200
     assert lone_superadmin.put(
         "/api/admins/3/permissions", json={"permissions": dict(ALL_OFF)},
@@ -1145,7 +1277,7 @@ def test_a_deactivated_last_superadmin_can_be_demoted_and_configured(lone_supera
         id=4, username="admin04", password="x", gmail="d@example.com", role="superadmin", status="inactive",
     ))
 
-    assert lone_superadmin.put("/api/admins/4/role", json={"role": "admin"}).status_code == 200
+    assert lone_superadmin.put("/api/admins/4/role", json=DEMOTE).status_code == 200
     # Demoted, so its switches can now be set - the rule that protects the last
     # active superadmin does not protect a deactivated one from either change.
     assert lone_superadmin.put(
@@ -1196,7 +1328,7 @@ def _peer_superadmins_act_together(monkeypatch, request_for):
 # The two ways one superadmin can strip another's access now that removal is
 # gone. Setting permissions is not among them: it refuses a superadmin target.
 PEER_REQUESTS = {
-    "demote": lambda client, target: client.put(f"/api/admins/{target}/role", json={"role": "admin"}),
+    "demote": lambda client, target: client.put(f"/api/admins/{target}/role", json=DEMOTE),
     "deactivate": lambda client, target: client.put(f"/api/admins/{target}/status", json={"status": "Inactive"}),
 }
 
@@ -1247,7 +1379,7 @@ def test_a_target_enabled_mid_request_cannot_leave_the_directory_without_a_super
     enabling.join(timeout=0.3)
     waiting = enabling.is_alive()
     relinquishing, relinquished = _start(
-        lambda client: client.put("/api/admins/1/role", json={"role": "admin"}),
+        lambda client: client.put("/api/admins/1/role", json=DEMOTE),
         signed_in(app, admin_id=2),
     )
     relinquishing.join(timeout=0.3)
@@ -1289,7 +1421,7 @@ def test_a_caller_demoted_between_the_guard_and_the_lock_is_refused(monkeypatch,
     monkeypatch.setattr(admins_module, "superadmin_required", paused_after_guard)
     stale, outcome = _start(STALE_CALLER_REQUESTS[operation], signed_in(app, admin_id=2))
     assert past_guard.wait(timeout=5)
-    demoted = signed_in(app, admin_id=1).put("/api/admins/2/role", json={"role": "admin"})
+    demoted = signed_in(app, admin_id=1).put("/api/admins/2/role", json=DEMOTE)
     assert demoted.status_code == 200
     proceed.set()
     stale.join(timeout=5)
@@ -1606,7 +1738,7 @@ def test_a_demoted_superadmin_starts_with_nothing(admin_directory):
 
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
 
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+    response = signed_in(admins_app()).put("/api/admins/3/role", json=DEMOTE)
 
     assert response.status_code == 200
     assert response.json["admin"]["permissions"] == ALL_OFF
@@ -1617,7 +1749,7 @@ def test_a_demotion_can_name_the_permissions_to_land_on():
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
 
     response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin",
+        **DEMOTE,
         "permissions": {"add": True, "edit": True, "delete": False, "changeUserStatus": True},
     })
 
@@ -1641,7 +1773,7 @@ def test_a_role_change_that_changes_nothing_keeps_the_switches():
 
     FakeAdmin.store[1].permissions = dict(ALL_ON)
 
-    response = signed_in(admins_app()).put("/api/admins/2/role", json={"role": "admin"})
+    response = signed_in(admins_app()).put("/api/admins/2/role", json=DEMOTE)
 
     assert response.status_code == 200
     assert response.json["message"] == "admin02 is already an administrator."
@@ -1652,7 +1784,7 @@ def test_a_demotion_with_a_partial_set_is_a_field_error():
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
 
     response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin", "permissions": {"edit": True},
+        **DEMOTE, "permissions": {"edit": True},
     })
 
     assert response.status_code == 400
@@ -1710,7 +1842,7 @@ def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_direc
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
 
     response = signed_in(admins_app()).put("/api/admins/3/role", json={
-        "role": "admin", "permissions": None,
+        **DEMOTE, "permissions": None,
     })
 
     assert response.status_code == 400
@@ -1722,7 +1854,7 @@ def test_demoting_with_an_explicit_null_permissions_is_a_field_error(admin_direc
 def test_omitting_permissions_still_defaults_on_a_demotion():
     FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
 
-    response = signed_in(admins_app()).put("/api/admins/3/role", json={"role": "admin"})
+    response = signed_in(admins_app()).put("/api/admins/3/role", json=DEMOTE)
 
     assert response.status_code == 200
     assert permissions_of(3) == ALL_OFF
@@ -1940,3 +2072,43 @@ def test_an_update_made_from_a_stale_account_is_refused(admin_directory):
     holders = [record.username for record in FakeAdmin.store
                if (record.gmail or "").lower() == "admin01@example.com"]
     assert holders == ["admin03"]
+
+
+def test_two_demotions_of_one_account_write_one_event(monkeypatch):
+    """The second waits for the lock, then finds an administrator: a no-op that
+    neither writes a second demotion event nor claims to have demoted anyone."""
+
+    FakeAdmin.store.append(FakeAdmin(id=3, username="admin03", password="x", gmail="c@example.com", role="superadmin"))
+    next(item for item in FakeAdmin.store if item.id == 2).role = "superadmin"
+    audits = []
+    monkeypatch.setattr(admins_module, "log_audit", lambda *args: audits.append(args))
+    app = admins_app()
+    in_check = threading.Event()
+    proceed = threading.Event()
+    original = admins_module._is_last_active_superadmin
+
+    def paused(record, *args):
+        result = original(record, *args)
+        if not in_check.is_set():
+            in_check.set()
+            assert proceed.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(admins_module, "_is_last_active_superadmin", paused)
+    first, first_outcome = _start(
+        lambda client: client.put("/api/admins/3/role", json={"role": "admin", "reasons": ["left_team"]}),
+        signed_in(app, admin_id=1),
+    )
+    assert in_check.wait(timeout=5)
+    second, second_outcome = _start(
+        lambda client: client.put("/api/admins/3/role", json={"role": "admin", "reasons": ["security_concern"]}),
+        signed_in(app, admin_id=2),
+    )
+    proceed.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert first_outcome["response"].json["message"] == "admin03 was demoted to administrator successfully."
+    assert second_outcome["response"].status_code == 200
+    assert second_outcome["response"].json["message"] == "admin03 is already an administrator."
+    assert [json.loads(entry[5])["reasons"] for entry in audits] == [["left_team"]]

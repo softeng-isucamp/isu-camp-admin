@@ -39,6 +39,7 @@ from auth import (
 )
 from extensions import db
 from model.record_status import normalized_status, status_label
+from services import demotion_reasons
 from services.audit import log_audit
 from services.password_rules import first_password_issue
 from services.security import hash_password
@@ -435,7 +436,8 @@ def set_admin_role(admin_id):
 
     Shaped like the status route. Granting or withdrawing account management is
     deliberate, so it needs a recent password confirmation, and an account
-    cannot change its own role.
+    cannot change its own role. A demotion must also give its reasons, which
+    the audit row keeps - see :mod:`services.demotion_reasons`.
     """
 
     # Superadmin is checked before the password so a plain administrator is
@@ -488,11 +490,24 @@ def set_admin_role(admin_id):
     if role == "admin" and _is_last_active_superadmin(record, directory):
         return _error(LAST_SUPERADMIN_MESSAGE, status=409)
 
+    # A demotion says why (issue #166). Read only now, from the locked row: it
+    # is the transition that needs reasons, so a promotion and a no-op never
+    # ask for them, and a target demoted by somebody else while this request
+    # waited for the lock is the no-op above rather than a second demotion.
+    detail = record.username
+    if role == "admin":
+        reasons, invalid = demotion_reasons.read(data)
+        if invalid:
+            return _error(invalid[1], field=invalid[0])
+        detail = demotion_reasons.encode_detail(record.username, *reasons)
+
     try:
         record.role = role
         record.permissions = permissions
         action = "promote" if role == "superadmin" else "demote"
-        log_audit("Admin", None, action, "Administrator", record.id, record.username)
+        # Staged in this transaction, so the role and its audit row commit or
+        # roll back together.
+        log_audit("Admin", None, action, "Administrator", record.id, detail)
         db.session.commit()
         return jsonify({
             "success": True,
