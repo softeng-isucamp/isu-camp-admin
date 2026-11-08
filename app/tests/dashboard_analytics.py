@@ -521,3 +521,41 @@ def test_route_reports_a_failure_without_leaking_it(app, monkeypatch):
         "success": False,
         "message": "Failed to load dashboard analytics.",
     }
+
+
+def test_calendar_year_uses_manila_boundaries_and_weekly_buckets(app):
+    with app.app_context():
+        db.session.add_all([
+            UserHistory(id=101, created_at=datetime(2025, 12, 31, 15, 59, tzinfo=timezone.utc)),
+            UserHistory(id=102, created_at=datetime(2025, 12, 31, 16, 0, tzinfo=timezone.utc)),
+            UserHistory(id=103, created_at=datetime(2026, 12, 31, 16, 0, tzinfo=timezone.utc)),
+        ])
+        db.session.commit()
+        result = summarize_dashboard_analytics('year-2026', now=NOW)
+    assert result['current']['searches'] == 1
+    assert result['previous'] is None
+    assert result['timeline'][0]['date'] == '2026-01-01'
+    assert result['timeline'][1]['date'] == '2026-01-08'
+
+
+def test_year_range_routes_reject_bad_and_future_years(app):
+    with app.app_context():
+        client = app.test_client()
+        for endpoint in ('/api/dashboard', '/api/dashboard/analytics'):
+            for value in ('year-9999', 'year-0001', 'year-nope'):
+                assert client.get(f'{endpoint}?range={value}').status_code == 400
+            assert client.get(f'{endpoint}?range=year-2020').status_code == 200
+
+
+def test_year_summary_and_analytics_count_same_searches(app):
+    with app.app_context():
+        db.session.add_all([
+            UserHistory(id=111, created_at=datetime(2020, 12, 31, 15, 59, tzinfo=timezone.utc)),
+            UserHistory(id=112, created_at=datetime(2020, 12, 31, 16, 0, tzinfo=timezone.utc)),
+            UserHistory(id=113, created_at=datetime(2021, 12, 31, 16, 0, tzinfo=timezone.utc)),
+        ])
+        db.session.commit()
+        client = app.test_client()
+        summary = client.get('/api/dashboard?range=year-2021').get_json()['data']
+        analytics = client.get('/api/dashboard/analytics?range=year-2021').get_json()['data']
+    assert summary['searches'] == analytics['current']['searches'] == 1

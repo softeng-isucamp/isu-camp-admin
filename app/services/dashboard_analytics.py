@@ -19,7 +19,8 @@ render empty instead of breaking, and the day an arrival event exists this
 module is the only place that has to change.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+import re
 
 from sqlalchemy import func
 
@@ -186,13 +187,28 @@ def _app_accounts():
     return db.session.query(AppUser).join(UserInfo, AppUser.info_id == UserInfo.id)
 
 
-def _earliest_day():
+def earliest_analytics_day():
     """The first Manila day with any Search or registration, or None."""
 
     first_search = db.session.query(db.func.min(UserHistory.created_at)).scalar()
     first_signup = _app_accounts().with_entities(db.func.min(UserInfo.created_at)).scalar()
     days = [day for day in (manila_day(first_search), manila_day(first_signup)) if day]
     return min(days) if days else None
+
+
+def calendar_year(key, today):
+    if not re.fullmatch(r"year-[0-9]{4}", key):
+        return None
+    year = int(key[5:])
+    return year if 1900 <= year <= today.year else None
+
+
+def valid_range(key, now=None):
+    return key in RANGE_DAYS or calendar_year(key, manila_day(now or datetime.now(timezone.utc))) is not None
+
+
+def year_window(year, today):
+    return _utc_floor(date(year, 1, 1)), _utc_ceiling(min(date(year, 12, 31), today))
 
 
 def _period(range_key, today):
@@ -202,10 +218,13 @@ def _period(range_key, today):
     response reports null for it.
     """
 
+    year = calendar_year(range_key, today)
+    if year is not None:
+        return _day_span(date(year, 1, 1), min(date(year, 12, 31), today)), []
     length = RANGE_DAYS[range_key]
 
     if length is None:
-        start = _earliest_day() or today
+        start = earliest_analytics_day() or today
         # A window that starts after today would be empty; one day is the floor.
         return _day_span(min(start, today), today), []
 
@@ -372,7 +391,7 @@ def summarize_dashboard_analytics(range_key, now=None):
 
     now = now or datetime.now(timezone.utc)
     today = manila_day(now)
-    size = RANGE_BUCKET_DAYS[range_key]
+    size = 7 if range_key.startswith("year-") else RANGE_BUCKET_DAYS[range_key]
     days, previous_days = _period(range_key, today)
 
     rows = _history_rows(days[0], days[-1]) if days else []

@@ -8,7 +8,7 @@ from model.user_history import UserHistory
 from services.dashboard_analytics import search_window
 
 
-def summarize_user_searches(days, limit=5, now=None):
+def summarize_user_searches(days, limit=5, now=None, window=None):
     """Return ranked User App destination selections for the last ``days``
     Manila calendar days, the window the Analytics tab uses.
 
@@ -16,7 +16,7 @@ def summarize_user_searches(days, limit=5, now=None):
     Building or Location has since been deleted; only the ranking skips those.
     """
 
-    window = search_window(days, now) if days is not None else None
+    window = window if window is not None else (search_window(days, now) if days is not None else None)
     total_query = db.session.query(func.count(UserHistory.id))
 
     location_query = (
