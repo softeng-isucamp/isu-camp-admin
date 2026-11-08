@@ -261,7 +261,7 @@ All four keys, every time, each a boolean — a body naming two leaves the other
 
 The audit row records what moved — `admin02: add: on -> off; delete: on -> off` — so the Logs page answers "who took that away" without anybody diffing two rows.
 
-**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts and demoted superadmins start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` and `PUT /api/admins/:id/role` both accept an optional `permissions` object; a promotion discards it.
+**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts and demoted superadmins start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` and `PUT /api/admins/:id/role` both accept an optional `permissions` object; a promotion discards it. A demotion must also give its reasons — see [Demoting a superadmin](#demoting-a-superadmin).
 
 `POST /api/admins` now requires a password confirmation for **every** create, not only a superadmin's — each new account is a new way into the portal whatever its role.
 
@@ -293,13 +293,72 @@ Two routes are judged on what the operation *is* rather than on which records it
 
 Apply `migrations/20261024_add_admin_permissions.sql` before using any of this.
 
+## Demoting a superadmin
+
+`PUT /api/admins/:id/role` promotes and demotes, superadmin-only, behind a recent password confirmation (`/api/confirm-password`), never on the caller's own account, and never when it would leave no active superadmin. All of that is unchanged. What a **demotion** adds is that it must say why (issue #166); promotion asks for nothing new.
+
+```json
+{"role":"admin","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}
+```
+
+| Code | Reason |
+| --- | --- |
+| `role_changed` | Role changed |
+| `left_team` | No longer part of the team |
+| `granted_by_mistake` | Access granted by mistake |
+| `security_concern` | Security concern |
+| `other` | Other reason |
+
+- `reasons` is a **nonempty array of distinct codes** from the table. The server stores them in table order, whatever order they were sent in.
+- `otherReason` is **required with `other`** and **refused without it**. It is trimmed and must then be 1–500 characters, counted as Unicode code points; nothing is ever truncated. Absent and `null` both mean "no explanation".
+- The optional `permissions` object is read as before.
+
+Each mistake is a 400 naming its field, and changes nothing — no role, no audit row:
+
+| Case | `fields` key | Message |
+| --- | --- | --- |
+| `reasons` missing, `null`, empty or not an array | `reasons` | `Choose at least one reason for the demotion.` |
+| A code that is not a string or not in the table | `reasons` | `Choose reasons from the list.` |
+| The same code twice | `reasons` | `Choose each reason only once.` |
+| `other` with no explanation, or only whitespace | `otherReason` | `Explain the other reason.` |
+| `otherReason` that is not a string | `otherReason` | `The other reason must be text.` |
+| More than 500 characters after trimming | `otherReason` | `Keep the other reason to 500 characters or fewer.` |
+| `otherReason` without `other` | `otherReason` | `Only explain a reason when Other reason is chosen.` |
+
+The order of checks is: superadmin, password confirmation, the directory lock, the target exists, `role`, `permissions`, self-change (409), already that role (200 no-op), last active superadmin (409), and only then the reasons. Reasons are read from the **locked** row's transition, so:
+
+- **Promotion** reads no reasons and ignores any it is sent.
+- **An account that is already an administrator** is the existing no-op — `admin02 is already an administrator.`, no write and no demotion event — with or without reasons. Two superadmins demoting the same account at once therefore produce one demotion and one no-op, and one event.
+
+### Where the reasons are kept
+
+In the existing `audit_log.detail` text column, as one JSON object, written in **the same transaction** as the role change — a failure writing either rolls both back. **No migration is needed**: `detail` is unbounded text and is already what a demotion wrote, the target's username. The row keeps the actor, `target_id`, the timestamp and the target's username **at the time**, so it stays intelligible after the account is renamed or its row removed.
+
+```json
+{"kind":"demotion","targetName":"admin02","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}
+```
+
+`GET /api/logs` does not return that string. A demotion with reasons comes back with a readable `detail` — which an older frontend shows as it is, and which the log search matches — plus a structured `demotion` object for a client that knows the codes:
+
+```json
+{"action":"demote","target":"Administrator","targetId":"2","actor":"admin01",
+ "detail":"admin02. Reasons: No longer part of the team, Other reason. Other reason: Moved to the Registrar's office",
+ "demotion":{"targetName":"admin02","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}}
+```
+
+`demotion` is present only on a demotion recorded with reasons; a demotion written before this change still reads as just the username. The explanation is free text and comes back exactly as entered: clients render it as text, never as HTML. Every active administrator who can read System Logs can read it, as with every other log row — which is why the dialog advises against putting passwords or sensitive personal details in it.
+
+### Deploying with the frontend
+
+Once this backend is deployed, a frontend without #167 cannot complete a demotion: it sends no `reasons` and gets the `fields.reasons` error, which it shows as a failed demotion. The server will not accept a missing reason to bridge the gap. Deploy the backend and the #167 frontend together, or in close succession with the backend first, and tell the superadmins that demotion is unavailable in between. Promotion, status changes and everything else keep working with either frontend.
+
 ## Database backups
 
 Backup & Recovery on My Profile takes real `pg_dump` archives. These routes back it, all superadmin-only:
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/backups` | Stored archives, the running job if there is one, and which controls this server can serve |
+| `GET /api/backups` | Stored archives, the running job if there is one, the schedule's own run history, and which controls this server can serve |
 | `POST /api/backups` | Start a dump; returns a job to poll |
 | `POST /api/backups/<id>/restore` | Restore an archive; needs the caller's password |
 | `POST /api/backups/<id>/download` | Issue a one-time download link; needs the caller's password |
@@ -316,7 +375,7 @@ These are jobs rather than plain responses because of that runtime. The API runs
 
 ### Every control is advertised, not assumed
 
-`GET /api/backups` carries `canDownload`, `canDelete` and `schedule`, and a job carries `cancellable`. **A key that is missing hides its control**, which is what lets the frontend and the backend land separately: a build talking to a deployment that has only half of this offers only the half that works, rather than a button that 404s. An unreadable `schedule` — a deployment that has not applied `migrations/20261023_add_backup_schedule.sql` — is treated the same as a missing one.
+`GET /api/backups` carries `canDownload`, `canDelete`, `schedule` and `automatic`, and a job carries `cancellable`. **A key that is missing hides its control**, which is what lets the frontend and the backend land separately: a build talking to a deployment that has only half of this offers only the half that works, rather than a button that 404s. An unreadable `schedule` — a deployment that has not applied `migrations/20261023_add_backup_schedule.sql` — is treated the same as a missing one, and so is an unreadable `automatic`.
 
 ### Cancelling
 
@@ -356,6 +415,7 @@ Things to know:
 - **Retention deletes archives that people took by hand.** It keeps the newest `keep` files in the directory whoever made them, because the limit is about disk rather than about authorship. At today's ~75 MB a dump, the default is a little over 1 GB. It runs **after each completed backup**, so a button press is held to the same limit as a scheduled run — and **saving a schedule deletes nothing by itself**, so lowering `keep` is never a delete somebody did not expect.
 - **A missed night is picked up at startup.** If the newest archive is more than a day old, a backup runs two minutes after the process starts instead of waiting for the next scheduled minute, because a development machine is rarely awake at 02:30. A restart an hour after a successful run does not take another.
 - **Starting it in two processes is safe.** Each run is claimed by creating a `.claimed-<time>` marker in the backup directory with `O_EXCL`, so `flask --debug` (which runs the app twice) or a second gunicorn worker still produces one dump rather than two writing the same file. Because the marker outlives the process, a restart does not re-take a night that was already taken.
+- **The panel shows the run history**, under the archive list, as `automatic` on `GET /api/backups`: `{runs, nextRunAt}`, newest first, read back out of the audit rows below rather than off the disk. The archives cannot answer the question somebody checking an unattended backup is asking — a night that **failed** left no file, one that was **skipped** left nothing at all, and one that succeeded is deleted by retention a fortnight before anybody stops caring that it ran — so a run says `taken`, `failed` or `skipped`, and a `taken` run carries its archive, its size, and whether that archive is still stored. `nextRunAt` is absent when the schedule is off, because a time shown there would promise a backup nobody gets. A log that cannot be read leaves `automatic` out entirely: an empty history means "it has never run", which is not a claim a deployment without the audit table can honestly make.
 - **Every run reaches the audit log** as a `System` row with actor `scheduler` — `backup`, `backup failed`, or `backup skipped` when somebody's own job was already running. Download, delete, cancel and a schedule change are `System` rows too, naming the administrator who did it; a retention removal names the archive it took. No row ever carries a password or a download link. The Logs page shows these under All.
 
 An unfinished dump is no longer mistaken for a backup. `pg_dump` creates its output file immediately and fills it as it reads, so a run that died part way through — a dropped pooler connection mid `building_photo` has happened here — used to leave a truncated file that the panel listed as ready to restore from. A dump now writes `<id>.dump.partial` and is renamed to `<id>.dump` only once the tool has exited cleanly, and leftovers are swept before each automatic run.

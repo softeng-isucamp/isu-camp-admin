@@ -10,8 +10,9 @@ browser fetches the second by a URL this module hands out, so this blueprint is
 mounted at ``/api`` and names each path itself.
 
 Every control the panel offers is advertised rather than assumed: ``GET
-/api/backups`` carries ``canDownload``, ``canDelete`` and ``schedule``, a job
-carries ``cancellable``, and a key that is missing hides its control. That is
+/api/backups`` carries ``canDownload``, ``canDelete``, ``schedule`` and
+``automatic`` - the schedule's own run history - a job carries ``cancellable``,
+and a key that is missing hides its control. That is
 what lets this land in pieces - a frontend talking to a deployment that has
 only half of it offers only the half that works, instead of offering a button
 that 404s.
@@ -47,7 +48,13 @@ from services.backup_jobs import (
     start_restore,
     DOWNLOAD_PATH,
 )
-from services.backup_schedule import read_schedule, save_schedule, validate_schedule
+from services.backup_schedule import (
+    next_run,
+    read_schedule,
+    recent_runs,
+    save_schedule,
+    validate_schedule,
+)
 from services.security import verify_password
 
 backups_bp = Blueprint("backups", __name__, url_prefix="/api")
@@ -136,6 +143,21 @@ def list_backup_history():
     schedule = read_schedule()
     if schedule is not None:
         payload["schedule"] = schedule
+
+    # What the schedule has actually done, which the archives above cannot
+    # say: a night that failed left no file, and a night that succeeded is
+    # deleted by retention long before anybody stops caring that it ran. Left
+    # out when the audit rows cannot be read, so the panel hides the section
+    # rather than showing an empty history that reads as "it has never run".
+    runs = recent_runs()
+    if runs is not None:
+        automatic = {"runs": runs}
+        due = next_run(schedule)
+        if due is not None:
+            # Absent when the schedule is off or unreadable: there is no next
+            # run to name, and naming one would promise a backup nobody gets.
+            automatic["nextRunAt"] = due
+        payload["automatic"] = automatic
 
     return jsonify(payload), 200
 
