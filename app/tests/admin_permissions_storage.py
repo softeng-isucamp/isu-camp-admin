@@ -101,7 +101,11 @@ def app(request, monkeypatch, tmp_path):
 
         if backend == "postgresql":
             # The genuine article, run exactly as a deployment would run it.
-            db.session.execute(db.text(MIGRATION.read_text(encoding="utf-8")))
+            #
+            # Handed to the driver rather than to db.text, which reads ":id" -
+            # part of the route named in the column comment - as a bind
+            # parameter and refuses the script for a value nobody passed.
+            db.session.connection().exec_driver_sql(MIGRATION.read_text(encoding="utf-8"))
         else:
             for event in ("insert", "update"):
                 db.session.execute(db.text(SQLITE_CONSTRAINT.format(event=event)))
@@ -126,6 +130,16 @@ def add_admin(app, identifier, username, role="admin", permissions=None):
             permissions=permissions,
         ))
         db.session.commit()
+
+        if app.backend == "postgresql":
+            # An id supplied by hand does not advance the sequence, and
+            # POST /api/admins lets the database assign one - so the next
+            # create would be handed an id this row already holds.
+            db.session.execute(db.text(
+                "select setval(pg_get_serial_sequence('public.admin', 'id'),"
+                " (select max(id) from public.admin))"
+            ))
+            db.session.commit()
 
 
 def signed_in(app, admin_id=1):
@@ -289,7 +303,7 @@ def test_demoting_a_superadmin_stores_an_object_not_null(app):
     add_admin(app, 2, "admin02", role="superadmin")
 
     response = signed_in(app).put("/api/admins/2/role", json={
-        "role": "admin", "permissions": dict(ALL_ON),
+        "role": "admin", "reasons": ["role_changed"], "permissions": dict(ALL_ON),
     })
 
     assert response.status_code == 200
@@ -321,7 +335,7 @@ def test_a_promotion_round_trips_through_a_demotion(app):
     client = signed_in(app)
 
     promoted = client.put("/api/admins/2/role", json={"role": "superadmin"})
-    demoted = client.put("/api/admins/2/role", json={"role": "admin"})
+    demoted = client.put("/api/admins/2/role", json={"role": "admin", "reasons": ["role_changed"]})
 
     assert (promoted.status_code, demoted.status_code) == (200, 200)
     assert stored_is_sql_null(app, "admin02") is False

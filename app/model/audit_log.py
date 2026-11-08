@@ -19,7 +19,16 @@ class AuditLog(db.Model):
     detail = db.Column(db.Text, nullable=True)
 
     def to_dict(self):
-        return {
+        detail = self.detail
+        demotion = None
+        if self.action == "demote":
+            # A demotion's reasons are stored as JSON in detail; old rows
+            # stored the target's name and read back unchanged.
+            from services.demotion_reasons import describe
+
+            detail, demotion = describe(detail)
+
+        record = {
             "id": str(self.id),
             "createdAt": self.created_at.isoformat() if self.created_at else None,
             "category": self.category,
@@ -27,5 +36,8 @@ class AuditLog(db.Model):
             "action": self.action,
             "target": self.target,
             "targetId": self.target_id,
-            "detail": self.detail,
+            "detail": detail,
         }
+        if demotion is not None:
+            record["demotion"] = demotion
+        return record
