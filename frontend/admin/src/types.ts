@@ -245,6 +245,32 @@ export interface DashboardAnalytics {
   completeness: CompletenessCheck[];
   completenessTotal: number;
 }
+/**
+ * Decision-support analytics for the Dashboard's Analytics tab. Not served by the
+ * backend yet: the local adapter returns fixture data and the HTTP adapter refuses.
+ * Usage-based figures follow the selected range; readiness figures do not.
+ */
+export interface DecisionAnalytics {
+  range: DashboardRange;
+  /** Both: one dot per place. `ready` is 0..100, the share of its information that is in place. */
+  fixFirst: Array<{ name: string; searches: number; ready: number }>;
+  /** Both: searches per building and whether any indoor rooms are mapped inside it. */
+  indoorDemand: Array<{ building: string; searches: number; hasRooms: boolean }>;
+  /** Both: admin edits against searches for each place. */
+  effort: Array<{ place: string; edits: number; searches: number }>;
+  /** Readiness: cumulative checks, each count includes every check above it. */
+  funnel: Array<{ key: string; label: string; count: number }>;
+  /** Readiness: walking routes that break if the pathway is closed. */
+  singlePoints: Array<{ pathway: string; routesBroken: number }>;
+  /** Readiness: places reachable by each travel mode, out of `total`. */
+  reach: { total: number; modes: Array<{ mode: string; reachable: number }> };
+  /** User App: searches started per weekday (Mon first) and hour; `cells[day][hourIndex]`. */
+  heatmap: { days: string[]; hours: number[]; cells: number[][] };
+  /** User App: searches per place in the previous and the current month. */
+  movers: Array<{ name: string; lastMonth: number; thisMonth: number }>;
+  /** User App: per place category, the percentage of searches by each account type (sums to 100). */
+  audience: Array<{ category: string } & Record<UserAccountType, number>>;
+}
 export interface TopSearchedLocation {
   rank: string;
   locationId?: string;

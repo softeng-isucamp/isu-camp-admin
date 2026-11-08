@@ -8,6 +8,7 @@ import type {
   AuditEntry,
   Building,
   DashboardAnalytics,
+  DecisionAnalytics,
   DashboardRange,
   DashboardSummary,
   Location,
@@ -64,6 +65,7 @@ import { readPermissions } from "../lib/permissions";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
+import { generateDecisionAnalytics } from "./fixtures/decisionAnalytics";
 import { backendLocationType, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
@@ -757,6 +759,8 @@ export interface Services {
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
     analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
+    /** Decision-support charts for the Analytics tab. Fixture only: the HTTP adapter rejects until the backend serves it. */
+    decisionAnalytics(range?: DashboardRange): Promise<DecisionAnalytics>;
   };
 
   locations: {
@@ -1357,6 +1361,14 @@ export const services: Services = {
         return normalizeBackendDashboardAnalytics(raw);
       }
       return wait(generateDashboardAnalytics(range, locations, Date.now(), localAdapter.buildings.list()));
+    },
+
+    decisionAnalytics: async (range = "week") => {
+      if (USE_HTTP_API) {
+        // A plain Error keeps this message visible; a "server" RequestError would be replaced by the caller's fallback.
+        throw new Error("These analytics are not available from the server yet.");
+      }
+      return wait(generateDecisionAnalytics(range));
     },
 
     summary: async (range = "week") => {

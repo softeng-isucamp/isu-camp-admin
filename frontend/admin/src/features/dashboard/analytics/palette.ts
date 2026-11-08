@@ -16,3 +16,8 @@ export const TOOLTIP_STYLE = {
   boxShadow: "0 4px 14px #0000001a",
   fontSize: 12,
 } as const;
+
+/** Decision charts: red marks "act on this", muted marks context; blue is the neutral data colour. */
+export const ALERT = "#d64545";
+export const MUTED_MARK = "#8a948f";
+export const TRACK = "#eef2f0";
