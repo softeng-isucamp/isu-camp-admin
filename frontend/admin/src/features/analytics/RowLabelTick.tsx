@@ -1,4 +1,4 @@
-import { INK } from "../palette";
+import { INK } from "../dashboard/analytics/palette";
 
 type Props = { x?: number | string; y?: number | string; payload?: { value?: unknown }; width?: number | string; anchor?: "end" | "middle" };
 

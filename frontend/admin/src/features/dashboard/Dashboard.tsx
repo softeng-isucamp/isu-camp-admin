@@ -10,15 +10,12 @@ import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
 import { AccountTypeSplit } from "./AccountTypeSplit";
-import { AnalyticsTab, dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
-import { formatAnalyticsPeriod } from "./analytics/format";
+import { dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
 import { usePermissions } from "../auth/usePermissions";
-import type { DashboardTab } from "./dashboardTabs";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const [tab, setTab] = useState<DashboardTab>("overview");
   const [range, setRange] = useState<DashboardRange>("week");
   const { data, error, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", range],
@@ -32,7 +29,7 @@ export function Dashboard() {
     queryKey: dashboardAnalyticsQueryKey(range),
     queryFn: () => services.dashboard.analytics(range),
     placeholderData: (previous) => previous,
-    enabled: useAnalyticsDestinations || tab === "analytics",
+    enabled: useAnalyticsDestinations,
     retry: false,
   });
   const destinations: Array<{ rank: string; locationId?: string; name: string; context: string; searches: number; visits?: number }> =
@@ -40,7 +37,6 @@ export function Dashboard() {
   const destinationsLoading = useAnalyticsDestinations ? destinationsQuery.isLoading : isLoading;
   const destinationsFailed = useAnalyticsDestinations ? !!destinationsQuery.error && !destinationsQuery.data : !!error && !data;
 
-  const periodText = destinationsQuery.data?.range === range ? formatAnalyticsPeriod(destinationsQuery.data) : null;
   const rangeLabel = range === "week" ? "this week" : range === "month" ? "this month" : range.startsWith("year-") ? `in ${range.slice(5)}` : "all time";
   const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
   const firstYear = Math.min(currentYear, Math.max(1900, data?.firstAnalyticsYear ?? currentYear));
@@ -61,22 +57,7 @@ export function Dashboard() {
         </Link>
       </section>
       <div className="dashboard-bar">
-        <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
-          {(["overview", "analytics"] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              className={tab === key ? "active" : undefined}
-              onClick={() => setTab(key)}
-            >
-              {key === "overview" ? "Overview" : "Analytics"}
-            </button>
-          ))}
-        </div>
         <div className="dashboard-range">
-          {tab === "analytics" && periodText && <span className="dashboard-range-dates">{periodText}</span>}
           <select
             className="dashboard-time-filter"
             aria-label="Dashboard time range"
@@ -90,8 +71,7 @@ export function Dashboard() {
           </select>
         </div>
       </div>
-      {tab === "analytics" ? <AnalyticsTab range={range} /> : (
-        <>
+      <>
           <div className="metric-grid">
             <Link className="card dashboard-link" to="/locations">
               <div className="metric-top">
@@ -237,8 +217,7 @@ export function Dashboard() {
               </Card>
             </div>
           </div>
-        </>
-      )}
+      </>
     </div>
   );
 }

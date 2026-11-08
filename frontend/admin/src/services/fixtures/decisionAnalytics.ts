@@ -1,93 +1,117 @@
-import type { DashboardRange, DecisionAnalytics } from "../../types";
+import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, ReadinessGap } from "../../types";
 import { mulberry32 } from "./prng";
 
 /**
- * Fixture numbers for the decision-support charts (approved mockup "grouped").
- * Week is the mockup's baseline. Month and all-time scale the usage-based numbers
- * (searches, edits, heatmap) so the range selector visibly does something;
- * readiness, pathways, travel-mode reach and the audience split stay fixed.
+ * Fixture for the Analytics page, built from the session's own Locations so every
+ * quick link opens a record that exists. Photo, description, keywords and map pin
+ * are read from the Locations; entrance links, rooms, searches, pathways and
+ * travel modes are seeded, since the local adapter has no route graph or history.
  */
-const SEARCH_SCALE: Record<DashboardRange, number> = { week: 1, month: 1.6, all: 2.5 };
-const EDIT_SCALE: Record<DashboardRange, number> = { week: 1, month: 1.3, all: 1.8 };
+const SEARCH_SCALE: Record<DashboardRange, number> = { week: 1, month: 3.4, all: 9 };
+const ROOM_HOLDERS = new Set(["College", "Campus Services", "Facility", undefined]);
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
-
-/** Weekdays follow a morning-and-afternoon curve with a lunch dip; the weekend is quiet, Sat 7:00-11:00 quietest. */
-const heatmapCells = (scale: number): number[][] => {
-  const jitter = mulberry32(2026);
-  const weekday = (dayFactor: number) =>
-    HOURS.map((hour) => {
-      const curve = Math.sin(((hour - 6) / 13) * Math.PI) * (hour === 12 ? 0.7 : 1) + (hour === 8 ? 0.25 : 0);
-      return Math.max(2, Math.round(40 * curve * dayFactor * (0.75 + 0.25 * jitter())));
-    });
-  const saturday = [3, 1, 1, 1, 2, 4, 5, 5, 4, 4, 3, 3, 2, 2];
-  const sunday = [3, 3, 2, 3, 3, 3, 4, 4, 4, 3, 3, 3, 2, 2];
-  return [weekday(1), weekday(0.95), weekday(1), weekday(0.9), weekday(0.8), saturday, sunday].map((row) =>
-    row.map((value) => Math.max(1, Math.round(value * scale))),
-  );
+const LABELS: Record<ReadinessGap, string> = {
+  photo: "Photo",
+  description: "Description",
+  keywords: "Search keywords",
+  pin: "Map pin",
+  entrance: "Entrance linked",
+  rooms: "Indoor rooms",
 };
 
-export function generateDecisionAnalytics(range: DashboardRange): DecisionAnalytics {
-  const s = SEARCH_SCALE[range];
-  const e = EDIT_SCALE[range];
-  const searches = (n: number) => Math.round(n * s);
+const ref = (place: Location): AnalyticsPlaceRef => ({ id: place.id, name: place.name });
+
+export function generateDecisionAnalytics(range: DashboardRange, locations: Location[]): DecisionAnalytics {
+  const rand = mulberry32(4207);
+  const places = locations.filter((item) => item.type === "Place" && item.parentId === null && item.status === "Active");
+
+  // Seeded per-place facts, fixed across ranges so only searches move with the range selector.
+  const facts = places.map((place, index) => {
+    const roll = rand();
+    const holdsRooms = ROOM_HOLDERS.has(place.classification);
+    return {
+      place,
+      entrance: index % 3 !== 1 && roll > 0.18,
+      holdsRooms,
+      rooms: holdsRooms && rand() > 0.72,
+      // A long tail: a few places get most of the searches.
+      weight: Math.pow(rand(), 2.6),
+    };
+  });
+
+  const scale = SEARCH_SCALE[range];
+  const searchesFor = (weight: number) => Math.round(weight * 46 * scale);
+
+  const gapsOf = (fact: (typeof facts)[number]): ReadinessGap[] => {
+    const { place } = fact;
+    const gaps: ReadinessGap[] = [];
+    if (!(place.hasPhoto || place.photo)) gaps.push("photo");
+    if (!place.function?.trim()) gaps.push("description");
+    if (!place.keywords?.trim()) gaps.push("keywords");
+    if (!(place.positioned || (place.lat != null && place.lng != null))) gaps.push("pin");
+    if (!fact.entrance) gaps.push("entrance");
+    if (fact.holdsRooms && !fact.rooms) gaps.push("rooms");
+    return gaps;
+  };
+
+  const withGaps = facts.map((fact) => ({ fact, gaps: gapsOf(fact) }));
+  const checks = (Object.keys(LABELS) as ReadinessGap[]).map((key) => {
+    const applies = withGaps.filter(({ fact }) => key !== "rooms" || fact.holdsRooms);
+    const missing = applies.filter(({ gaps }) => gaps.includes(key)).map(({ fact }) => ref(fact.place));
+    return { key, label: LABELS[key], complete: applies.length - missing.length, total: applies.length, missing };
+  });
+
+  const attention = withGaps
+    .filter(({ gaps }) => gaps.length > 0)
+    .map(({ fact, gaps }) => ({ ...ref(fact.place), searches: searchesFor(fact.weight), gaps }))
+    .filter((row) => row.searches > 0)
+    .sort((a, b) => b.searches - a.searches)
+    .slice(0, 8);
+
+  const routable = facts.filter((fact) => fact.entrance).map((fact) => fact.place);
+  const pick = (start: number, count: number) => routable.slice(start, start + count).map(ref);
+  const closures = [
+    { id: "pw-junction-ccsict", pathway: "Junction → CCSICT walkway", cutOff: pick(0, 4), longerTrip: 6 },
+    { id: "pw-infirmary", pathway: "Infirmary entrance path", cutOff: pick(4, 2), longerTrip: 9 },
+    { id: "pw-old-ca", pathway: "Old CA spur", cutOff: pick(6, 1), longerTrip: 3 },
+    { id: "pw-oval-loop", pathway: "Oval loop road", cutOff: [], longerTrip: 11 },
+    { id: "pw-gate-road", pathway: "Main gate road (east)", cutOff: [], longerTrip: 4 },
+  ];
+
+  const unreachable = (share: number, offset: number) => {
+    const count = Math.round(routable.length * share);
+    return Array.from({ length: count }, (_, i) => routable[(offset + i * 3) % routable.length]).filter(
+      (place, i, all) => all.findIndex((other) => other.id === place.id) === i,
+    ).map(ref);
+  };
+  const modes = [
+    { mode: "Walking", unreachable: unreachable(0.05, 2) },
+    { mode: "Bicycle", unreachable: unreachable(0.3, 1) },
+    { mode: "Motorcycle", unreachable: unreachable(0.55, 0) },
+    { mode: "Car", unreachable: unreachable(0.62, 5) },
+  ].map((row) => ({ ...row, reachable: routable.length - row.unreachable.length }));
+
+  const total = Math.round(59 * scale);
+  const split = <K extends string>(keys: K[], shares: number[]) => {
+    const values = shares.map((share) => Math.round(total * share));
+    values[0] += total - values.reduce((sum, value) => sum + value, 0);
+    return Object.fromEntries(keys.map((key, i) => [key, values[i]])) as Record<K, number>;
+  };
+
   return {
     range,
-    fixFirst: [
-      ["Registrar", 92, 25], ["CCSICT", 73, 38], ["Main Library", 63, 0], ["Cashier", 48, 25],
-      ["Clinic", 40, 75], ["Gym", 30, 100], ["CAS", 58, 100], ["Canteen", 80, 100],
-      ["Old CA", 12, 25], ["De Venecia", 9, 0], ["Admin Bldg", 47, 75], ["Nursing", 22, 50],
-      ["Vetmed", 18, 75], ["ISU Oval", 6, 50], ["CED", 35, 100], ["Guard house", 4, 25],
-    ].map(([name, count, ready]) => ({ name: name as string, searches: searches(count as number), ready: ready as number })),
-    indoorDemand: [
-      { building: "Registrar bldg", searches: searches(92), hasRooms: true },
-      { building: "CCSICT", searches: searches(71), hasRooms: false },
-      { building: "CAS", searches: searches(58), hasRooms: true },
-      { building: "Admin Bldg", searches: searches(48), hasRooms: false },
-      { building: "Nursing", searches: searches(22), hasRooms: true },
-      { building: "Vetmed", searches: searches(18), hasRooms: false },
-    ],
-    effort: [
-      ["Canteen", 3, 77], ["Registrar", 2, 92], ["CCSICT", 4, 71], ["Gym", 21, 30], ["ISU Oval", 17, 6], ["Main Library", 1, 64],
-    ].map(([place, edits, count]) => ({ place: place as string, edits: Math.round((edits as number) * e), searches: searches(count as number) })),
-    funnel: [
-      { key: "active", label: "Active places", count: 48 },
-      { key: "onMap", label: "On user map", count: 48 },
-      { key: "description", label: "Has description", count: 48 },
-      { key: "photo", label: "Has photo", count: 31 },
-      { key: "routable", label: "Routable", count: 16 },
-      { key: "indoor", label: "Has indoor rooms", count: 4 },
-    ],
-    singlePoints: [
-      { pathway: "Junction → CCSICT", routesBroken: 30 },
-      { pathway: "Infirmary entrance", routesBroken: 24 },
-      { pathway: "Old CA spur", routesBroken: 19 },
-      { pathway: "To Junction X", routesBroken: 12 },
-      { pathway: "Gate road", routesBroken: 6 },
-    ],
-    reach: {
-      total: 16,
-      modes: [
-        { mode: "Walking", reachable: 15 },
-        { mode: "Bicycle", reachable: 11 },
-        { mode: "Motorcycle", reachable: 7 },
-        { mode: "Car", reachable: 6 },
-      ],
+    readiness: {
+      total: places.length,
+      fullyReady: withGaps.filter(({ gaps }) => gaps.length === 0).length,
+      checks,
     },
-    heatmap: { days: DAYS, hours: HOURS, cells: heatmapCells(s) },
-    movers: [
-      { name: "Registrar", lastMonth: 30, thisMonth: 92 },
-      { name: "Cashier", lastMonth: 25, thisMonth: 55 },
-      { name: "Gym", lastMonth: 44, thisMonth: 30 },
-      { name: "Canteen", lastMonth: 70, thisMonth: 77 },
-      { name: "Clinic", lastMonth: 38, thisMonth: 40 },
-    ],
-    audience: [
-      { category: "College", student: 62, teacher: 30, visitor: 8 },
-      { category: "Offices", student: 35, teacher: 25, visitor: 40 },
-      { category: "Food", student: 70, teacher: 22, visitor: 8 },
-      { category: "Facility", student: 40, teacher: 45, visitor: 15 },
-    ],
+    attention,
+    closures,
+    reach: { origin: "Main Gate", total: routable.length, modes },
+    searches: {
+      total,
+      byAccountType: split(["student", "teacher", "visitor"], [0.64, 0.22, 0.14]),
+      byDestinationType: split<DestinationType>(["Building", "Room", "Office", "Laboratory", "Restroom"], [0.55, 0.18, 0.14, 0.09, 0.04]),
+    },
   };
 }

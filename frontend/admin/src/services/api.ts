@@ -1368,7 +1368,7 @@ export const services: Services = {
         // A plain Error keeps this message visible; a "server" RequestError would be replaced by the caller's fallback.
         throw new Error("These analytics are not available from the server yet.");
       }
-      return wait(generateDecisionAnalytics(range));
+      return wait(generateDecisionAnalytics(range, locations));
     },
 
     summary: async (range = "week") => {

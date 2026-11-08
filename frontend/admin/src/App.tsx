@@ -8,6 +8,7 @@ import { Login } from './features/auth/AuthPages'
 import { ForgotPassword } from './features/auth/ForgotPassword'
 import { ForgotUsername } from './features/auth/ForgotUsername'
 import { Dashboard } from './features/dashboard/Dashboard'
+import { AnalyticsPage } from './features/analytics/AnalyticsPage'
 import { Locations } from './features/locations/Locations'
 import { MapEditor } from './features/map/MapEditor'
 import { Users } from './features/users/Users'
@@ -32,5 +33,5 @@ export function MissingRoute() {
   if (session) return <Shell>{card}</Shell>
   return <div className="auth-page"><div className="ambient" />{card}</div>
 }
-function AppRoutes() { return <Routes><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
+function AppRoutes() { return <Routes><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
 export function App() { return <AuthProvider><AppRoutes /></AuthProvider> }

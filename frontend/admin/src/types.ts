@@ -245,31 +245,36 @@ export interface DashboardAnalytics {
   completeness: CompletenessCheck[];
   completenessTotal: number;
 }
+/** A place an Analytics quick link can open: `id` is its Location ID. */
+export interface AnalyticsPlaceRef { id: string; name: string }
+/** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
+export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entrance" | "rooms";
 /**
- * Decision-support analytics for the Dashboard's Analytics tab. Not served by the
- * backend yet: the local adapter returns fixture data and the HTTP adapter refuses.
- * Usage-based figures follow the selected range; readiness figures do not.
+ * The Analytics page. Not served by the backend yet: the local adapter returns
+ * fixture data and the HTTP adapter refuses. Readiness, closures and reach are
+ * a current snapshot; searches follow the selected range.
  */
 export interface DecisionAnalytics {
   range: DashboardRange;
-  /** Both: one dot per place. `ready` is 0..100, the share of its information that is in place. */
-  fixFirst: Array<{ name: string; searches: number; ready: number }>;
-  /** Both: searches per building and whether any indoor rooms are mapped inside it. */
-  indoorDemand: Array<{ building: string; searches: number; hasRooms: boolean }>;
-  /** Both: admin edits against searches for each place. */
-  effort: Array<{ place: string; edits: number; searches: number }>;
-  /** Readiness: cumulative checks, each count includes every check above it. */
-  funnel: Array<{ key: string; label: string; count: number }>;
-  /** Readiness: walking routes that break if the pathway is closed. */
-  singlePoints: Array<{ pathway: string; routesBroken: number }>;
-  /** Readiness: places reachable by each travel mode, out of `total`. */
-  reach: { total: number; modes: Array<{ mode: string; reachable: number }> };
-  /** User App: searches started per weekday (Mon first) and hour; `cells[day][hourIndex]`. */
-  heatmap: { days: string[]; hours: number[]; cells: number[][] };
-  /** User App: searches per place in the previous and the current month. */
-  movers: Array<{ name: string; lastMonth: number; thisMonth: number }>;
-  /** User App: per place category, the percentage of searches by each account type (sums to 100). */
-  audience: Array<{ category: string } & Record<UserAccountType, number>>;
+  /** Active Places only; each check counts on its own over the Places it applies to. */
+  readiness: {
+    total: number;
+    /** Places that pass every check that applies to them. */
+    fullyReady: number;
+    checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[] }>;
+  };
+  /** Places with at least one gap, most searched first. `searches` counts recorded searches in the range. */
+  attention: Array<AnalyticsPlaceRef & { searches: number; gaps: ReadinessGap[] }>;
+  /** What closing each pathway would do to walking routes from the origin. */
+  closures: Array<{ id: string; pathway: string; cutOff: AnalyticsPlaceRef[]; longerTrip: number }>;
+  /** Routable Places each travel mode reaches from `origin`. */
+  reach: { origin: string; total: number; modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[] }> };
+  /** Recorded searches in the range (UserHistory rows that survived deletion). */
+  searches: {
+    total: number;
+    byAccountType: Record<UserAccountType, number>;
+    byDestinationType: Record<DestinationType, number>;
+  };
 }
 export interface TopSearchedLocation {
   rank: string;
