@@ -37,7 +37,7 @@ export const demotionReasonIssues = (reasons: readonly string[], otherReason?: s
   const issues: Record<string, string> = {};
   if (reasons.length === 0) issues.reasons = REASONS_REQUIRED_MESSAGE;
   if (reasons.includes("other")) {
-    const length = (otherReason ?? "").trim().length;
+    const length = Array.from((otherReason ?? "").trim()).length;
     if (length === 0) issues.otherReason = OTHER_REASON_REQUIRED_MESSAGE;
     else if (length > OTHER_REASON_MAX) issues.otherReason = OTHER_REASON_TOO_LONG_MESSAGE;
   }

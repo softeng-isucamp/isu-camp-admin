@@ -683,11 +683,11 @@ describe("Changing an administrator's role", () => {
       const setRole = vi.spyOn(services.admins, "setRole").mockResolvedValue({ ...dean, role: "admin" });
       await openDemotion();
       chooseReasons("Other reason");
-      fireEvent.change(otherBox(), { target: { value: `  ${"x".repeat(500)}  ` } });
+      fireEvent.change(otherBox(), { target: { value: `  ${"😀".repeat(500)}  ` } });
       confirmWith("password123", "Make Administrator");
 
       await waitFor(() => expect(setRole).toHaveBeenCalledOnce());
-      expect(lastCall(setRole)[2]).toMatchObject({ reasons: ["other"], otherReason: "x".repeat(500) });
+      expect(lastCall(setRole)[2]).toMatchObject({ reasons: ["other"], otherReason: "😀".repeat(500) });
     });
 
     it.each([

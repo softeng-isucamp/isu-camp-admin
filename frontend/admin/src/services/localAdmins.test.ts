@@ -317,7 +317,7 @@ describe("fixture role changes", () => {
 
     it("omits the explanation when Other is not selected", async () => {
       await fixture.admins.setRole("3", "admin", { reasons: ["security_concern", "role_changed"] });
-      expect(fixture.audit.mock.calls[0][3]).toEqual({ reasons: ["security_concern", "role_changed"] });
+      expect(fixture.audit.mock.calls[0][3]).toEqual({ reasons: ["role_changed", "security_concern"] });
     });
 
     it.each([
@@ -329,6 +329,7 @@ describe("fixture role changes", () => {
       ["Other without an explanation", { reasons: ["other"] }, "otherReason"],
       ["Other with a blank explanation", { reasons: ["other"], otherReason: "  \n " }, "otherReason"],
       ["Other over 500 characters", { reasons: ["other"], otherReason: "x".repeat(501) }, "otherReason"],
+      ["Other over 500 Unicode code points", { reasons: ["other"], otherReason: "😀".repeat(501) }, "otherReason"],
       ["an explanation without Other", { reasons: ["left_team"], otherReason: "stray" }, "otherReason"],
     ])("refuses %s with a %s field error and changes nothing", async (_name, options, field) => {
       expect(await refusal(options)).toMatchObject({ fieldErrors: { [field]: expect.any(String) } });
@@ -337,8 +338,16 @@ describe("fixture role changes", () => {
     });
 
     it("accepts an explanation of exactly 500 trimmed characters", async () => {
-      await fixture.admins.setRole("3", "admin", { reasons: ["other"], otherReason: ` ${"x".repeat(500)} ` });
+      await fixture.admins.setRole("3", "admin", { reasons: ["other"], otherReason: ` ${"😀".repeat(500)} ` });
       expect(await roleOf("3")).toBe("admin");
+    });
+
+    it("validates supplied permissions before reasons, including an already-admin no-op", async () => {
+      for (const id of ["2", "3"]) {
+        const error = await failure(fixture.admins.setRole(id, "admin", { permissions: null as never }));
+        expect(error).toMatchObject({ fieldErrors: { permissions: expect.any(String) } });
+      }
+      expect(fixture.audit).not.toHaveBeenCalled();
     });
 
     it("asks for no reasons on a promotion and logs none", async () => {

@@ -5,8 +5,8 @@ import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmail
 import { firstPasswordIssue } from "./passwordRules";
 import { viewOnlyPermissions } from "../lib/permissions";
 import {
-  OTHER_REASON_MAX, OTHER_REASON_REQUIRED_MESSAGE, OTHER_REASON_TOO_LONG_MESSAGE,
-  REASONS_REQUIRED_MESSAGE, isDemotionReasonCode,
+  OTHER_REASON_MAX, OTHER_REASON_REQUIRED_MESSAGE,
+  DEMOTION_REASONS, isDemotionReasonCode,
 } from "../lib/demotionReasons";
 import type { SetRoleOptions } from "./api";
 
@@ -65,17 +65,19 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
    * explanation without it; refusals name `reasons` or `otherReason`. Returns what is logged.
    */
   const readDemotionReasons = (reasons: unknown, otherReason: unknown): { reasons: string[]; otherReason?: string } => {
-    if (!Array.isArray(reasons) || reasons.length === 0) throw fieldError("reasons", REASONS_REQUIRED_MESSAGE);
-    if (!reasons.every(isDemotionReasonCode)) throw fieldError("reasons", "Choose from the listed reasons only.");
-    if (new Set(reasons).size !== reasons.length) throw fieldError("reasons", "Each reason can be selected once.");
+    if (!Array.isArray(reasons) || reasons.length === 0) throw fieldError("reasons", "Choose at least one reason for the demotion.");
+    if (!reasons.every(isDemotionReasonCode)) throw fieldError("reasons", "Choose reasons from the list.");
+    if (new Set(reasons).size !== reasons.length) throw fieldError("reasons", "Choose each reason only once.");
     if (!reasons.includes("other")) {
-      if (otherReason !== undefined && otherReason !== null) throw fieldError("otherReason", "Only add an explanation when Other reason is selected.");
-      return { reasons: [...reasons] };
+      if (otherReason !== undefined && otherReason !== null) throw fieldError("otherReason", "Only explain a reason when Other reason is chosen.");
+      return { reasons: DEMOTION_REASONS.map(({ code }) => code).filter((code) => reasons.includes(code)) };
     }
-    if (typeof otherReason !== "string" || !otherReason.trim()) throw fieldError("otherReason", OTHER_REASON_REQUIRED_MESSAGE);
+    if (otherReason == null) throw fieldError("otherReason", OTHER_REASON_REQUIRED_MESSAGE);
+    if (typeof otherReason !== "string") throw fieldError("otherReason", "The other reason must be text.");
+    if (!otherReason.trim()) throw fieldError("otherReason", OTHER_REASON_REQUIRED_MESSAGE);
     const trimmed = otherReason.trim();
-    if (trimmed.length > OTHER_REASON_MAX) throw fieldError("otherReason", OTHER_REASON_TOO_LONG_MESSAGE);
-    return { reasons: [...reasons], otherReason: trimmed };
+    if (Array.from(trimmed).length > OTHER_REASON_MAX) throw fieldError("otherReason", "Keep the other reason to 500 characters or fewer.");
+    return { reasons: DEMOTION_REASONS.map(({ code }) => code).filter((code) => reasons.includes(code)), otherReason: trimmed };
   };
 
   /** The server's identity checks, in its order; the password is only checked when given or required. */
@@ -183,12 +185,12 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
       requireConfirmation("Confirm your password to change this administrator's role.");
       const record = find(id);
       if (role !== "admin" && role !== "superadmin") throw fieldError("role", ROLE_MESSAGE);
+      const demotedWith = role === "admin" ? (permissions === undefined ? viewOnlyPermissions() : readPermissions(permissions)) : undefined;
       if (record.id === caller.id) throw new Error("You cannot change your own role.");
       if (record.role === role) return asAccount(record);
       // Judged after the no-op, so an already-admin target is never refused over reasons it does not need.
-      const demotion = role === "admin" ? readDemotionReasons(reasons, otherReason) : undefined;
       if (role === "admin" && isLastActiveSuperadmin(record)) throw new Error(LAST_SUPERADMIN_MESSAGE);
-      const demotedWith = role === "admin" ? (permissions ? readPermissions(permissions) : viewOnlyPermissions()) : undefined;
+      const demotion = role === "admin" ? readDemotionReasons(reasons, otherReason) : undefined;
       record.role = role;
       if (demotedWith) record.permissions = demotedWith;
       else delete record.permissions;

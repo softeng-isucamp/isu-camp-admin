@@ -96,7 +96,7 @@ type BackendUser = { id?: unknown; user_id?: unknown; username?: unknown; create
 export const parseAccountStatus = (raw: unknown): AccountStatus =>
   String(raw ?? "").trim().toLowerCase() === "inactive" ? "Inactive" : "Active";
 export type SetRoleOptions = { permissions?: AdminPermissions; reasons?: string[]; otherReason?: string };
-type BackendAudit = { reasons?: unknown; otherReason?: unknown; other_reason?: unknown; id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
+type BackendAudit = { targetName?: unknown; demotion?: unknown; targetId?: unknown; reasons?: unknown; otherReason?: unknown; other_reason?: unknown; id?: unknown; actor?: unknown; action?: unknown; target?: unknown; target_id?: unknown; detail?: unknown; createdAt?: unknown; created_at?: unknown; category?: unknown };
 export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
   const id = raw.id ?? raw.user_id;
   if (id === undefined || typeof raw.username !== "string") throw new InvalidResponseError("Backend returned a malformed user record.");
@@ -104,13 +104,16 @@ export const normalizeBackendUser = (raw: BackendUser): UserAccount => {
 };
 export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
   if (raw.id === undefined || typeof raw.actor !== "string" || typeof raw.action !== "string" || typeof raw.target !== "string") throw new InvalidResponseError("Backend returned a malformed audit record.");
-  // Demotion reasons may sit on the entry or inside a structured `detail`; anything else stays plain text.
+  // #169 exposes structured reasons alongside readable detail.
+  const demotion = typeof raw.demotion === "object" && raw.demotion !== null && !Array.isArray(raw.demotion) ? raw.demotion as BackendAudit : undefined;
   const structured = typeof raw.detail === "object" && raw.detail !== null && !Array.isArray(raw.detail) ? raw.detail as BackendAudit & { text?: unknown; message?: unknown } : undefined;
-  const source = { reasons: raw.reasons ?? structured?.reasons, other: raw.otherReason ?? raw.other_reason ?? structured?.otherReason ?? structured?.other_reason };
+  const source = { reasons: demotion?.reasons ?? raw.reasons ?? structured?.reasons, other: demotion?.otherReason ?? raw.otherReason ?? raw.other_reason ?? structured?.otherReason ?? structured?.other_reason };
   const reasons = Array.isArray(source.reasons) ? source.reasons.filter((code): code is string => typeof code === "string") : [];
   const otherReason = typeof source.other === "string" && source.other.trim() ? source.other : undefined;
-  const detailText = structured ? (typeof structured.text === "string" ? structured.text : typeof structured.message === "string" ? structured.message : undefined) : raw.detail == null ? undefined : String(raw.detail);
-  return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: raw.target_id == null ? undefined : String(raw.target_id), detail: detailText, ...(reasons.length ? { reasons } : {}), ...(otherReason ? { otherReason } : {}), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
+  // The structured fields are displayed separately; retain the target name without
+  // repeating the backend fallback sentence and its explanation in Log Details.
+  const detailText = reasons.length && typeof demotion?.targetName === "string" ? demotion.targetName : structured ? (typeof structured.text === "string" ? structured.text : typeof structured.message === "string" ? structured.message : undefined) : raw.detail == null ? undefined : String(raw.detail);
+  return { id: String(raw.id), actor: raw.actor, action: raw.action, target: raw.target, targetId: (raw.targetId ?? raw.target_id) == null ? undefined : String(raw.targetId ?? raw.target_id), detail: detailText, ...(reasons.length ? { reasons } : {}), ...(otherReason ? { otherReason } : {}), createdAt: String(raw.createdAt ?? raw.created_at ?? ""), category: raw.category === "User" || raw.category === "System" ? raw.category : "Admin" };
 };
 
 const dashboardMetricsSchema = z.object({
@@ -805,11 +808,9 @@ export interface Services {
    *   changed or logged. Promotion sends neither. Deploy this frontend with or just
    *   before the backend: sending reasons is harmless before the backend requires them,
    *   but an older frontend cannot demote once it does.
-   * - System Logs: the demotion event is expected to expose the reasons. The wire shape
-   *   is not fixed by #166, so the portal reads `reasons` (array of codes) and
-   *   `otherReason` (or `other_reason`) either on the log entry or inside `detail` when
-   *   that is a structured object, and otherwise shows `detail` as plain text. Unknown
-   *   codes are shown as received. All of it is rendered as text, never as HTML.
+   * - System Logs: #169 returns readable `detail` and a structured `demotion`
+   *   object with `targetName`, `reasons` and nullable `otherReason`. Legacy rows
+   *   retain plain `detail`. Unknown codes are shown as received, all as text.
    * `GET /api/me` must read permissions from the database each time. The portal
    * refreshes on window focus/visibility (at most once per 30s), and immediately
    * after a write returns 403 with `code: "PERMISSION_DENIED"`. Every write must

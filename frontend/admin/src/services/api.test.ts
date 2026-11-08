@@ -1611,6 +1611,23 @@ describe("real administrators service boundary", () => {
     expect(error).toMatchObject({ fieldErrors: { reasons: "Select at least one reason.", otherReason: "Explanation is too long." } });
   });
 
+  it("reads structured demotion reasons without repeating the fallback sentence and preserves legacy details", async () => {
+    const { services: http } = await httpServices();
+    const detail = "admin02. Reasons: Other reason. Other reason: <b>x</b>";
+    const base = { actor: "a", action: "demote", target: "Administrator", targetId: "2", createdAt: "2026-11-01T00:00:00Z", category: "Admin" };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(json({ items: [
+      { ...base, id: 1, detail, demotion: { targetName: "admin02", reasons: ["other"], otherReason: "<b>x</b>" } },
+      { ...base, id: 2, detail: "admin02. Reasons: Role changed.", demotion: { targetName: "admin02", reasons: ["role_changed"], otherReason: null } },
+      { ...base, id: 3, detail: "admin02" },
+    ], total: 3, page: 1, pageSize: 20 }));
+    const { items } = await http.logs.list();
+    expect(items[0]).toMatchObject({ detail: "admin02", targetId: "2", reasons: ["other"], otherReason: "<b>x</b>" });
+    expect(items[1]).toMatchObject({ reasons: ["role_changed"] });
+    expect(items[1]).not.toHaveProperty("otherReason");
+    expect(items[2]).toMatchObject({ detail: "admin02" });
+    expect(items[2]).not.toHaveProperty("reasons");
+  });
+
   it("reads demotion reasons from a log entry, from a structured detail, or leaves plain detail alone", async () => {
     const { services: http } = await httpServices();
     const base = { actor: "a", action: "Demoted Administrator", target: "t", created_at: "2026-11-01T00:00:00Z", category: "Admin" };

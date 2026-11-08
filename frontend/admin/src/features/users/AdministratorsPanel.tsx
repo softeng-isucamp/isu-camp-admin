@@ -700,7 +700,7 @@ function DemotionReasons({ id, selected, otherReason, errors, disabled, onToggle
 }) {
   const groupError = errors.reasons;
   const otherError = errors.otherReason;
-  const length = otherReason.trim().length;
+  const length = Array.from(otherReason.trim()).length;
   return (
     <fieldset
       className="permissions-editor demotion-reasons"
