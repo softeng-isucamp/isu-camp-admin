@@ -5,7 +5,7 @@ import { services } from "../../../services/api";
 import { errorMessage } from "../../../services/errors";
 import type { DashboardRange, DecisionAnalytics } from "../../../types";
 import { EffortVsDemand, FixFirstMatrix, IndoorDemand } from "./decision/BothCharts";
-import { DecisionCard } from "./decision/DecisionCard";
+import { GraphBlock } from "./decision/GraphBlock";
 import { DECISION_GROUPS } from "./decision/decisionCopy";
 import { PlaceFunnel, SinglePointsOfFailure, TravelModeReach } from "./decision/ReadinessCharts";
 import { AudienceMix, MoversSlope, QuietHoursHeatmap } from "./decision/UsageCharts";
@@ -20,7 +20,7 @@ const GROUP_CHARTS: Array<Array<(data: DecisionAnalytics) => ReactNode>> = [
   [(d) => <QuietHoursHeatmap data={d} />, (d) => <MoversSlope data={d} />, (d) => <AudienceMix data={d} />],
 ];
 
-/** The Dashboard's Analytics tab: nine decision charts in three ranked groups. */
+/** The Dashboard's Analytics tab: three group panels, each a full-width #1 graph over its #2 and #3. */
 export function AnalyticsTab({ range }: { range: DashboardRange }) {
   const { data, error, isFetching, isLoading, refetch } = useQuery({
     queryKey: decisionAnalyticsQueryKey(range),
@@ -67,11 +67,11 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
             <span className="decision-tag">{group.tag}</span>
           </div>
           <p className="decision-sub">{group.sub}</p>
-          <div className="decision-row">
+          <div className="graph-panel">
             {group.cards.map((copy, i) => (
-              <DecisionCard key={copy.title} rank={i + 1} copy={copy} best={i === 0}>
+              <GraphBlock key={copy.title} rank={i + 1} copy={copy} hero={i === 0}>
                 {GROUP_CHARTS[g][i](data)}
-              </DecisionCard>
+              </GraphBlock>
             ))}
           </div>
         </section>

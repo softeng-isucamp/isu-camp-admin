@@ -4302,42 +4302,102 @@ td small {
   line-height: 1.5;
   color: var(--muted);
 }
-.decision-row {
+.graph-panel {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
 }
-.decision-card {
-  display: flex;
-  flex-direction: column;
+.graph {
   min-width: 0;
-  padding: 18px 18px 14px;
+  padding: 20px 24px 18px;
 }
-.decision-card.decision-best {
-  outline: 2px solid var(--green-2);
-  outline-offset: -2px;
+.graph-hero {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--border);
 }
-.decision-card .card-heading h2 {
-  margin: 2px 0 4px;
-  font-size: 16px;
+.graph:not(.graph-hero) + .graph:not(.graph-hero) {
+  border-left: 1px solid var(--border);
 }
-.decision-rank {
-  font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted);
+.graph-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
-.decision-question {
+.graph-title h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.graph-hero .graph-title h3 {
+  font-size: 17px;
+}
+.graph-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--mint);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+}
+.graph-title p {
+  margin: 3px 0 0 28px;
   font-size: 12.5px;
-  line-height: 1.4;
   color: var(--muted);
 }
-.decision-question strong {
-  color: var(--text);
-  font-weight: 600;
+.graph-info {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--muted);
+  font: italic 700 12px Georgia, serif;
 }
-.decision-chart {
-  flex: 1;
-  margin-top: 12px;
+.graph-info:hover,
+.graph-info.open {
+  border-color: var(--green-2);
+  color: var(--green-2);
+  background: var(--mint);
+}
+.graph-help {
+  margin: 0 0 14px 28px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f6f8f7;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.graph-help p {
+  margin: 0;
+}
+.graph-help ul {
+  margin: 8px 0 0;
+  padding-left: 16px;
+}
+.graph-help li {
+  margin: 3px 0;
+}
+.graph-do {
+  color: var(--muted);
+}
+.graph-help .graph-data {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.graph-plot {
   min-width: 0;
 }
 .decision-legend {
@@ -4368,165 +4428,29 @@ td small {
   box-shadow: 0 4px 14px #0000001a;
   font-size: 12px;
 }
-.decision-toggle {
-  align-self: flex-start;
-  margin-top: 12px;
-  padding: 4px 10px 4px 6px;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--green-2);
-  font-size: 12px;
-  font-weight: 600;
-}
-.decision-toggle:hover {
-  background: var(--mint);
-}
-.decision-help {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.decision-help h3 {
-  margin: 10px 0 3px;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.decision-help p {
-  margin: 0;
-}
-.decision-help ul {
-  margin: 0;
-  padding-left: 16px;
-}
-.decision-help li {
-  margin: 3px 0;
-}
-.decision-do {
-  color: var(--muted);
-}
-.decision-pills {
-  margin-top: 8px;
-}
-.decision-pill {
-  display: inline-block;
-  margin: 2px 4px 0 0;
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: 99px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.decision-pill.go {
-  border-color: #1f8a52;
-  color: #1f8a52;
-}
-.decision-pill.warn {
-  border-color: #b97a00;
-  color: #b97a00;
-}
-.decision-pill.no {
-  border-color: var(--danger);
-  color: var(--danger);
-}
-.decision-help .decision-data {
-  margin-top: 8px;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-/* Effort vs demand: butterfly */
-.butterfly-head,
-.butterfly-row {
+/* Effort vs demand: two mirrored bar charts sharing the place names */
+.butterfly-chart {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 86px minmax(0, 1fr);
-  align-items: center;
-  column-gap: 6px;
-}
-.butterfly-head {
-  margin-bottom: 4px;
-  font-size: 10.5px;
-  color: var(--muted);
-}
-.butterfly-head span:first-child {
-  text-align: right;
-}
-.butterfly-row {
-  height: 26px;
-}
-.butterfly-name {
-  text-align: center;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.butterfly-side {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-}
-.butterfly-side.left {
-  justify-content: flex-end;
-}
-.butterfly-side i {
-  height: 18px;
-  min-width: 2px;
-  border-radius: 3px;
-}
-.butterfly-side.left i {
-  order: -1;
-}
-.butterfly-side.left {
-  flex-direction: row-reverse;
-}
-/* Reach by travel mode */
-.reach {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 6px;
-}
-.reach-row {
-  display: grid;
-  grid-template-columns: 66px minmax(0, 1fr) 38px;
-  align-items: center;
-  column-gap: 8px;
-  font-size: 11px;
-}
-.reach-name {
-  text-align: right;
-}
-.reach-squares {
-  display: grid;
-  gap: 2px;
-}
-.reach-squares i {
-  height: 20px;
-  border-radius: 2px;
-  background: #eef2f0;
-}
-.reach-squares i.on {
-  background: #2a78d6;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
 }
 /* Quietest-hours heatmap */
 .heatmap-hours {
   display: grid;
-  margin-left: 32px;
-  font-size: 10px;
+  margin: 0 0 4px 42px;
+  font-size: 11px;
+  text-align: center;
   color: var(--muted);
 }
 .heatmap-body {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 .heatmap-days {
   display: grid;
   grid-template-rows: repeat(7, 1fr);
-  width: 26px;
-  font-size: 10px;
-  color: var(--muted);
+  width: 34px;
+  font-size: 12px;
+  color: var(--text);
 }
 .heatmap-days span {
   display: flex;
@@ -4536,25 +4460,63 @@ td small {
   position: relative;
   display: grid;
   flex: 1;
-  gap: 2px;
-  height: 154px;
+  gap: 3px;
+  height: 252px;
 }
 .heatmap-cells i {
-  border-radius: 2px;
+  border-radius: 3px;
 }
 .heatmap-quiet {
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid var(--text);
-  border-radius: 3px;
+  border: 2.5px solid var(--text);
+  border-radius: 4px;
+}
+.heatmap-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 0 42px;
 }
 .heatmap-caption {
-  margin: 8px 0 0;
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
   color: var(--muted);
 }
 .heatmap-caption strong {
   color: var(--text);
+}
+.heatmap-key-box {
+  width: 22px;
+  height: 12px;
+  border: 2.5px solid var(--text);
+  border-radius: 3px;
+}
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.heatmap-scale i {
+  width: 140px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(42, 120, 214, 0.08), rgba(42, 120, 214, 1));
+}
+@media (max-width: 900px) {
+  .graph-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .graph:not(.graph-hero) + .graph:not(.graph-hero) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 @media (max-width: 1100px) {
   .analytics-grid {

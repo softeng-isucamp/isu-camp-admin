@@ -1,4 +1,4 @@
-import { Bar, BarChart, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 import { accountTypes } from "../../../../lib/accountType";
 import type { DecisionAnalytics } from "../../../../types";
 import { ChartArea } from "../ChartCard";
@@ -30,7 +30,7 @@ export function QuietHoursHeatmap({ data }: { data: DecisionAnalytics }) {
   return (
     <div className="heatmap">
       <div className="heatmap-hours" style={{ gridTemplateColumns: `repeat(${hours.length}, 1fr)` }} aria-hidden="true">
-        {hours.map((hour, i) => <span key={hour}>{i % 2 === 0 ? hour : ""}</span>)}
+        {hours.map((hour) => <span key={hour}>{hour}:00</span>)}
       </div>
       <div className="heatmap-body">
         <div className="heatmap-days">{days.map((day) => <span key={day}>{day}</span>)}</div>
@@ -52,7 +52,14 @@ export function QuietHoursHeatmap({ data }: { data: DecisionAnalytics }) {
           />
         </div>
       </div>
-      <p className="heatmap-caption">Quietest: <strong>{days[quiet.day]} {from}:00–{to}:00</strong></p>
+      <div className="heatmap-foot">
+        <p className="heatmap-caption"><b className="heatmap-key-box" aria-hidden="true" /> Quietest 4 hours: <strong>{days[quiet.day]} {from}:00–{to}:00</strong></p>
+        <div className="heatmap-scale" aria-label={`Colour scale from 0 to ${max} searches`}>
+          <span>0</span>
+          <i />
+          <span>{max} searches</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -66,10 +73,11 @@ export function MoversSlope({ data }: { data: DecisionAnalytics }) {
   const max = Math.max(...data.movers.flatMap((m) => [m.lastMonth, m.thisMonth]));
   const ordered = [...data.movers].sort((a, b) => b.thisMonth - b.lastMonth - (a.thisMonth - a.lastMonth));
   return (
-    <ChartArea height={190}>
-      <LineChart data={rows} margin={{ top: 8, right: 86, bottom: 4, left: 14 }}>
-        <XAxis dataKey="period" tick={AXIS_TICK} tickLine={false} axisLine={false} padding={{ left: 20, right: 20 }} />
-        <YAxis hide domain={[0, Math.ceil(max / 10) * 10]} />
+    <ChartArea height={300}>
+      <LineChart data={rows} margin={{ top: 10, right: 104, bottom: 4, left: 0 }}>
+        <CartesianGrid vertical={false} stroke={INK.grid} />
+        <XAxis dataKey="period" tick={{ ...AXIS_TICK, fill: INK.primary, fontSize: 12 }} tickLine={false} axisLine={{ stroke: INK.grid }} padding={{ left: 24, right: 24 }} />
+        <YAxis domain={[0, Math.ceil(max / 20) * 20]} tick={AXIS_TICK} tickLine={false} axisLine={false} width={44} label={{ value: "Searches", angle: -90, position: "insideLeft", offset: 10, style: { textAnchor: "middle" }, fill: INK.secondary, fontSize: 12 }} />
         <Tooltip
           contentStyle={TOOLTIP_STYLE}
           cursor={{ stroke: "#dbe5df" }}
@@ -115,10 +123,11 @@ export function AudienceMix({ data }: { data: DecisionAnalytics }) {
       <div className="decision-legend" aria-label="Legend">
         {accountTypes.map((type) => <span key={type.key}><i style={{ background: type.color }} /> {type.label}</span>)}
       </div>
-      <ChartArea height={170}>
-        <BarChart data={data.audience} layout="vertical" margin={{ top: 2, right: 4, bottom: 0, left: 0 }} barCategoryGap={8}>
-          <XAxis type="number" hide domain={[0, 100]} />
-          <YAxis type="category" dataKey="category" tick={<RowLabelTick />} tickLine={false} axisLine={false} width={58} interval={0} />
+      <ChartArea height={276}>
+        <BarChart data={data.audience} layout="vertical" margin={{ top: 4, right: 16, bottom: 22, left: 0 }} barCategoryGap="26%">
+          <CartesianGrid horizontal={false} stroke={INK.grid} />
+          <XAxis type="number" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v) => `${v}%`} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} label={{ value: "Share of searches", position: "insideBottom", offset: -14, fill: INK.secondary, fontSize: 12 }} />
+          <YAxis type="category" dataKey="category" tick={<RowLabelTick />} tickLine={false} axisLine={{ stroke: INK.grid }} width={72} interval={0} />
           <Tooltip cursor={false} contentStyle={TOOLTIP_STYLE} formatter={(value, name) => [`${value}%`, name]} />
           {accountTypes.map((type) => (
             <Bar key={type.key} dataKey={type.key} name={type.label} stackId="mix" fill={type.color} stroke="#fff" strokeWidth={1} isAnimationActive={false} />
