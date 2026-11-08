@@ -212,179 +212,6 @@ Within one process a lock serializes the read-decide-write; across processes `SE
 
 Apply `migrations/20261024_add_recovery_attempt.sql` before using any of this.
 
-## Fixed superadministrators
-
-**There are four superadmins, and the portal cannot change which four.** They are named in `public.superadmin_designation`, and that table — not the role column — is where the set lives. Promotion and demotion are gone from the API, creating a superadmin is refused, and a designated account's status and permissions are not the portal's to set. Replacing one of the four is a restricted operator procedure run against the database, documented below.
-
-The role column still says what an account may reach. What changed is that nothing reachable from a session decides who holds it: a stolen session, a mistaken click or a direct `update public.admin set role = 'superadmin'` can no longer make it five.
-
-No live id or username appears anywhere in the source. The four are operator inputs to the migration, verified against the live directory with an authorized read-only check beforehand.
-
-### What the database enforces
-
-`migrations/20261107_fixed_superadmins.sql` installs the table and these rules. They hold against direct SQL, not only against the API:
-
-| Rule | How |
-| --- | --- |
-| A designated account holds the superadmin role, and an account without a designation cannot acquire it | `assert_superadmin_designation`, a `DEFERRABLE INITIALLY DEFERRED` constraint trigger on **both** tables, checked at COMMIT |
-| At most four designations, ever | the same trigger |
-| A designated `public.admin` row cannot be deleted | `guard_designated_admin_delete`, plus the designation's `references public.admin(id) on delete restrict` |
-| `public.superadmin_designation` cannot be inserted, changed or deleted at all | `guard_superadmin_designation_write` |
-
-**Deferred is the point.** A transfer has to write both tables, and whichever one it writes first leaves them disagreeing for a statement. An immediate check could not be satisfied in any order; checking at COMMIT means no order leaves an undesignated superadmin behind.
-
-**The cap counts designations, not active accounts.** Containing a compromised account deactivates it, and the portal then runs on three active superadmins until it is replaced. A rule that demanded four *active* accounts would make containment impossible, which is the opposite of what it would be for.
-
-The last three rules read a session setting, `isu.superadmin_transfer`, and refuse unless the transaction has set it. That is a deliberate-action gate, in the same spirit as the portal's password confirmation — somebody who already has SQL could set it too. What it buys is that no ordinary statement, no application bug and no half-remembered maintenance script moves a designation by accident. The boundary against the *application* is a grant, and the application never needs one:
-
-```sql
-revoke insert, update, delete on public.superadmin_designation from <application role>;
-```
-
-### What the API does
-
-| Route | Before | Now |
-| --- | --- | --- |
-| `PUT /api/admins/:id/role` | promoted and demoted | **405** `{"code":"superadmin_set_fixed"}`, for every caller, every target and every body. Reads nothing, locks nothing, asks for no password, and writes nothing |
-| `POST /api/admins` with `"role":"superadmin"` | created a superadmin | **409** `{"code":"superadmin_set_fixed"}` with `fields.role`, before the password confirmation |
-| `POST /api/admins` with `"role":"admin"`, `null` or omitted | created an administrator | unchanged |
-| `POST /api/admins` with any other role | 400 `Role must be Administrator or Superadmin.` | **400** `Role must be Administrator.` with `fields.role` |
-| `PUT /api/admins/:id/status` on one of the four | activated or deactivated | **409** `{"code":"superadmin_set_fixed"}`, both directions, before the body is read |
-| `PUT /api/admins/:id/permissions` on one of the four | 409 for being a superadmin | **409** `{"code":"superadmin_set_fixed"}` |
-| `DELETE /api/admins/:id` | already gone | unchanged — 405 for every account, which is the stronger protection: nothing can address a delete at one of the four |
-
-The frontend reads the `code`, not the message, so a build left over from before this deployment can tell "the server no longer does this" from any other refusal and stop offering the control. **409 rather than 403** throughout: a 403 with an unrecognised code reads as "confirm your password" to an older client, and no password helps here.
-
-`GET /api/admins`, `POST /api/admins` and `PUT /api/admins/:id` all carry **`isProtected`** on each account:
-
-```json
-{"id":"7","username":"registrar","email":"…","status":"Active","role":"superadmin",
- "isProtected":true,"isCurrent":false,"permissions":null}
-```
-
-A client that does not know the key reads it as absent and merely offers actions the server refuses — hiding a control was never the protection. Frontend work is tracked in #167.
-
-**A designated superadmin's own account still works.** They edit their own username, email and password through `PUT /api/admins/:id` and `PATCH /api/profile` like anybody else, and a colleague can still send them a reset code. What is fixed is who holds the role, not the account's credentials; protecting the password would only be a reason to keep a stale one.
-
-**Nothing is cached.** The role and the designation are read from the database on every request, so a transfer or a containment takes effect on the next request each session makes — no sign-out, no restart. `superadmin_required` re-reads the caller from the rows it locks, so a request that was in flight when the set changed is judged against the set as it is now.
-
-Administrators who are *not* designated — which is every superadmin until the migration is applied — keep the rules that predate this: the last active superadmin cannot be deactivated, nobody deactivates or configures themselves, and a superadmin's permission switches are not configurable.
-
-### Applying it
-
-Four verified ids, supplied on the command line. Confirm them first with an authorized read-only check against the live database:
-
-```sql
-select id, username, role, status from public.admin
- where coalesce(role, 'admin') = 'superadmin' order by id;
-```
-
-Take a backup through Backup & Recovery, or `pg_dump`, and keep it off-host. Then, with the application build **not yet** serving:
-
-```bash
-psql "$DATABASE_URL" \
-  -v ON_ERROR_STOP=1 \
-  -v super1=<id> -v super2=<id> -v super3=<id> -v super4=<id> \
-  -f migrations/20261107_fixed_superadmins.sql
-```
-
-`ON_ERROR_STOP=1` is required, not advisory: without it psql carries on past a failed precondition and reaches the COMMIT. The whole file is one transaction, so a precondition that fails leaves no table and no trigger behind.
-
-It aborts, writing nothing, unless all of these hold: four ids, all distinct; every one an existing account; every one an **active superadmin**; no superadmin outside the four; and the designation table either empty or already holding exactly these four. It does not choose the accounts, demote an extra superadmin, or create anything — every one of those is a decision for the people running the transfer process, and a migration that made it silently would be the accident this exists to prevent.
-
-Re-running it with the same four writes nothing and audits nothing twice. Re-running it with a different id is refused and points at the transfer procedure.
-
-**Ordering.** Schema first, then the application. The build reads `public.superadmin_designation` on every administrator listing, so it needs the table; the *old* build, meanwhile, runs happily against the new schema except that a promotion or demotion fails at COMMIT — a safe failure, and the reason the schema goes first. Follow the [production recipe](deploy/README.md) for the release assets themselves.
-
-**Rollback.** Rolling the application back to a build that still offers promotion is safe on its own: those requests fail with a 500 from the refused COMMIT rather than succeeding. If that build has to be able to change roles again, drop the enforcement first:
-
-```sql
-begin;
-drop trigger if exists assert_superadmin_designation_on_admin on public.admin;
-drop trigger if exists assert_superadmin_designation_on_designation on public.superadmin_designation;
-drop trigger if exists guard_designated_admin_delete on public.admin;
-drop trigger if exists guard_superadmin_designation_write on public.superadmin_designation;
-drop table if exists public.superadmin_designation;
-drop function if exists public.assert_superadmin_designation();
-drop function if exists public.guard_superadmin_designation_write();
-drop function if exists public.guard_designated_admin_delete();
-drop function if exists public.superadmin_transfer_authorized();
-commit;
-```
-
-Nothing else reads any of it, and `public.admin` is untouched, so this is reversible by applying the migration again with the same four ids.
-
-### Replacing a designated account
-
-Restricted, audited, atomic, and agreed in advance: **name the approvers before deployment**, and record who approved each transfer alongside the audit row. One transaction, both tables, in the row-lock order the application uses — administrators first, then designations — so a transfer and a portal request queue rather than deadlock.
-
-```sql
-begin;
-set local isu.superadmin_transfer = 'on';
-
--- Same lock order as the application's writes.
-select 1 from public.admin where id in (<outgoing>, <incoming>) for update;
-select 1 from public.superadmin_designation order by admin_id for update;
-
--- Confirm what is about to change before changing it.
-select id, username, role, status from public.admin where id in (<outgoing>, <incoming>);
-
-delete from public.superadmin_designation where admin_id = <outgoing>;
-update public.admin
-   set role = 'admin',
-       permissions = '{"add": false, "edit": false, "delete": false, "changeUserStatus": false}'::jsonb
- where id = <outgoing>;
-
-insert into public.superadmin_designation (admin_id) values (<incoming>);
-update public.admin set role = 'superadmin', permissions = null where id = <incoming>;
-
-insert into public.audit_log
-       (created_at, category, actor, action, target, target_id, detail)
-select now(), 'Admin', '<operator>', 'transfer superadmin', 'Administrator',
-       a.id::text, a.username
-  from public.admin a where a.id in (<outgoing>, <incoming>) order by a.id;
-
-commit;
-```
-
-The two halves can be written in either order — that is what the deferred invariant buys — but **both** must be there: withdrawing a designation and leaving the role behind is refused at COMMIT with `superadmin_not_designated`. `set local` ends with the transaction, so the gate does not stay open for whatever runs next on the connection.
-
-`created_at` is spelled out: the column is `NOT NULL` and its default lives in the model rather than in the schema, so an insert that leaves it out is rejected. The audit row records ids and usernames only — a transfer is a change of who, not of any credential, and nothing here writes a password, an address or a token.
-
-The incoming account must already exist as an active administrator, created through the portal in the ordinary way. Nothing in this procedure creates an account or sets a password.
-
-**Urgent containment of a compromised account.** Deactivating comes first and does not need a replacement lined up:
-
-```sql
-begin;
-update public.admin set status = 'inactive' where id = <compromised>;
-insert into public.audit_log
-       (created_at, category, actor, action, target, target_id, detail)
-select now(), 'Admin', '<operator>', 'contain superadmin', 'Administrator',
-       a.id::text, a.username
-  from public.admin a where a.id = <compromised>;
-commit;
-```
-
-No transfer gate, because this touches no designation: the account stays one of the four and simply cannot sign in. The portal is then running on three active superadmins, which is a state the cap allows on purpose, and **the portal cannot switch it back on** — that is why the status route refuses both directions for a designated account. Rotate the password through the ordinary recovery flow, reactivate with the mirror of the statement above, or run the transfer procedure to replace the account outright.
-
-### Verification
-
-| Coverage | Where |
-| --- | --- |
-| Every API refusal, the `isProtected` contract, the concurrency cases, and that ordinary administrator management is untouched | `app/tests/admins.py` |
-| The database invariants, the migration's preconditions and failure modes, an authorized transfer, containment, and sessions after an access change — against the real migration file | `app/tests/fixed_superadmins_storage.py` |
-
-The second file needs a disposable PostgreSQL and skips without one:
-
-```bash
-ISU_TEST_DATABASE_URL=postgresql://…/disposable python -m pytest app/tests/fixed_superadmins_storage.py
-```
-
-**PostgreSQL only, and deliberately not reproduced on SQLite.** A deferred constraint trigger and a session setting have no SQLite equivalent, and a SQLite rendering of these rules would be a different mechanism tested in place of the real one. Use staging or a disposable database for anything that writes; verify live identity and designation with authorized read-only checks only.
-
-Apply `migrations/20261107_fixed_superadmins.sql` before using any of this.
-
 ## Administrator permissions
 
 A superadmin switches four general actions on or off for each regular administrator. **Viewing is not one of them**: it is the least-privilege minimum every active account keeps, so an administrator who should see nothing is deactivated, not given four off switches.
@@ -396,7 +223,7 @@ A superadmin switches four general actions on or off for each regular administra
 | `delete` | Deleting locations, buildings, route nodes, pathways, path points |
 | `changeUserStatus` | Activating and deactivating **app users** (`PUT /api/users/:id/status`) |
 
-**Superadmins hold every permission and cannot be configured.** Their stored switches are SQL `NULL` — the column is declared `none_as_null` so that assigning nothing stores SQL NULL and not the JSON scalar `null`, which the migration's shape constraint rejects — and `PUT /api/admins/:id/permissions` refuses them with 409. There is no "demote them first": the superadmins are a [fixed set](#fixed-superadministrators), and a request against one of the four is refused with `superadmin_set_fixed`. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
+**Superadmins hold every permission and cannot be configured.** Their stored switches are SQL `NULL` — the column is declared `none_as_null` so that assigning nothing stores SQL NULL and not the JSON scalar `null`, which the migration's shape constraint rejects — and `PUT /api/admins/:id/permissions` refuses them with 409; to restrict one, demote them first. Backup & Recovery and everything under `/api/admins` except `GET` and the password-reset send stay superadmin-only and are **not grantable** — no combination of the four reaches another administrator's account.
 
 Nobody changes their own permissions.
 
@@ -415,7 +242,7 @@ Nobody changes their own permissions.
 
 ### Setting them
 
-`PUT /api/admins/:id/permissions`, superadmin-only and behind a recent password confirmation (`/api/confirm-password`):
+`PUT /api/admins/:id/permissions`, superadmin-only and behind a recent password confirmation (`/api/confirm-password`), the same pattern as `/role`:
 
 ```json
 {"permissions":{"add":true,"edit":true,"delete":false,"changeUserStatus":false}}
@@ -423,23 +250,22 @@ Nobody changes their own permissions.
 
 All four keys, every time, each a boolean — a body naming two leaves the other two to whatever the reader assumes. Anything else is a 400 with `fields.permissions`.
 
-**Absent and null are different things.** Leaving `permissions` out of a create takes the default (all four off); sending it as `null` is a value the caller chose, and the only shape a supplied value may take is the four booleans, so it is refused like any other wrong shape. Reading the two the same way meant a client asking for "no permissions" silently got the view-only default instead of being told its request made no sense. A create that names `"role":"superadmin"` is refused by policy whatever it sends for `permissions`.
+**Absent and null are different things.** Leaving `permissions` out of a create or a demotion takes the default (all four off); sending it as `null` is a value the caller chose, and the only shape a supplied value may take is the four booleans, so it is refused like any other wrong shape. Reading the two the same way meant a client asking for "no permissions" silently got the view-only default instead of being told its request made no sense. A supplied value is still **ignored** for a superadmin target, `null` included — a client may hold one form for both roles, and a field that cannot apply must not fail the request.
 
 | Case | Status | Message |
 | --- | --- | --- |
 | The target is the caller | 409 | `You cannot change your own permissions.` |
-| The target is one of the fixed four | 409 | `This is a designated superadmin account. Its role and its access are managed outside the portal.` with `code: superadmin_set_fixed` |
-| The target is a superadmin that is not designated | 409 | `Superadmins always have every permission, so there is nothing to restrict.` |
+| The target is a superadmin | 409 | `Superadmins always have every permission. Demote them first to restrict them.` |
 | A partial or mistyped set | 400 | `Each of the four permissions must be given as true or false.` |
 | Done | 200 | `Permissions updated for <username>.` plus the updated `admin` |
 
 The audit row records what moved — `admin02: add: on -> off; delete: on -> off` — so the Logs page answers "who took that away" without anybody diffing two rows.
 
-**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` accepts an optional `permissions` object. There is no longer a demotion to land on a set of switches, nor a promotion to discard one.
+**Defaults.** The migration backfills existing administrators with all four **on**, because a migration must not quietly take away what everyone could do yesterday. New accounts and demoted superadmins start with all four **off** unless the request says otherwise: an account being set up has not been given anything yet. `POST /api/admins` and `PUT /api/admins/:id/role` both accept an optional `permissions` object; a promotion discards it. A demotion must also give its reasons — see [Demoting a superadmin](#demoting-a-superadmin).
 
 `POST /api/admins` now requires a password confirmation for **every** create, not only a superadmin's — each new account is a new way into the portal whatever its role.
 
-**`DELETE /api/admins/:id` is gone** and answers 405. Removing the row orphaned everything the account had ever done, since the audit trail names an actor by username; `PUT /api/admins/:id/status` does the same job and keeps the history readable. **`PUT /api/admins/:id/role` is gone too** and answers 405 — see [Fixed superadministrators](#fixed-superadministrators).
+**`DELETE /api/admins/:id` is gone** and answers 405. Removing the row orphaned everything the account had ever done, since the audit trail names an actor by username; `PUT /api/admins/:id/status` does the same job and keeps the history readable.
 
 ### The server is the enforcement
 
@@ -466,6 +292,65 @@ Two routes are judged on what the operation *is* rather than on which records it
 `POST /api/map/publish` is open to every active administrator and none of the four gates it: publishing promotes work that is already saved, and the saving is what each permission was checked on.
 
 Apply `migrations/20261024_add_admin_permissions.sql` before using any of this.
+
+## Demoting a superadmin
+
+`PUT /api/admins/:id/role` promotes and demotes, superadmin-only, behind a recent password confirmation (`/api/confirm-password`), never on the caller's own account, and never when it would leave no active superadmin. All of that is unchanged. What a **demotion** adds is that it must say why (issue #166); promotion asks for nothing new.
+
+```json
+{"role":"admin","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}
+```
+
+| Code | Reason |
+| --- | --- |
+| `role_changed` | Role changed |
+| `left_team` | No longer part of the team |
+| `granted_by_mistake` | Access granted by mistake |
+| `security_concern` | Security concern |
+| `other` | Other reason |
+
+- `reasons` is a **nonempty array of distinct codes** from the table. The server stores them in table order, whatever order they were sent in.
+- `otherReason` is **required with `other`** and **refused without it**. It is trimmed and must then be 1–500 characters, counted as Unicode code points; nothing is ever truncated. Absent and `null` both mean "no explanation".
+- The optional `permissions` object is read as before.
+
+Each mistake is a 400 naming its field, and changes nothing — no role, no audit row:
+
+| Case | `fields` key | Message |
+| --- | --- | --- |
+| `reasons` missing, `null`, empty or not an array | `reasons` | `Choose at least one reason for the demotion.` |
+| A code that is not a string or not in the table | `reasons` | `Choose reasons from the list.` |
+| The same code twice | `reasons` | `Choose each reason only once.` |
+| `other` with no explanation, or only whitespace | `otherReason` | `Explain the other reason.` |
+| `otherReason` that is not a string | `otherReason` | `The other reason must be text.` |
+| More than 500 characters after trimming | `otherReason` | `Keep the other reason to 500 characters or fewer.` |
+| `otherReason` without `other` | `otherReason` | `Only explain a reason when Other reason is chosen.` |
+
+The order of checks is: superadmin, password confirmation, the directory lock, the target exists, `role`, `permissions`, self-change (409), already that role (200 no-op), last active superadmin (409), and only then the reasons. Reasons are read from the **locked** row's transition, so:
+
+- **Promotion** reads no reasons and ignores any it is sent.
+- **An account that is already an administrator** is the existing no-op — `admin02 is already an administrator.`, no write and no demotion event — with or without reasons. Two superadmins demoting the same account at once therefore produce one demotion and one no-op, and one event.
+
+### Where the reasons are kept
+
+In the existing `audit_log.detail` text column, as one JSON object, written in **the same transaction** as the role change — a failure writing either rolls both back. **No migration is needed**: `detail` is unbounded text and is already what a demotion wrote, the target's username. The row keeps the actor, `target_id`, the timestamp and the target's username **at the time**, so it stays intelligible after the account is renamed or its row removed.
+
+```json
+{"kind":"demotion","targetName":"admin02","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}
+```
+
+`GET /api/logs` does not return that string. A demotion with reasons comes back with a readable `detail` — which an older frontend shows as it is, and which the log search matches — plus a structured `demotion` object for a client that knows the codes:
+
+```json
+{"action":"demote","target":"Administrator","targetId":"2","actor":"admin01",
+ "detail":"admin02. Reasons: No longer part of the team, Other reason. Other reason: Moved to the Registrar's office",
+ "demotion":{"targetName":"admin02","reasons":["left_team","other"],"otherReason":"Moved to the Registrar's office"}}
+```
+
+`demotion` is present only on a demotion recorded with reasons; a demotion written before this change still reads as just the username. The explanation is free text and comes back exactly as entered: clients render it as text, never as HTML. Every active administrator who can read System Logs can read it, as with every other log row — which is why the dialog advises against putting passwords or sensitive personal details in it.
+
+### Deploying with the frontend
+
+Once this backend is deployed, a frontend without #167 cannot complete a demotion: it sends no `reasons` and gets the `fields.reasons` error, which it shows as a failed demotion. The server will not accept a missing reason to bridge the gap. Deploy the backend and the #167 frontend together, or in close succession with the backend first, and tell the superadmins that demotion is unavailable in between. Promotion, status changes and everything else keep working with either frontend.
 
 ## Database backups
 

@@ -2,23 +2,14 @@
 
 App users (``public.user``) belong to the User App and stay read-only here.
 Administrator accounts (``public.admin``) are the portal's own, so this is where
-they are created, deactivated and given their permissions, by superadmins only.
-Editing is limited to the signed-in account: every other administrator can be
-deactivated or configured, but not rewritten. Any active administrator can list
-the accounts and send a password reset code.
+they are created, deactivated, given a role and given their permissions, by
+superadmins only. Editing is limited to the signed-in account: every other
+administrator can be deactivated or configured, but not rewritten. Any active
+administrator can list the accounts and send a password reset code.
 
 Administrators are no longer removed. Deactivation does the same job without
 orphaning the audit trail of everything the account did, so the delete route
 answers 405 and points at the status route instead.
-
-**Nobody's role changes here.** There are four superadmins, they are named in
-``public.superadmin_designation``, and the portal cannot appoint a fifth or
-retire one of the four: ``PUT /api/admins/:id/role`` is gone, creating a
-superadmin is refused, and a designated account's status cannot be set from
-here either. A replacement is a restricted operator procedure run against the
-database - see services.superadmin and the "Fixed superadministrators" section
-of README.md. Every account this module *can* create is a regular
-administrator, and that is the whole of what it can do to who holds the role.
 
 Everything here is superadmin-only except the listing and the password-reset
 send, and none of it is grantable through the four permissions: an
@@ -48,24 +39,15 @@ from auth import (
 )
 from extensions import db
 from model.record_status import normalized_status, status_label
+from services import demotion_reasons
 from services.audit import log_audit
 from services.password_rules import first_password_issue
 from services.security import hash_password
-from services.superadmin import (
-    CREATE_SUPERADMIN_MESSAGE,
-    DESIGNATED_ACCOUNT_MESSAGE,
-    ROLE_FIXED_MESSAGE,
-    SUPERADMIN_SET_FIXED_CODE,
-    designated_admin_ids,
-)
 
 admins_bp = Blueprint("admins", __name__, url_prefix="/api/admins")
 
-# Both spellings a request may name, so an explicit "superadmin" is told the
-# policy rather than treated as a typo. Only one of them can be created.
 ROLES = ("admin", "superadmin")
-ROLE_CHOICE_MESSAGE = "Role must be Administrator."
-LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required."
+LAST_SUPERADMIN_MESSAGE = "At least one active superadmin is required. Promote another account first."
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Never names the account that holds it. One administrator reading another's
@@ -82,39 +64,13 @@ def _error(message, status=400, field=None):
     return jsonify(payload), status
 
 
-def _fixed_refusal(message, *, status=409, field=None):
-    """A refusal that exists because the superadmin set is fixed.
-
-    Carries a code the frontend recognises, so a build left over from before
-    this policy - one that still offers Make superadmin, or a role selector -
-    can tell "the server does not do this any more" from any other 409 and stop
-    offering it, rather than showing the message against a field and leaving
-    the control there. 409 rather than 403, like every other refusal here that
-    is about the policy instead of about who is asking: a 403 with an
-    unrecognised code reads as "confirm your password" to an older client.
-    """
-
-    payload = {"success": False, "code": SUPERADMIN_SET_FIXED_CODE, "message": message}
-    if field:
-        payload["fields"] = {field: message}
-    return jsonify(payload), status
-
-
-def _as_dict(admin, designated=()):
+def _as_dict(admin):
     return {
         "id": str(admin.id),
         "username": admin.username,
         "email": admin.gmail or "",
         "status": status_label(admin.status),
         "role": "superadmin" if admin.is_superadmin else "admin",
-        # One of the fixed superadmins, so the portal has nothing it may do to
-        # this row: no status change, no permissions, no removal, no role.
-        # Reported as a flag rather than left for the client to infer from the
-        # role, because what is protected is the *designation* - and because a
-        # frontend that inferred it would be guessing at the policy instead of
-        # being told it. A build that does not know the key reads it as absent
-        # and merely offers actions the server refuses.
-        "isProtected": admin.id in designated,
         # Null for a superadmin, whose switches are not configurable, and for
         # an administrator nothing has restricted yet. The frontend reads
         # either as full access. One administrator's switches are not a secret
@@ -134,20 +90,17 @@ PERMISSIONS_SHAPE_MESSAGE = (
     "Each of the four permissions must be given as true or false."
 )
 
-# No longer "demote them first": nobody demotes anybody. Reached only by a
-# superadmin that is not designated, which the database does not allow once the
-# migration is applied.
 SUPERADMIN_PERMISSIONS_MESSAGE = (
-    "Superadmins always have every permission, so there is nothing to restrict."
+    "Superadmins always have every permission. Demote them first to restrict them."
 )
 
 
-def _read_permissions(data, *, default=None):
-    """The switches a create or configure body asks for, or ``default``.
+def _read_permissions(data, *, role, default=None):
+    """The switches a create/demote body asks for, or ``default``.
 
     Returns ``(permissions, error_response)``. ``None`` as the permissions is
-    meaningful - it is what the four superadmins' rows store - so the two are
-    not interchangeable with a falsy check.
+    meaningful - it is what a superadmin's row stores - so the two are not
+    interchangeable with a falsy check.
 
     Only an *absent* field defaults. A field that is present and null is a
     value the caller chose to send, and the one shape a supplied value may
@@ -156,13 +109,16 @@ def _read_permissions(data, *, default=None):
     "no permissions" and silently receive the view-only default instead of
     being told its request made no sense.
 
-    Every account this module writes is a regular administrator, so there is no
-    longer a role for which a supplied set is ignored: creating a superadmin is
-    refused before this is reached, and promotion and demotion are gone.
+    A superadmin's switches are ignored rather than refused, null included: a
+    client may hold one form for both roles, and refusing a field that cannot
+    apply would make promoting somebody fail for a value nothing reads.
     """
 
     if not isinstance(data, dict) or "permissions" not in data:
         return default, None
+
+    if role == "superadmin":
+        return None, None
 
     requested = data["permissions"]
     if not isinstance(requested, dict) or any(
@@ -221,12 +177,7 @@ def _read_identity(data, *, require_password):
 
 
 def _read_role(value):
-    """Returns the stored role a request names, or None when it names neither.
-
-    Still recognises ``superadmin``, which nothing may create: a request that
-    names it is answered with the policy rather than with "that is not a
-    role", and only a value that is neither is a validation error.
-    """
+    """Returns the stored role a request names, or None when it names neither."""
 
     role = value.strip().lower() if isinstance(value, str) else None
     return role if role in ROLES else None
@@ -235,9 +186,9 @@ def _read_role(value):
 def _lock_administrators():
     """Locks every administrator row for this transaction and returns them by id.
 
-    Every write that changes who can sign in or what an account may do (status,
-    permissions) starts here and decides from what this returns, never from
-    rows read earlier. The table holds a handful of accounts, so SELECT ... FOR
+    Every write that changes who can sign in, who can manage accounts, or what
+    an account may do (status, role, permissions) starts here and decides from
+    what this returns, never from rows read earlier. The table holds a handful of accounts, so SELECT ... FOR
     UPDATE over all of it, in id order, is cheap, and it makes these writes
     run one at a time: a second request waits in this query until the first
     commits, rolls back or ends, and then reads the rows as the first left
@@ -245,36 +196,24 @@ def _lock_administrators():
     refreshes the ones this session already holds). Taking every row in one
     ordered statement means no request holds a lock while waiting for another.
 
-    The designated superadmins are locked in the same transaction, after the
-    administrator rows and in the same order the transfer procedure takes them,
-    so a transfer committing mid-request cannot leave this deciding from a set
-    of four that has since changed - and so two writers queue rather than
-    deadlock.
-
     The caller is judged again from the locked rows, since its role may have
-    changed while it waited. Returns ``(directory, designated, error_response)``.
+    changed while it waited. Returns ``(directory, error_response)``.
     """
 
     rows = Admin.query.order_by(Admin.id).populate_existing().with_for_update().all()
-    designated = designated_admin_ids(lock=True)
     _, error = superadmin_required(rows)
-    return {row.id: row for row in rows}, designated, error
+    return {row.id: row for row in rows}, error
 
 
 def _is_last_active_superadmin(record, directory):
     """True when losing this account's superadmin access would leave nobody with it.
 
     Only an active superadmin counts, so a deactivated one neither blocks the
-    change nor is protected by it. ``directory`` is the locked set from
-    :func:`_lock_administrators`.
-
-    Kept now that the designated accounts are refused outright, because the two
-    rules answer for different deployments. A designated account is protected
-    whatever it would leave behind; this one protects a *superadmin that is not
-    designated*, which is what every row looks like on a deployment where the
-    migration has not been applied yet. Without it such a deployment could
-    deactivate its way out of having any superadmin at all during the window
-    between the new build and the schema.
+    change nor is protected by it. Applies to demoting and deactivating alike.
+    ``directory`` is the locked set from
+    :func:`_lock_administrators`. Holding it, the caller is an active
+    superadmin and is never the target, so this cannot be true for a real
+    request; it stays as the second line of defence.
     """
 
     if not (record.is_active and record.is_superadmin):
@@ -296,13 +235,7 @@ def list_admins():
         return error
 
     records = Admin.query.order_by(Admin.username.asc()).all()
-    # Read once for the whole listing, not per row: the answer is the same set
-    # for every account in it.
-    designated = designated_admin_ids()
-    return jsonify({
-        "items": [_as_dict(record, designated) for record in records],
-        "total": len(records),
-    }), 200
+    return jsonify({"items": [_as_dict(record) for record in records], "total": len(records)}), 200
 
 
 @admins_bp.post("")
@@ -315,23 +248,11 @@ def create_admin():
     if invalid:
         return invalid
 
-    # Left out (or null) means a plain administrator, which is now the only
-    # account this route creates. A body that names a role is still read -
-    # "admin" is accepted, anything unrecognized is a field error - so a client
-    # that sends the field is not silently given something else.
+    # Left out (or null) means a plain administrator; anything else must name a role.
     requested = request.get_json(silent=True).get("role")
     role = "admin" if requested is None else _read_role(requested)
     if role is None:
-        return _error(ROLE_CHOICE_MESSAGE, field="role")
-
-    # Asking for a superadmin is refused, not quietly downgraded: the caller
-    # asked for an account with Backup & Recovery and account management, and
-    # handing back a regular administrator under the same name would be a
-    # different account from the one it thinks it made. Refused before the
-    # password confirmation, like a missing role, so nobody is asked to confirm
-    # something the answer was always no to.
-    if role == "superadmin":
-        return _fixed_refusal(CREATE_SUPERADMIN_MESSAGE, field="role")
+        return _error("Role must be Administrator or Superadmin.", field="role")
 
     # Absent means "nothing yet", not "everything": an account being set up has
     # not been given anything, and the superadmin who creates it decides what it
@@ -339,7 +260,8 @@ def create_admin():
     # already exists must not silently lose what it could do yesterday.
     permissions, invalid = _read_permissions(
         request.get_json(silent=True),
-        default=ALL_PERMISSIONS_OFF,
+        role=role,
+        default=None if role == "superadmin" else ALL_PERMISSIONS_OFF,
     )
     if invalid:
         return invalid
@@ -380,9 +302,6 @@ def create_admin():
             db.session.flush()
             log_audit("Admin", None, "create", "Administrator", record.id, record.username)
             db.session.commit()
-        # No designation is looked up for the new row: it is a regular
-        # administrator this request has just inserted, so it cannot be one of
-        # the four, and a query to say so would only be able to agree.
         return jsonify({"success": True, "message": "Administrator added successfully.", "admin": _as_dict(record)}), 201
     except Exception:
         db.session.rollback()
@@ -401,13 +320,8 @@ def update_admin(admin_id):
 
     # An administrator owns only their own sign-in details. Another account's
     # username, email and password are theirs to change, so every other row is
-    # read-only here - a superadmin changes their status and permissions
+    # read-only here - a superadmin changes their status, role and permissions
     # through the routes below, never their details.
-    #
-    # A designated superadmin edits their own row here like anybody else. What
-    # is protected is who holds the role, not the account's own password: the
-    # four would otherwise have no way to change their own credentials, which
-    # would make the protection a reason to keep a stale password.
     if record.id != session.get("admin_id"):
         return _error(
             "You can only edit your own administrator account.",
@@ -451,14 +365,7 @@ def update_admin(admin_id):
                 record.password = password_hash
             log_audit("Admin", None, "update", "Administrator", record.id, record.username)
             db.session.commit()
-        # Asked for even though this route cannot change it: the caller may be
-        # one of the four, and an ``admin`` object that reported them
-        # unprotected would undo the flag in whatever the client merges it into.
-        return jsonify({
-            "success": True,
-            "message": "Administrator updated successfully.",
-            "admin": _as_dict(record, designated_admin_ids()),
-        }), 200
+        return jsonify({"success": True, "message": "Administrator updated successfully.", "admin": _as_dict(record)}), 200
     except Exception:
         db.session.rollback()
         return _error("Failed to update the administrator.", status=500)
@@ -470,35 +377,20 @@ def set_admin_status(admin_id):
 
     The reversible counterpart to a delete: the account and its audit trail
     stay, but it can no longer sign in. Unlike the account's own details, this
-    is another administrator's to set - unless that administrator is one of the
-    four designated superadmins, whose access is not the portal's to set in
-    either direction.
-
-    Both directions, because the four are managed outside the portal and not
-    merely kept switched on. Containing a compromised one deactivates it
-    through the operator procedure; if the portal could switch it back, the
-    containment would last until whoever took the account noticed the button.
+    is another administrator's to set.
     """
 
     _, error = superadmin_required()
     if error:
         return error
 
-    directory, designated, error = _lock_administrators()
+    directory, error = _lock_administrators()
     if error:
         return error
 
     record = directory.get(admin_id)
     if not record:
         return _error("Administrator not found.", status=404)
-
-    # Before the body is read, like the self-edit rule above: this is about the
-    # account, not about what the request asked for, so there is no status -
-    # valid, invalid, or the one it already holds - that makes it answerable.
-    # No portal request against one of the four is ever reported as having
-    # done something.
-    if record.id in designated:
-        return _fixed_refusal(DESIGNATED_ACCOUNT_MESSAGE)
 
     data = request.get_json(silent=True)
     requested = (data or {}).get("status") if isinstance(data, dict) else None
@@ -519,7 +411,7 @@ def set_admin_status(admin_id):
         return jsonify({
             "success": True,
             "message": f"{record.username} is already {status_label(status).lower()}.",
-            "admin": _as_dict(record, designated),
+            "admin": _as_dict(record),
         }), 200
 
     try:
@@ -531,7 +423,7 @@ def set_admin_status(admin_id):
             "success": True,
             "message": f"{record.username} was "
                        f"{'deactivated' if status == 'inactive' else 'activated'} successfully.",
-            "admin": _as_dict(record, designated),
+            "admin": _as_dict(record),
         }), 200
     except Exception:
         db.session.rollback()
@@ -540,44 +432,102 @@ def set_admin_status(admin_id):
 
 @admins_bp.put("/<int:admin_id>/role")
 def set_admin_role(admin_id):
-    """Gone. The superadmin accounts are a fixed set, named in the database.
+    """Promotes an administrator to superadmin or demotes a superadmin.
 
-    This used to promote an administrator and demote a superadmin. That is the
-    hole the policy closes: one promotion, by accident or by a stolen session,
-    and the four superadmins were five, with a fifth account holding Backup &
-    Recovery and everybody else's account. The set now lives in
-    ``public.superadmin_designation``, and replacing one of the four is a
-    reviewed operator procedure run against the database - not a request any
-    portal session can make.
-
-    Retained rather than deleted, and answered here rather than left to Flask's
-    own 405, so a client left over from before this deployment gets the
-    envelope and the code it can act on - "the server no longer does this",
-    which is what tells it to stop offering Make superadmin - instead of a bare
-    405 page it would show as an unexpected error.
-
-    Nothing here reads the database, takes a lock, asks for a password or looks
-    the target up: there is no request body and no target for which this does
-    anything, so a 404 for a missing id would imply that a real one would have
-    worked. Registered for every caller, superadmin or not, for the same reason
-    the delete route is: the operation does not exist for anybody, and checking
-    a role first would imply there is somebody it exists for.
+    Shaped like the status route. Granting or withdrawing account management is
+    deliberate, so it needs a recent password confirmation, and an account
+    cannot change its own role. A demotion must also give its reasons, which
+    the audit row keeps - see :mod:`services.demotion_reasons`.
     """
 
-    return jsonify({
-        "success": False,
-        "code": SUPERADMIN_SET_FIXED_CODE,
-        "message": ROLE_FIXED_MESSAGE,
-    }), 405
+    # Superadmin is checked before the password so a plain administrator is
+    # refused outright rather than asked to confirm something they may not do.
+    _, error = superadmin_required()
+    if error:
+        return error
+
+    _, error = reauth_required("Confirm your password to change this administrator's role.")
+    if error:
+        return error
+
+    directory, error = _lock_administrators()
+    if error:
+        return error
+
+    record = directory.get(admin_id)
+    if not record:
+        return _error("Administrator not found.", status=404)
+
+    data = request.get_json(silent=True)
+    role = _read_role(data.get("role") if isinstance(data, dict) else None)
+    if role is None:
+        return _error("Role must be Administrator or Superadmin.", field="role")
+
+    # A demotion has to say what the account may do as a plain administrator,
+    # or it gets nothing: a superadmin's switches were never configured, so
+    # there is nothing to fall back to, and falling back to "everything" would
+    # make a demotion a formality. A promotion discards them, because the role
+    # carries everything and a stored set would be a value nothing reads.
+    permissions, invalid = _read_permissions(
+        data,
+        role=role,
+        default=None if role == "superadmin" else ALL_PERMISSIONS_OFF,
+    )
+    if invalid:
+        return invalid
+
+    if record.id == session.get("admin_id"):
+        return _error("You cannot change your own role.", status=409)
+
+    noun = "a superadmin" if role == "superadmin" else "an administrator"
+    if record.is_superadmin == (role == "superadmin"):
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} is already {noun}.",
+            "admin": _as_dict(record),
+        }), 200
+
+    if role == "admin" and _is_last_active_superadmin(record, directory):
+        return _error(LAST_SUPERADMIN_MESSAGE, status=409)
+
+    # A demotion says why (issue #166). Read only now, from the locked row: it
+    # is the transition that needs reasons, so a promotion and a no-op never
+    # ask for them, and a target demoted by somebody else while this request
+    # waited for the lock is the no-op above rather than a second demotion.
+    detail = record.username
+    if role == "admin":
+        reasons, invalid = demotion_reasons.read(data)
+        if invalid:
+            return _error(invalid[1], field=invalid[0])
+        detail = demotion_reasons.encode_detail(record.username, *reasons)
+
+    try:
+        record.role = role
+        record.permissions = permissions
+        action = "promote" if role == "superadmin" else "demote"
+        # Staged in this transaction, so the role and its audit row commit or
+        # roll back together.
+        log_audit("Admin", None, action, "Administrator", record.id, detail)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": f"{record.username} was "
+                       f"{'promoted to superadmin' if role == 'superadmin' else 'demoted to administrator'} successfully.",
+            "admin": _as_dict(record),
+        }), 200
+    except Exception:
+        db.session.rollback()
+        return _error("Failed to update the administrator's role.", status=500)
 
 
 @admins_bp.put("/<int:admin_id>/permissions")
 def set_admin_permissions(admin_id):
     """Switches one administrator's four general permissions on or off.
 
-    Deliberate: this is the difference between a colleague who can delete a
-    building and one who cannot, so it needs a recent password confirmation,
-    and nobody configures their own switches.
+    Shaped like the role route, and deliberate for the same reason: this is the
+    difference between a colleague who can delete a building and one who
+    cannot, so it needs a recent password confirmation, and nobody configures
+    their own switches.
 
     Taking a permission away takes effect on the target's next request. Nothing
     is stored in their session, so there is no cached grant to outlive this.
@@ -595,10 +545,11 @@ def set_admin_permissions(admin_id):
     if error:
         return error
 
-    # Locked because the target's role is what decides this: a superadmin
-    # holding a configured set of switches is a state nothing reads, and the
-    # read and the write have to agree about which role the row holds.
-    directory, designated, error = _lock_administrators()
+    # Locked for the same reason the role route locks: a promotion landing
+    # between the target's role being read and the write would leave a
+    # superadmin holding a configured set of switches, which is a state
+    # nothing reads.
+    directory, error = _lock_administrators()
     if error:
         return error
 
@@ -609,16 +560,6 @@ def set_admin_permissions(admin_id):
     if record.id == session.get("admin_id"):
         return _error("You cannot change your own permissions.", status=409)
 
-    # One of the four, and so refused for the reason the whole account is
-    # managed outside the portal rather than for the reason any superadmin's
-    # switches are. Checked first because it is the more specific answer and
-    # the one the frontend has a code for.
-    if record.id in designated:
-        return _fixed_refusal(DESIGNATED_ACCOUNT_MESSAGE)
-
-    # A superadmin that is not designated, which is every superadmin on a
-    # deployment where the migration has not been applied yet. Their switches
-    # are still not configurable: the role carries everything.
     if record.is_superadmin:
         return _error(SUPERADMIN_PERMISSIONS_MESSAGE, status=409)
 
@@ -626,7 +567,7 @@ def set_admin_permissions(admin_id):
     if not isinstance(data, dict) or data.get("permissions") is None:
         return _error(PERMISSIONS_SHAPE_MESSAGE, field="permissions")
 
-    permissions, invalid = _read_permissions(data)
+    permissions, invalid = _read_permissions(data, role="admin")
     if invalid:
         return invalid
 
@@ -644,7 +585,7 @@ def set_admin_permissions(admin_id):
         return jsonify({
             "success": True,
             "message": f"Permissions updated for {record.username}.",
-            "admin": _as_dict(record, designated),
+            "admin": _as_dict(record),
         }), 200
     except Exception:
         db.session.rollback()
@@ -724,14 +665,6 @@ def delete_admin(admin_id):
     usual envelope and names the route that took over. Registered for every
     caller, superadmin or not: the method does not exist for anybody, and
     checking a role first would imply there is a caller for whom it does.
-
-    This is also how a designated superadmin is protected from deletion
-    through the portal, and it is the stronger form of it: the method is gone
-    for every account rather than refused for four of them, so no request can
-    remove one however it is addressed. The status route it points at refuses
-    those four in turn, and the database refuses the row itself
-    (``guard_designated_admin_delete``) in case anything ever reaches it by
-    another path.
     """
 
     return jsonify({
