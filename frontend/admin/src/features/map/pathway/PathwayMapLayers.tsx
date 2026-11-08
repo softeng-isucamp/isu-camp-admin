@@ -106,6 +106,25 @@ interface PathwayDraftLayerProps {
   onError: (message: string) => void;
 }
 
+/** Leaflet stacks markers by latitude plus this offset; points take 1000 so they outrank split handles (offset 0). */
+export const POINT_MARKER_Z_OFFSET = 1000;
+
+/**
+ * Gives a marker a button name and Space/Enter activation. Leaflet already turns Enter on a focused marker
+ * into a click, so only Space (which it ignores) and the accessible name are added here.
+ */
+export function makeMarkerKeyboardOperable(marker: L.Marker, label: string, activate: () => void) {
+  const element = marker.getElement?.();
+  if (!element) return;
+  element.setAttribute("role", "button");
+  element.setAttribute("aria-label", label);
+  element.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key !== " ") return;
+    event.preventDefault();
+    activate();
+  });
+}
+
 /** The pathway tool's Path Point markers and, for the active Pathway, its midpoint split handles. */
 export function PathwayDraftLayer({
   pathway,
@@ -135,8 +154,15 @@ export function PathwayDraftLayer({
             key={`path-point-${index}`}
             position={point}
             icon={createPointIcon(true)}
+            title={`Path point ${index + 1}`}
+            // Above every split handle, so a point that sits on a segment midpoint is still the thing that gets clicked.
+            zIndexOffset={POINT_MARKER_Z_OFFSET}
             draggable={pathway.canModify && selectedPathPointIndex === index}
             eventHandlers={{
+              add: (event) => makeMarkerKeyboardOperable(event.target as L.Marker, `Path point ${index + 1}`, () => {
+                setSelectedPathPointIndex(index);
+                setSelected({ type: "path_point", id: `${editingPathId ?? "pathway"}:point:${index}` });
+              }),
               click: () => {
                 setSelectedPathPointIndex(index);
                 setSelected({ type: "path_point", id: `${editingPathId ?? "pathway"}:point:${index}` });
@@ -182,7 +208,12 @@ export function PathwayDraftLayer({
               key={`path-split-handle-${segmentIndex}`}
               position={[midpoint.latitude, midpoint.longitude]}
               icon={splitIcon}
-              eventHandlers={{ click: () => insertPathPoint(segmentIndex) }}
+              title={`Add a path point on segment ${segmentIndex + 1}`}
+              zIndexOffset={0}
+              eventHandlers={{
+                add: (event) => makeMarkerKeyboardOperable(event.target as L.Marker, `Add a path point on segment ${segmentIndex + 1}`, () => insertPathPoint(segmentIndex)),
+                click: () => insertPathPoint(segmentIndex),
+              }}
             />
           );
         });

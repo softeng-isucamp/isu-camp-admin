@@ -100,6 +100,8 @@ describe("Users account type", () => {
     await userEvent.click(screen.getByRole("button", { name: "Actions for maria.santos1" }));
     const actions = screen.getAllByRole("menuitem").map((item) => item.textContent);
     expect(actions).toEqual(["View activity", "Deactivate account"]);
+    // Viewing and changing access sit in separate groups, as in the Administrators menu.
+    expect(within(screen.getByRole("menu")).getAllByRole("separator")).toHaveLength(1);
   });
 
   it("shows each account's status and labels the action to match", async () => {
@@ -315,5 +317,28 @@ describe("Users search requests", () => {
     resolveFirstPage({ items: [maria], total: 1, page: 1, pageSize: 10 });
 
     expect(await screen.findByText("maria.santos1")).toBeInTheDocument();
+  });
+});
+
+describe("Users filter bar and count", () => {
+  beforeEach(() => {
+    signInAs("admin", { permissions: allPermissions() });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("labels the search persistently and counts matching users with the pager", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    expect(screen.getByLabelText("SEARCH USERS")).toBe(screen.getByPlaceholderText("Search by username..."));
+    expect(screen.getByText(/of 2 matching users/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Showing 2 users$/)).not.toBeInTheDocument();
+  });
+
+  it("uses the singular for one matching user", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue({ ...page, items: [page.items[0]], total: 1 });
+    renderUsers();
+    await screen.findByText("maria.santos1");
+    expect(screen.getByText(/of 1 matching user$/)).toBeInTheDocument();
   });
 });

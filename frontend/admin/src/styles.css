@@ -406,7 +406,7 @@ button {
 .content {
   margin-left: 280px;
   flex: 1;
-  min-width: 800px;
+  min-width: 0;
 }
 .content > header,
 .map-toolbar {
@@ -493,11 +493,11 @@ main {
 .hero {
   background: linear-gradient(115deg, #d8eee0, #f2f7f4);
   border-radius: 32px;
-  padding: 32px;
-  min-height: 452px;
+  padding: 24px 32px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+  gap: 16px;
 }
 .hero h1,
 .page-hero h1 {
@@ -543,10 +543,7 @@ main {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
-  margin-top: -196px;
-  margin-left: 32px;
-  margin-right: 32px;
-  position: relative;
+  margin-top: 16px;
 }
 .card {
   background: var(--surface);
@@ -555,12 +552,18 @@ main {
   box-shadow: 0 1px 2px #0000000b;
 }
 .metric-grid .card {
-  height: 196px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 20px 24px;
+}
+.metric-grid .card > span:not(.metric-icon),
+.metric-grid .card > strong {
+  grid-column: 2;
 }
 .metric-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  display: contents;
 }
 .metric-icon {
   width: 48px;
@@ -577,16 +580,25 @@ main {
   height: 20px;
   object-fit: contain;
 }
-.metric-grid .card > span {
+.metric-grid .card > span:not(.metric-icon) {
   display: block;
-  margin-top: 56px;
   color: #4c5751;
   font-size: 14px;
+  grid-row: 1;
+}
+.metric-grid .metric-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+.metric-grid .metric-top .badge {
+  grid-column: 3;
+  grid-row: 1 / span 2;
 }
 .metric-grid strong {
   display: block;
-  font-size: 34px;
-  margin-top: 4px;
+  font-size: 32px;
+  line-height: 1.15;
+  grid-row: 2;
 }
 .account-type-split {
   display: flex;
@@ -1006,11 +1018,11 @@ main {
 .page-hero {
   background: #fff;
   border-radius: 0 0 36px 36px;
-  padding: 30px 28px 28px;
+  padding: 18px 28px 20px;
   display: flex;
   gap: 18px;
   align-items: center;
-  margin: 0 -24px 20px;
+  margin: -32px -24px 20px;
 }
 .page-icon {
   display: grid;
@@ -1277,6 +1289,44 @@ td small {
 .password input {
   width: 100%;
   padding-left: 42px;
+  padding-right: 44px;
+}
+.password-label {
+  /* Same look as the login card's other labels. */
+  color: #3f4941;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* The one show/hide control: a 32px hit area around the 18px glyph, centred in the input's end. */
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64716a;
+}
+.password-toggle:hover {
+  color: var(--green);
+  background: #0059310f;
+}
+.password-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.field-input-wrap {
+  position: relative;
+}
+.field-input-wrap .field-input {
+  padding-right: 44px;
 }
 .password-icon {
   position: absolute;
@@ -1286,16 +1336,6 @@ td small {
   height: 21px;
   transform: translateY(-50%);
   pointer-events: none;
-}
-.password button {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  background: transparent;
-  color: #64716a;
-  padding: 0;
 }
 .forgot {
   display: flex;
@@ -1423,17 +1463,12 @@ td small {
 .login-card > .muted {
   line-height: 1.5;
 }
-.recovery-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  place-items: center;
-  background: #0e12107a;
-  padding: 24px;
-}
 .recovery-modal {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   width: 460px;
   max-width: 100%;
   padding: 32px;
@@ -1482,6 +1517,7 @@ td small {
 }
 /* Field labels share the login form's small caps style. The markup is sentence case, so screen readers read words, not letters. */
 .login-card .field > span,
+.login-card .field > .password-label,
 .recovery-modal .recovery-label {
   color: #3f4941;
   font-size: 11px;
@@ -1594,27 +1630,18 @@ td small {
   width: 100%;
   padding-right: 48px;
 }
-.recovery-modal .recovery-password-toggle {
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  background: transparent;
-  padding: 0;
-  color: #64716a;
-}
 .recovery-modal .recovery-rules,
 .admin-form .recovery-rules {
   list-style: none;
   margin: -6px 0 0;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-radius: 14px;
   background: #f0f8f3;
   display: grid;
-  gap: 4px;
-  font-size: 13px;
-  line-height: 19px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+  font-size: 12px;
+  line-height: 18px;
 }
 .recovery-modal .recovery-rules li,
 .admin-form .recovery-rules li {
@@ -1739,10 +1766,10 @@ td small {
   width: min(360px, calc(100% - 2rem));
   max-height: calc(100% - 6.25rem);
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(0, 89, 49, 0.22);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 22px 55px rgba(22, 37, 29, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 22px 55px rgba(22, 37, 29, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.58);
   backdrop-filter: blur(18px) saturate(135%);
   -webkit-backdrop-filter: blur(18px) saturate(135%);
 }
@@ -1759,7 +1786,7 @@ td small {
 .inspector-domain-badge {
   margin-bottom: 4px;
   color: #005931;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1776,7 +1803,7 @@ td small {
 .inspector-card-header p {
   margin: 5px 0 0;
   color: #5c6d63;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -1827,7 +1854,9 @@ td small {
   cursor: pointer;
 }
 
-.inspector-overflow-menu button:hover:not(:disabled) { background: #edf5f0; }
+.inspector-overflow-menu button:hover:not(:disabled),
+.inspector-overflow-menu button:focus-visible { background: #edf5f0; outline: none; }
+.inspector-overflow-menu [role="separator"] { height: 1px; margin: 6px 4px; border: 0; background: var(--border); }
 .inspector-overflow-menu button.danger { color: #b42318; }
 .inspector-overflow-menu button:disabled { opacity: 0.46; cursor: not-allowed; }
 
@@ -1855,13 +1884,13 @@ td small {
   gap: 12px;
   padding: 8px 0;
   border-bottom: 1px solid #edf1ee;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-summary dt,
 .inspector-provenance-content dt { color: #65756c; font-weight: 600; }
 .inspector-summary dd,
-.inspector-provenance-content dd { margin: 0; color: #1d2a23; font-weight: 800; overflow-wrap: anywhere; }
+.inspector-provenance-content dd { margin: 0; color: #1d2a23; font-weight: 700; overflow-wrap: anywhere; }
 
 .inspector-related-section {
   margin: 6px 18px 12px;
@@ -1908,7 +1937,7 @@ td small {
   margin: 4px 18px 12px;
 }
 
-.inspector-point-inputs label { color: #65756c; font-size: 10px; font-weight: 800; }
+.inspector-point-inputs label { color: #65756c; font-size: 12px; font-weight: 700; }
 .inspector-point-inputs input {
   width: 100%;
   margin-top: 4px;
@@ -1916,7 +1945,7 @@ td small {
   border: 1px solid #d8e2dc;
   border-radius: 9px;
   color: #1d2a23;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-edit-fields {
@@ -1929,8 +1958,8 @@ td small {
   display: grid;
   gap: 4px;
   color: #65756c;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .inspector-edit-fields input,
@@ -1942,8 +1971,45 @@ td small {
   border-radius: 9px;
   background: white;
   color: #1d2a23;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
+}
+
+.inspector-picker-label {
+  color: #65756c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inspector-status-action {
+  margin-top: 8px;
+  padding: 6px 12px;
+  border: 1px solid #005931;
+  border-radius: 999px;
+  background: #005931;
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.inspector-status-action:hover { background: #004727; }
+.inspector-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: 8px;
+  color: #1d2a23;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.inspector-section-title { font-size: 11px; font-weight: 800; }
+.inspector-section-count {
+  color: #65756c;
+  font-size: 10px;
+  font-weight: 800;
 }
 
 .inspector-point-selector { margin: 10px 18px 12px; }
@@ -1956,7 +2022,7 @@ td small {
   border-radius: 10px;
   background: #fff2f0;
   color: #9b241b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .inspector-inline-actions {
@@ -1973,7 +2039,7 @@ td small {
   border-radius: 999px;
   background: #edf7f0;
   color: #005931;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 .inspector-inline-actions button {
@@ -1983,10 +2049,10 @@ td small {
   border-radius: 999px;
   background: #f7faf8;
   color: #365047;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
-.inspector-inline-actions button:last-child { border-color: #005931; background: #005931; color: white; }
+.inspector-inline-actions button.inspector-primary-action { border-color: #005931; background: #005931; color: white; }
 .inspector-inline-actions button:disabled { opacity: 0.45; }
 
 .inspector-action-notice {
@@ -2839,9 +2905,6 @@ td small {
   }
   .dashboard-grid {
     grid-template-columns: 1fr;
-  }
-  .metric-grid {
-    margin-top: 24px;
   }
   .inline-fields {
     flex-wrap: wrap;
@@ -3742,6 +3805,17 @@ td small {
   font-size: 12px;
   text-align: center;
 }
+/* Compact sizing for the pickers inside the map panels and inspector (their own input rules would otherwise win). */
+.parent-building-compact .parent-building-input,
+.inspector-edit-fields .parent-building-compact .parent-building-input {
+  padding: 7px 52px 7px 30px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.parent-building-compact .parent-building-icon { left: 10px; }
+.parent-building-compact .parent-building-option { padding: 7px 9px; font-size: 12px; }
+.parent-building-compact .parent-building-popover { z-index: 1000; }
 
 /* Filter bar dropdowns (type-ahead and select-only): one field and one popover for every filter, with a list that scrolls. */
 .filter-combobox {
@@ -3951,32 +4025,37 @@ td small {
   gap: 16px;
 }
 
-/* Dashboard tabs and range filter */
-.hero {
-  position: relative;
-}
-.hero-compact {
-  min-height: 260px;
-}
-.hero-toolbar {
-  position: absolute;
-  left: 32px;
-  right: 32px;
-  bottom: 220px;
+/* Dashboard tabs and range filter: a compact bar that stays under the app header while scrolling. */
+.dashboard-bar {
+  position: sticky;
+  top: 64px;
+  z-index: 9;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px -24px 0;
+  padding: 8px 24px;
+  background: #f8f9fa;
 }
-.hero-compact .hero-toolbar {
-  bottom: 28px;
+.dashboard-range {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.dashboard-range-dates {
+  font-size: 12px;
+  color: #4c5751;
+  white-space: nowrap;
 }
 .hero-tabs {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
   border-radius: 999px;
-  background: #ffffffb3;
+  background: #e6ede9;
 }
 .hero-tabs button {
   border: 0;
@@ -4001,7 +4080,7 @@ td small {
 
 /* Analytics tab */
 .analytics {
-  margin-top: 24px;
+  margin-top: 16px;
 }
 .analytics-section {
   margin: 8px 4px 16px;
@@ -4188,9 +4267,6 @@ td small {
   background: #2a78d6;
 }
 @media (max-width: 1100px) {
-  .hero-toolbar {
-    bottom: 24px;
-  }
   .analytics-grid {
     grid-template-columns: 1fr;
   }
@@ -4213,6 +4289,554 @@ td small {
   font-size: inherit;
 }
 
+/* Narrow windows: the page never scrolls sideways. Tables scroll inside their own wrapper, and rows of controls wrap. */
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow-x: auto !important;
+    max-width: 100%;
+  }
+  .filters .field:first-child {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .hero {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+  .metric-grid .metric-top .badge {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 4px;
+  }
+  .hero-tabs {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .dashboard-time-filter {
+    max-width: 100%;
+  }
+}
+
+/* Recovery progress cue: Email, Code, then the flow's last step. */
+.recovery-progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.recovery-progress li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.recovery-progress li + li::before {
+  content: "";
+  width: 16px;
+  height: 1px;
+  margin-right: 2px;
+  background: var(--border);
+}
+.recovery-progress-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+.recovery-progress .is-current {
+  color: var(--green);
+}
+.recovery-progress .is-current .recovery-progress-dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+.recovery-progress .is-done .recovery-progress-dot {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: var(--green);
+}
+/* Holds the room of a two-line error so the controls below do not move when one appears. */
+.recovery-modal .recovery-error-slot {
+  min-height: 58px;
+}
+/* The unknown-page card. */
+.not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 32px;
+  border-radius: 28px;
+}
+.not-found h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.not-found p {
+  margin: 0;
+  color: var(--muted);
+}
+.not-found-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+/* Narrow windows: the basemap switch keeps its names for assistive technology but drops to icons, so it and the search box share the top row. */
+@media (max-width: 720px) {
+  .map-basemap-toggle .tool {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .map-basemap-toggle .tool > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .map-search-box {
+    width: calc(100% - 8.5rem);
+  }
+}
+
+/* Locations: active filter chips, group counts, form notes */
+.filter-chips {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid #c4ddcf;
+  border-radius: 999px;
+  background: #fff;
+  color: #234333;
+  font-size: 12px;
+  font-weight: 600;
+}
+.filter-chip button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: #e5f0ea;
+  color: #234333;
+  cursor: pointer;
+}
+.filter-chip button:hover {
+  background: #d3e6dc;
+}
+.filter-chip button:focus-visible,
+.filter-clear:focus-visible,
+.photo-panel button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.filter-clear {
+  border: 0;
+  background: none;
+  padding: 4px 8px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.group-count {
+  display: block;
+  margin-top: 2px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.locations-form-note {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #edf3f0;
+  color: #365047;
+  font-size: 13px;
+}
+
+/* Location photos: a compact summary row that expands into the gallery. */
+.photo-panel {
+  border: 1px dashed #d1d5db;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #f9fafb;
+}
+.photo-panel.is-dragging {
+  border-color: #0c7441;
+  background: #ecf8f0;
+}
+.photo-panel.has-problem {
+  border-color: #dc2626;
+}
+.photo-panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.photo-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 160px;
+}
+.photo-panel-text strong {
+  display: block;
+  color: #191c1d;
+  font-size: 14px;
+}
+.photo-panel-text span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.photo-thumbs {
+  display: inline-flex;
+  align-items: center;
+}
+.photo-thumbs img,
+.photo-thumbs-more {
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
+  border: 2px solid #f9fafb;
+  border-radius: 8px;
+  object-fit: cover;
+}
+.photo-thumbs > :first-child {
+  margin-left: 0;
+}
+.photo-thumbs-more {
+  display: grid;
+  place-items: center;
+  background: #d6ede0;
+  color: #0c7441;
+  font-size: 11px;
+  font-weight: 700;
+}
+.photo-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.photo-choose {
+  padding: 8px 12px;
+  border: 1px solid #0c7441;
+  border-radius: 999px;
+  background: #fff;
+  color: #0c7441;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.photo-choose:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.photo-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d1d5db;
+  border-radius: 50%;
+  background: #e5e7eb;
+  color: #36463c;
+  cursor: pointer;
+}
+.photo-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+.photo-help {
+  margin: 12px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.photo-grid li {
+  min-width: 0;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+.photo-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.photo-card-head img {
+  width: 52px;
+  height: 52px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+.photo-card-head > div {
+  min-width: 0;
+}
+.photo-card-head strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.photo-card-head span {
+  color: #0c7441;
+  font-size: 10px;
+}
+.photo-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 8px;
+}
+.photo-card-actions button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0c7441;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.photo-card-actions button.is-danger {
+  color: #b42318;
+}
+.photo-feedback {
+  margin: 10px 0 0;
+  color: #365047;
+  font-size: 12px;
+}
+.photo-panel.has-problem .photo-feedback {
+  color: #b42318;
+}
+
+/* Filter bar search: a persistent label, the row's free width, and the same 46px height as the dropdowns beside it. */
+.filters .filters-search {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+/* Locations stacks its search above the filter row, so there it spans the card instead of flexing. */
+.filters .filters-search-stacked {
+  flex: none;
+  align-self: stretch;
+  width: 100%;
+}
+.filters .filters-search .field-input {
+  height: 46px;
+  border-radius: 18px;
+  background: #ffffff;
+  border-color: #e1e3e4;
+}
+.filters .filters-search .field-input:focus {
+  border-color: #005931;
+}
+
+/* A separator between groups of row-menu actions. */
+.row-action-menu [role="separator"] {
+  height: 1px;
+  margin: 6px 4px;
+  border: 0;
+  background: var(--border);
+}
+
+/* System Logs: the zone is stated once in the column header; the detail dialog leads with the event's own text. */
+.th-zone {
+  font-weight: 500;
+  color: #64716a;
+  white-space: nowrap;
+}
+.log-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.log-detail-head .badge {
+  flex: none;
+}
+.log-detail-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.log-detail-text {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f4f7f5;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.detail-list {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 16px;
+  margin: 0 0 18px;
+  font-size: 12px;
+  color: #3f4941;
+}
+.detail-list dt {
+  color: #64716a;
+  font-weight: 700;
+}
+.detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Failed / danger tone, drawn from the palette's --danger. */
+.badge-red {
+  background: #fbe9e9;
+  color: #8f2a2a;
+}
+.badge-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.parent-building-selected-id {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+/* Dashboard shortcuts are real links: same look, reachable by keyboard. */
+.dashboard-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.dashboard-link:hover {
+  background: #f4f8f6;
+}
+.dashboard-link:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Building inspector: sections are separated by simple dividers rather than nested bordered panels; supporting text is at least 12px. */
+.inspector-section { margin: 0 18px; padding: 12px 0; border-bottom: 1px solid #e2ece5; color: #30453a; font-size: 13px; }
+.inspector-section:last-child { border-bottom: 0; }
+.inspector-section h3 { margin: 0; color: #18261e; font-size: 13px; font-weight: 800; }
+.inspector-section p { margin: 0; }
+.inspector-access-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.inspector-view-only { color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-access-status { margin-top: 6px; color: #18261e; }
+.inspector-access-explanation { margin-top: 2px; color: #4b5d53; line-height: 1.45; }
+.inspector-entrance-summary { margin-top: 8px; color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-entrance-list { display: grid; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
+.inspector-entrance-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 3px 0; overflow-wrap: anywhere; font-weight: 700; }
+.inspector-entrance-list em { flex: 0 0 auto; color: #17613b; font-size: 12px; font-style: normal; font-weight: 800; }
+.inspector-compact-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.inspector-compact-actions button {
+  padding: 6px 11px;
+  border: 1px solid #c9d8cf;
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #1f4a35;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.inspector-compact-actions button:hover { background: #edf5f0; }
+.inspector-compact-actions button.inspector-primary-action { border-color: #005931; background: #005931; color: white; }
+.inspector-compact-actions button.inspector-primary-action:hover { background: #004727; }
+.inspector-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: #18261e;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+.inspector-disclosure-count { color: #65756c; font-weight: 700; }
+.inspector-empty { margin-top: 6px; color: #4b5d53; line-height: 1.45; }
+.inspector-section .inspector-floor-group { margin-top: 6px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.inspector-floor-disclosure .inspector-disclosure { color: #0c7441; font-size: 12px; }
+.inspector-section .inspector-location-row { align-items: flex-start; padding: 6px 0 6px 18px; border-bottom: 0; }
+.inspector-section .inspector-location-row strong { font-size: 13px; overflow-wrap: anywhere; }
+.inspector-section .inspector-location-row > div > span { font-size: 12px; color: #4b5d53; }
+.inspector-section .inspector-content-icon { width: 24px; height: 24px; flex-basis: 24px; }
+.inspector-details-list { margin: 6px 0 0; }
+.inspector-details-list > div { display: grid; grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1.2fr); gap: 10px; padding: 4px 0; font-size: 12px; }
+.inspector-details-list dt { color: #65756c; font-weight: 600; }
+.inspector-details-list dd { margin: 0; color: #1d2a23; font-weight: 700; overflow-wrap: anywhere; }
+.inspector-section .inspector-related-group button {
+  padding: 6px 10px; border: 1px solid #c9d8cf; border-radius: 10px; background: #f7faf8; color: #1f4a35; font-size: 12px; font-weight: 700; text-align: left;
+}
+.inspector-section .inspector-related-group strong { font-size: 12px; }
+.inspector-section .inspector-related-group span { font-size: 12px; }
+
+/* Map Editor inspector cards other than Building: the same divider rhythm and 12px floor. */
+.inspector-card-header p.inspector-view-only { margin-top: 4px; }
+.inspector-section .inspector-edit-fields { margin-top: 8px; }
+.inspector-section .inspector-hint,
+.inspector-hint { display: block; margin-top: 4px; color: #4b5d53; font-size: 12px; font-weight: 600; line-height: 1.4; }
+p.inspector-notice { margin: 10px 18px 0; padding: 8px 10px; border-radius: 10px; background: #f3f8f5; color: #30453a; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.inspector-section p.inspector-notice { margin: 8px 0 0; }
+.inspector-section .inspector-point-inputs,
+.inspector-section .inspector-point-selector { margin-left: 0; margin-right: 0; }
+.inspector-modes { margin: 10px 0 0; padding: 0; border: 0; }
+.inspector-modes legend { padding: 0; color: #65756c; font-size: 12px; font-weight: 700; }
+.inspector-modes > div { display: flex; gap: 16px; margin-top: 6px; }
+.inspector-modes label { display: flex; align-items: center; gap: 6px; color: #1d2a23; font-size: 12px; font-weight: 700; }
+.inspector-modes label:has(input:disabled) { opacity: 0.6; }
+.inspector-section .inspector-inline-actions { margin: 10px 0 0; }
+.inspector-section .inspector-secondary-action { width: 100%; margin: 10px 0 0; }
+.inspector-section .inspector-validation { margin-top: 10px; }
+.map-search-box-open { z-index: 903; }
 /* Demotion reasons: spaced from the permissions editor and password field that follow */
 .demotion-reasons {
   margin-bottom: 16px;

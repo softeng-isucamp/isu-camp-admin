@@ -25,7 +25,7 @@ interface BasemapToggleProps {
 /** The Map / Satellite basemap switch. */
 export function BasemapToggle({ basemap, onChange }: BasemapToggleProps) {
   return (
-    <div className="map-glass-panel absolute left-4 top-4 z-[900] flex items-center gap-1 rounded-full p-1.5">
+    <div className="map-basemap-toggle map-glass-panel absolute left-4 top-4 z-[900] flex items-center gap-1 rounded-full p-1.5">
       <button
         type="button"
         className={`tool flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition ${basemap === "street" ? "active bg-[#005931] text-white shadow-sm" : "text-[#3f4941] hover:bg-emerald-50"}`}

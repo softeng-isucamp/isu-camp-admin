@@ -263,6 +263,14 @@ describe("Administrator accounts in User Management", () => {
     }
   });
 
+  it("groups the row menu into activity, access changes and credentials with real separators", async () => {
+    await openAdministrators();
+    openRowMenu("admin_registrar");
+    const menu = screen.getByRole("menu");
+    const layout = Array.from(menu.children).map((child) => child.getAttribute("role") === "separator" ? "|" : child.textContent);
+    expect(layout).toEqual(["View activity", "|", "Edit permissions", "Deactivate account", "Make superadmin", "|", "Send password reset code"]);
+  });
+
   it("links a row to that administrator's recorded activity", async () => {
     await openAdministrators();
 

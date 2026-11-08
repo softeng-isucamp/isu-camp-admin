@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Spinner } from "../../../components/UI";
 import { polygonFeatureAnchor } from "../mapEditing";
 import type { SaveAction } from "../session/useSavingAction";
@@ -30,6 +31,20 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
     deletePolygonVertex,
     cancelDraft: cancelBuildingDraft,
   } = editor;
+  // The error styling is for a refused attempt (or a shape that is already visibly wrong), not for an empty canvas.
+  const [finishAttempted, setFinishAttempted] = useState(false);
+  useEffect(() => {
+    if (canFinishFootprint || points.length === 0) setFinishAttempted(false);
+  }, [canFinishFootprint, points.length]);
+  const geometryIssue = footprintGeometryIssues[0];
+  const showGeometryError = Boolean(geometryIssue) && (finishAttempted || points.length >= 3);
+  const finishDrawing = () => {
+    if (!canFinishFootprint) {
+      setFinishAttempted(true);
+      return;
+    }
+    closePolygon();
+  };
   return (
     <div>
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Building Footprint</div>
@@ -71,7 +86,7 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
       ) : (
         <div>
           <p className="text-xs text-[#3f4941] mt-1">
-            Click on the map to plot the perimeter corners of the building footprint. A minimum of 3 points is required to form a closed polygon.
+            Click the map to place each corner of the footprint.
           </p>
           <div className="flex items-center gap-1 my-3 bg-[#edf3ef] p-1 rounded-xl" role="group" aria-label="Footprint interaction mode">
             <button
@@ -106,9 +121,14 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
           Derived label anchor: {polygonFeatureAnchor(points).map((c) => c.toFixed(5)).join(", ")}
         </div>
       )}
-      {footprintGeometryIssues.length > 0 && (
+      {!polygonClosed && !editingBuildingId && points.length < 3 && !showGeometryError && (
+        <p id="building-corner-guidance" className="mb-3 rounded-xl border border-[#dbe0e2] bg-[#f8f9fa] p-2 text-xs font-semibold text-[#3f4941]">
+          Place at least 3 corners
+        </p>
+      )}
+      {showGeometryError && (
         <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-2 text-xs font-semibold text-red-700" role="alert">
-          {footprintGeometryIssues[0].message}
+          {geometryIssue.message}
         </div>
       )}
       {!polygonClosed && footprintOverlapWarning && (
@@ -144,13 +164,14 @@ export function BuildingToolPanel({ editor, savingAction, onSave: handleSaveBuil
           >
             Clear Area
           </button>
+          {/* Stays enabled while there are corners so that finishing an invalid shape can explain itself. */}
           <button
             type="button"
-            disabled={!canFinishFootprint}
-            onClick={closePolygon}
-            className="px-3 py-1.5 bg-emerald-50 border border-[#005931] text-[#005931] rounded-full text-xs font-bold hover:bg-emerald-100 disabled:opacity-40 transition cursor-pointer"
+            disabled={!points.length}
+            onClick={finishDrawing}
+            className={`px-3 py-1.5 border border-[#005931] rounded-full text-xs font-bold disabled:opacity-40 transition cursor-pointer ${canFinishFootprint ? "bg-[#005931] text-white hover:bg-[#004727]" : "bg-emerald-50 text-[#005931] hover:bg-emerald-100"}`}
           >
-            Save shape
+            Finish drawing
           </button>
         </div>
       )}

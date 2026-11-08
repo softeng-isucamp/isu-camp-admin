@@ -27,7 +27,7 @@ const tilesOf = (data: DashboardAnalytics): Tile[] => {
     },
     {
       label: "Arrival rate",
-      hint: "Visits divided by Searches",
+      hint: "Visits divided by searches",
       value: formatPercent(current.arrivalRate, 1),
       change: previous ? relativeChange(current.arrivalRate, previous.arrivalRate) : null,
     },

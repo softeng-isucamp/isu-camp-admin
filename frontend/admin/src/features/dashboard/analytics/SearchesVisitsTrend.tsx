@@ -8,8 +8,8 @@ import { AXIS_TICK, INK, SERIES, TOOLTIP_STYLE } from "./palette";
 export function SearchesVisitsTrend({ data }: { data: DashboardAnalytics | undefined }) {
   return (
     <ChartCard
-      title="Searches & Visits"
-      subtitle={data?.range === "all" ? "Weekly Searches and Visits." : "Daily Searches and Visits (Asia/Manila)."}
+      title="Searches and visits"
+      subtitle={data?.range === "all" ? "Searches and visits per week." : "Searches and visits per day (Asia/Manila)."}
       data={data}
       isEmpty={(d) => d.timeline.every((point) => point.searches === 0)}
       className="analytics-wide"

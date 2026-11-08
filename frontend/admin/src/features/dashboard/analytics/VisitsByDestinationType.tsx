@@ -17,7 +17,7 @@ export function VisitsByDestinationType({ data }: { data: DashboardAnalytics | u
   return (
     <ChartCard
       title="Visits by destination type"
-      subtitle="Share of Visits by kind of Destination. Indoor Locations count toward their own type."
+      subtitle="Share of visits by destination type. Indoor locations count toward their own type."
       data={data}
       isEmpty={(d) => Object.values(d.visitsByDestinationType).every((value) => value === 0)}
     >

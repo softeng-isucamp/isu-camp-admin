@@ -95,7 +95,7 @@ describe("code step: expiry", () => {
       /^A 6-digit verification code has been sent to admin@isu\.edu\.ph ?\.$/,
     );
     expect(
-      screen.getByText("Only the most recently sent code will work. Requesting a new code will invalidate your previous code."),
+      screen.getByText("Only the newest code works; a new one replaces the old."),
     ).toBeInTheDocument();
   });
 
@@ -447,13 +447,30 @@ describe("code step: assistive technology", () => {
     expect(heading).toHaveAccessibleDescription(/A 6-digit verification code has been sent to/);
   });
 
-  it("keeps the blurred login preview behind the modal out of reach", async () => {
+  it("renders recovery as one surface, with no login form behind it", async () => {
     mockBackend({ [REQUEST]: [issued()] });
     await openCodeStep();
 
-    // The preview is hidden from assistive technology, so its controls must not take keyboard focus either.
-    expect(screen.queryByRole("button", { name: "Login" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Login", hidden: true }).closest("[inert]")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Login", hidden: true })).toBeNull();
+    expect(document.querySelector("[inert]")).toBeNull();
+    expect(document.querySelector(".login-card")).toBeNull();
+  });
+
+  it("marks the code step as the current step of Email, Code and New password", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    const steps = within(screen.getByRole("list", { name: "Recovery progress" })).getAllByRole("listitem");
+    expect(steps.map((step) => step.textContent)).toEqual(["✓Email", "2Code", "3New password"]);
+    expect(steps.map((step) => step.getAttribute("aria-current"))).toEqual([null, "step", null]);
+  });
+
+  it("keeps a slot for the error so the controls stay put", async () => {
+    mockBackend({ [REQUEST]: [issued()] });
+    await openCodeStep();
+
+    expect(document.querySelector(".recovery-error-slot")).toBeInTheDocument();
+    expect(document.querySelector(".recovery-error-slot")).toBeEmptyDOMElement();
   });
 
   it("focuses the email step heading when the page first loads", () => {

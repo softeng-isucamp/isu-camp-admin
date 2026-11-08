@@ -148,7 +148,8 @@ describe("Map Editor preview", () => {
       nodeType: "Junction",
       associatedPlaceId: null,
     })));
-    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction Route Node");
+    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Route node");
+    expect(screen.getByRole("complementary", { name: "North Gate object details" })).toHaveTextContent("Junction · Active");
   });
 
   it("persists converting an Entrance to a Junction and restores truthful UI when persistence fails", async () => {
@@ -164,13 +165,13 @@ describe("Map Editor preview", () => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
     fireEvent.click(await screen.findByRole("button", { name: "North Entrance Route Node" }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Standard Node" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Junction" }));
 
     await waitFor(() => expect(updateRouteNode).toHaveBeenCalledWith(expect.objectContaining({
       id: "node-a", nodeType: "Junction", associatedPlaceId: null,
     })));
     expect(await screen.findByRole("alert")).toHaveTextContent("Route Node update failed");
-    expect(screen.getByRole("complementary", { name: "North Entrance object details" })).toHaveTextContent("Entrance Route Node");
+    expect(screen.getByRole("complementary", { name: "North Entrance object details" })).toHaveTextContent("Entrance");
   });
 
   it("shows canonical Buildings for an Entrance association without persisting the selection", async () => {
@@ -189,13 +190,21 @@ describe("Map Editor preview", () => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
     fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
 
-    const association = await screen.findByLabelText("Route Node association");
-    expect(association).toHaveDisplayValue("No Building association");
-    expect(within(association).getByRole("option", { name: "Engineering Hall (ENG-01)" })).toBeInTheDocument();
-    expect(within(association).getByRole("option", { name: "Unregistered Map Shape (MAP-ONLY)" })).toBeInTheDocument();
-    fireEvent.change(association, { target: { value: "building-42" } });
+    const association = await screen.findByRole("combobox", { name: "Route Node association" });
+    expect(association).toHaveAttribute("placeholder", expect.stringContaining("No Building association"));
+    fireEvent.focus(association);
+    const list = await screen.findByRole("listbox", { name: "Matching buildings" });
+    expect(within(list).getByRole("option", { name: "No Building association" })).toBeInTheDocument();
+    expect(within(list).getByRole("option", { name: "Engineering Hall ENG-01" })).toBeInTheDocument();
+    expect(within(list).getByRole("option", { name: "Unregistered Map Shape MAP-ONLY" })).toBeInTheDocument();
 
-    expect(association).toHaveValue("building-42");
+    fireEvent.change(association, { target: { value: "eng-01" } });
+    expect(within(screen.getByRole("listbox", { name: "Matching buildings" })).getAllByRole("option")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("option", { name: "Engineering Hall ENG-01" }));
+
+    expect(screen.getByRole("combobox", { name: "Route Node association" })).toHaveValue("Engineering Hall");
+    fireEvent.click(screen.getByRole("button", { name: "Clear Building association" }));
+    expect(screen.getByRole("combobox", { name: "Route Node association" })).toHaveValue("");
     expect(services.map.save).not.toHaveBeenCalled();
   });
 
@@ -240,6 +249,35 @@ describe("Map Editor preview", () => {
       lng: 121.6902,
     })));
     await waitFor(() => expect(document.querySelector('[data-testid="saved-map-marker"][data-position="16.7208,121.6902"]')).toBeTruthy());
+  });
+
+  it("picks the Building association of a new Entrance by typing, only for an Entrance, and saves its id", async () => {
+    const osmPlace = (id: string, sourceId: number) => ({
+      id, name: "Unnamed OSM building", code: "", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: 16.7205, lng: 121.6895, positioned: true,
+      source: { provider: "osm", sourceType: "way", sourceId, url: null, rawId: null },
+    });
+    vi.mocked(services.locations.list).mockResolvedValue({ items: [osmPlace("osm-a", 111), osmPlace("osm-b", 222)], total: 2, page: 1, pageSize: 100 });
+    vi.mocked(services.map.locations).mockResolvedValue([osmPlace("osm-a", 111), osmPlace("osm-b", 222)]);
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Route Node" }));
+    fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Junction" } });
+    expect(screen.getByRole("combobox", { name: "Route Node association" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Entrance" } });
+    const association = screen.getByRole("combobox", { name: "Route Node association" });
+    expect(association).toBeEnabled();
+    fireEvent.change(association, { target: { value: "way 222" } });
+    const option = await screen.findByRole("option", { name: "Unnamed OSM building OSM way 222" });
+    expect(within(screen.getByRole("listbox", { name: "Matching buildings" })).getAllByRole("option")).toHaveLength(1);
+    fireEvent.click(option);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. CAS Entrance"), { target: { value: "Annex Entrance" } });
+    clickMap(16.7208, 121.6902);
+    fireEvent.click(screen.getByRole("button", { name: "Save Route Node" }));
+    await waitFor(() => expect(services.map.createRouteNode).toHaveBeenCalledWith(expect.objectContaining({
+      nodeType: "Entrance",
+      associatedPlaceId: "osm-b",
+    })));
   });
 
   it("allows metadata edits immediately after creating a Route Node", async () => {

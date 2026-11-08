@@ -160,7 +160,7 @@ describe("Map Editor preview", () => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Collision Pathway" } });
     fireEvent.click(await screen.findByRole("button", { name: "Collision Pathway Pathway" }));
 
-    expect(await screen.findByRole("complementary", { name: "Collision Pathway object details" })).toHaveTextContent("[Walking Network]");
+    expect(await screen.findByRole("complementary", { name: "Collision Pathway object details" })).toHaveTextContent("Pathway");
     expect(screen.queryByRole("complementary", { name: "Collision Room object details" })).not.toBeInTheDocument();
   });
 });

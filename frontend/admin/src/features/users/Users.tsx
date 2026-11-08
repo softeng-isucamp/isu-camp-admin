@@ -3,10 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
-import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner } from "../../components/UI";
+import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner, Stamp, TimeZoneTag } from "../../components/UI";
 import { FilterCombobox } from "../../components/FilterCombobox";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
-import { formatDateTime } from "../../lib/format";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
 import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
 import { PageIcon } from "../../components/PageIcon";
@@ -95,7 +94,7 @@ function AppUserDirectory() {
       <FeedbackStack messages={feedback.messages} onDismiss={feedback.dismiss} />
 
       <Card className="filters">
-        <Field label="" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
+        <Field className="filters-search" label="SEARCH USERS" placeholder="Search by username..." value={q} onChange={(e) => setQ(e.target.value)} />
         <FilterCombobox
           label="REGISTERED"
           noun="date ranges"
@@ -119,17 +118,14 @@ function AppUserDirectory() {
       <Card className="table-card" style={{ overflow: "visible" }}>
         <div className="table-heading">
           <h2>Accounts</h2>
-          <p style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            {isFetching ? "Loading…" : `Showing ${result.total} users`}
-            {isFetching && <Spinner size={13} />}
-          </p>
+          {isFetching && <p style={{ display: "flex", alignItems: "center", gap: "8px" }}>Loading… <Spinner size={13} /></p>}
         </div>
         <ProgressBar active={isFetching} />
         <div className="table-wrap" style={{ overflow: "visible" }}>
           <table>
             <thead>
               <tr>
-                <th>Username</th><th>Account Type</th><th>Registered On</th><th>Status</th>
+                <th>Username</th><th>Account Type</th><th>Registered On <TimeZoneTag /></th><th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
@@ -138,7 +134,7 @@ function AppUserDirectory() {
                 <tr key={user.id}>
                   <td><strong>{user.username}</strong></td>
                   <td>{user.userType ? accountTypeLabel(user.userType) : "—"}</td>
-                  <td>{formatDateTime(user.createdAt)}</td>
+                  <td><Stamp value={user.createdAt} /></td>
                   <td><Badge tone={user.status === "Active" ? "green" : "grey"}>{user.status}</Badge></td>
                   <td style={{ textAlign: "right", position: "relative" }}>
                     <div style={{ display: "inline-flex" }} ref={actionMenuId === user.id ? actionMenuRef : undefined}>
@@ -166,6 +162,7 @@ function AppUserDirectory() {
                           >
                             View activity
                           </button>
+                          {can("changeUserStatus") && <div role="separator" />}
                           {can("changeUserStatus") && (
                             <button
                               role="menuitem"
@@ -187,7 +184,7 @@ function AppUserDirectory() {
             ? <LoadingState size={20}>Loading users…</LoadingState>
             : !result.items.length && <Empty>No users found.</Empty>}
         </div>
-        <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} />
+        <Pagination total={result.total} page={page} pageSize={pageSize} onChange={setPage} unit={result.total === 1 ? "matching user" : "matching users"} />
       </Card>
 
       {pendingDeactivation && canChangeStatus && (

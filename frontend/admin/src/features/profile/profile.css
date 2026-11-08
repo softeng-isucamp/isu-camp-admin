@@ -55,3 +55,7 @@
   .profile-auto-runs li { grid-template-columns: 1fr auto; }
   .profile-auto-runs li .profile-muted { grid-column: 1 / -1; }
 }
+/* Sign Out sits with the other account actions: secondary in weight, destructive in colour. */
+.profile-actions .profile-signout { color: var(--danger); border: 1px solid #efc4c4; background: #fff; }
+.profile-actions .profile-signout:hover:not(:disabled) { background: #fdf0f0; }
+.profile-backups { margin-top: 8px; }

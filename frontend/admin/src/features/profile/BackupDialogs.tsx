@@ -1,11 +1,12 @@
 import { FormEvent, useState } from 'react';
 import { Button, Field, Modal } from '../../components/UI';
-import { formatDateTime } from '../../lib/format';
+import { PasswordField } from '../../components/PasswordField';
+import { formatDateTime, formatDateTimeFull } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage } from '../../services/errors';
 import type { BackupDownload, BackupJob, SystemBackup } from '../../services/profile';
 import { DELETE_CONFIRMATION_WORDING, PasswordConfirmationField, usePasswordConfirmation } from '../auth/PasswordConfirmation';
-import { origin, sizeText } from './backupFormat';
+import { isAutomatic, origin, sizeText } from './backupFormat';
 import { DialogFocus, type FocusReturn } from './DialogFocus';
 
 const BACKUP_DELETE_WORDING = { ...DELETE_CONFIRMATION_WORDING, expired: 'Your password confirmation expired. Enter it again to delete this backup.' };
@@ -35,7 +36,7 @@ export function DownloadDialog({ backup, returnTo, onClose, onStarted }: { backu
       <form onSubmit={submit} className="admin-form" aria-busy={busy}>
         <p className="profile-warning">This file is a complete copy of the database, including administrator password hashes. Store it securely.</p>
         {error && <div role="alert" className="admin-form-error">{error}</div>}
-        <Field label="YOUR PASSWORD" aria-label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
+        <PasswordField label="YOUR PASSWORD" aria-label="Your password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
         <div className="modal-actions">
           <Button variant="subtle" type="button" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button type="submit" loading={busy} disabled={!password}>Download</Button>
@@ -63,7 +64,7 @@ export function RestoreDialog({ backup, returnTo, onClose, onStarted }: { backup
         <p className="admin-remove-copy">This replaces {backup.scope} with this backup. Changes made after it was created may be lost.</p>
         {error && <div role="alert" className="admin-form-error">{error}</div>}
         <Field label="TYPE RESTORE TO CONFIRM" aria-label="Type RESTORE to confirm" autoComplete="off" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} disabled={busy} required />
-        <Field label="YOUR PASSWORD" aria-label="Your password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
+        <PasswordField label="YOUR PASSWORD" aria-label="Your password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} required />
         <div className="modal-actions">
           <Button variant="subtle" type="button" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="danger" loading={busy} disabled={confirmation !== 'RESTORE' || !password}>Restore Backup</Button>
@@ -114,4 +115,23 @@ export function StopRestoreDialog({ returnTo, onClose, onStop }: { returnTo: Foc
       </div>
     </div>
   </Modal></DialogFocus>;
+}
+
+/** What is known about a failed backup. The server sends no error text for a history row, so the dialog says so rather than guessing. */
+export function FailureDialog({ backup, returnTo, onClose }: { backup: SystemBackup; returnTo: FocusReturn; onClose: () => void }) {
+  return <DialogFocus returnTo={returnTo}>
+    <Modal title="Backup failed" subtitle="This backup did not complete and cannot be restored or downloaded." size="sm" variant="danger" onClose={onClose}>
+      <div className="admin-form">
+        <dl className="detail-list">
+          <dt>Started</dt><dd><time dateTime={backup.createdAt}>{formatDateTimeFull(backup.createdAt)}</time></dd>
+          <dt>Type</dt><dd>{isAutomatic(backup) ? 'Automatic' : 'Manual'}</dd>
+          <dt>Started by</dt><dd>{isAutomatic(backup) ? 'The automatic schedule' : backup.createdBy}</dd>
+          <dt>Reason</dt><dd>No reason was recorded for this failure. Check the server logs for details.</dd>
+        </dl>
+        <div className="modal-actions">
+          <Button type="button" variant="subtle" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </Modal>
+  </DialogFocus>;
 }

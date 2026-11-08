@@ -88,7 +88,7 @@ describe("Map Editor preview", () => {
     clickMap(16.721, 121.689);
     clickMap(16.721, 121.690);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save shape" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
     fireEvent.change(screen.getByLabelText("Building name"), { target: { value: "Suspended Building" } });
     fireEvent.change(screen.getByLabelText("Building code"), { target: { value: "SUSP-01" } });
     fireEvent.change(screen.getByLabelText("Building function"), { target: { value: "Administration" } });

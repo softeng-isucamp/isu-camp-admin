@@ -1,6 +1,8 @@
 import type { CanPerform } from "../../../lib/permissions";
 import type { Building, Location, Pathway, RouteNode } from "../../../types";
 import { isPlace } from "../../../lib/locationPolicy";
+import { BuildingPicker } from "../../locations/BuildingPicker";
+import { buildingIdentifier } from "../building/buildingIdentifier";
 import type { InspectorCardModel } from "../InspectorCardHUD";
 import type { MapPoint } from "../campusBoundary";
 import type { SaveAction } from "../session/useSavingAction";
@@ -58,18 +60,20 @@ export function routeNodeInspectorModel({
     kind: node.nodeType === "Entrance" ? "entrance_route_node" : "route_node",
     title: node.name,
     domain: "Walking Network",
-    status: node.nodeType === "Entrance" ? "Entrance Route Node" : `${node.nodeType} Route Node`,
+    objectLabel: node.nodeType === "Entrance" ? "Entrance" : "Route node",
+    // The type names the object for an entrance; any other node says which kind of node it is.
+    subtitle: `${node.nodeType === "Entrance" ? "" : `${node.nodeType} · `}${node.status ?? "Active"}`,
+    viewOnly: !can("edit") && !can("delete"),
     summary: [
-      { label: "Node Type", value: node.nodeType },
-      { label: "Lifecycle", value: node.status ?? "Active" },
-      { label: "Associated Building", value: associatedBuilding?.name ?? (node.associatedPlaceId ? "Missing" : "None") },
+      ...(node.nodeType === "Entrance" || node.associatedPlaceId
+        ? [{ label: "Associated Building", value: associatedBuilding?.name ?? (node.associatedPlaceId ? "Missing" : "None") }]
+        : []),
       { label: "Connected Pathways", value: String(connectedPaths) },
-      { label: "Latitude", value: node.lat.toFixed(6) },
-      { label: "Longitude", value: node.lng.toFixed(6) },
+      { label: "Coordinates", value: `${node.lat.toFixed(6)}, ${node.lng.toFixed(6)}` },
     ],
     // The metadata form and its Update button are edits, so a view-only administrator sees the summary alone.
     details: can("edit") ? (
-      <section className="inspector-related-section" aria-label="Edit Route Node metadata">
+      <section className="inspector-section" aria-label="Edit Route Node metadata">
         <h3>Route Node metadata</h3>
         <div className="inspector-edit-fields">
           <label> Name
@@ -87,28 +91,34 @@ export function routeNodeInspectorModel({
             </select>
           </label>
           {(nodeFrame.frame?.nodeType ?? node.nodeType) === "Entrance" && (
-            <label> Building association
-              <select aria-label="Route Node association" value={nodeFrame.frame?.associatedPlaceId ?? ""} onChange={(event) => {
-                const associatedPlaceId = event.target.value || null;
-                stageRouteNodeEdit({ ...(nodeFrame.frame ?? node), associatedPlaceId });
-              }}>
-                <option value="">No Building association</option>
-                {buildingAssociationOptions.map((building) => <option key={building.id} value={building.id}>{building.name} ({building.code})</option>)}
-              </select>
-              <span className="mt-1 block text-[10px] text-[#526359]">Saved with the Route Node Update action.</span>
-            </label>
+            <div>
+              <BuildingPicker
+                label="Building association"
+                ariaLabel="Route Node association"
+                buildings={buildingAssociationOptions}
+                value={nodeFrame.frame?.associatedPlaceId ?? null}
+                onChange={(building) => stageRouteNodeEdit({ ...(nodeFrame.frame ?? node), associatedPlaceId: building?.id ?? null })}
+                noneLabel="No Building association"
+                clearLabel="Clear Building association"
+                searchPlaceholder="No Building association. Type to search by name or code…"
+                identifierOf={buildingIdentifier}
+                labelClassName="inspector-picker-label"
+                compact
+              />
+              <span className="inspector-hint">Saved with the Route Node Update action.</span>
+            </div>
           )}
         </div>
         <div className="inspector-inline-actions">
           <button type="button" onClick={nodeFrame.cancel} disabled={!nodeFrame.dirty}>Cancel</button>
-          <button type="button" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
+          <button type="button" className="inspector-primary-action" onClick={nodeFrame.apply} disabled={!nodeFrame.dirty || savingAction === "route-node-metadata"}>{savingAction === "route-node-metadata" ? "Updating Route Node…" : "Update Route Node"}</button>
         </div>
       </section>
     ) : undefined,
     primaryAction: can("edit") ? { label: node.nodeType === "Entrance" ? "✥ Move Entrance" : "✥ Move Route Node", onSelect: onMove } : undefined,
     overflowActions: [
       ...(node.nodeType === "Entrance" && can("edit") ? [{
-        label: "⎋ Convert to Standard Node",
+        label: "⎋ Convert to Junction",
         tone: "danger" as const,
         onSelect: () => {
           const updated = { ...node, nodeType: "Junction" as const, associatedPlaceId: null };
@@ -117,7 +127,7 @@ export function routeNodeInspectorModel({
             before: node,
             after: updated,
             context: { buildings: currentBuildings, locations: currentLocations, campusBoundary },
-            description: `Convert ${node.name} to a standard Route Node`,
+            description: `Convert ${node.name} to a Junction`,
           }).then((result) => {
             if (!result.ok) {
               setError(result.message);
@@ -133,6 +143,7 @@ export function routeNodeInspectorModel({
       ...(can("delete") ? [{
         label: "🗑 Delete Route Node",
         tone: "danger" as const,
+        separatorBefore: true,
         onSelect: () => {
           onDelete({ kind: "route_node", id: node.id, name: node.name, impact: calculateDeleteImpact({ object: node, pathways: currentPathways, nodes: currentNodes, buildings: currentBuildings }) });
         },

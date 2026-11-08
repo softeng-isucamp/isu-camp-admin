@@ -8,9 +8,20 @@ export const indoorLocationTypes = ["Room", "Office", "Laboratory", "Restroom"] 
 // storey, so the directory keeps one of them. The backend stores it as floor
 // number 1 and renders that as "Ground Floor", which is why nothing here
 // needs to change when an older record comes back.
-export const standardFloorLevels = [
-  "Ground Floor", "2nd Floor", "3rd Floor", "4th Floor", "5th Floor", "Basement",
-] as const;
+const upperFloors = ["2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"].map((n) => `${n} Floor`);
+
+/** Floors the form offers. The backend accepts any ordinal floor; the list stops at 10th, the tallest a campus building is expected to need. */
+export const standardFloorLevels: readonly string[] = ["Ground Floor", ...upperFloors, "Basement"];
+
+/** Physical storey order, lowest first, for lists that show floors. `standardFloorLevels` keeps its order for validation messages. */
+export const floorLevelsInPhysicalOrder: readonly string[] = ["Basement", "Ground Floor", ...upperFloors];
+
+/** Sort key for floor names: the standard levels in storey order, other names after them, Unspecified Floor last. */
+export const floorNameRank = (name: string) => {
+  if (name === "Unspecified Floor") return floorLevelsInPhysicalOrder.length + 1;
+  const index = (floorLevelsInPhysicalOrder as readonly string[]).indexOf(name);
+  return index === -1 ? floorLevelsInPhysicalOrder.length : index;
+};
 
 export const isIndoorLocationType = (type: LocationType) =>
   (indoorLocationTypes as readonly string[]).includes(type);

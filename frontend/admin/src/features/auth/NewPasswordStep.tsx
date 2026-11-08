@@ -1,15 +1,14 @@
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { Button } from "../../components/UI";
+import { PasswordField } from "../../components/PasswordField";
 import { AuthError, RateLimitError, services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
 import { resetPasswordSchema } from "../../services/schemas";
-import { CapsLockWarning, useCapsLock } from "./capsLock";
 import { useReturnToLogin } from "./loginPrefill";
 import type { DeadCode } from "./RecoveryCodeStep";
 import type { VerifiedRecovery } from "./RecoveryFlow";
 import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
-import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
 import { BackToLogin, SuccessIcon } from "./RecoveryFrame";
 import { useCountdown } from "./useCountdown";
 
@@ -93,7 +92,8 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
       setError("");
     }
   };
-  const errorFor = (field: "password" | "confirmPassword") => (invalidField === field ? alertId : undefined);
+  const invalidProps = (field: "password" | "confirmPassword") =>
+    invalidField === field ? { "aria-invalid": true, "aria-describedby": alertId } : {};
 
   return (
     <form onSubmit={submit} noValidate>
@@ -102,21 +102,26 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
         Create a new password for your administrator account. If your verification code expires before you finish, you'll need to request a new one.
       </p>
       <PasswordField
+        variant="recovery"
         label="New password"
-        toggleName="new password"
         placeholder="Enter new password"
+        autoComplete="new-password"
+        capsLockWarning
         value={password}
-        onChange={edit(setPassword)}
-        errorId={errorFor("password")}
+        onChange={(event) => edit(setPassword)(event.target.value)}
+        {...invalidProps("password")}
       />
       <PasswordChecklist password={password} />
       <PasswordField
+        variant="recovery"
         label="Confirm new password"
         toggleName="confirm password"
         placeholder="Confirm new password"
+        autoComplete="new-password"
+        capsLockWarning
         value={confirmPassword}
-        onChange={edit(setConfirmPassword)}
-        errorId={errorFor("confirmPassword")}
+        onChange={(event) => edit(setConfirmPassword)(event.target.value)}
+        {...invalidProps("confirmPassword")}
       >
         <p className={`recovery-match recovery-match-${matchState}`} role="status">
           {matchState === "match" && "✓ Passwords match"}
@@ -133,50 +138,5 @@ export function NewPasswordStep({ verified, onCodeDied }: { verified: VerifiedRe
       </Button>
       <BackToLogin />
     </form>
-  );
-}
-
-interface PasswordFieldProps {
-  label: string;
-  /** Names the show/hide button: "Show {toggleName}". */
-  toggleName: string;
-  placeholder: string;
-  value: string;
-  onChange: (value: string) => void;
-  /** The alert describing this field's error; marks the input invalid while set. */
-  errorId?: string;
-  /** Rendered under the Caps Lock warning. */
-  children?: ReactNode;
-}
-
-/** A labelled new-password input with its own show/hide toggle and Caps Lock warning. */
-function PasswordField({ label, toggleName, placeholder, value, onChange, errorId, children }: PasswordFieldProps) {
-  const id = useId();
-  const [shown, setShown] = useState(false);
-  const caps = useCapsLock();
-  return (
-    <div className="field">
-      <label className="recovery-label" htmlFor={id}>{label}</label>
-      <div className="recovery-password">
-        <input
-          id={id}
-          type={shown ? "text" : "password"}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={caps.onKeyDown}
-          onKeyUp={caps.onKeyUp}
-          onBlur={caps.onBlur}
-          aria-invalid={errorId ? true : undefined}
-          aria-describedby={errorId}
-          autoComplete="new-password"
-          placeholder={placeholder}
-        />
-        <button type="button" className="recovery-password-toggle" onClick={() => setShown((on) => !on)} aria-pressed={shown} aria-label={`Show ${toggleName}`}>
-          <PasswordVisibilityIcon shown={shown} />
-        </button>
-      </div>
-      <CapsLockWarning visible={caps.capsLockOn} />
-      {children}
-    </div>
   );
 }

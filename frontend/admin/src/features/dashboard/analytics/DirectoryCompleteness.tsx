@@ -13,7 +13,7 @@ export function DirectoryCompleteness({ data }: { data: DashboardAnalytics | und
   return (
     <ChartCard
       title="Directory completeness"
-      subtitle="Active Buildings and indoor Locations that have a photo, description, keywords, and a map pin."
+      subtitle="Active buildings and indoor locations that have a photo, description, keywords, and a map pin."
       data={data}
       isEmpty={(d) => d.completenessTotal === 0}
       emptyMessage="No active locations to check yet."

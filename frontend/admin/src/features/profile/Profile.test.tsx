@@ -112,6 +112,14 @@ describe('change password rules', () => {
   });
 });
 
+it('keeps Change Password, Edit Profile and Sign Out together in the identity card', async () => {
+  page();
+  const signOut = await screen.findByRole('button', { name: 'Sign Out' });
+  const group = signOut.parentElement!;
+  expect(group).toHaveClass('profile-actions');
+  expect(within(group).getAllByRole('button').map((button) => button.textContent)).toEqual(['Change Password', 'Edit Profile', 'Sign Out']);
+});
+
 it('signs out from the profile after confirmation', async () => {
   const logout = vi.spyOn(services.auth, 'logout');
   page();
@@ -126,14 +134,20 @@ it('signs out from the profile after confirmation', async () => {
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'My Profile' })).not.toBeInTheDocument());
 });
 
-it('reveals password fields while the show passwords checkbox is checked', async () => {
+it('reveals each password field separately with its own named toggle', async () => {
   page();
   await userEvent.click(await screen.findByRole('button', { name: 'Change Password' }));
+  expect(screen.queryByRole('checkbox', { name: 'Show passwords' })).not.toBeInTheDocument();
   expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'password');
-  await userEvent.click(screen.getByRole('checkbox', { name: 'Show passwords' }));
-  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'text');
+  await userEvent.click(screen.getByRole('button', { name: 'Show new password' }));
   expect(screen.getByLabelText('New password')).toHaveAttribute('type', 'text');
+  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'password');
+  expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('type', 'password');
+  expect(screen.getByRole('button', { name: 'Show new password' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: 'Show confirm new password' }));
   expect(screen.getByLabelText('Confirm new password')).toHaveAttribute('type', 'text');
+  await userEvent.click(screen.getByRole('button', { name: 'Show current password' }));
+  expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'text');
 });
 
 it('seeds the fixture history with automatic, manual and failed backups', async () => {
@@ -411,7 +425,7 @@ describe('backup & recovery', () => {
     expect(button).toHaveTextContent('Auto · Daily at 2:30 AM');
     expect(button).toHaveAttribute('title', 'Automatic backups: Daily at 2:30 AM · keeps 14');
     expect(screen.getByRole('button', { name: /Create Backup/ })).toBeInTheDocument();
-    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Created', 'Type', 'Size', 'Status', 'Actions']);
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent?.replace(/ \(.+\)$/, ''))).toEqual(['Created', 'Type', 'Size', 'Status', 'Actions']);
   });
 
   it('words a weekly schedule and an off schedule', async () => {
@@ -451,15 +465,39 @@ describe('backup & recovery', () => {
     expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Delete' })).toHaveClass('danger');
     await userEvent.click(screen.getByText('Backup & Recovery'));
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    expect(menuLabels(await openMenu(3))).toEqual(['Delete']);
+    expect(menuLabels(await openMenu(3))).toEqual(['View failure details', 'Delete']);
   });
 
   it('hides Download and Delete when the server does not offer them', async () => {
     history({ canDownload: undefined, canDelete: undefined });
     page();
     expect(menuLabels(await openMenu(1))).toEqual(['Restore']);
-    // A failed backup then has nothing to offer, so it has no menu.
-    expect(within(await row(3)).queryByRole('button', { name: /Actions for backup/ })).not.toBeInTheDocument();
+    // A failed backup still explains itself.
+    await userEvent.click(screen.getByText('Backup & Recovery'));
+    expect(menuLabels(await openMenu(3))).toEqual(['View failure details']);
+  });
+
+  it('marks a failed backup with its own danger tone and icon, not the neutral grey', async () => {
+    history();
+    page();
+    const failed = within(await row(3)).getByText('Failed');
+    expect(failed).toHaveClass('badge-red');
+    expect(failed).not.toHaveClass('badge-grey');
+    expect(failed.querySelector('svg')).not.toBeNull();
+    expect(within(await row(1)).getByText('Ready')).toHaveClass('badge-green');
+  });
+
+  it('explains a failed backup with only the fields it has and says no reason was recorded', async () => {
+    history();
+    page();
+    await userEvent.click(within(await openMenu(3)).getByRole('menuitem', { name: 'View failure details' }));
+    const dialog = screen.getByRole('dialog', { name: 'Backup failed' });
+    expect(within(dialog).getByText('Automatic')).toBeInTheDocument();
+    expect(within(dialog).getByText('The automatic schedule')).toBeInTheDocument();
+    expect(within(dialog).getByText(/No reason was recorded/)).toBeInTheDocument();
+    expect(dialog.querySelector('time')).toHaveAttribute('datetime', '2026-10-07T02:00:00Z');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   describe('automatic history', () => {

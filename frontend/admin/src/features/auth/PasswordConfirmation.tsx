@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Field } from "../../components/UI";
+import { PasswordField } from "../../components/PasswordField";
 import { services } from "../../services/api";
 import { errorMessage, PasswordConfirmationRequiredError } from "../../services/errors";
 
@@ -87,10 +87,10 @@ export function PasswordConfirmationField({
 }) {
   return (
     <div className="password-confirmation">
-      <Field
+      <PasswordField
         label="CONFIRM YOUR PASSWORD"
+        toggleName="password"
         aria-label="Confirm your password"
-        type="password"
         autoComplete="current-password"
         placeholder="Enter your admin password"
         required

@@ -5,6 +5,7 @@ import { geometryOnCampus, pointOnCampus, type MapPoint } from "../campusBoundar
 import { isPositionedLocation } from "../indoorLocation/indoorLocations";
 import { polygonFeatureAnchor } from "../mapEditing";
 import type { PathwayCrossing } from "../pathway/pathwayTopology";
+import { buildingIdentifier } from "../building/buildingIdentifier";
 import { selectedBuildingViewFor } from "../building/selectedBuilding";
 import { locationSelection, type MapSelection } from "../selection/useMapSelection";
 import type { EditorMode } from "../types";
@@ -41,6 +42,8 @@ export interface MapIssue {
   kind: MapIssueKind;
   /** The affected object, e.g. "CAS Building" or "Main Road × Gym Walkway". */
   title: string;
+  /** What tells same-named objects apart: a code, or the OSM source when there is no code. */
+  identifier?: string | null;
   /** A few words adding a fact the group header does not, e.g. "0 entrance nodes". */
   detail: string;
   /** Where the map flies to. */
@@ -103,19 +106,20 @@ export function deriveMapIssues(
         id: `no-entrance:${building.id}`,
         kind: "no-entrance",
         title: building.name,
+        identifier: buildingIdentifier(building),
         detail: "0 entrance nodes",
         point: polygonFeatureAnchor(building.points),
         selection: { type: "building", id: building.id },
       });
     });
 
-  const addOutside = (id: string, title: string, detail: string, point: MapPoint, selection: MapSelection) => {
-    issues.push({ id: `outside-boundary:${id}`, kind: "outside-boundary", title, detail, point, selection });
+  const addOutside = (id: string, title: string, detail: string, point: MapPoint, selection: MapSelection, identifier?: string | null) => {
+    issues.push({ id: `outside-boundary:${id}`, kind: "outside-boundary", title, identifier, detail, point, selection });
   };
   locations
     .filter((item) => isPositionedLocation(item) && !pointOnCampus([item.lat, item.lng], campusBoundary))
     .forEach((item) => addOutside(`location:${item.type}:${item.id}`, item.name, backendLocationType(item) ?? "Unclassified",
-      [item.lat as number, item.lng as number], locationSelection(item)));
+      [item.lat as number, item.lng as number], locationSelection(item), buildingIdentifier(item)));
   nodes
     .filter((item) => !pointOnCampus([item.lat, item.lng], campusBoundary))
     .forEach((item) => addOutside(`node:${item.id}`, item.name, "Route Node",
@@ -135,7 +139,7 @@ export function deriveMapIssues(
   buildings
     .filter((item) => item.points.length > 0 && !geometryOnCampus(item.points, campusBoundary))
     .forEach((item) => addOutside(`building:${item.id}`, item.name, "Building",
-      polygonFeatureAnchor(item.points), { type: "building", id: item.id }));
+      polygonFeatureAnchor(item.points), { type: "building", id: item.id }, buildingIdentifier(item)));
 
   return issues.sort((a, b) => groupOrder(a.kind) - groupOrder(b.kind));
 }

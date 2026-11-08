@@ -3,11 +3,12 @@ import {
   type HTMLAttributes,
   type PropsWithChildren,
   type InputHTMLAttributes,
+  type ReactNode,
   type SelectHTMLAttributes,
   useEffect,
   useId,
 } from "react";
-import { cx } from "../lib/format";
+import { cx, formatDateTimeCompact, formatDateTimeFull, timestampIso, viewerTimeZone } from "../lib/format";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "subtle" | "danger" | "secondary";
@@ -91,6 +92,17 @@ export function ProgressBar({ active, className }: { active: boolean; className?
   );
 }
 
+/** One table timestamp: compact text, the full local time on hover, and the machine-readable instant. */
+export function Stamp({ value }: { value: string }) {
+  return <time dateTime={timestampIso(value)} title={formatDateTimeFull(value)}>{formatDateTimeCompact(value)}</time>;
+}
+
+/** The viewer's own time zone, shown once beside a date column heading. */
+export function TimeZoneTag() {
+  const zone = viewerTimeZone();
+  return <span className="th-zone" title={zone.name}>({zone.short})</span>;
+}
+
 export function Card({
   className,
   ...props
@@ -104,6 +116,8 @@ export interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
   subhelper?: string;
   error?: string;
   badge?: string;
+  /** Rendered over the end of the input, e.g. the show/hide password toggle. */
+  endAdornment?: ReactNode;
 }
 
 export function Field({
@@ -112,6 +126,7 @@ export function Field({
   subhelper,
   error,
   badge,
+  endAdornment,
   className,
   required,
   id: customId,
@@ -120,6 +135,16 @@ export function Field({
   const sub = subhelper || helper;
   const id = customId || (label ? `field-${label.toLowerCase().replace(/[^a-z0-9]/g, "-")}` : undefined);
   const errorId = error && id ? `${id}-error` : undefined;
+  const input = (
+    <input
+      id={id}
+      className={cx("field-input", error ? "field-input-error" : "")}
+      required={required}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={[props["aria-describedby"], errorId].filter(Boolean).join(" ") || undefined}
+      {...props}
+    />
+  );
   return (
     <div className={cx("field-group", className)}>
       <div className="field-label-row">
@@ -129,14 +154,7 @@ export function Field({
         </label>
         {badge && <span className="field-badge">{badge}</span>}
       </div>
-      <input
-        id={id}
-        className={cx("field-input", error ? "field-input-error" : "")}
-        required={required}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={[props["aria-describedby"], errorId].filter(Boolean).join(" ") || undefined}
-        {...props}
-      />
+      {endAdornment ? <div className="field-input-wrap">{input}{endAdornment}</div> : input}
       {sub && <span className="field-subhelper">{sub}</span>}
       {error && <span id={errorId} className="field-error-msg">{error}</span>}
     </div>
@@ -296,11 +314,14 @@ export function Pagination({
   page = 1,
   pageSize = 20,
   onChange,
+  unit,
 }: {
   total: number;
   page?: number;
   pageSize?: number;
   onChange?: (page: number) => void;
+  /** Names what the total counts, e.g. "top-level places", when another count on the page counts something else. */
+  unit?: string;
 }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(Math.max(page, 1), pages);
@@ -320,7 +341,7 @@ export function Pagination({
     <div className="pagination">
       <span>
         Showing {total === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(total, currentPage * pageSize)}{" "}
-        of {total}
+        of {total}{unit ? ` ${unit}` : ""}
       </span>
       <div>
         <button type="button" disabled={currentPage === 1} onClick={() => onChange?.(currentPage - 1)}>Previous</button>

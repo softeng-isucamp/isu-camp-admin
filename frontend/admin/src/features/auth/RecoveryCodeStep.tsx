@@ -254,7 +254,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
         </button>
       </p>
       <p className="muted recovery-copy">
-        Only the most recently sent code will work. Requesting a new code will invalidate your previous code.
+        Only the newest code works; a new one replaces the old.
       </p>
       {/* role="timer" is not a live region, so the ticking is not announced; the expired alert is. */}
       {expiry.seconds > 0 && !dead && (
@@ -290,11 +290,14 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           {resendMessage}
         </p>
       </div>
-      {error && (
-        <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} attemptsWording="remaining" urgent={state === "exhausted" || rateLimited}>
-          {shownError}
-        </AuthAlert>
-      )}
+      {/* The slot keeps its height whether or not an error shows, so the buttons below never jump. */}
+      <div className="recovery-error-slot">
+        {error && (
+          <AuthAlert id={alertId} attemptsRemaining={attemptsRemaining} attemptsWording="remaining" urgent={state === "exhausted" || rateLimited}>
+            {shownError}
+          </AuthAlert>
+        )}
+      </div>
       {dead ? (
         <Button type="button" className="recovery-primary recovery-submit" onClick={() => void resend()} loading={resending} disabled={resendBlocked}>
           {resending ? "Sending…" : resendLabel}

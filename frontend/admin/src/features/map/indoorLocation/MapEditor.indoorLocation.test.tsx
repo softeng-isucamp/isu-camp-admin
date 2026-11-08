@@ -12,7 +12,7 @@ vi.mock("../../auth/AuthContext", async () => (await import("../testing/mapEdito
 describe("Map Editor preview", () => {
   useMapEditorTestLifecycle();
 
-  it("omits parent building and spatial source from indoor location cards", async () => {
+  it("shows the parent building, floor and an explicit marker state on indoor location cards, without a spatial source", async () => {
     vi.mocked(services.map.locations).mockResolvedValue([
       { id: "room-113", name: "Room 113", code: "ADM-113", type: "Room", parentId: "admin-building", building: "Administration Building", floor: "Ground Floor", status: "Active", lat: 16.7205, lng: 121.6895, positioned: true, function: "Classroom" },
     ]);
@@ -24,7 +24,11 @@ describe("Map Editor preview", () => {
     const locationCard = screen.getByRole("complementary", { name: "Room 113 object details" });
     expect(locationCard).toHaveTextContent("Ground Floor");
     expect(locationCard).toHaveTextContent("Classroom");
-    expect(locationCard).not.toHaveTextContent("Parent building");
+    expect(locationCard).toHaveTextContent("Indoor location");
+    expect(locationCard).toHaveTextContent("Parent building");
+    expect(locationCard).toHaveTextContent("Administration Building");
+    expect(locationCard).toHaveTextContent("Map marker");
+    expect(locationCard).toHaveTextContent("Placed");
     expect(locationCard).not.toHaveTextContent("Spatial source");
   });
 
@@ -86,8 +90,9 @@ describe("Indoor marker permissions", () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
     if (screen.queryByRole("button", { name: "Select Placement Hall Building" })) fireEvent.click(screen.getByRole("button", { name: "Select Placement Hall Building" }));
-    fireEvent.click(await screen.findByRole("button", { name: "More actions for Placement Hall" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Mark indoor location/ }));
+    // Marking sits in the indoor section for someone who may add; an Add-only administrator has no ⋯ menu at all.
+    expect(screen.queryByRole("button", { name: "More actions for Placement Hall" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /Mark indoor location/ }));
     const dialog = await screen.findByRole("dialog", { name: "Mark indoor location" });
     expect(within(dialog).getByText("Room 204")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reposition" })).not.toBeInTheDocument();

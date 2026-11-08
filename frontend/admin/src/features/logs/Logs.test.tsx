@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { services } from "../../services/api";
 import type { AuditEntry } from "../../types";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime, formatDateTimeCompact, formatDateTimeFull, timestampIso, viewerTimeZone } from "../../lib/format";
 import { chooseFilterOption, filterOptionNames } from "../../test/filterCombobox";
 import { Logs } from "./Logs";
 
@@ -18,6 +18,10 @@ const readable = (value: string) => new Intl.DateTimeFormat("en-US", {
   hour: "numeric",
   minute: "2-digit",
   hour12: true,
+}).format(new Date(value.replace(" · ", " ")));
+
+const readableCompact = (value: string) => new Intl.DateTimeFormat("en-US", {
+  month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
 }).format(new Date(value.replace(" · ", " ")));
 
 const entries: AuditEntry[] = [
@@ -67,6 +71,21 @@ describe("formatDateTime", () => {
   });
 });
 
+describe("compact timestamps", () => {
+  it("drops the zone and the long month from the row text", () => {
+    expect(formatDateTimeCompact(isoTimestamp)).toBe(new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(isoTimestamp)));
+    expect(formatDateTimeCompact(isoTimestamp)).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M$/);
+    expect(formatDateTimeCompact("Just now")).toBe("Just now");
+    expect(formatDateTimeCompact("not a date")).toBe("—");
+  });
+
+  it("offers the full instant and a machine-readable value", () => {
+    expect(formatDateTimeFull(isoTimestamp)).toContain(viewerTimeZone().short);
+    expect(timestampIso(isoTimestamp)).toBe("2026-09-13T03:47:29.990Z");
+    expect(timestampIso("Just now")).toBeUndefined();
+  });
+});
+
 describe("Logs", () => {
   afterEach(() => {
     cleanup();
@@ -84,15 +103,37 @@ describe("Logs", () => {
 
     await screen.findByText("login");
     const table = screen.getByRole("table");
-    expect(within(table).getByText(readable(isoTimestamp))).toBeInTheDocument();
-    expect(within(table).getByText(readable(fixtureTimestamp))).toBeInTheDocument();
+    expect(within(table).getByText(readableCompact(isoTimestamp))).toBeInTheDocument();
+    expect(within(table).getByText(readableCompact(fixtureTimestamp))).toBeInTheDocument();
     expect(within(table).queryByText(isoTimestamp)).not.toBeInTheDocument();
+    // One zone in the header, a semantic <time>, and the full instant on hover.
+    expect(within(table).getByRole("columnheader", { name: new RegExp(`Date & Time \\(${viewerTimeZone().short.replace(/[+]/g, "\\+")}\\)`) })).toBeInTheDocument();
+    const stamp = within(table).getByText(readableCompact(isoTimestamp));
+    expect(stamp.tagName).toBe("TIME");
+    expect(stamp).toHaveAttribute("datetime", "2026-09-13T03:47:29.990Z");
+    expect(stamp).toHaveAttribute("title", formatDateTimeFull(isoTimestamp));
+    expect(screen.getByLabelText("SEARCH LOGS")).toBe(screen.getByPlaceholderText(/search actions/i));
 
     await userEvent.click(within(table).getAllByRole("button", { name: "View Details" })[0]);
 
     const dialog = await screen.findByRole("dialog", { name: "Log Details" });
-    expect(within(dialog).getByText(readable(isoTimestamp))).toBeInTheDocument();
+    expect(within(dialog).getByText(readableCompact(isoTimestamp))).toBeInTheDocument();
     expect(within(dialog).queryByText(isoTimestamp)).not.toBeInTheDocument();
+  });
+
+  it("leads the detail dialog with the event's own text and a content-sized badge", async () => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({
+      items: [{ ...entries[1], detail: "Changed the building code from A1 to A2." }], total: 1, page: 1, pageSize: 20,
+    });
+    renderLogs();
+    await userEvent.click(await screen.findByRole("button", { name: "View Details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Log Details" });
+    const badge = within(dialog).getByText("Admin Activity");
+    expect(badge.parentElement).toHaveClass("log-detail-head");
+    const text = within(dialog).getByText("Changed the building code from A1 to A2.");
+    const meta = dialog.querySelector(".detail-list")!;
+    expect(text.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(dialog).getAllByText("create")).toHaveLength(1);
   });
 });
 
@@ -209,6 +250,19 @@ describe("Logs search requests", () => {
     resolveFirstPage({ items: [entry("hit", "Matched Target")], total: 1, page: 1, pageSize: 10 });
 
     expect(await screen.findByText("Matched Target")).toBeInTheDocument();
+  });
+  it("exposes which log category is selected", async () => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+
+    const all = await screen.findByRole("button", { name: "All Logs" });
+    const admin = screen.getByRole("button", { name: "Admin Activity" });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(admin).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(admin);
+    expect(admin).toHaveAttribute("aria-pressed", "true");
+    expect(all).toHaveAttribute("aria-pressed", "false");
   });
 });
 

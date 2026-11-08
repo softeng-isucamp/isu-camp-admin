@@ -1,64 +1,40 @@
 import type { PropsWithChildren } from "react";
 import { Link } from "react-router-dom";
-import { Button, Card } from "../../components/UI";
-import kumpasLogo from "../../assets/figma/brand/kumpas-logo.png";
-import userIcon from "../../assets/figma/login/login-icon-4.svg";
-import lockIcon from "../../assets/figma/login/login-icon-1.svg";
-import arrowIcon from "../../assets/figma/login/login-icon-5.svg";
-import { PasswordVisibilityIcon } from "./PasswordVisibilityIcon";
+import { Card } from "../../components/UI";
 
-/** A picture of the login card behind the modal. `inert` keeps its controls out of the tab order and the accessibility tree. */
-function LoginPreview() {
+/** Where the admin is in a recovery flow: the labels of every step, and the index of the current one. */
+export interface RecoveryProgress {
+  steps: string[];
+  current: number;
+}
+
+/** A compact step cue, e.g. Email, Code, New password. The current step carries aria-current="step". */
+function RecoveryProgressCue({ steps, current }: RecoveryProgress) {
   return (
-    <Card className="login-card" aria-hidden="true" inert>
-      <div className="auth-brand">
-        <div className="auth-mark">
-          <img src={kumpasLogo} alt="KUMPAS logo" />
-        </div>
-        <h1>KUMPAS</h1>
-        <p>Admin Login</p>
-      </div>
-      <form>
-        <label className="field">
-          <span>Username</span>
-          <div className="input-with-icon">
-            <img src={userIcon} alt="" />
-            <input placeholder="Enter your username" readOnly />
-          </div>
-        </label>
-        <div className="forgot forgot-username">
-          <a>Forgot username?</a>
-        </div>
-        <label className="field">
-          <span>Password</span>
-          <div className="password">
-            <img className="password-icon" src={lockIcon} alt="" />
-            <input placeholder="Enter your password" type="password" readOnly />
-            <button type="button">
-              <PasswordVisibilityIcon shown={false} />
-            </button>
-          </div>
-        </label>
-        <div className="forgot forgot-username">
-          <a>Forgot password?</a>
-        </div>
-        <Button type="button">
-          Login <img src={arrowIcon} alt="" />
-        </Button>
-      </form>
-    </Card>
+    <ol className="recovery-progress" aria-label="Recovery progress">
+      {steps.map((label, index) => (
+        <li
+          key={label}
+          className={index < current ? "is-done" : index === current ? "is-current" : undefined}
+          aria-current={index === current ? "step" : undefined}
+        >
+          <span className="recovery-progress-dot" aria-hidden="true">{index < current ? "✓" : index + 1}</span>
+          {label}
+        </li>
+      ))}
+    </ol>
   );
 }
 
-/** The recovery modal over the blurred login preview. Every recovery step renders inside it. */
-export function RecoveryFrame({ children }: PropsWithChildren) {
+/** The recovery card on the branded background. Every recovery step renders inside it. */
+export function RecoveryFrame({ children, progress }: PropsWithChildren<{ progress?: RecoveryProgress }>) {
   return (
     <div className="auth-page">
       <div className="ambient" />
-      <LoginPreview />
-      <div className="recovery-overlay">
-        <Card className="recovery-modal">{children}</Card>
-      </div>
+      <Card className="recovery-modal">
+        {progress && <RecoveryProgressCue {...progress} />}
+        {children}
+      </Card>
     </div>
   );
 }

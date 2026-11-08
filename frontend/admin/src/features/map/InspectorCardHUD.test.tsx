@@ -98,4 +98,85 @@ describe("InspectorCardHUD", () => {
     expect(screen.getByRole("button", { name: "▱ Reshape Boundary" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear object selection" })).toBeInTheDocument();
   });
+
+  describe("overflow menu keyboard", () => {
+    const withDelete = (): InspectorCardModel => ({
+      ...baseObject(),
+      overflowActions: [
+        { label: "✎ Edit Details", onSelect: vi.fn() },
+        { label: "▱ Reshape Footprint", onSelect: vi.fn() },
+        { label: "🗑 Delete Building", tone: "danger", separatorBefore: true, onSelect: vi.fn() },
+      ],
+    });
+    const openMenu = () => {
+      render(<InspectorCardHUD object={withDelete()} onClose={vi.fn()} />);
+      const trigger = screen.getByRole("button", { name: "More actions for Engineering West Hall" });
+      fireEvent.click(trigger);
+      return trigger;
+    };
+
+    it("moves focus to the first item on open and sets Delete apart with a separator", () => {
+      openMenu();
+      expect(screen.getByRole("menuitem", { name: "✎ Edit Details" })).toHaveFocus();
+      const separator = screen.getByRole("separator");
+      expect(separator.nextElementSibling).toHaveTextContent("Delete Building");
+    });
+
+    it("moves between items with ArrowDown and ArrowUp, wrapping at the ends", () => {
+      openMenu();
+      const menu = screen.getByRole("menu");
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "▱ Reshape Footprint" })).toHaveFocus();
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "🗑 Delete Building" })).toHaveFocus();
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "✎ Edit Details" })).toHaveFocus();
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
+      expect(screen.getByRole("menuitem", { name: "🗑 Delete Building" })).toHaveFocus();
+    });
+
+    it("closes on Escape, returns focus to the trigger, and never lets the map's Escape shortcut see it", () => {
+      const mapEscape = vi.fn();
+      window.addEventListener("keydown", mapEscape);
+      const trigger = openMenu();
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+      expect(mapEscape).not.toHaveBeenCalled();
+
+      // With no menu open, Escape still reaches the map (it cancels the active tool or clears the selection).
+      fireEvent.keyDown(trigger, { key: "Escape" });
+      expect(mapEscape).toHaveBeenCalledOnce();
+      window.removeEventListener("keydown", mapEscape);
+    });
+
+    it("closes on Tab", () => {
+      const trigger = openMenu();
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Tab" });
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
+  it("resets the card scroll to the top when another object is selected, but not while the same object is edited", () => {
+    const { rerender } = render(<InspectorCardHUD object={baseObject()} onClose={vi.fn()} />);
+    const card = screen.getByRole("complementary", { name: "Engineering West Hall object details" });
+    card.scrollTop = 120;
+    rerender(<InspectorCardHUD object={{ ...baseObject(), status: "Edited" }} onClose={vi.fn()} />);
+    expect(card.scrollTop).toBe(120);
+
+    rerender(<InspectorCardHUD object={{ ...baseObject(), id: "building-2", title: "Other" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("complementary", { name: "Other object details" }).scrollTop).toBe(0);
+
+    screen.getByRole("complementary", { name: "Other object details" }).scrollTop = 80;
+    rerender(<InspectorCardHUD object={{ ...baseObject(), id: "building-2", kind: "campus_location", title: "Other" }} onClose={vi.fn()} />);
+    expect(screen.getByRole("complementary", { name: "Other object details" }).scrollTop).toBe(0);
+  });
+
+  it("shows a quiet View only note in the header when the model says so", () => {
+    render(<InspectorCardHUD object={{ ...baseObject(), viewOnly: true, overflowActions: [] }} onClose={vi.fn()} />);
+    expect(screen.getByText("View only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /More actions/ })).not.toBeInTheDocument();
+  });
 });

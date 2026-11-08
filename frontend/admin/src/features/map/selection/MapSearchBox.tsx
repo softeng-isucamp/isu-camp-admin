@@ -10,7 +10,8 @@ interface MapSearchBoxProps {
 
 export function MapSearchBox({ search, results, onSearchChange, onSelectResult }: MapSearchBoxProps) {
   return (
-    <div className={`map-glass-panel absolute right-4 top-4 z-[900] w-72 rounded-[20px] p-2`}>
+    // The inspector card (z-index 901) opens below the search box; an open results list must sit above it, not behind it.
+    <div className={`map-search-box map-glass-panel absolute right-4 top-4 w-72 rounded-[20px] p-2 ${results.length > 0 ? "map-search-box-open z-[903]" : "z-[900]"}`}>
       <div className="relative flex items-center">
         <svg className="w-4 h-4 absolute left-3 text-[#3f4941]/60 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

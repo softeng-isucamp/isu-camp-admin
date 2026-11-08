@@ -46,7 +46,7 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
         </div>
       )}
       <section aria-labelledby="analytics-app-usage">
-        <h2 className="analytics-section" id="analytics-app-usage">App Usage</h2>
+        <h2 className="analytics-section" id="analytics-app-usage">App usage</h2>
         <div className="analytics-grid">
           <ActivityKpis data={data} />
           <SearchesVisitsTrend data={data} />
@@ -56,7 +56,7 @@ export function AnalyticsTab({ range }: { range: DashboardRange }) {
         </div>
       </section>
       <section aria-labelledby="analytics-data-health">
-        <h2 className="analytics-section" id="analytics-data-health">Data Health</h2>
+        <h2 className="analytics-section" id="analytics-data-health">Data health</h2>
         <div className="analytics-grid">
           <DirectoryCompleteness data={data} />
         </div>

@@ -203,4 +203,84 @@ describe("MapIssuesTray", () => {
 
     expect(screen.getByRole("button", { name: /Create Junction/ })).toBeInTheDocument();
   });
+
+  describe("search", () => {
+    const hall = (id: string, identifier: string | null): MapIssue => ({ ...noEntrance(id), title: "Unnamed OSM building", identifier });
+    const searchBox = () => screen.getByRole("searchbox", { name: "Search map issues by name or code" });
+
+    it("shows a distinguishing identifier on each row so same-named issues differ", () => {
+      renderTray([hall("a", "OSM way 111"), hall("b", "OSM way 222")]);
+      openTray();
+
+      expect(screen.getByRole("button", { name: "Unnamed OSM building (OSM way 111), 0 entrance nodes" })).toHaveTextContent("OSM way 111");
+      expect(screen.getByRole("button", { name: "Unnamed OSM building (OSM way 222), 0 entrance nodes" })).toHaveTextContent("OSM way 222");
+    });
+
+    it("filters by name or code, keeps the counts honest, and still focuses a match", () => {
+      const { onFocusIssue } = renderTray([hall("a", "OSM way 111"), hall("b", "OSM way 222"), { ...noEntrance("c"), identifier: "LIB" }]);
+      openTray();
+      const tray = screen.getByRole("region", { name: "Map issues" });
+      expect(tray).toHaveTextContent("Map issues3");
+
+      fireEvent.change(searchBox(), { target: { value: "way 222" } });
+      expect(tray).toHaveTextContent("Map issues1 of 3");
+      expect(within(tray).getAllByRole("listitem")).toHaveLength(1);
+      expect(within(tray).getByRole("button", { name: /No entrance/ })).toHaveTextContent("1");
+
+      fireEvent.click(screen.getByRole("button", { name: /OSM way 222/ }));
+      expect(onFocusIssue).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
+
+      fireEvent.change(searchBox(), { target: { value: "lib" } });
+      expect(within(tray).getAllByRole("listitem")).toHaveLength(1);
+    });
+
+    it("says when nothing matches and recovers when the search is cleared", () => {
+      renderTray([hall("a", "OSM way 111")]);
+      openTray();
+
+      fireEvent.change(searchBox(), { target: { value: "zzz" } });
+      expect(screen.getByRole("status")).toHaveTextContent("No issues match “zzz”. Clear the search to see all 1.");
+      expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+
+      fireEvent.change(searchBox(), { target: { value: "" } });
+      expect(screen.getByRole("listitem")).toBeInTheDocument();
+    });
+  });
+
+  describe("beside an open inspector", () => {
+    it("hides the tray and compacts the pill, then restores the open tray and its search when the inspector closes", () => {
+      signInAs("admin");
+      const issues = [noEntrance("a")];
+      const { rerender } = render(<MapIssuesTray issues={issues} activeIssueId={null} onFocusIssue={vi.fn()} />);
+      openTray();
+      fireEvent.change(screen.getByRole("searchbox"), { target: { value: "hall" } });
+
+      rerender(<MapIssuesTray yieldToInspector issues={issues} activeIssueId={null} onFocusIssue={vi.fn()} />);
+      expect(screen.queryByRole("region", { name: "Map issues" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Show map issues (1)" })).toHaveTextContent("⚠ 1");
+      expect(screen.getByRole("button", { name: "Show map issues (1)" })).not.toHaveTextContent("issue");
+
+      rerender(<MapIssuesTray issues={issues} activeIssueId={null} onFocusIssue={vi.fn()} />);
+      expect(screen.getByRole("region", { name: "Map issues" })).toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toHaveValue("hall");
+    });
+
+    it("stays open when a row is focused, since that is what opens the inspector", () => {
+      signInAs("admin");
+      const issues = [noEntrance("a")];
+      const { rerender } = render(<MapIssuesTray issues={issues} activeIssueId={null} onFocusIssue={vi.fn()} />);
+      openTray();
+      fireEvent.click(screen.getByRole("button", { name: "Hall a, 0 entrance nodes" }));
+
+      rerender(<MapIssuesTray yieldToInspector issues={issues} activeIssueId="a" onFocusIssue={vi.fn()} />);
+      expect(screen.getByRole("region", { name: "Map issues" })).toBeInTheDocument();
+    });
+
+    it("lets the administrator open the tray over the inspector", () => {
+      signInAs("admin");
+      render(<MapIssuesTray yieldToInspector issues={[noEntrance("a")]} activeIssueId={null} onFocusIssue={vi.fn()} />);
+      openTray();
+      expect(screen.getByRole("region", { name: "Map issues" })).toBeInTheDocument();
+    });
+  });
 });

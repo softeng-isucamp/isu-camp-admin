@@ -51,7 +51,7 @@ export function Shell({ children }: PropsWithChildren) {
   const location = useLocation();
 
   const title =
-    location.pathname === "/profile" ? "My Profile" : links.find((l) => l.to === location.pathname)?.label ?? "Dashboard Overview";
+    location.pathname === "/profile" ? "My Profile" : links.find((l) => l.to === location.pathname)?.label ?? "Page not found";
 
   useEffect(() => {
     localStorage.setItem("isucamp_sidebar_minimized", String(minimized));

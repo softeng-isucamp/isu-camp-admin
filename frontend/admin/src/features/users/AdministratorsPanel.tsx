@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
 import type { useFeedback } from "../../components/Feedback";
+import { PasswordField } from "../../components/PasswordField";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
 import { PasswordConfirmationField, usePasswordConfirmation, type PasswordConfirmationWording } from "../auth/PasswordConfirmation";
 import { useAuth } from "../auth/AuthContext";
@@ -371,6 +372,7 @@ export function AdministratorsPanel({ feedback }: {
                         <button role="menuitem" onClick={() => viewActivity(account)}>
                           View activity
                         </button>
+                        {canManage && <div role="separator" />}
                         {canManage && account.role === "admin" && !account.isCurrent && (
                           <button
                             role="menuitem"
@@ -400,6 +402,7 @@ export function AdministratorsPanel({ feedback }: {
                             {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
                           </button>
                         )}
+                        <div role="separator" />
                         {/* Helps a locked-out colleague without touching their
                             account: the code only reaches their own inbox. */}
                         <button
@@ -453,10 +456,10 @@ export function AdministratorsPanel({ feedback }: {
               error={fieldErrors.email}
               onChange={(event) => setDraft({ ...draft, email: event.target.value })}
             />
-            <Field
+            <PasswordField
               label="PASSWORD"
+              toggleName="password"
               aria-label="Password"
-              type="password"
               required
               autoComplete="new-password"
               value={draft.password ?? ""}

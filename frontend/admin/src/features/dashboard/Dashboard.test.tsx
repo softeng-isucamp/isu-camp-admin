@@ -82,6 +82,10 @@ describe("Dashboard backend boundary", () => {
     await userEvent.click(screen.getByRole("button", { name: "View Student accounts" }));
     expect(screen.getByTestId("dashboard-route")).toHaveTextContent("/users?userType=student");
     const rankedLibrary = screen.getByTitle("View Library in directory");
+    expect(rankedLibrary).toHaveAttribute("href", expect.stringContaining("/locations?q=Library"));
+    // Shortcuts are real links, so they are reachable from the keyboard.
+    expect(screen.getByRole("link", { name: /Total Buildings/ })).toHaveAttribute("href", "/locations");
+    expect(screen.getByRole("link", { name: /Indoor Locations/ })).toHaveAttribute("href", "/locations");
     expect(within(rankedLibrary).getByText("Library")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("Student Services")).toBeInTheDocument();
     expect(within(rankedLibrary).getByText("18")).toBeInTheDocument();
@@ -145,10 +149,10 @@ describe("Dashboard backend boundary", () => {
     renderDashboard();
 
     await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByRole("heading", { name: "App Usage" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Data Health" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "App usage" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Data health" })).toBeInTheDocument();
     expect(await screen.findByText("Active users")).toBeInTheDocument();
-    for (const title of ["Searches & Visits", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
+    for (const title of ["Searches and visits", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
       expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
@@ -195,7 +199,7 @@ describe("Dashboard backend boundary", () => {
   });
 });
 
-describe("Dashboard quick add for a restricted administrator", () => {
+describe("Dashboard Open Locations link for a restricted administrator", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const loadCards = () => {
@@ -203,21 +207,23 @@ describe("Dashboard quick add for a restricted administrator", () => {
     vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
   };
 
-  it("hides New Location without the Add switch but keeps every card and section", async () => {
+  it("keeps the navigation link for a view-only administrator", async () => {
     loadCards();
-    renderDashboard(["admin", { permissions: { ...allPermissions(), add: false } }]);
+    renderDashboard(["admin", { permissions: viewOnlyPermissions() }]);
 
     expect(await screen.findByText("12")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Open Locations" });
+    expect(link).toHaveAttribute("href", "/locations");
     expect(screen.queryByRole("link", { name: /new location/i })).not.toBeInTheDocument();
     expect(screen.getByText("Registered Users")).toBeInTheDocument();
-    expect(screen.getByText("Campus Map Preview")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Analytics" })).toBeInTheDocument();
   });
 
-  it("shows New Location with the Add switch", async () => {
+  it("shows the exact period for the selected range on the Analytics tab", async () => {
     loadCards();
-    renderDashboard(["admin", { permissions: { ...viewOnlyPermissions(), add: true } }]);
+    renderDashboard(["admin", { permissions: viewOnlyPermissions() }]);
 
-    expect(await screen.findByRole("link", { name: /new location/i })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("tab", { name: "Analytics" }));
+    expect(await screen.findByText(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})? \u2013 [A-Z][a-z]{2} \d{1,2}, \d{4}$/)).toBeInTheDocument();
   });
 });

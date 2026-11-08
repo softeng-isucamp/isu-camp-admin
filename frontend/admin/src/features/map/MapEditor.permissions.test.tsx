@@ -27,7 +27,9 @@ describe("Map Editor for a restricted administrator", () => {
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
 
     const card = await screen.findByRole("complementary", { name: "Engineering Hall object details" });
-    expect(within(card).getByText("ENG")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Code ENG");
+    expect(within(card).getByText("View only")).toBeInTheDocument();
+    expect(card).toHaveTextContent("No active entrance is linked to this building");
     expect(within(card).queryByRole("button", { name: /Reshape Footprint/ })).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /Add indoor location|Add entrance|Link existing entrance/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "More actions for Engineering Hall" })).not.toBeInTheDocument();
@@ -67,8 +69,8 @@ describe("Map Editor for a restricted administrator", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "building polygon" }));
 
-    expect(await screen.findByRole("button", { name: "▱ Reshape Footprint" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "More actions for Engineering Hall" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for Engineering Hall" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["✎ Edit Details", "▱ Reshape Footprint", "🗑 Delete Building"]);
     expect(screen.getByRole("button", { name: "Building Polygon" })).toBeInTheDocument();
   });
 });

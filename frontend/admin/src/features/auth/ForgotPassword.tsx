@@ -7,6 +7,7 @@ export function ForgotPassword() {
     <RecoveryFlow
       purpose="password"
       title="Reset your password"
+      finalLabel="New password"
       renderFinal={(verified, controls) => <NewPasswordStep verified={verified} onCodeDied={controls.codeDied} />}
     />
   );
