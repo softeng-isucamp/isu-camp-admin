@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { services } from "../../../services/api";
 import { useMapEditorTestLifecycle, renderEditor, clickMap, mapTestState, mapZoomEndHandler } from "../testing/mapEditorTestHarness";
@@ -10,6 +10,21 @@ vi.mock("../../auth/AuthContext", async () => (await import("../testing/mapEdito
 
 describe("Map Editor preview", () => {
   useMapEditorTestLifecycle();
+
+  it("opens the full Building inspector when a Place with a footprint is picked from search", async () => {
+    vi.mocked(services.map.buildings).mockResolvedValue([
+      { id: "loc-1", name: "Library", code: "LIB", points: [[16.720, 121.689], [16.721, 121.689], [16.721, 121.690]] },
+    ]);
+    renderEditor();
+
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
+    fireEvent.click(await screen.findByRole("option", { name: /Library Location/ }));
+
+    const inspector = await screen.findByRole("complementary", { name: "Library object details" });
+    // The Building inspector, not the read-only Location one: it carries the Building's entrance actions.
+    expect(within(inspector).getByRole("button", { name: /Add entrance/ })).toBeInTheDocument();
+    expect(within(inspector).getByRole("button", { name: /Link existing entrance/ })).toBeInTheDocument();
+  });
 
   it("offers a choice when a clicked Pathway overlaps other map objects", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([
