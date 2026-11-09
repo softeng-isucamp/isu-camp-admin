@@ -153,7 +153,7 @@ Two limits guard `/api/recovery/*`, both persistent and both measured over the s
 | Codes requested | 3 per window | 429 `recovery_restricted`, and **nothing is mailed** |
 | Wrong codes guessed | 5 per window | 15-minute restriction, starting with the 5th guess itself |
 
-Unchanged: a code still expires after **10 minutes** and a resend is still refused for **60 seconds**.
+Unchanged: a code still expires after **10 minutes** and a resend is still refused for **60 seconds**. The resend cooldown is kept with the account's counters, measured from its newest request, so it holds whichever address, purpose or network the second request comes from and survives a restart. User Management's colleague send is not held by it (it has its own one-a-minute limit per account), but a page request right after that send is.
 
 ### The counts belong to an account, not to a code
 
@@ -168,7 +168,7 @@ So the five guesses are cumulative **across resends, across both of an account's
 
 The **5th wrong code is itself answered with the restriction**, not with `code_exhausted`. Being told "request a new one" was advice that led straight back to five more guesses.
 
-While a subject is restricted, **every** recovery route answers 429 `recovery_restricted` with an integer `Retry-After` — including a request for a new code, so the restriction cannot be waited out by mailing yourself codes until it lifts, and **including a request carrying the correct code**. A restriction the right code could walk through would only ever hold up the people who had lost their code.
+While a subject is restricted, **every** recovery route answers 429 `recovery_restricted` with the restriction's remaining time as an integer `Retry-After`, ahead of any flood limit that would also refuse the request, so the user is never told to wait seconds when the real wait is minutes. This includes a request for a new code, so the restriction cannot be waited out by mailing yourself codes until it lifts, and **including a request carrying the correct code**. A restriction the right code could walk through would only ever hold up the people who had lost their code.
 
 When it lifts, the whole budget comes back. Leaving the failures at the limit would restrict the account again on its very next mistake, and the next — a permanent lockout wearing a fifteen-minute label.
 
@@ -190,7 +190,7 @@ Both carry `Retry-After`; the frontend reads the `code`, not the message.
 | `rate_limited` | This client is going too fast | per IP, or per IP and address | seconds |
 | `email_not_found` | The address is on no active account, so nothing was sent | the submitted address | n/a — fix the address |
 
-The 60-second resend cooldown and the per-IP flood limits are `rate_limited`. The 3-per-window request cap and the 5-failure restriction are `recovery_restricted`.
+The 60-second resend cooldown and the per-IP flood limits are `rate_limited`. The 3-per-window request cap and the 5-failure restriction are `recovery_restricted`. When several apply, the restriction is reported first, then the request cap, then the cooldown and flood limits.
 
 `invalid_code` still carries `attemptsRemaining`, and it is now the **cumulative** figure rather than what is left on one code.
 
@@ -208,7 +208,7 @@ An address with **no account** is stored as `email:` followed by an HMAC of it k
 
 Rows untouched for longer than both windows remember nothing and are deleted, which is also what keeps a flood of invented addresses from growing the table past the addresses actually seen in the last few minutes.
 
-Within one process a lock serializes the read-decide-write; across processes `SELECT … FOR UPDATE` on the subject's row does the same, so a deployment with several workers counts once per guess rather than once per worker.
+Within one process a lock serializes the read-decide-write; across processes `SELECT … FOR UPDATE` on the subject's row does the same, so the counters would count once per guess even with several workers. **The codes would not**: they live in one process's memory, so with a second worker a verify could reach the worker that never issued the code and count the correct code as wrong. The admin API therefore runs as a single Gunicorn process (see [deploy/README.md](deploy/README.md)). Persist the codes before raising the worker count.
 
 Apply `migrations/20261024_add_recovery_attempt.sql` before using any of this.
 
