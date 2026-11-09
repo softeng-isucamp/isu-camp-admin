@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { AuthAlert, RATE_LIMIT_MESSAGE, tryAgainLabel } from "./AuthAlert";
 import { CapsLockWarning, useCapsLock } from "./capsLock";
@@ -19,7 +19,6 @@ const LOGIN_RETRY_FALLBACK_SECONDS = 60;
 
 export function Login() {
   const { login } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const [error, setError] = useState("");
   const [loginCountdown, setLoginCountdown] = useState(0);
@@ -75,8 +74,8 @@ export function Login() {
     loginInFlight.current = true;
     setLoginPending(true);
     try {
+      // The app's guest route sends a signed-in administrator on, to the page they asked for or the Dashboard.
       await login(values.username, values.password, values.remember);
-      navigate("/dashboard");
     } catch (err) {
       if (err instanceof AuthError && err.kind === "invalid_credentials" && err.attemptsRemaining !== undefined) {
         setError("Incorrect username or password.");
