@@ -7,7 +7,7 @@ import { resetSchema } from "../../services/schemas";
 import { AuthAlert, recoveryRateLimitMessage, tryAgainLabel } from "./AuthAlert";
 import { OtpInput, type OtpInputHandle } from "./OtpInput";
 import { BackToLogin } from "./RecoveryFrame";
-import { formatClock, useCountdown } from "./useCountdown";
+import { useCountdown } from "./useCountdown";
 
 /** Where the admin is in entering a code. `exhausted` and `expired` mean the code is dead and only a resend helps. */
 type CodeStepState = "entering" | "verifying" | "exhausted" | "expired";
@@ -256,12 +256,6 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       <p className="muted recovery-copy">
         Only the newest code works; a new one replaces the old.
       </p>
-      {/* role="timer" is not a live region, so the ticking is not announced; the expired alert is. */}
-      {expiry.seconds > 0 && !dead && (
-        <p className="recovery-expiry" role="timer">
-          Code expires in {formatClock(expiry.seconds)}
-        </p>
-      )}
       <div className="field">
         <span className="recovery-label">Verification code</span>
         <OtpInput

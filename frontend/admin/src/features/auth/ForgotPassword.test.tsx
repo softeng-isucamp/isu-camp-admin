@@ -657,7 +657,7 @@ describe("forgot-password: a code already received", () => {
     expect(screen.getByRole("heading", { name: /verification code/i })).toHaveAccessibleDescription(
       /^A 6-digit verification code has been sent to admin@isu\.edu\.ph/,
     );
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    expect(screen.queryByRole("timer")).toBeNull();
   });
 });
 
