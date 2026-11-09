@@ -22,6 +22,13 @@ export const passwordRules: readonly PasswordRule[] = [
   { id: "symbol", label: "A symbol", message: "Password must include a symbol.", test: (p) => /[^\p{L}\p{N}\s]/u.test(p) },
 ];
 
+/**
+ * A password made of whitespace only. The length rule counts its characters, as the backend does, so the
+ * checklist ticks that rule for it; it is still refused, and with this message rather than the first missing class.
+ */
+export const WHITESPACE_ONLY_MESSAGE = "Password can't be only spaces.";
+export const isWhitespaceOnly = (password: string): boolean => password.length > 0 && /^\s+$/u.test(password);
+
 /** The message for the first unmet rule, or undefined when the password passes. */
 export const firstPasswordIssue = (password: string): string | undefined =>
-  passwordRules.find((rule) => !rule.test(password))?.message;
+  isWhitespaceOnly(password) ? WHITESPACE_ONLY_MESSAGE : passwordRules.find((rule) => !rule.test(password))?.message;

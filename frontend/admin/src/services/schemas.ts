@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PLACE_CLASSIFICATIONS } from "../types";
-import { passwordRules } from "./passwordRules";
+import { isWhitespaceOnly, passwordRules, WHITESPACE_ONLY_MESSAGE } from "./passwordRules";
 
 const locationTypeSchema = z.enum([
   "Place",
@@ -21,6 +21,10 @@ export const loginSchema = z.object({
 export const recoveryEmailSchema = z.string().trim().email("Enter a valid email address.");
 /** Every unmet rule is reported, in checklist order. */
 export const passwordSchema = z.string().superRefine((password, ctx) => {
+  if (isWhitespaceOnly(password)) {
+    ctx.addIssue({ code: "custom", message: WHITESPACE_ONLY_MESSAGE });
+    return;
+  }
   for (const rule of passwordRules) {
     if (!rule.test(password)) ctx.addIssue({ code: "custom", message: rule.message });
   }

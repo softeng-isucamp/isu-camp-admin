@@ -22,6 +22,16 @@ describe("password rules", () => {
     expect(firstPasswordIssue(password)).toBe(message);
   });
 
+  it("refuses a password of spaces only with its own message, though the length rule counts the spaces", () => {
+    expect(passwordRules[0].test("        ")).toBe(true);
+    expect(firstPasswordIssue("        ")).toBe("Password can't be only spaces.");
+    expect(firstPasswordIssue(" \t ")).toBe("Password can't be only spaces.");
+  });
+
+  it("does not treat a password that merely contains spaces as spaces only", () => {
+    expect(firstPasswordIssue("Abc def1")).toBe("Password must include a symbol.");
+  });
+
   it("reports nothing for a password that meets every rule", () => {
     expect(firstPasswordIssue("Abcdef1!")).toBeUndefined();
   });

@@ -112,6 +112,15 @@ describe('change password rules', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it('refuses eight spaces with a message that says so, and does not send it', async () => {
+    const changePassword = vi.spyOn(services.profile, 'changePassword');
+    await openDialog();
+    await submit('        ');
+    expect(await screen.findByText("Password can't be only spaces.")).toBeInTheDocument();
+    expect(changePassword).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('New password')).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('sends a password that meets every rule and closes the dialog', async () => {
     // Stubbed so the shared fixture account keeps its sign-in for the other tests.
     const changePassword = vi.spyOn(services.profile, 'changePassword').mockResolvedValue(undefined);
