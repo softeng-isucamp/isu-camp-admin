@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -99,6 +99,17 @@ describe('change password rules', () => {
     await submit('abc');
     expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument();
     expect(screen.queryByText('Password must include an uppercase letter.')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the Change Password button after a successful change', async () => {
+    vi.spyOn(services.profile, 'changePassword').mockResolvedValue(undefined);
+    page();
+    // fireEvent.click does not move focus, as a pointer press in some browsers does not: the button is only the opener.
+    const trigger = await screen.findByRole('button', { name: 'Change Password' });
+    fireEvent.click(trigger);
+    await submit('Abcdef1!');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
   });
 
   it('sends a password that meets every rule and closes the dialog', async () => {
@@ -900,6 +911,40 @@ describe('backup & recovery', () => {
       expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Create Backup/ })).toHaveFocus();
+    });
+
+    it.each([
+      ['a press that moves focus', (element: HTMLElement) => userEvent.click(element)],
+      ['a click that does not move focus', (element: HTMLElement) => fireEvent.click(element)],
+    ])('keeps focus on a control, not the body, when a delete removes its row (%s)', async (_label, press) => {
+      history();
+      vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      await press(within(await row(3)).getByRole('button', { name: /Actions for backup from/ }));
+      await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+      await press(screen.getByRole('menuitem', { name: 'Delete' }));
+      const dialog = screen.getByRole('dialog', { name: 'Delete this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Confirm your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Backup' }));
+      expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(document.activeElement).not.toBe(document.body);
+      expect(screen.getByRole('button', { name: /Create Backup/ })).toHaveFocus();
+    });
+
+    it('keeps focus on a control, not the body, when a restore starts', async () => {
+      history();
+      vi.spyOn(services.profile, 'restore').mockResolvedValue({ id: 'job-2', kind: 'restore', status: 'running', cancellable: true });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-2', kind: 'restore', status: 'running', cancellable: true });
+      page();
+      await openMenu(1);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+      const dialog = screen.getByRole('dialog', { name: 'Restore this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Type RESTORE to confirm'), 'RESTORE');
+      await userEvent.type(within(dialog).getByLabelText('Your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Restore Backup' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(document.activeElement).not.toBe(document.body);
     });
 
     it('returns focus to the Edit schedule button', async () => {
