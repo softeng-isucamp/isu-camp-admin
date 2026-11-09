@@ -19,7 +19,10 @@ export function ScheduleDialog({ initial, onClose, onSaved }: { initial: BackupS
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const keepCount = Number(keep);
-  const keepValid = /^\d+$/.test(keep.trim()) && keepCount >= 1 && keepCount <= KEEP_MAX;
+  // A retention saved before the cap (e.g. 365) stays valid while unchanged, so editing only the time or day
+  // never forces fewer backups; a changed value must be within 1..KEEP_MAX.
+  const keepUnchanged = keep.trim() === String(initial.keep);
+  const keepValid = /^\d+$/.test(keep.trim()) && keepCount >= 1 && (keepCount <= KEEP_MAX || keepUnchanged);
   const keepError = enabled && !keepValid ? `Enter a whole number from 1 to ${KEEP_MAX}.` : undefined;
   const valid = /^\d\d:\d\d$/.test(time) && keepValid;
   const save = async (event: FormEvent) => {
@@ -50,7 +53,7 @@ export function ScheduleDialog({ initial, onClose, onSaved }: { initial: BackupS
           </SelectField>}
           <Field label="TIME" aria-label="Time" type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={saving} subhelper="Philippine time" required />
         </div>
-        <Field label="BACKUPS TO KEEP" aria-label="Backups to keep" type="number" min={1} max={KEEP_MAX} value={keep} onChange={(e) => setKeep(e.target.value)} disabled={saving} subhelper="The newest backups are kept; older ones are deleted, including manual backups." error={keepError} required />
+        <Field label="BACKUPS TO KEEP" aria-label="Backups to keep" type="number" min={1} max={Math.max(KEEP_MAX, initial.keep)} value={keep} onChange={(e) => setKeep(e.target.value)} disabled={saving} subhelper="The newest backups are kept; older ones are deleted, including manual backups." error={keepError} required />
       </>}
       <div className="modal-actions">
         <Button type="button" variant="subtle" disabled={saving} onClick={onClose}>Cancel</Button>

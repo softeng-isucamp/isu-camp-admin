@@ -277,6 +277,16 @@ describe("Logs search requests", () => {
     await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
   });
 
+  it("clears the DATE filter too, so older activity for the account is not still hidden", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs("/system-logs?q=maria.santos1&category=Admin");
+    await screen.findByText("No activity recorded for maria.santos1 yet.");
+    chooseFilterOption("DATE", "Last 7 days");
+    await waitFor(() => expect(list.mock.lastCall?.[3]).not.toBe("all"));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
+  });
+
   it("keeps the plain empty message when no search is active", async () => {
     vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
     renderLogs();

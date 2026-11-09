@@ -675,6 +675,25 @@ describe('backup & recovery', () => {
       expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
     });
 
+    it('keeps a retention saved before the cap while only the time changes, and caps it once edited', async () => {
+      history({ schedule: { ...SCHEDULE, keep: 365 } });
+      const save = saveSchedule();
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByLabelText('Backups to keep')).toHaveValue(365);
+      expect(within(dialog).queryByText('Enter a whole number from 1 to 99.')).not.toBeInTheDocument();
+      fireEvent.change(within(dialog).getByLabelText('Time'), { target: { value: '04:00' } });
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '200');
+      expect(within(dialog).getByText('Enter a whole number from 1 to 99.')).toBeInTheDocument();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '365');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ keep: 365, time: '04:00' })));
+    });
+
     it('refuses a keep count below one and keeps the dialog open when the save fails', async () => {
       history();
       vi.spyOn(services.profile, 'saveSchedule').mockRejectedValue(new Error('Schedule is unavailable.'));
@@ -1006,6 +1025,23 @@ describe('backup & recovery', () => {
       await userEvent.click(within(dialog).getByRole('button', { name: 'Restore Backup' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
       expect(document.activeElement).not.toBe(document.body);
+    });
+
+    it('moves focus on from the running job Cancel button when the restore finishes and that button goes', async () => {
+      history();
+      vi.spyOn(services.profile, 'restore').mockResolvedValue({ id: 'job-3', kind: 'restore', status: 'running', cancellable: true });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-3', kind: 'restore', status: 'succeeded' });
+      page();
+      await openMenu(1);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+      const dialog = screen.getByRole('dialog', { name: 'Restore this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Type RESTORE to confirm'), 'RESTORE');
+      await userEvent.type(within(dialog).getByLabelText('Your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Restore Backup' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      // The first poll (after a second) reports the restore finished, which removes the Cancel button.
+      await waitFor(() => expect(document.querySelector('[data-job-cancel]')).toBeNull(), { timeout: 4000 });
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     });
 
     it('returns focus to the Edit schedule button', async () => {

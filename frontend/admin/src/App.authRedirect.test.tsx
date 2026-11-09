@@ -74,7 +74,7 @@ describe("returning to the requested page after sign-in", () => {
 });
 
 describe("a signed-in administrator opening a sign-in or recovery page", () => {
-  it.each(["/login", "/forgot-password"])("is sent from %s to the Dashboard", async (path) => {
+  it.each(["/login", "/forgot-password", "/forgot-username"])("is sent from %s to the Dashboard", async (path) => {
     vi.spyOn(services.auth, "me").mockResolvedValue(SESSION);
     renderApp([path]);
     await onPage("Dashboard Overview");
