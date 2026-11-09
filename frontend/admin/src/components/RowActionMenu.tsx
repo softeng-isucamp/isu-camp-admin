@@ -107,12 +107,19 @@ export function RowActionMenu({ label, disabled = false, triggerProps, children 
     target?.focus();
   };
 
-  // Runs before the item's own handler, so focus is on the trigger when that handler opens a dialog.
-  const onMenuClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+  const chosenItem = (event: MouseEvent<HTMLDivElement>) => {
     const item = (event.target as HTMLElement).closest<HTMLElement>(ITEM);
-    if (!item || (item as HTMLButtonElement).disabled) return;
-    triggerRef.current?.focus();
-    setOpen(false);
+    return item && !(item as HTMLButtonElement).disabled ? item : null;
+  };
+  // Capture runs before the item's own handler, so focus is on the trigger when that handler opens a dialog.
+  // It must not close the menu: React applies that update before the bubble phase, which would unmount the
+  // item before its own onClick runs (real browsers; jsdom happens not to show it).
+  const onMenuClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (chosenItem(event)) triggerRef.current?.focus();
+  };
+  // Bubble runs after the item's handler, so closing here never swallows the choice.
+  const onMenuClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (chosenItem(event)) setOpen(false);
   };
 
   return (
@@ -138,6 +145,7 @@ export function RowActionMenu({ label, disabled = false, triggerProps, children 
           aria-label={label}
           onKeyDown={onMenuKeyDown}
           onClickCapture={onMenuClickCapture}
+          onClick={onMenuClick}
         >
           {children}
         </FittedPopover>
