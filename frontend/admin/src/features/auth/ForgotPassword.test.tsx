@@ -323,7 +323,7 @@ describe("forgot-password: code step", () => {
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
-  it("does not resend rejected digits on its own; the same code entered again is checked, and so is Verify on the unedited boxes", async () => {
+  it("does not resend rejected digits on its own or on Verify; the same code entered again is checked", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2), wrongCode(1)] });
     renderForgotPassword();
@@ -337,21 +337,24 @@ describe("forgot-password: code step", () => {
     expect(sent[VERIFY]).toHaveLength(1);
     expectBoxes("111111");
 
-    // Pasting or typing the same, unedited code again is not a new entry: nothing is sent and no attempt is spent.
+    // Pasting the same code again is a new entry: the server answers again.
     pasteCode(1, "111111");
-    await settle();
-    typeCode("111111");
-    await settle();
-    expect(sent[VERIFY]).toHaveLength(1);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
-    expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
-
-    // Once a digit changes and is typed back, the code is an edit like any other and is checked again.
-    fireEvent.input(box(6), { target: { value: "" } });
-    fireEvent.input(box(6), { target: { value: "1" } });
     await settle();
     expect(sent[VERIFY]).toHaveLength(2);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
+
+    // Typing it again is just as good.
+    typeCode("111111");
+    await settle();
+    expect(sent[VERIFY]).toHaveLength(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
+
+    // Verify on the unedited rejected code would only spend an attempt on a refused guess, so it waits for a new entry.
+    expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("button", { name: "Verify" }).closest("form")!);
+    await settle();
+    expect(sent[VERIFY]).toHaveLength(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
   });
 
   it("still auto-submits a different code after one was rejected", async () => {

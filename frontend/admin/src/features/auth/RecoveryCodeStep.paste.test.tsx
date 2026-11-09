@@ -199,8 +199,8 @@ describe("code step: a rejected code stays as real, editable values", () => {
 
   it.each([
     ["a different code", "654321"],
-    ["the rejected code again, unchanged", REJECTED],
-  ])("sends one request on the sixth digit when %s is typed over a rejected code: an unchanged code is not sent again", async (_name, retyped) => {
+    ["the rejected code again", REJECTED],
+  ])("sends exactly one request when %s is typed over a rejected code, on the sixth digit", async (_name, retyped) => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "typing");
 
@@ -214,7 +214,7 @@ describe("code step: a rejected code stays as real, editable values", () => {
     await user.keyboard(retyped[5]);
     await settle();
 
-    expect(sentCodes(sent)).toEqual(retyped === REJECTED ? [REJECTED] : [REJECTED, retyped]);
+    expect(sentCodes(sent)).toEqual([REJECTED, retyped]);
     expect(boxValues()).toBe(retyped);
   });
 
@@ -262,16 +262,16 @@ describe("code step: a rejected code stays as real, editable values", () => {
     expect(sentCodes(sent)).toEqual([REJECTED, "128456"]);
   });
 
-  it("does not check the same code again when it is pasted again, keeping it as real values", async () => {
+  it("checks the same code again when it is pasted again, keeping it as real values", async () => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "paste");
 
     await pasteIntoFirstBox(user, REJECTED);
 
-    expect(sentCodes(sent)).toEqual([REJECTED]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
-    expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
+    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
     expect(boxValues()).toBe(REJECTED);
+    expectAllInvalid();
   });
 
   it("checks a different pasted code, even when the paste starts in a later box or has separators", async () => {
@@ -308,12 +308,12 @@ describe("code step: a rejected code stays as real, editable values", () => {
     expect(sentCodes(sent)).toEqual([REJECTED, inserted]);
   });
 
-  it("does not send an unedited rejected code when Verify is pressed: Verify is disabled until the code changes", async () => {
+  it("does not spend an attempt on Verify with the unedited rejected code; Verify waits for a new entry", async () => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "paste");
 
     expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Verify" }).closest("form")!);
     await settle();
 
     expect(sentCodes(sent)).toEqual([REJECTED]);
@@ -609,41 +609,42 @@ describe("code step: a rejected code and a rate-limit wait", () => {
     await settle();
   };
 
-  it("sends a rate-limited code once more when its wait ends, and nothing more after it is rejected again", async () => {
+  it("sends the retried rejected code once when its own rate-limit wait ends, and nothing more after it is rejected again", async () => {
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), RATE_LIMITED(), wrongCode(3)] });
     await openCodeStep();
     pasteCode(1, "123456");
     await settle();
-    // A changed code is a new entry, so it is checked; the server rate-limits it.
-    fireEvent.input(box(6), { target: { value: "7" } });
+    // Re-pasting the rejected code is a deliberate new entry, so it is checked again (and rate-limited here).
+    pasteCode(1, "123456");
     await settle();
     expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
-    expect(sentCodes(sent)).toEqual(["123456", "123457"]);
+    expect(sentCodes(sent)).toEqual(["123456", "123456"]);
 
     await endWait();
-    expect(sentCodes(sent)).toEqual(["123456", "123457", "123457"]);
+    expect(sentCodes(sent)).toEqual(["123456", "123456", "123456"]);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
 
     await endWait();
     expect(sentCodes(sent)).toHaveLength(3);
-    expect(boxValues()).toBe("123457");
+    expect(boxValues()).toBe("123456");
     expectAllInvalid();
   });
 
-  it("sends a code edited during the wait, and only that, when the wait ends", async () => {
+  it("sends a rejected code edited during the wait, and only that, when the wait ends", async () => {
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), RATE_LIMITED(), wrongCode(3)] });
     await openCodeStep();
     pasteCode(1, "123456");
     await settle();
-    fireEvent.input(box(6), { target: { value: "7" } });
+    // Re-pasting the rejected code is a deliberate new entry, so it is checked again (and rate-limited here).
+    pasteCode(1, "123456");
     await settle();
 
     fireEvent.input(box(3), { target: { value: "7" } });
     await settle();
-    expect(sentCodes(sent)).toEqual(["123456", "123457"]);
+    expect(sentCodes(sent)).toEqual(["123456", "123456"]);
     await endWait();
 
-    expect(sentCodes(sent)).toEqual(["123456", "123457", "127457"]);
+    expect(sentCodes(sent)).toEqual(["123456", "123456", "127456"]);
   });
 });
 
@@ -839,9 +840,9 @@ describe("code step: a digit typed into a box that already holds one", () => {
     expect(box(6)).toHaveFocus();
   });
 
-  it.each([["654321", [REJECTED, "654321"]], [REJECTED, [REJECTED]]] as const)(
-    "sends one request, on the sixth digit, when %s is typed after clicking box 1 that already has focus (sent: %j)",
-    async (retyped, expectedSent) => {
+  it.each(["654321", REJECTED])(
+    "sends exactly one request, on the sixth digit, when %s is typed after clicking box 1 that already has focus",
+    async (retyped) => {
       const user = userEvent.setup();
       const { sent } = await openRejected(user);
 
@@ -855,7 +856,7 @@ describe("code step: a digit typed into a box that already holds one", () => {
       await settle();
 
       expect(boxValues()).toBe(retyped);
-      expect(sentCodes(sent)).toEqual(expectedSent);
+      expect(sentCodes(sent)).toEqual([REJECTED, retyped]);
     },
   );
 
@@ -949,7 +950,7 @@ describe("code step: events in box 6 that enter no digit into a rejected code", 
     expect(sentCodes(sent)).toEqual([REJECTED, "123459"]);
   });
 
-  it("does not send again when the digit box 6 already holds is typed over it, since the code is unchanged", async () => {
+  it("still sends once when the digit a box 6 already holds is typed over it", async () => {
     const { user, sent } = await openRejected();
     await user.click(box(6));
 
@@ -957,7 +958,7 @@ describe("code step: events in box 6 that enter no digit into a rejected code", 
     await settle();
 
     expect(boxValues()).toBe(REJECTED);
-    expect(sentCodes(sent)).toEqual([REJECTED]);
+    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
   });
 
 });

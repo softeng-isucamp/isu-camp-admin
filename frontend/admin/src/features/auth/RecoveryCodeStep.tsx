@@ -64,7 +64,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const inFlight = useRef(false);
   // The last code the server rejected. Until the boxes change, it is not sent again: that would spend another attempt on a guess already refused.
   const rejectedCode = useRef<string | null>(null);
-  // Whether a digit has changed since that rejection; editing the code and typing it back is an edit like any other.
+  // Whether anything was entered since that rejection; typing or pasting the same code again is a deliberate new entry.
   const editedSinceRejection = useRef(false);
   const [repeatsRejected, setRepeatsRejected] = useState(false);
   // The issued code can no longer be accepted. Set the moment that is known, ahead of any render, so no timer's callback can still send it.
@@ -283,8 +283,10 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           describedBy={error ? alertId : undefined}
           onChange={(next) => {
             setCode(next);
-            if (rejectedCode.current !== null && next !== rejectedCode.current) editedSinceRejection.current = true;
-            setRepeatsRejected(next === rejectedCode.current && !editedSinceRejection.current);
+            // Any input after a rejection is a new entry, even retyping or re-pasting the same digits: that is
+            // the administrator deliberately checking it again. Only Enter or Verify with nothing entered is held back.
+            if (rejectedCode.current !== null) editedSinceRejection.current = true;
+            setRepeatsRejected(false);
             // Typing answers "enter the code"; a rejected code's message stays until the next attempt.
             setError((current) => (current === CODE_INCOMPLETE ? "" : current));
           }}
