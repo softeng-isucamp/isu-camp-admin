@@ -134,7 +134,7 @@ export function Shell({ children }: PropsWithChildren) {
                 <img src={profileUserIcon} alt="" />
               </div>
               <div className="profile-copy">
-                <strong>{session?.username ?? "Admin Justine"}</strong>
+                <strong className="profile-name" title={session?.username ?? "Admin Justine"}>{session?.username ?? "Admin Justine"}</strong>
                 <small>{session?.role === "superadmin" ? "SUPERADMIN" : "ADMINISTRATOR"}</small>
               </div>
               </NavLink>

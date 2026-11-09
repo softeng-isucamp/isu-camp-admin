@@ -377,6 +377,17 @@ describe('alternative email', () => {
     expect(screen.getByLabelText('Alternative email')).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('refuses a username over 255 characters under the field, as Add Administrator does, and saves nothing', async () => {
+    const update = vi.spyOn(services.profile, 'update');
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit Profile' }));
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'u'.repeat(256) } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Username must be 255 characters or fewer.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('shows a taken username under the username field', async () => {
     await openDialog();
     await type('Username', 'admin_dean');

@@ -15,6 +15,7 @@ import {
   DEMOTION_REASONS, OTHER_REASON_MAX, demotionReasonIssues, type DemotionReasonCode,
 } from "../../lib/demotionReasons";
 import { PERMISSION_ACTIONS, allPermissions, samePermissions, viewOnlyPermissions } from "../../lib/permissions";
+import { usernameIssue } from "../../lib/username";
 import type { AdminAccount, AdminAccountDraft, AdminPermissions, AdminRole } from "../../types";
 import { PermissionsEditor } from "./PermissionsEditor";
 
@@ -271,7 +272,8 @@ export function AdministratorsPanel({ feedback }: {
     const username = draft.username.trim();
     const email = draft.email.trim();
     const issues: Record<string, string> = {};
-    if (!username) issues.username = "Username is required.";
+    const usernameProblem = usernameIssue(username);
+    if (usernameProblem) issues.username = usernameProblem;
     if (!email) issues.email = "Email is required.";
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) issues.email = "Enter a valid email address.";
     const weakness = firstPasswordIssue(draft.password ?? "");

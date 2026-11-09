@@ -7,6 +7,7 @@ import { PasswordChecklist } from '../../components/PasswordChecklist';
 import { services } from '../../services/api';
 import { errorMessage } from '../../services/errors';
 import { firstPasswordIssue } from '../../services/passwordRules';
+import { usernameIssue } from '../../lib/username';
 import { supportsAlternativeEmail, type AccountProfile } from '../../services/profile';
 import { useAuth } from '../auth/AuthContext';
 import { BackupRecovery } from './BackupRecovery';
@@ -89,6 +90,8 @@ function DetailsDialog({ profile, returnTo, onClose, onSaved }: { profile: Accou
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (saving || unchanged) return;
+    const usernameProblem = usernameIssue(username);
+    if (usernameProblem) { setError(''); setFieldErrors({ username: usernameProblem }); return; }
     setError(''); setFieldErrors({}); setSaving(true);
     try {
       onSaved(await services.profile.update({
@@ -106,7 +109,7 @@ function DetailsDialog({ profile, returnTo, onClose, onSaved }: { profile: Accou
   return <DialogFocus busy={saving} returnTo={returnTo}><Modal title="Edit Profile" size="sm" onClose={() => { if (!saving) onClose(); }}>
     <form onSubmit={save} className="admin-form" noValidate>
       {error && <div role="alert" className="admin-form-error">{error}</div>}
-      <Field label="USERNAME" aria-label="Username" value={username} onChange={edit('username', setUsername)} required autoComplete="username" maxLength={100} disabled={saving} error={fieldErrors.username} />
+      <Field label="USERNAME" aria-label="Username" value={username} onChange={edit('username', setUsername)} required autoComplete="username" disabled={saving} error={fieldErrors.username} />
       <Field label={alternativeSupported ? 'PRIMARY EMAIL' : 'EMAIL'} aria-label={alternativeSupported ? 'Primary email' : 'Email'} type="email" value={email} onChange={edit('email', setEmail)} required autoComplete="email" maxLength={254} disabled={saving} subhelper="Password reset codes are sent here." error={fieldErrors.email} />
       {alternativeSupported && <Field label="ALTERNATIVE EMAIL" aria-label="Alternative email" type="email" badge="Optional" value={alternativeEmail} onChange={edit('alternativeEmail', setAlternativeEmail)} autoComplete="email" maxLength={254} placeholder="you@example.com" disabled={saving} subhelper="Used for account recovery if you lose access to your primary email." error={fieldErrors.alternativeEmail} />}
       {emailsChanged && <PasswordField label="CURRENT PASSWORD" toggleName="current password" aria-label="Current password" value={currentPassword} onChange={edit('currentPassword', setCurrentPassword)} required autoComplete="current-password" disabled={saving} subhelper="Changing an email address needs your password." error={fieldErrors.currentPassword} />}

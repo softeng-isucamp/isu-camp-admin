@@ -31,6 +31,28 @@ describe("Shell Sidebar Component", () => {
     cleanup();
   });
 
+  it("truncates a long username in the sidebar chip and shows the full name as its tooltip", () => {
+    const longName = "administrator_".repeat(8);
+    vi.spyOn(AuthContext, "useAuth").mockReturnValue({
+      session: { ...mockSession, username: longName },
+      login: vi.fn(),
+      logout: mockLogout,
+      loading: false,
+      updateSession: vi.fn(),
+      refreshSession: vi.fn(),
+    });
+    render(
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Shell>
+          <div>Child Content</div>
+        </Shell>
+      </MemoryRouter>
+    );
+    const name = screen.getByText(longName);
+    expect(name).toHaveClass("profile-name");
+    expect(name).toHaveAttribute("title", longName);
+  });
+
   it("renders expanded sidebar by default and shows navigation labels", () => {
     render(
       <MemoryRouter initialEntries={["/dashboard"]}>
