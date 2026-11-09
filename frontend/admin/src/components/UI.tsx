@@ -7,6 +7,7 @@ import {
   type SelectHTMLAttributes,
   useEffect,
   useId,
+  useRef,
 } from "react";
 import { cx, formatDateTimeCompact, formatDateTimeFull, timestampIso, viewerTimeZone } from "../lib/format";
 
@@ -238,6 +239,9 @@ export interface ModalProps {
   className?: string;
 }
 
+/** Open Modals, oldest first; only the last one answers Escape. */
+const openModals: object[] = [];
+
 export function Modal({
   title,
   subtitle,
@@ -249,9 +253,22 @@ export function Modal({
   className,
 }: PropsWithChildren<ModalProps>) {
   const titleId = useId();
+  const modalRef = useRef({});
+  useEffect(() => {
+    const modal = modalRef.current;
+    openModals.push(modal);
+    return () => {
+      const index = openModals.indexOf(modal);
+      if (index >= 0) openModals.splice(index, 1);
+    };
+  }, []);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Escape closes the topmost modal only, and is handled here so page-level shortcuts skip it.
+      if (openModals[openModals.length - 1] !== modalRef.current) return;
+      e.preventDefault();
+      onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

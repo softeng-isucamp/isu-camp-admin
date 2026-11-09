@@ -74,7 +74,11 @@ export function useEscapeShortcut({
       if (mode === "move") return;
       if (toolSession.pendingToolRequest) {
         toolSession.cancelInterruption();
-      } else if (workingSession.hasActiveDraft()) {
+        return;
+      }
+      // A modal dialog owns Escape: it closes itself, and the map's unwinding stays out of it.
+      if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (workingSession.hasActiveDraft()) {
         toolSession.requestTool({ toolType: "select" });
       } else if (activeTool !== "select") {
         toolSession.activateTool("select");
