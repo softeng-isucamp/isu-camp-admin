@@ -26,6 +26,7 @@ import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDeta
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { FilterCombobox } from "../../components/FilterCombobox";
+import { RowActionMenu } from "../../components/RowActionMenu";
 import { ParentBuildingField } from "./ParentBuildingField";
 import { usePermissions } from "../auth/usePermissions";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -155,19 +156,6 @@ export function Locations() {
   >(null);
   const dialogRef = useRef(dialog);
   dialogRef.current = dialog;
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
-        setActionMenuId(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
@@ -793,7 +781,6 @@ export function Locations() {
     setPhotos([]);
     setCustomFloorMode(false);
     setLockedParentId(parent.id);
-    setActionMenuId(null);
     openDialog("add");
   };
 
@@ -1063,7 +1050,6 @@ export function Locations() {
             </thead>
             <tbody>
               {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed, childSummary }, index) => {
-                const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: "16px 20px" }}>
@@ -1145,106 +1131,61 @@ export function Locations() {
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === locationIdentityKey(item) ? 50 : 0 }}>
-                    <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === locationIdentityKey(item) ? actionMenuRef : undefined}>
+                  <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                    <RowActionMenu
+                      label={`Actions for ${item.name}`}
+                      triggerProps={{ style: { background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" } }}
+                    >
                       <button
-                        className="table-action menu-trigger"
-                        aria-label={`Actions for ${item.name}`}
-                        aria-expanded={actionMenuId === locationIdentityKey(item)}
-                        onClick={() => setActionMenuId((current) => (current === locationIdentityKey(item) ? null : locationIdentityKey(item)))}
-                        style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" }}
+                        role="menuitem"
+                        onClick={() => {
+                          const parent = item.parentId
+                            ? allLocations.find((location) => location.id === item.parentId && isLocationContainer(location))
+                              ?? allLocations.find((location) => location.name === item.building && isLocationContainer(location))
+                            : undefined;
+                          if (isChildLocation(item) && !parent) {
+                            setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
+                            return;
+                          }
+                          if (isChildLocation(item)) navigate(`/map-editor?indoorLocation=${encodeURIComponent(item.id)}`);
+                          else navigate(`/map-editor?location=${encodeURIComponent(item.id)}`);
+                        }}
                       >
-                        •••
+                        {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                       </button>
-                      {actionMenuId === locationIdentityKey(item) && (
-                        <div
-                          className="row-action-menu"
-                          role="menu"
-                          onMouseDown={(event) => event.stopPropagation()}
-                          style={{
-                            position: "absolute",
-                            right: "20px",
-                            top: isNearBottom ? "auto" : "44px",
-                            bottom: isNearBottom ? "44px" : "auto",
-                            background: "#fff",
-                            borderRadius: "14px",
-                            boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
-                            zIndex: 40,
-                            padding: "6px",
-                            minWidth: "165px",
-                            border: "1px solid #e5e7eb",
-                            textAlign: "left",
+                      {isBuilding(item) && can("add") && (
+                        <button role="menuitem" onClick={() => openAddRoom(item)}>
+                          ＋ Add room to this building
+                        </button>
+                      )}
+                      {can("edit") && (
+                        <button role="menuitem" onClick={() => openEdit(item)}>
+                          Edit location
+                        </button>
+                      )}
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setSelected(item);
+                          openDialog("history");
+                        }}
+                      >
+                        View history
+                      </button>
+                      {can("delete") && <div role="separator" />}
+                      {can("delete") && (
+                        <button
+                          role="menuitem"
+                          className="danger"
+                          onClick={() => {
+                            setSelected(item);
+                            openDialog("remove");
                           }}
                         >
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              const parent = item.parentId
-                                ? allLocations.find((location) => location.id === item.parentId && isLocationContainer(location))
-                                  ?? allLocations.find((location) => location.name === item.building && isLocationContainer(location))
-                                : undefined;
-                              if (isChildLocation(item) && !parent) {
-                                setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
-                                setActionMenuId(null);
-                                return;
-                              }
-                              if (isChildLocation(item)) navigate(`/map-editor?indoorLocation=${encodeURIComponent(item.id)}`);
-                              else navigate(`/map-editor?location=${encodeURIComponent(item.id)}`);
-                              setActionMenuId(null);
-                            }}
-                          >
-                            {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
-                          </button>
-                          {isBuilding(item) && can("add") && (
-                            <button
-                              role="menuitem"
-                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                              onClick={() => openAddRoom(item)}
-                            >
-                              ＋ Add room to this building
-                            </button>
-                          )}
-                          {can("edit") && (
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              openEdit(item);
-                              setActionMenuId(null);
-                            }}
-                          >
-                            Edit location
-                          </button>
-                          )}
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              setSelected(item);
-                              openDialog("history");
-                              setActionMenuId(null);
-                            }}
-                          >
-                            View history
-                          </button>
-                          {can("delete") && <div role="separator" />}
-                          {can("delete") && (
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
-                            onClick={() => {
-                              setSelected(item);
-                              openDialog("remove");
-                              setActionMenuId(null);
-                            }}
-                          >
-                            Delete location
-                          </button>
-                          )}
-                        </div>
+                          Delete location
+                        </button>
                       )}
-                    </div>
+                    </RowActionMenu>
                   </td>
                   </>}
                 </tr>

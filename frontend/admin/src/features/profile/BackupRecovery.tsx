@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Badge, Button, Card, Empty, LoadingState, Stamp, TimeZoneTag } from '../../components/UI';
-import { FittedPopover } from '../../components/FittedPopover';
+import { RowActionMenu } from '../../components/RowActionMenu';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
@@ -32,7 +32,6 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const [job, setJob] = useState<BackupJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [target, setTarget] = useState<Target | null>(null);
-  const [menuId, setMenuId] = useState<string | null>(null);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [cancelRequested, setCancelRequested] = useState<string | null>(null);
@@ -41,18 +40,10 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const [pollError, setPollError] = useState('');
   // After a schedule save, the shown next run is the old schedule's until the server answers.
   const [nextRunStale, setNextRunStale] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   // Async answers are checked against what is on screen now, and a cancel that lost its race is reported once.
   const jobRef = useRef(job);
   jobRef.current = job;
   const cancelAsked = useRef<string | null>(null);
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuId(null);
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
-  }, []);
   const apply = (history: BackupHistory) => {
     setItems(history.items);
     setCapabilities({ canDownload: history.canDownload, canDelete: history.canDelete });
@@ -129,7 +120,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     document.querySelector<HTMLElement>('[data-create-backup]'),
     document.getElementById('backup-heading'),
   ];
-  const open = (action: Target['action'], backup: SystemBackup) => { setMenuId(null); setTarget({ action, backup }); };
+  const open = (action: Target['action'], backup: SystemBackup) => setTarget({ action, backup });
   const active = pending(job);
   const cancelling = active && cancelRequested === job!.id;
   const locked = busy || active;
@@ -180,14 +171,11 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
             <td>{isAutomatic(backup) ? <Badge tone="green">Automatic</Badge> : <><Badge tone="grey">Manual</Badge> <span className="profile-muted">{backup.createdBy}</span></>}</td>
             <td>{backup.status === 'ready' ? sizeText(backup.sizeBytes) : '—'}</td>
             <td>{backup.status === 'ready' ? <Badge tone="green">Ready</Badge> : <Badge tone="red" className="badge-with-icon"><FailedIcon />Failed</Badge>}</td>
-            <td style={{ position: 'relative', textAlign: 'right' }}>
-              {actions.length > 0 && <div style={{ display: 'inline-flex' }} ref={menuId === backup.id ? menuRef : undefined}>
-                <button className="table-action menu-trigger" data-backup-trigger={backup.id} aria-label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} aria-expanded={menuId === backup.id}
-                  disabled={locked || target !== null} onClick={() => setMenuId((current) => current === backup.id ? null : backup.id)}>•••</button>
-                {menuId === backup.id && <FittedPopover className="row-action-menu" role="menu">
-                  {actions.map((entry, index) => [entry.action === 'delete' && index > 0 && <div key="separator" role="separator" />, <button key={entry.action} role="menuitem" className={entry.action === 'delete' ? 'danger' : undefined} onClick={() => open(entry.action, backup)}>{entry.label}</button>])}
-                </FittedPopover>}
-              </div>}
+            <td>
+              {actions.length > 0 && <RowActionMenu label={`Actions for backup from ${formatDateTime(backup.createdAt)}`} disabled={locked || target !== null}
+                triggerProps={{ 'data-backup-trigger': backup.id }}>
+                {actions.map((entry, index) => [entry.action === 'delete' && index > 0 && <div key="separator" role="separator" />, <button key={entry.action} role="menuitem" className={entry.action === 'delete' ? 'danger' : undefined} onClick={() => open(entry.action, backup)}>{entry.label}</button>])}
+              </RowActionMenu>}
             </td>
           </tr>;
         })}</tbody>

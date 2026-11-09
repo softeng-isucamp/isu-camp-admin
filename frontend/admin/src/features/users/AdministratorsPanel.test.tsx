@@ -68,6 +68,18 @@ const typeConfirmation = (password = "password123") =>
   fireEvent.change(screen.getByLabelText("Confirm your password"), { target: { value: password } });
 
 describe("Administrator accounts in User Management", () => {
+  it("closes a row menu on Escape and returns focus to its trigger", async () => {
+    await openAdministrators();
+    const trigger = screen.getByRole("button", { name: "Actions for admin_registrar" });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem")[0]).toHaveFocus();
+
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0], { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   beforeEach(() => {
     signInAs("superadmin");
     vi.spyOn(services.admins, "list").mockResolvedValue(directory.map((admin) => ({ ...admin })));
