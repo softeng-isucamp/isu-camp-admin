@@ -1886,8 +1886,8 @@ export const services: Services = {
       }
 
       failIfConfigured("buildingRemove");
-      const removed = buildings.find((item) => item.id === id);
-      if (removed) removed.status = "Inactive";
+      // Like the backend, deleting a Building deletes it outright, with its indoor Locations.
+      const removed = localAdapter.buildings.remove(id);
       if (removed) addAudit("Removed Building", removed.name, "Admin", removed.id);
       return wait(undefined);
     },
