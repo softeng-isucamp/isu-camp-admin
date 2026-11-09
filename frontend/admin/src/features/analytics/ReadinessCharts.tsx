@@ -57,7 +57,9 @@ export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
               );
             }}
           />
+          {/* Two Y axes and no axis 0: without axisId the tooltip falls back to a default axis and snaps to the wrong rows. */}
           <Tooltip
+            axisId="checks"
             cursor={{ fill: "#f3f6f4" }}
             content={({ active, payload }) => {
               const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;

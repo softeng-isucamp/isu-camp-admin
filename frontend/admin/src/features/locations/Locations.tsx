@@ -1029,7 +1029,7 @@ export function Locations() {
             <button
               type="button"
               className="btn btn-subtle"
-              style={{ padding: "8px 16px", borderRadius: "999px", fontSize: "13px", fontWeight: 600, border: "1px solid #d1d5db" }}
+              style={{ padding: "8px 16px", borderRadius: "999px", fontSize: "13px", fontWeight: 600, border: "1px solid #d1d5db", ...(analyticsFilter && viewMode === "hierarchy" ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
               aria-label="Toggle view mode"
               // The flat view pages through the server, so it cannot narrow to an Analytics list; that list stays in the hierarchy.
               disabled={!!analyticsFilter && viewMode === "hierarchy"}
