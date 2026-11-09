@@ -162,8 +162,8 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     {error && <div role="alert" className="admin-table-error profile-inline-error">{error}<Button variant="subtle" onClick={() => setRetry((n) => n + 1)}>Retry</Button></div>}
     {loading ? <LoadingState size={20}>Loading backups…</LoadingState> : !error && <div className="table-wrap" style={{ overflow: 'visible' }}>
       <table className="profile-backup-table">
-        <colgroup><col style={{ width: '27%' }} /><col style={{ width: '25%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /></colgroup>
-        <thead><tr><th>Created <TimeZoneTag /></th><th>Type</th><th>Size</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+        <colgroup><col style={{ width: '30%' }} /><col style={{ width: '26%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /><col style={{ width: '96px' }} /></colgroup>
+        <thead><tr><th>Created <TimeZoneTag /></th><th>Type</th><th>Size</th><th>Status</th><th style={{ textAlign: 'left' }}>Actions</th></tr></thead>
         <tbody>{items.map((backup) => {
           const actions = rowActions(backup);
           return <tr key={backup.id}>
