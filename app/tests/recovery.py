@@ -13,7 +13,7 @@ import re
 import threading
 from collections import deque
 
-from flask import Flask
+from flask import Flask, has_app_context
 from sqlalchemy import event
 import pytest
 
@@ -204,8 +204,30 @@ class Harness:
         return "000000" if real != "000000" else "111111"
 
     def release_cooldown(self):
-        """Lets the same address ask for another code without waiting a minute."""
+        """Lets the same address ask for another code without waiting a minute.
+
+        The resend cooldown is the subject's newest stored request, so every
+        stored request is moved a cooldown into the past - the way a minute's
+        wait would have left them - along with clearing the flood buckets.
+        """
         auth_module.rate_limit_buckets.clear()
+        if not has_app_context():
+            # Called from a test's worker thread, which has no context of its own.
+            with self.app.app_context():
+                self.age_requests_by_a_cooldown()
+            return
+        self.age_requests_by_a_cooldown()
+
+    def age_requests_by_a_cooldown(self):
+        db.session.expire_all()
+        shift = timedelta(seconds=auth_module.RECOVERY_RESEND_SECONDS)
+        for row in RecoveryAttempt.query.all():
+            if row.requested_at:
+                row.requested_at = [
+                    (auth_module.as_utc(datetime.fromisoformat(value)) - shift).isoformat()
+                    for value in row.requested_at
+                ]
+        db.session.commit()
 
     # ------------------------------------------
     # The persistent counters, as a test reads them
@@ -509,6 +531,89 @@ def test_an_unregistered_address_is_refused_before_any_restriction_is_consulted(
     assert harness.verify("999999", email=email).json["code"] == "recovery_restricted"
 
 
+def test_a_restriction_is_reported_ahead_of_the_request_flood_limits(harness):
+    """Asking for a code right after a lockout used to answer the one-a-minute
+    flood limit with its few seconds, so the user was told to wait seconds when
+    the real wait was a quarter of an hour."""
+
+    harness.request_code()
+    harness.exhaust_attempts()
+
+    # The same client and address within the minute: the flood limit would
+    # refuse this too, but the restriction is what is reported.
+    asked = harness.request_code()
+    assert asked.status_code == 429
+    assert asked.json["code"] == "recovery_restricted"
+    assert int(asked.headers["Retry-After"]) > 800
+
+    # And past the per-client limit as well.
+    for n in range(auth_module.RECOVERY_REQUEST_LIMIT_PER_IP):
+        harness.request_code(email=f"person{n}@isu.edu.ph")
+    asked = harness.request_code()
+    assert asked.json["code"] == "recovery_restricted"
+    assert int(asked.headers["Retry-After"]) > 800
+    assert len(harness.sent) == 1
+
+
+def test_a_restriction_is_reported_ahead_of_the_guess_flood_limits(harness, monkeypatch):
+    harness.request_code()
+    code = harness.issued_code()
+    harness.exhaust_attempts()
+    monkeypatch.setattr(auth_module, "RECOVERY_GUESS_LIMIT_PER_EMAIL", 1)
+    monkeypatch.setattr(auth_module, "RECOVERY_GUESS_LIMIT_PER_IP", 1)
+
+    for refused in (harness.verify(code), harness.verify(code), harness.reset(code), harness.reset(code)):
+        assert refused.status_code == 429
+        assert refused.json["code"] == "recovery_restricted"
+        assert int(refused.headers["Retry-After"]) > 800
+    assert harness.admins[0].password == "old-password"
+
+
+def test_the_resend_cooldown_holds_across_clients(harness):
+    """Kept with the account's counters, not in a bucket per client, so asking
+    again from another network does not skip it."""
+
+    first = harness.post_from("192.0.2.10", "request", email="admin@isu.edu.ph", purpose="password")
+    again = harness.post_from("192.0.2.11", "request", email="admin@isu.edu.ph", purpose="username")
+
+    assert first.status_code == 200
+    assert again.status_code == 429
+    assert again.json["code"] == "rate_limited"
+    assert 0 < int(again.headers["Retry-After"]) <= 60
+    assert len(harness.sent) == 1
+    assert requests_counted(harness) == 1
+
+
+def test_the_resend_cooldown_survives_a_restart(harness):
+    harness.request_code()
+    # What a restart forgets: the in-memory flood buckets.
+    auth_module.rate_limit_buckets.clear()
+
+    again = harness.request_code()
+
+    assert again.status_code == 429
+    assert again.json["code"] == "rate_limited"
+    assert len(harness.sent) == 1
+
+
+def test_the_resend_cooldown_lifts_after_a_minute(harness):
+    harness.request_code()
+    harness.release_cooldown()
+
+    assert harness.post_from("192.0.2.12", "request", email="admin@isu.edu.ph", purpose="password").status_code == 200
+    assert len(harness.sent) == 2
+
+
+def test_the_resend_cooldown_covers_both_of_an_accounts_addresses(two_addresses):
+    assert two_addresses.request_code().status_code == 200
+
+    again = two_addresses.post_from("192.0.2.13", "request", email=ALTERNATIVE, purpose="password")
+
+    assert again.status_code == 429
+    assert again.json["code"] == "rate_limited"
+    assert len(two_addresses.sent) == 1
+
+
 def test_unexpected_errors_are_json_and_do_not_leak_the_cause(harness, monkeypatch):
     def broken(email):
         raise RuntimeError("connection to db-host:5432 refused")
@@ -709,17 +814,22 @@ def test_verify_tells_a_flood_limit_apart_from_a_restriction(harness):
     """Both are 429 and both carry Retry-After, but they mean different things:
     one is about how fast this client is going, the other about the account."""
 
+    unrestricted = [harness.verify("999999", email=f"p{n}@isu.edu.ph") for n in range(31)]
+    assert unrestricted[-1].status_code == 429
+    assert unrestricted[-1].json["code"] == "rate_limited"
+    assert 0 < int(unrestricted[-1].headers["Retry-After"]) <= 60
+    harness.release_cooldown()
+
     responses = [harness.verify("999999") for _ in range(12)]
 
     assert [r.status_code for r in responses] == [400] * 4 + [429] * 8
     assert all(r.is_json for r in responses)
-    # The first four spend the budget, the fifth restricts, and the rest are
-    # refused by the restriction until the per-address flood limit of ten
-    # guesses a minute takes over.
-    assert [r.json["code"] for r in responses[4:10]] == ["recovery_restricted"] * 6
-    assert [r.json["code"] for r in responses[10:]] == ["rate_limited"] * 2
+    # The first four spend the budget and the fifth restricts. The rest stay
+    # the restriction even past the per-address flood limit of ten guesses a
+    # minute: a restricted account is always told its real wait.
+    assert [r.json["code"] for r in responses[4:]] == ["recovery_restricted"] * 8
     assert int(responses[4].headers["Retry-After"]) == 900
-    assert 0 < int(responses[10].headers["Retry-After"]) <= 60
+    assert int(responses[-1].headers["Retry-After"]) > 60
 
 
 def test_verify_429_does_not_count_against_the_attempts(harness, monkeypatch):
@@ -1047,7 +1157,8 @@ def test_a_failed_colleague_send_refunds_its_own_request_not_a_later_one(harness
     def fail_after_another_request(message):
         # Another thread can request through the alternative address while
         # SMTP is waiting. Its later timestamp must keep its own full window.
-        clock[0] = started + timedelta(seconds=30)
+        # Past the resend cooldown, which this send started.
+        clock[0] = started + timedelta(seconds=auth_module.RECOVERY_RESEND_SECONDS + 1)
         assert auth_module.authorize_recovery_subject(harness.subject()) is None
         raise RuntimeError("smtp is down")
 
@@ -1068,6 +1179,20 @@ def test_a_failed_slow_send_does_not_refund_a_later_send_cooldown(harness, colle
     monkeypatch.setattr(auth_module.mail, "send", fail_after_cooldown_was_reused)
     assert colleague.send().status_code == 502
     assert list(auth_module.rate_limit_buckets[("admin-reset", "1")]) == [clock[0]]
+
+
+def test_a_colleague_send_is_not_held_by_the_pages_resend_cooldown(harness, colleague):
+    """A signed-in administrator helping someone who asked a moment ago is not
+    told to wait; the page asking again right after the send still is."""
+
+    harness.request_code()
+    assert colleague.send().status_code == 200
+
+    auth_module.rate_limit_buckets.clear()
+    asked = harness.post_from("192.0.2.14", "request", email="admin@isu.edu.ph", purpose="password")
+    assert asked.status_code == 429
+    assert asked.json["code"] == "rate_limited"
+    assert len(harness.sent) == 2
 
 
 def test_a_code_requested_from_the_page_stays_asynchronous_when_mail_fails(harness, colleague):

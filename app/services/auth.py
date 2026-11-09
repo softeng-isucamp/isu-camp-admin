@@ -847,10 +847,12 @@ RECOVERY_ATTEMPT_LIMIT = 5
 # happened rather than hedging about whether an account exists.
 RECOVERY_REQUEST_MESSAGE = "A verification code has been sent to this email."
 
-# Rate limits, per minute. Requests are limited per address as the resend
-# cooldown and per client across addresses so the form cannot be used to flood
-# inboxes. Guesses are limited per address and per client; the per-code attempt
-# limit is what actually stops guessing, this only slows a flood of requests.
+# Rate limits, per minute. Requests are limited per client and address, and per
+# client across addresses, so the form cannot be used to flood inboxes; the
+# resend cooldown that holds across clients is per subject and persisted (see
+# recovery_resend_wait). Guesses are limited per address and per client; the
+# per-subject attempt limit is what actually stops guessing, this only slows a
+# flood of requests.
 RECOVERY_REQUEST_LIMIT_PER_IP = 10
 RECOVERY_GUESS_LIMIT_PER_EMAIL = 10
 RECOVERY_GUESS_LIMIT_PER_IP = 30
@@ -1208,6 +1210,21 @@ def recovery_request_wait(row):
     return max(1, math.ceil(remaining))
 
 
+def recovery_resend_wait(row):
+    """Whole seconds until the resend cooldown lets this subject ask again, or 0.
+
+    Measured from the subject's newest stored request rather than from an
+    in-memory bucket keyed by client, so asking again from another network
+    does not skip it, and a restart does not reset it.
+    """
+
+    times = recovery_request_times(row)
+    if not times:
+        return 0
+    remaining = RECOVERY_RESEND_SECONDS - (utc_now() - times[-1]).total_seconds()
+    return max(1, math.ceil(remaining)) if remaining > 0 else 0
+
+
 def record_recovery_request(row):
     """Counts one issued code against the window.
 
@@ -1290,6 +1307,45 @@ def recovery_request_limited_response(seconds):
     })
     response.headers["Retry-After"] = str(max(1, int(seconds)))
     return response, 429
+
+
+def recovery_resend_cooldown_response(seconds):
+    """The 429 for a second code asked for inside the resend cooldown.
+
+    A ``rate_limited`` answer, like the flood limits: it lifts in seconds and
+    says nothing about the account being closed.
+    """
+
+    response = jsonify({
+        "success": False,
+        "code": RATE_LIMITED_CODE,
+        "message": "Please wait before requesting another code.",
+    })
+    response.headers["Retry-After"] = str(max(1, int(seconds)))
+    return response, 429
+
+
+def recovery_restriction_refusal(subject):
+    """The restriction answer when ``subject`` is restricted, else None.
+
+    Read before any flood limit, so a restricted subject is always told the
+    restriction and its real remaining time - not a flood limit's few seconds,
+    after which it would only be refused again with the restriction.
+
+    A read with no row lock and no write: it only decides the order of two
+    refusals. The locked read that decides the verdict still happens later, so
+    a restriction that starts after this read is still enforced. It does take
+    ``recovery_lock``, like every other read of these rows, so it never runs
+    beside another request's read-decide-write in this process.
+
+    The caller resolves the subject once and hands the same identity on, so
+    a request still makes one account lookup, whatever the address.
+    """
+
+    with recovery_lock:
+        row = db.session.get(RecoveryAttempt, subject, populate_existing=True)
+        seconds = recovery_restriction_seconds(row) if row is not None else 0
+    return recovery_restricted_response(seconds) if seconds else None
 
 
 def recovery_key(purpose, email):
@@ -1527,7 +1583,7 @@ def send_password_reset_otp(admin):
         }), 409
 
     reservation = []
-    refused = authorize_recovery_subject(subject, reservation=reservation)
+    refused = authorize_recovery_subject(subject, reservation=reservation, cooldown=False)
     if refused:
         return refused
 
@@ -1594,7 +1650,7 @@ def recovery_code_matches(entry, code):
     return digits_match and entry["otp"] is not None
 
 
-def authorize_recovery_subject(subject, *, reservation=None):
+def authorize_recovery_subject(subject, *, reservation=None, cooldown=True):
     """Counts one code request against ``subject``, or what to send instead.
 
     Returns None when a code may be issued - having recorded that it was - and
@@ -1605,6 +1661,12 @@ def authorize_recovery_subject(subject, *, reservation=None):
     Both account-scoped limits are checked here: a restriction earned by
     guessing closes requesting too, because otherwise the way to sit out a
     restriction would be to keep mailing yourself codes until it lifted.
+
+    The resend cooldown applies with ``cooldown``. The colleague send passes
+    False: it is signed in and has its own per-account send limit, and an
+    administrator helping someone who asked for a code a moment ago should
+    not be told to wait. A page request just after a colleague send is still
+    held by the cooldown, since the send is recorded like any other request.
 
     Recorded and committed before the code is issued, so a crash between the
     two costs a request rather than leaving a code that nothing counted.
@@ -1626,6 +1688,14 @@ def authorize_recovery_subject(subject, *, reservation=None):
             db.session.commit()
             return recovery_request_limited_response(wait)
 
+        # The resend cooldown, per subject and persisted, so it holds whatever
+        # address or network the second request comes from. After the cap,
+        # whose wait is the longer one when both apply.
+        wait = recovery_resend_wait(row) if cooldown else 0
+        if wait:
+            db.session.commit()
+            return recovery_resend_cooldown_response(wait)
+
         admitted_at = record_recovery_request(row)
         db.session.commit()
         if reservation is not None:
@@ -1633,7 +1703,7 @@ def authorize_recovery_subject(subject, *, reservation=None):
     return None
 
 
-def check_recovery_code(purpose, email, code):
+def check_recovery_code(purpose, email, code, identity=None):
     """Judges a submitted code, spending one of the subject's attempts if wrong.
 
     Returns ``(admin, None)`` when it is right, or ``(None, response)`` with the
@@ -1659,7 +1729,7 @@ def check_recovery_code(purpose, email, code):
     """
 
     key = recovery_key(purpose, email)
-    subject, admin = recovery_identity(email)
+    subject, admin = identity if identity is not None else recovery_identity(email)
 
     with recovery_lock:
         sweep_recovery_attempts()
@@ -1753,6 +1823,16 @@ def recovery_request():
         email = recovery_email(data)
         client = request.remote_addr or "unknown"
 
+        # Looked up first, so a restricted account is told the restriction and
+        # its real remaining time rather than a flood limit's few seconds. An
+        # address on no active account is not consulted: it is refused below
+        # as unregistered, whatever its counters say.
+        identity = recovery_identity(email) if EMAIL_PATTERN.match(email) else None
+        if identity is not None and identity[1] is not None:
+            restricted = recovery_restriction_refusal(identity[0])
+            if restricted:
+                return restricted
+
         limited = rate_limited(
             "recovery-request-ip",
             client,
@@ -1767,6 +1847,9 @@ def recovery_request():
         if not EMAIL_PATTERN.match(email):
             return recovery_bad_request("Enter a valid email address.")
 
+        # Throttles repeats from one client for any address, registered or
+        # not. The cooldown that holds across clients is the subject's, in
+        # authorize_recovery_subject.
         limited = rate_limited(
             "recovery-request",
             f"{client}:{email}",
@@ -1783,7 +1866,7 @@ def recovery_request():
         # The address must already be on record, as either of an account's two
         # addresses. Checked before anything is counted or stored, so a mistyped
         # address spends none of the account's budget and leaves no entry.
-        subject, admin = recovery_identity(email)
+        subject, admin = identity
         if admin is None:
             return recovery_error(RECOVERY_UNKNOWN_EMAIL_CODE, RECOVERY_UNKNOWN_EMAIL_MESSAGE)
 
@@ -1811,6 +1894,14 @@ def recovery_verify():
         data = request.get_json(silent=True)
         email = recovery_email(data)
 
+        # Before the flood limits, so a restricted subject always gets the
+        # restriction's own remaining time.
+        identity = recovery_identity(email) if EMAIL_PATTERN.match(email) else None
+        if identity is not None:
+            restricted = recovery_restriction_refusal(identity[0])
+            if restricted:
+                return restricted
+
         limited = recovery_guess_limit("recovery-verify", email)
         if limited:
             return limited
@@ -1820,7 +1911,7 @@ def recovery_verify():
         if not EMAIL_PATTERN.match(email) or purpose not in RECOVERY_PURPOSES or not isinstance(code, str) or not code:
             return recovery_bad_request("Email, purpose and verification code are required.")
 
-        admin, refusal = check_recovery_code(purpose, email, code)
+        admin, refusal = check_recovery_code(purpose, email, code, identity)
         if refusal:
             return refusal
 
@@ -1836,6 +1927,14 @@ def recovery_reset_password():
         data = request.get_json(silent=True)
         email = recovery_email(data)
 
+        # Before the flood limits, so a restricted subject always gets the
+        # restriction's own remaining time.
+        identity = recovery_identity(email) if EMAIL_PATTERN.match(email) else None
+        if identity is not None:
+            restricted = recovery_restriction_refusal(identity[0])
+            if restricted:
+                return restricted
+
         limited = recovery_guess_limit("recovery-reset", email)
         if limited:
             return limited
@@ -1847,7 +1946,7 @@ def recovery_reset_password():
 
         # The code first, so the password rules cannot be probed without one,
         # and so a weak password is refused without having spent the code.
-        admin, refusal = check_recovery_code("password", email, code)
+        admin, refusal = check_recovery_code("password", email, code, identity)
         if refusal:
             return refusal
 
