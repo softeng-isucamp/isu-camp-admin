@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from auth import admin_required
+from extensions import db
 from model.app_user import AppUser
 from model.audit_log import AuditLog
 from model.building import Building
@@ -52,26 +53,46 @@ def list_logs():
 
 
 def _user_activity_records():
-    """Project User App destination selections into the audit-log contract."""
+    """Project User App destination selections into the audit-log contract.
+
+    A fixed number of statements however long the history is: the history,
+    then one ``IN (...)`` lookup each for the users, locations and buildings it
+    names. Only the names are selected, which also keeps out the per-row
+    columns the full models carry, such as a location's cover-photo EXISTS.
+    """
+    histories = UserHistory.query.all()
+    usernames = _names_by_id(AppUser.id, AppUser.username, (h.user_id for h in histories))
+    location_names = _names_by_id(Location.location_id, Location.location_name, (h.location_id for h in histories))
+    building_names = _names_by_id(Building.building_id, Building.building_name, (h.building_id for h in histories))
+
     projected = []
-    for history in UserHistory.query.all():
-        user = AppUser.query.get(history.user_id) if history.user_id is not None else None
-        location = Location.query.get(history.location_id) if history.location_id is not None else None
-        building = Building.query.get(history.building_id) if history.building_id is not None else None
-        target = location.location_name if location is not None else (building.building_name if building is not None else "Unknown destination")
+    for history in histories:
+        location_name = location_names.get(history.location_id)
+        building_name = building_names.get(history.building_id)
+        target = location_name if location_name is not None else (building_name if building_name is not None else "Unknown destination")
         target_id = history.location_id if history.location_id is not None else history.building_id
-        target_type = "Location" if location is not None else "Building"
+        target_type = "Location" if location_name is not None else "Building"
+        username = usernames.get(history.user_id)
         projected.append({
             "id": f"user-history-{history.id}",
             "createdAt": history.created_at.isoformat(),
             "category": "User",
-            "actor": user.username if user is not None else f"user:{history.user_id}",
+            "actor": username if username is not None else f"user:{history.user_id}",
             "action": f"Searched {target_type}",
             "target": target,
             "targetId": str(target_id) if target_id is not None else None,
             "detail": "Destination selected in the User App",
         })
     return projected
+
+
+def _names_by_id(id_column, name_column, ids):
+    """``{id: name}`` for the given ids, from one query, or no query for none."""
+    wanted = {identifier for identifier in ids if identifier is not None}
+    if not wanted:
+        return {}
+    rows = db.session.query(id_column, name_column).filter(id_column.in_(wanted)).all()
+    return {identifier: name for identifier, name in rows}
 
 
 def _as_utc(value):
