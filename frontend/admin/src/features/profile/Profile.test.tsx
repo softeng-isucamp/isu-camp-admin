@@ -637,6 +637,24 @@ describe('backup & recovery', () => {
       expect(await screen.findByRole('button', { name: /Automatic backups are off/ })).toHaveTextContent('Auto backups off');
     });
 
+    it('refuses more than 99 backups to keep with an inline message and saves nothing', async () => {
+      history();
+      const save = saveSchedule();
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '999999999999');
+      expect(within(dialog).getByText('Enter a whole number from 1 to 99.')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Backups to keep')).toHaveAttribute('aria-invalid', 'true');
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+      expect(save).not.toHaveBeenCalled();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '99');
+      expect(within(dialog).queryByText('Enter a whole number from 1 to 99.')).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+
     it('refuses a keep count below one and keeps the dialog open when the save fails', async () => {
       history();
       vi.spyOn(services.profile, 'saveSchedule').mockRejectedValue(new Error('Schedule is unavailable.'));
