@@ -4318,7 +4318,6 @@ td small {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #fff;
-  overflow: hidden;
 }
 .graph {
   min-width: 0;
@@ -4381,13 +4380,35 @@ td small {
   color: var(--green-2);
   background: var(--mint);
 }
+.graph-info-anchor {
+  position: relative;
+  display: inline-flex;
+}
+/* A floating reading guide: layered above the charts, flipped by FittedPopover to stay on screen. */
 .graph-help {
-  margin: 0 0 14px;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  box-sizing: border-box;
+  width: 320px;
+  max-width: calc(100vw - 32px);
   padding: 12px 14px;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f6f8f7;
+  background: #fff;
+  box-shadow: 0 8px 24px #00000026;
   font-size: 12.5px;
   line-height: 1.5;
+  text-align: left;
+}
+.graph-help.aligns-end {
+  left: auto;
+  right: 0;
+}
+.graph-help.opens-up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .graph-help p {
   margin: 0;
@@ -4431,12 +4452,19 @@ td small {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  box-sizing: border-box;
+  max-width: 230px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 4px 14px #0000001a;
   font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.decision-tooltip .tip-names {
+  color: var(--muted);
 }
 .graph-aside {
   display: flex;

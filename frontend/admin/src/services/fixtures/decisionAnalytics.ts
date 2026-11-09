@@ -69,16 +69,25 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   const checks = (Object.keys(LABELS) as ReadinessGap[]).map((key) => {
     const applies = withGaps.filter(({ fact }) => key !== "rooms" || fact.holdsRooms);
     const missing = applies.filter(({ gaps }) => gaps.includes(key)).map(({ fact }) => ref(fact.place));
-    return { key, label: LABELS[key], complete: applies.length - missing.length, total: applies.length, missing };
+    const have = applies.filter(({ gaps }) => !gaps.includes(key)).map(({ fact }) => ref(fact.place));
+    return { key, label: LABELS[key], complete: have.length, total: applies.length, missing, have };
   });
 
   const routable = facts.filter((fact) => fact.entrance).map((fact) => fact.place);
   const pick = (start: number, count: number) => routable.slice(start, start + count).map(ref);
+  // Places that only get a longer walk come from the routable places a closure does not cut off.
+  const detour = (cutOff: AnalyticsPlaceRef[], start: number, count: number) => {
+    const cut = new Set(cutOff.map((place) => place.id));
+    return routable.filter((place) => !cut.has(place.id)).slice(start, start + count).map(ref);
+  };
   const closures = [
-    { pathway: "Junction → CCSICT walkway", cutOff: pick(0, 4), longerTrip: 6 },
-    { pathway: "Infirmary entrance path", cutOff: pick(4, 2), longerTrip: 9 },
-    { pathway: "Oval loop road", cutOff: [], longerTrip: 11 },
-  ].map((row, index) => ({ id: PATHWAY_IDS[index % PATHWAY_IDS.length] ?? `pathway-${index}`, ...row }));
+    { pathway: "Junction → CCSICT walkway", cutOff: pick(0, 4), longer: 6, start: 0 },
+    { pathway: "Infirmary entrance path", cutOff: pick(4, 2), longer: 9, start: 3 },
+    { pathway: "Oval loop road", cutOff: [] as AnalyticsPlaceRef[], longer: 11, start: 1 },
+  ].map(({ pathway, cutOff, longer, start }, index) => {
+    const longerPlaces = detour(cutOff, start, longer);
+    return { id: PATHWAY_IDS[index % PATHWAY_IDS.length] ?? `pathway-${index}`, pathway, cutOff, longerTrip: longerPlaces.length, longerPlaces };
+  });
 
   const unreachable = (share: number, offset: number) => {
     const count = Math.round(routable.length * share);
@@ -91,7 +100,11 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     { mode: "Bicycle", unreachable: unreachable(0.3, 1) },
     { mode: "Motorcycle", unreachable: unreachable(0.55, 0) },
     { mode: "Car", unreachable: unreachable(0.62, 5) },
-  ].map((row) => ({ ...row, reachable: routable.length - row.unreachable.length }));
+  ].map((row) => {
+    const missed = new Set(row.unreachable.map((place) => place.id));
+    const reachablePlaces = routable.filter((place) => !missed.has(place.id)).map(ref);
+    return { ...row, reachable: reachablePlaces.length, reachablePlaces };
+  });
 
   const total = Math.round(59 * scale);
   const split = <K extends string>(keys: K[], shares: number[]) => {

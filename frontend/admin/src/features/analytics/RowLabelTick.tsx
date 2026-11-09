@@ -14,8 +14,21 @@ type Props = {
   links?: RowLink[];
 };
 
+/** Rough width of one 12px label character, to fit a name into its axis without measuring text. */
+const CHAR_WIDTH = 6.2;
+/** Room kept between a label and the axis line. */
+const LABEL_GAP = 8;
+
+/** The name cut with an ellipsis so it fits `width` pixels; untouched when it already fits or the width is unknown. */
+export const fitLabel = (text: string, width: number) => {
+  const room = Math.floor((width - LABEL_GAP) / CHAR_WIDTH);
+  if (!(width > 0) || text.length <= room) return text;
+  return `${text.slice(0, Math.max(1, room - 1)).trimEnd()}…`;
+};
+
 /**
  * Category-axis label that never wraps (Recharts wraps long ticks into the next row).
+ * A name wider than its axis is cut with an ellipsis and keeps its full text as a hover title, rather than running off the panel's left edge.
  * `anchor="middle"` centres the label in the axis width, for a mirrored chart whose names sit between two bar sets.
  * With `links`, a row's label is a focusable link to the same place its bar opens, so the chart works by keyboard
  * and a zero-width bar (which renders nothing to click) still has a target.
@@ -23,6 +36,8 @@ type Props = {
 export function RowLabelTick({ x = 0, y = 0, payload, index, width = 0, anchor = "end", links }: Props) {
   const middle = anchor === "middle";
   const link = links?.[Number(index)];
+  const full = String(payload?.value ?? "");
+  const text = middle ? full : fitLabel(full, Number(width));
   const label = (
     <text
       x={middle ? Number(x) - Number(width) / 2 : Number(x) - 6}
@@ -33,7 +48,8 @@ export function RowLabelTick({ x = 0, y = 0, payload, index, width = 0, anchor =
       fill={INK.primary}
       textDecoration={link ? "underline" : undefined}
     >
-      {String(payload?.value ?? "")}
+      {text !== full && <title>{full}</title>}
+      {text}
     </text>
   );
   if (!link) return label;

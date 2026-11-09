@@ -263,12 +263,25 @@ export interface DecisionAnalytics {
     total: number;
     /** Places that pass every check that applies to them. */
     fullyReady: number;
-    checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[] }>;
+    /** `have` (proposed) lists the places that pass the check, so the "has it" half of a bar can open them like `missing`; a server that omits it leaves that half unclickable. */
+    checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[]; have?: AnalyticsPlaceRef[] }>;
   };
   /** What closing each pathway would do to walking routes from the main gate: only pathways that change something, worst first. `id` is the Pathway ID. */
-  closures: null | Array<{ id: string; pathway: string; cutOff: AnalyticsPlaceRef[]; longerTrip: number }>;
+  closures: null | Array<{
+    id: string;
+    pathway: string;
+    cutOff: AnalyticsPlaceRef[];
+    longerTrip: number;
+    /** Proposed: the `longerTrip` places themselves, so the longer-walk part of a bar can open them. */
+    longerPlaces?: AnalyticsPlaceRef[];
+  }>;
   /** Routable Places each travel mode reaches from `origin`; null when no single node is named as the main gate. */
-  reach: null | { origin: string; total: number; modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[] }> };
+  reach: null | {
+    origin: string;
+    total: number;
+    /** `reachablePlaces` (proposed) lists the `reachable` places, so the reached part of a bar can open them like `unreachable`. */
+    modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[]; reachablePlaces?: AnalyticsPlaceRef[] }>;
+  };
   /** Recorded searches in the range (UserHistory rows that survived deletion). */
   searches: {
     total: number;
