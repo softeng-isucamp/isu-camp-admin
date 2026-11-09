@@ -83,12 +83,12 @@ describe("Map Editor preview", () => {
     };
     renderEditor();
     fireEvent.change(screen.getByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
-    await screen.findByRole("button", { name: /Library Location/ });
+    await screen.findByRole("option", { name: /Library Location/ });
 
     act(() => { mapTestState.zoom = 17; mapZoomEndHandler?.(); });
     expect(screen.queryAllByTestId("saved-map-marker")).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /Library Location/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Library Location/ }));
     const selectedMarkers = screen.getAllByTestId("saved-map-marker");
     expect(selectedMarkers).toHaveLength(1);
     expect(selectedMarkers[0]).toHaveAttribute("data-icon-class", "location-marker-icon selected");
@@ -97,7 +97,7 @@ describe("Map Editor preview", () => {
   it("deselects the inspected feature when the administrator clicks empty canvas", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Location/ }));
     expect(screen.getByRole("complementary", { name: "Library object details" })).toBeInTheDocument();
 
     clickMap(16.7208, 121.6902);
@@ -116,7 +116,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Collision Junction" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Collision Junction Route Node" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Collision Junction Route Node" }));
 
     expect(screen.getByTestId("path-geometry")).toHaveAttribute("data-color", "#005931");
   });
@@ -140,11 +140,11 @@ describe("Map Editor preview", () => {
 
     const search = await screen.findByPlaceholderText("Search campus places...");
     fireEvent.change(search, { target: { value: "Collision Pathway" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Collision Pathway Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Collision Pathway Pathway" }));
     expect(screen.queryByRole("button", { name: "Map marker at 10,10" })).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "Collision Junction" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Collision Junction Route Node" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Collision Junction Route Node" }));
     expect(await screen.findByRole("button", { name: "Map marker at 10,10" })).toBeInTheDocument();
   });
 
@@ -158,7 +158,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Collision Pathway" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Collision Pathway Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Collision Pathway Pathway" }));
 
     expect(await screen.findByRole("complementary", { name: "Collision Pathway object details" })).toHaveTextContent("Pathway");
     expect(screen.queryByRole("complementary", { name: "Collision Room object details" })).not.toBeInTheDocument();

@@ -16,7 +16,7 @@ vi.mock("../../auth/AuthContext", async () => (await import("../testing/mapEdito
 const room: Location = { id: "room", name: "Room 204", code: "R204", type: "Room", parentId: "hall", building: "Hall", status: "Active", floor: "2nd Floor", function: "Classroom", lat: null, lng: null, positioned: false };
 const openRoomDetails = async () => {
   fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: room.name } });
-  fireEvent.click(await screen.findByRole("button", { name: "Room 204 Location" }));
+  fireEvent.click(await screen.findByRole("option", { name: "Room 204 Location" }));
   fireEvent.click(screen.getByRole("button", { name: "More actions for Room 204" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
   return screen.findByRole("dialog", { name: "Edit Location" });

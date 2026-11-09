@@ -71,7 +71,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: generatedMapFixture.pathways[0].name } });
-    fireEvent.click((await screen.findAllByRole("button", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
+    fireEvent.click((await screen.findAllByRole("option", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
     fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
     const importedPoint = generatedMapFixture.pathways[0].pathPoints[0];
     fireEvent.click((await screen.findAllByRole("button", { name: `Path Point at ${importedPoint.join(",")}` }))[0]);
@@ -146,7 +146,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Walk Pathway/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Walk Pathway/ }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library Walk" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Pathway" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("1 Path Point");
@@ -317,7 +317,7 @@ describe("Map Editor preview", () => {
 
     await screen.findByTestId("path-geometry");
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     fireEvent.change(screen.getByLabelText("Pathway shade"), { target: { value: "Fully Shaded" } });
     fireEvent.change(screen.getByLabelText("Pathway direction"), { target: { value: "One-way" } });
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
@@ -344,7 +344,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Switch source and destination" }));
 
     const inspector = screen.getByRole("complementary", { name: "North Walk object details" });
@@ -408,7 +408,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     expect(screen.getByRole("complementary", { name: "North Walk object details" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: toolName }));
@@ -423,7 +423,7 @@ describe("Map Editor preview", () => {
     ]);
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     await choosePathwayEditor();
 
     expect(await screen.findByRole("heading", { name: "Calibrate Path Points" })).toBeInTheDocument();

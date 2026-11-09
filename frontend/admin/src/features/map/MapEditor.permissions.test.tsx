@@ -54,7 +54,7 @@ describe("Map Editor for a restricted administrator", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /North Entrance Route Node/ }));
     const card = await screen.findByRole("complementary", { name: "North Entrance object details" });
     expect(within(card).queryByRole("button", { name: /Move Entrance/ })).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Update Route Node" })).not.toBeInTheDocument();
@@ -158,7 +158,7 @@ describe("Recovered moves and Add composite operations", () => {
   it("rejects a recovered Route Node move without Edit and cannot nudge or save it", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /North Entrance Route Node/ }));
     fireEvent.click(screen.getByRole("button", { name: /Move Entrance/ }));
     clickMap(16.7208, 121.6898);
     expect(screen.getByRole("button", { name: "Save Position" })).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe("Recovered moves and Add composite operations", () => {
     vi.mocked(services.map.pathways).mockResolvedValue([legacyPath]);
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     const point = await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" });
     expect(point).toHaveAttribute("data-draggable", "false");
     fireEvent.click(point);
