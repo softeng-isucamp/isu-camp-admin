@@ -1,17 +1,16 @@
-import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 import type { DecisionAnalytics } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
-import { locationsListLink } from "./links";
+import { locationsListLink, useOpenModule } from "./links";
 import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: number };
 
 /** Fully-ready count beside one bar per check (has it / missing it). Clicking a bar opens Locations filtered to the places missing it. */
 export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
-  const navigate = useNavigate();
+  const navigate = useOpenModule();
   const { readiness } = data;
   const rows: Row[] = readiness.checks.map((check) => ({ ...check, missingCount: check.total - check.complete }));
   const openRow = (row: Row) => navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));

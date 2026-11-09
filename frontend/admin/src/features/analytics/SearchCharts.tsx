@@ -1,4 +1,3 @@
-import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
 import { accountTypes } from "../../lib/accountType";
 import type { DecisionAnalytics, DestinationType } from "../../types";
@@ -6,11 +5,12 @@ import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { formatNumber, formatPercent } from "../dashboard/analytics/format";
 import { AXIS_TICK, INK, SERIES, TOOLTIP_STYLE } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
+import { useOpenModule } from "./links";
 import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 /** Same layout as the Dashboard's "Visits by account type", fed by recorded searches. A bar opens that account type in User Management. */
 export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
-  const navigate = useNavigate();
+  const navigate = useOpenModule();
   const { total, byAccountType } = data.searches;
   const rows = accountTypes.map((type) => ({ key: type.key, name: type.label, value: byAccountType[type.key], color: type.color }));
   const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
@@ -64,7 +64,7 @@ const TYPES: Array<{ key: DestinationType; label: string; color: string }> = [
 
 /** Same donut and legend as the Dashboard's "Visits by destination type", fed by recorded searches. */
 export function SearchesByDestinationType({ data }: { data: DecisionAnalytics }) {
-  const navigate = useNavigate();
+  const navigate = useOpenModule();
   const { byDestinationType } = data.searches;
   const rows = TYPES.map((type) => ({ ...type, value: byDestinationType[type.key] })).sort((a, b) => b.value - a.value);
   const total = rows.reduce((sum, row) => sum + row.value, 0);

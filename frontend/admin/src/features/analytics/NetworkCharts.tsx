@@ -1,18 +1,17 @@
-import { useNavigate } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, LabelList, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 import type { DecisionAnalytics } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, MUTED_MARK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
 import { Empty } from "../../components/UI";
-import { locationsListLink, pathwayLink } from "./links";
+import { locationsListLink, pathwayLink, useOpenModule } from "./links";
 import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type ClosureRow = DecisionAnalytics["closures"][number] & { cut: number };
 
 /** Per pathway: places cut off (red) and places that only get a longer walk (grey). A click opens that pathway in the Map Editor. */
 export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
-  const navigate = useNavigate();
+  const navigate = useOpenModule();
   if (!data.closures.length) return <Empty>No single pathway closure changes any walk from the main gate.</Empty>;
   const rows: ClosureRow[] = [...data.closures]
     .map((row) => ({ ...row, cut: row.cutOff.length }))
@@ -72,7 +71,7 @@ type ReachRow = NonNullable<DecisionAnalytics["reach"]>["modes"][number];
 
 /** Routable places each travel mode reaches, against the total. A click opens Locations filtered to the places it cannot reach. */
 export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
-  const navigate = useNavigate();
+  const navigate = useOpenModule();
   if (!data.reach) return <Empty>Name exactly one route node "Main Gate" in the Map Editor to measure reach.</Empty>;
   const { origin, total, modes } = data.reach;
   const openRow = (row: ReachRow) => navigate(locationsListLink(row.unreachable, `Not reachable by ${row.mode.toLowerCase()}`));
