@@ -163,6 +163,16 @@ export function Locations() {
   const passwordConfirmation = usePasswordConfirmation();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
+  // Set when a save is refused, so the next render moves focus to the first invalid field and a
+  // screen reader announces its message (the banner no longer repeats messages shown inline).
+  const focusInvalidRef = useRef(false);
+  useEffect(() => {
+    if (!focusInvalidRef.current || !fieldErrors.length) return;
+    focusInvalidRef.current = false;
+    const body = document.querySelector<HTMLElement>(".locations-modal-body");
+    const target = body?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? body?.querySelector<HTMLElement>('[role="alert"]');
+    target?.focus();
+  }, [fieldErrors]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [photos, setPhotos] = useState<LocationPhotoDraft[]>([]);
@@ -653,6 +663,7 @@ export function Locations() {
       ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
     ];
     if (validationIssues.length) {
+      focusInvalidRef.current = true;
       setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
       return null;
     }
@@ -696,10 +707,15 @@ export function Locations() {
       return saved;
     } catch (cause) {
       const backendFields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
-      if (backendFields) {
-        setFieldErrors(Object.entries(backendFields).map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
+      const fieldEntries = Object.entries(backendFields ?? {});
+      if (fieldEntries.length) {
+        focusInvalidRef.current = true;
+        setFieldErrors(fieldEntries.map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
       }
-      setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
+      // When every refused field shows its own message inline, the server's general message would only repeat it.
+      if (!fieldEntries.length || !fieldEntries.every(([field]) => fieldIsShown(field as keyof LocationDraft))) {
+        setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
+      }
       return null;
     } finally {
       setSaving(false);
@@ -1270,7 +1286,7 @@ export function Locations() {
             {/* Form Body */}
             <div className="locations-modal-body" style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
               {(error || bannerErrors.length > 0) && (
-                <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
+                <div role="alert" tabIndex={-1} style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
                   {error}
                   {bannerErrors.length > 0 && <ul style={{ margin: error ? "6px 0 0" : 0, paddingLeft: "18px" }}>{bannerErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>

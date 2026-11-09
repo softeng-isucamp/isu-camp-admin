@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { RowActionMenu } from "./RowActionMenu";
@@ -124,5 +124,22 @@ describe("RowActionMenu", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Actions for Ben" }));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes an open menu when another row's menu opens, even without a mousedown", async () => {
+    render(
+      <div>
+        <RowActionMenu label="Actions for Ana"><button role="menuitem">Edit Ana</button></RowActionMenu>
+        <RowActionMenu label="Actions for Ben"><button role="menuitem">Edit Ben</button></RowActionMenu>
+      </div>,
+    );
+    const ana = screen.getByRole("button", { name: "Actions for Ana" });
+    const ben = screen.getByRole("button", { name: "Actions for Ben" });
+    await userEvent.click(ana);
+    // A synthesized activation (assistive technology) fires click with no preceding mousedown.
+    act(() => ben.click());
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(ana).toHaveAttribute("aria-expanded", "false");
+    expect(ben).toHaveAttribute("aria-expanded", "true");
   });
 });

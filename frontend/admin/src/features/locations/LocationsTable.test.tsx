@@ -998,6 +998,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveAttribute("aria-invalid", "true"));
     expect(document.getElementById("select-location-type-error")).toHaveTextContent("Classification is not allowed.");
+    // The field says why; the server's general message would only repeat it, and focus goes to that field.
+    expect(screen.queryByText("Invalid type.")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveFocus());
   });
 
   it("groups the type filter into Places and Locations and sends each option's backend name", async () => {
@@ -1278,6 +1281,8 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
     expect(nameInput.getAttribute("aria-describedby")).toContain("field-location-name-error");
     expect(screen.getByText("Location name is required.")).toHaveAttribute("id", "field-location-name-error");
+    // With no banner to announce the refusal, focus moves to the first invalid field, whose message is its description.
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-invalid", "true"));
   });
 
   it("shows each validation message once, inline under its field", async () => {

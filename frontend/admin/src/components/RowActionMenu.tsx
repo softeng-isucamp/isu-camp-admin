@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { FittedPopover } from "./FittedPopover";
 
 const ITEM = '[role="menuitem"]';
+const OPEN_EVENT = "row-action-menu:open";
 
 export interface RowActionMenuProps {
   /** The trigger's accessible name, such as "Actions for Maria". */
@@ -38,6 +39,18 @@ export function RowActionMenu({ label, disabled = false, triggerProps, children 
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+
+  // Only one row menu is open at a time, however the second was opened (a synthesized click with no mousedown included).
+  const menuId = useId();
+  useEffect(() => {
+    if (!isOpen) return;
+    document.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: menuId }));
+    const closeWhenAnotherOpens = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== menuId) setOpen(false);
+    };
+    document.addEventListener(OPEN_EVENT, closeWhenAnotherOpens);
+    return () => document.removeEventListener(OPEN_EVENT, closeWhenAnotherOpens);
+  }, [isOpen, menuId]);
 
   useEffect(() => {
     if (!isOpen) return;
