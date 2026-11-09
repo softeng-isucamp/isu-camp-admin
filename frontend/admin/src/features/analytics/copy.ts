@@ -8,7 +8,7 @@ export type ChartCopy = {
 export const COPY = {
   readiness: {
     title: "Directory readiness",
-    what: "Each bar is one check across active places: blue have it, red is missing it. The big number counts places that pass every check that applies to them. Indoor rooms only count for places that hold rooms (not Food or Parking). Click a bar to open those places in Locations.",
+    what: "Each bar is one check across active places: blue have it, red is missing it. The big number counts places that pass every check that applies to them. Indoor rooms only count for places that hold rooms (not Food or Parking). Click the blue part to open the places that have it in Locations, the red part for the places missing it.",
     read: [
       { see: "A long red part", means: "many places are missing that one thing.", action: "Click it and work down the list." },
       { see: "Fully ready far below the bars", means: "the gaps are spread across different places, not one bad batch." },
@@ -18,7 +18,7 @@ export const COPY = {
   },
   closures: {
     title: "Closure impact",
-    what: "For each pathway: how many places the app could no longer reach on foot from the Main Gate if it were closed (red), and how many would still be reachable but by a longer walk (grey). Click a bar to open the Map Editor there.",
+    what: "For each pathway: how many places the app could no longer reach on foot from the Main Gate if it were closed (red), and how many would still be reachable but by a longer walk (grey). Click the red or grey part to list those places in Locations; click the pathway name to open it in the Map Editor.",
     read: [
       { see: "Any red", means: "this pathway is the only way in to those places.", action: "Map a second path before closing it, or warn users." },
       { see: "Grey only", means: "people get a detour, nobody is cut off.", action: "Safe to close for maintenance." },
@@ -27,7 +27,7 @@ export const COPY = {
   },
   reach: {
     title: "Reach by travel mode",
-    what: "Routable places each travel mode can get to from the Main Gate, out of all routable places. Click a bar to list the places it cannot reach.",
+    what: "Routable places each travel mode can get to from the Main Gate (blue), and the ones it cannot (grey), out of all routable places. Click the blue part to list the places it reaches, the grey part for the places it cannot.",
     read: [
       { see: "Walking below the line", means: "a place has an entrance but no connected walkway.", action: "Fix it in the Map Editor." },
       { see: "Car or motorcycle far below", means: "either roads are not tagged for that mode, or those places really are walk-only.", action: "Check the listed places; tag roads or link parking." },
