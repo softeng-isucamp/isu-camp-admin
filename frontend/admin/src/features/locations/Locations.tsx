@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_MODE, services, setMockFailure } from "../../services/api";
@@ -187,6 +187,13 @@ export function Locations() {
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Every open, close and change of mode starts the form with no errors, so an
+  // abandoned Add's messages never show under an Edit. Layout effect: the reset
+  // lands before the new dialog is painted.
+  useLayoutEffect(() => {
+    setError("");
+    setFieldErrors([]);
+  }, [dialog]);
   const openerRef = useRef<HTMLElement | null>(null);
   const directoryHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const processedIndoorHandoffRef = useRef<string | null>(null);
@@ -813,6 +820,20 @@ export function Locations() {
   };
 
   const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
+  // Mirrors what the form renders: a field's message sits under that field, so the banner
+  // carries only the messages with no field on screen (coordinates, the Building name, a
+  // photo the form replaced with its own load failure, or a field the form is not showing).
+  const showsParentFields = isChildType(draft.type) || draft.parentId !== null;
+  const fieldIsShown = (field?: keyof LocationDraft) => {
+    switch (field) {
+      case "type": case "name": case "code": case "function": return true;
+      case "parentId": return showsParentFields;
+      case "floor": return showsParentFields && draft.type !== "Floor";
+      case "photo": return !photoLoadFailed;
+      default: return false;
+    }
+  };
+  const bannerErrors = fieldErrors.filter((issue) => !fieldIsShown(issue.field));
 
   return (
     <div className="page locations-page">
@@ -1248,9 +1269,10 @@ export function Locations() {
 
             {/* Form Body */}
             <div className="locations-modal-body" style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
-              {(error || fieldErrors.length > 0) && (
+              {(error || bannerErrors.length > 0) && (
                 <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
-                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
+                  {error}
+                  {bannerErrors.length > 0 && <ul style={{ margin: error ? "6px 0 0" : 0, paddingLeft: "18px" }}>{bannerErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
               <LocationDetailsFields

@@ -1277,7 +1277,49 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const nameInput = await screen.findByLabelText(/location name/i);
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
     expect(nameInput.getAttribute("aria-describedby")).toContain("field-location-name-error");
-    expect(screen.getByRole("alert")).toHaveTextContent("Location name is required.");
+    expect(screen.getByText("Location name is required.")).toHaveAttribute("id", "field-location-name-error");
+  });
+
+  it("shows each validation message once, inline under its field", async () => {
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+
+    await screen.findByText("Location name is required.");
+    // The banner repeated what the fields already say; with no error left for it to carry, it does not appear.
+    expect(screen.getAllByText("Location name is required.")).toHaveLength(1);
+    expect(screen.getAllByText("Laboratory Locations require a parent Building.")).toHaveLength(1);
+    expect(screen.getAllByText("Indoor Locations require a Floor Level.")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("opens Edit without the validation errors left behind by an abandoned Add", async () => {
+    renderLocations(["/locations?q=Chinese"]);
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+    await screen.findByText("Location name is required.");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Chinese Building" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit Location" });
+    expect(within(dialog).queryByText(/is required\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/require a parent Building\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/require a Floor Level\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("closes a row menu on Escape and returns focus to its trigger", async () => {
+    renderLocations(["/locations?q=Chinese"]);
+    const trigger = await screen.findByRole("button", { name: "Actions for Chinese Building" });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem")[0]).toHaveFocus();
+
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0], { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   describe("BUILDING filter combobox", () => {
