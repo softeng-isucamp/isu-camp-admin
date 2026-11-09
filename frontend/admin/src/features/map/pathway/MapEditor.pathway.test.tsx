@@ -80,6 +80,9 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ id: generatedMapFixture.pathways[0].id })));
+    // Saving an existing Pathway confirms it, and the Pathway stays open for further edits.
+    expect(await screen.findByText("Pathway details were updated successfully.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update Pathway" })).toBeInTheDocument();
   });
 
   it("lets Reshape Pathway drag a point immediately without calculating distance or ETA", async () => {

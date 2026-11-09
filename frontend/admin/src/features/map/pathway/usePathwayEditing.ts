@@ -413,7 +413,11 @@ export function usePathwayEditing({
     }
   };
 
-  const applyFrame = async (): Promise<boolean> => {
+  /**
+   * Saves the inspector's Pathway. `true` means a new Pathway was created and the tool should finish;
+   * "updated" means an existing Pathway's details were saved and editing stays open; `false` means nothing was saved.
+   */
+  const applyFrame = async (): Promise<boolean | "updated"> => {
     if (!can(namedPathwayFrame?.id === provisionalPathwayId ? "add" : "edit")) return false;
     if (!namedPathwayFrame || pathwayFrameIssues.length > 0) {
       if (pathwayFrameIssues[0]) setError(pathwayFrameIssues[0].message);
@@ -452,7 +456,7 @@ export function usePathwayEditing({
     } finally {
       endSaving();
     }
-    return false;
+    return "updated";
   };
 
   const switchEndpoints = () => {

@@ -514,7 +514,13 @@ export function MapEditor() {
   const applyPathwayFrame = async () => {
     // A provisional Pathway is saved for the first time here; only a saved one is updated.
     const creating = pathway.provisionalPathwayId !== null && pathway.pathwayFrame?.id === pathway.provisionalPathwayId;
-    if (!await pathway.applyFrame()) return;
+    const outcome = await pathway.applyFrame();
+    if (!outcome) return;
+    if (outcome === "updated") {
+      // An existing Pathway stays open for further edits; the toast confirms the save.
+      feedback.reportSuccess("Pathway details were updated successfully.");
+      return;
+    }
     feedback.reportSuccess(creating ? "Pathway was created successfully." : "Pathway details were updated successfully.");
     finishPathwayTool();
   };
