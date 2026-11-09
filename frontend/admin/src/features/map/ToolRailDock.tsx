@@ -146,19 +146,20 @@ export function ToolRailDock({ activeTool, onSelectTool, onBrowseWalkingNetwork,
         )}
       </div>
 
+      {/* Bottom centre: the bottom-left corner belongs to the Map Legend and the issues pill. */}
       {suspendedDrafts.length > 0 && (
         <button
           type="button"
           aria-expanded={shelfOpen}
           onClick={() => setShelfOpen((open) => !open)}
-          className="absolute bottom-5 left-5 z-[902] rounded-full border border-amber-300 bg-amber-50/95 px-4 py-2 text-xs font-extrabold text-amber-900 shadow-lg"
+          className="absolute bottom-5 left-1/2 z-[902] -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50/95 px-4 py-2 text-xs font-extrabold text-amber-900 shadow-lg"
         >
           Suspended Drafts ({suspendedDrafts.length})
         </button>
       )}
 
       {shelfOpen && suspendedDrafts.length > 0 && (
-        <aside role="dialog" aria-label="Suspended Drafts" className="absolute bottom-16 left-5 z-[903] w-72 rounded-2xl border border-amber-200 bg-white p-4 shadow-2xl">
+        <aside role="dialog" aria-label="Suspended Drafts" className="absolute bottom-16 left-1/2 z-[903] w-72 -translate-x-1/2 rounded-2xl border border-amber-200 bg-white p-4 shadow-2xl">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-extrabold text-[#191c1d]">Suspended Drafts</h2>
             <button type="button" aria-label="Close Suspended Drafts" onClick={() => setShelfOpen(false)} className="text-lg text-[#526158]">×</button>

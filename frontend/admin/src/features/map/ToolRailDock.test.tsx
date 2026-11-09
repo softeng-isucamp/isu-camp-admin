@@ -64,3 +64,16 @@ describe("Pathway menu permission wording", () => {
     expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
   });
 });
+
+describe("Suspended Drafts chip placement", () => {
+  afterEach(cleanup);
+  it("sits clear of the bottom-left corner that the Map Legend occupies", () => {
+    signInAs("admin", { permissions: allPermissions() });
+    const draft = { id: "d1", toolType: "polygon" as const, provisionalGeometry: { points: [] }, isSuspended: true };
+    render(<ToolRailDock activeTool="select" onSelectTool={vi.fn()} onBrowseWalkingNetwork={vi.fn()} suspendedDrafts={[draft]} onResumeDraft={vi.fn()} />);
+    const chip = screen.getByRole("button", { name: /Suspended Drafts \(1\)/ });
+    expect(chip.className).not.toMatch(/(^|\s)left-\d+(\s|$)/);
+    fireEvent.click(chip);
+    expect(screen.getByRole("dialog", { name: "Suspended Drafts" }).className).not.toMatch(/(^|\s)left-\d+(\s|$)/);
+  });
+});
