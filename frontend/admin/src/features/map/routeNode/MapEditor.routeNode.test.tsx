@@ -26,6 +26,29 @@ describe("Map Editor preview", () => {
     expect(screen.queryByRole("dialog", { name: "Create Outdoor Point Location" })).not.toBeInTheDocument();
   });
 
+  it("flags out-of-range coordinates inline and keeps Save Route Node disabled until they are valid", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Route Node" }));
+    clickMap(16.7208, 121.6902);
+    fireEvent.change(screen.getByLabelText("Route Node name"), { target: { value: "Gate" } });
+    expect(screen.getByText("Between −90 and 90.")).toBeInTheDocument();
+    expect(screen.getByText("Between −180 and 180.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Placement latitude"), { target: { value: "999" } });
+    fireEvent.change(screen.getByLabelText("Placement longitude"), { target: { value: "500" } });
+
+    expect(screen.getByText("Latitude must be between −90 and 90.")).toBeInTheDocument();
+    expect(screen.getByText("Longitude must be between −180 and 180.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Placement latitude")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Placement latitude"), { target: { value: "16.7208" } });
+    fireEvent.change(screen.getByLabelText("Placement longitude"), { target: { value: "121.6902" } });
+    expect(screen.queryByText(/must be between/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeEnabled();
+  });
+
   it("moves an imported route node from the generated fixture", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
     vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
