@@ -715,6 +715,29 @@ describe('backup & recovery', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
+    it('says to enter the password inline when Delete is pressed with the field empty', async () => {
+      history();
+      const remove = vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      const dialog = await openDelete(3);
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Backup' }));
+      expect(await within(dialog).findByText('Enter your password to confirm this deletion.')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Confirm your password')).toHaveAttribute('aria-invalid', 'true');
+      expect(remove).not.toHaveBeenCalled();
+      expect(dialog).toBeInTheDocument();
+    });
+
+    it('says to enter the password inline when Enter is pressed with the field empty', async () => {
+      history();
+      const remove = vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      const dialog = await openDelete(3);
+      within(dialog).getByLabelText('Confirm your password').focus();
+      await userEvent.keyboard('{Enter}');
+      expect(await within(dialog).findByText('Enter your password to confirm this deletion.')).toBeInTheDocument();
+      expect(remove).not.toHaveBeenCalled();
+    });
+
     it('warns, but still allows it, when deleting the only ready backup', async () => {
       history({ items: [READY, FAILED] });
       const remove = vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
