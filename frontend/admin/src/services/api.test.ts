@@ -467,9 +467,15 @@ describe("mock service contracts", () => {
       floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false,
     });
     await services.map.save({ buildings: [building] });
+    const entrance = await services.map.createRouteNode({ name: "Delete Hall Entrance", nodeType: "Entrance", associatedPlaceId: building.id, lat: 16.7205, lng: 121.6905, status: "Active" });
     const before = (await services.map.buildings()).length;
 
     await services.map.removeBuilding(building.id);
+
+    // Like purge_building's SET NULL: the waypoint stays, only its reference to the deleted Building goes.
+    const node = (await services.map.nodes()).find((item) => item.id === entrance.id);
+    expect(node).toBeDefined();
+    expect(node?.associatedPlaceId ?? null).toBeNull();
 
     expect((await services.map.buildings()).length).toBe(before - 1);
     expect((await services.map.buildings()).find((item) => item.id === building.id)).toBeUndefined();

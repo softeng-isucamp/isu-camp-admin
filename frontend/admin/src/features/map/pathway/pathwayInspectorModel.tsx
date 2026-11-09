@@ -104,8 +104,9 @@ export function selectedPathwayInspectorModel({
       </>
     ) : undefined,
     primaryAction: canChange ? {
-      label: pathwaySaveLabel(savingAction === "pathway-metadata", provisional),
-      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
+      // A new Pathway saves its shape (savingAction "pathway"); an existing one saves its metadata.
+      label: pathwaySaveLabel(savingAction === (provisional ? "pathway" : "pathway-metadata"), provisional),
+      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === (provisional ? "pathway" : "pathway-metadata"),
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
     } : undefined,
@@ -157,6 +158,7 @@ export function pathPointInspectorModel({
   } = pathway;
   if (!editingPathId || selectedPathPointIndex === null || !pathPoints[selectedPathPointIndex]) return null;
   const point = pathPoints[selectedPathPointIndex];
+  const pointParentProvisional = pathway.provisionalPathwayId === activePathway?.id;
   return {
     id,
     kind: "path_point",
@@ -196,15 +198,16 @@ export function pathPointInspectorModel({
       </>
     ),
     // Updating, cancelling and removing a point change the Pathway (Edit); converting a point creates a Route Node (Add).
-    primaryAction: can("edit") ? {
-      label: pathwaySaveLabel(savingAction === "pathway-metadata", pathway.provisionalPathwayId === activePathway?.id),
-      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
+    // Saving a Pathway still being created needs Add, the same as its parent inspector; an existing one needs Edit.
+    primaryAction: can(pointParentProvisional ? "add" : "edit") ? {
+      label: pathwaySaveLabel(savingAction === (pointParentProvisional ? "pathway" : "pathway-metadata"), pointParentProvisional),
+      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === (pointParentProvisional ? "pathway" : "pathway-metadata"),
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
     } : undefined,
     overflowActions: [
       // Update lives in the footer and Cancel beside the fields; the menu offers Cancel only when those fields are not shown.
-      ...(can("edit") && !pathway.canModify ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
+      ...(can(pointParentProvisional ? "add" : "edit") && !pathway.canModify ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
       ...(can("add") ? [{ label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion }] : []),
       {
         label: "↩ Inspect Parent Pathway",
