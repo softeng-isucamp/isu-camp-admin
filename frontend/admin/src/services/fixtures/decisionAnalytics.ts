@@ -1,16 +1,15 @@
 import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, ReadinessGap } from "../../types";
 import mapFixture from "../generated-map-fixture.json";
+import { indoorLocationTypes, isLocationContainer } from "../../lib/locationPolicy";
 import { mulberry32 } from "./prng";
 
 /**
  * Fixture for the Analytics page, built from the session's own Locations so every
- * quick link opens a record that exists. Photo, description, keywords and map pin
- * are read from the Locations; entrance links, rooms, searches, pathways and
+ * quick link opens a record that exists. Photo, description, keywords, map pin and
+ * indoor rooms are read from the Locations; entrance links, searches, pathways and
  * travel modes are seeded, since the local adapter has no route graph or history.
  */
 const SEARCH_SCALE: Record<DashboardRange, number> = { week: 1, month: 3.4, all: 9 };
-// Matches the backend: only these (and legacy, unclassified Places) may hold indoor Locations.
-const ROOM_HOLDERS = new Set(["College", "Campus Services", "Building", undefined]);
 // Real fixture pathway IDs, so a closure bar opens a pathway the Map Editor can find.
 const PATHWAY_IDS = mapFixture.walkingNetwork.pathways.map((pathway) => pathway.id);
 
@@ -29,15 +28,20 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   const rand = mulberry32(4207);
   const places = locations.filter((item) => item.type === "Place" && item.parentId === null && item.status === "Active");
 
-  // Seeded per-place facts, fixed across ranges so only searches move with the range selector.
+  // Rooms follow the shared policy (only Places that may hold indoor Locations are asked) and the real children.
+  const withRooms = new Set(
+    locations
+      .filter((item) => item.status === "Active" && item.parentId && indoorLocationTypes.includes(item.type as (typeof indoorLocationTypes)[number]))
+      .map((item) => item.parentId),
+  );
+  // Entrance links are seeded, fixed across ranges so only searches move with the range selector.
   const facts = places.map((place, index) => {
-    const roll = rand();
-    const holdsRooms = ROOM_HOLDERS.has(place.classification);
+    const holdsRooms = isLocationContainer(place);
     return {
       place,
-      entrance: index % 3 !== 1 && roll > 0.18,
+      entrance: index % 3 !== 1 && rand() > 0.18,
       holdsRooms,
-      rooms: holdsRooms && rand() > 0.72,
+      rooms: holdsRooms && withRooms.has(place.id),
     };
   });
 

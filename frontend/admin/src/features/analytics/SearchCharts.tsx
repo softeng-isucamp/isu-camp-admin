@@ -6,19 +6,22 @@ import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { formatNumber, formatPercent } from "../dashboard/analytics/format";
 import { AXIS_TICK, INK, SERIES, TOOLTIP_STYLE } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
+import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 /** Same layout as the Dashboard's "Visits by account type", fed by recorded searches. A bar opens that account type in User Management. */
 export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
   const navigate = useNavigate();
   const { total, byAccountType } = data.searches;
   const rows = accountTypes.map((type) => ({ key: type.key, name: type.label, value: byAccountType[type.key], color: type.color }));
+  const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
+  const links: RowLink[] = rows.map((row) => ({ label: `${row.name}: see these accounts in User Management`, open: () => navigate(usersLink(row.key)) }));
   return (
     <>
       <ChartArea height={220}>
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 92, bottom: 4, left: 8 }} barCategoryGap={18}>
           <CartesianGrid horizontal={false} stroke={INK.grid} />
           <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
-          <YAxis type="category" dataKey="name" tick={{ ...AXIS_TICK, fill: INK.primary, fontSize: 12 }} tickLine={false} axisLine={{ stroke: INK.grid }} width={70} />
+          <YAxis type="category" dataKey="name" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={70} interval={0} />
           <Tooltip
             cursor={{ fill: "#f3f6f4" }}
             content={({ active, payload }) => {
@@ -34,7 +37,7 @@ export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
             cursor="pointer"
             onClick={(entry) => {
               const key = (entry as { payload?: { key?: string } } | undefined)?.payload?.key;
-              if (key) navigate(`/users?${new URLSearchParams({ userType: key })}`);
+              if (key) navigate(usersLink(key));
             }}
             isAnimationActive={false}
           >
@@ -47,8 +50,9 @@ export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
   );
 }
 
-/** Where a destination type opens: indoor types filter Locations by type; Places open the whole directory. */
-const typeLink = (key: DestinationType) => (key === "Building" ? "/locations" : `/locations?${new URLSearchParams({ type: key })}`);
+/** Where a destination type opens: indoor types filter Locations by type; Places list every Place and no indoor Location. */
+const typeLink = (key: DestinationType) =>
+  `/locations?${new URLSearchParams(key === "Building" ? { scope: "places", why: "Places only" } : { type: key })}`;
 
 const TYPES: Array<{ key: DestinationType; label: string; color: string }> = [
   { key: "Building", label: "Places", color: SERIES.blue },

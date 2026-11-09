@@ -5164,3 +5164,7 @@ p.inspector-notice { margin: 10px 18px 0; padding: 8px 10px; border-radius: 10px
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Analytics row labels double as keyboard links to what the bar opens. */
+.chart-row-link:focus { outline: none; }
+.chart-row-link:focus-visible text { fill: #0c7441; font-weight: 700; }

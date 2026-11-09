@@ -5,7 +5,7 @@ import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
 import { locationsListLink } from "./links";
-import { RowLabelTick } from "./RowLabelTick";
+import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: number };
 
@@ -14,10 +14,13 @@ export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
   const navigate = useNavigate();
   const { readiness } = data;
   const rows: Row[] = readiness.checks.map((check) => ({ ...check, missingCount: check.total - check.complete }));
+  const openRow = (row: Row) => navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));
   const open = (entry: unknown) => {
     const row = (entry as { payload?: Row } | undefined)?.payload;
-    if (row && row.missing.length) navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));
+    if (row && row.missing.length) openRow(row);
   };
+  const links: RowLink[] = rows.map((row) =>
+    row.missing.length ? { label: `${row.label}: list the ${row.missing.length} missing it in Locations`, open: () => openRow(row) } : undefined);
   return (
     <div className="readiness">
       <button
@@ -33,7 +36,7 @@ export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 0 }} barCategoryGap="26%">
           <CartesianGrid horizontal={false} stroke={INK.grid} />
           <XAxis type="number" hide domain={[0, "dataMax"]} />
-          <YAxis yAxisId="checks" type="category" dataKey="label" tick={<RowLabelTick />} tickLine={false} axisLine={{ stroke: INK.grid }} width={128} interval={0} />
+          <YAxis yAxisId="checks" type="category" dataKey="label" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={128} interval={0} />
           {/* Right-hand axis carries the "N missing" labels: a zero-width bar renders no label, so they cannot ride on the bars. */}
           <YAxis
             yAxisId="gaps"

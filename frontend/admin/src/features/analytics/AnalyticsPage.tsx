@@ -39,7 +39,8 @@ export function AnalyticsPage() {
     placeholderData: (previous) => previous,
     retry: false,
   });
-  const rangeLabel = RANGE_LABEL[range];
+  // Label what is on screen: while another range loads, the previous range's numbers stay up.
+  const rangeLabel = data ? RANGE_LABEL[data.range] : RANGE_LABEL[range];
 
   return (
     <div className="page analytics-page">
@@ -73,6 +74,12 @@ export function AnalyticsPage() {
         <div className="dashboard-state" role="status" aria-live="polite"><Spinner size={18} /> Loading analytics…</div>
       ) : (
         <div className="analytics decision-analytics">
+          {error && (
+            <div className="dashboard-error" role="alert">
+              <span>The latest refresh failed, so these numbers may be out of date.</span>
+              <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>Try again</Button>
+            </div>
+          )}
           <Section id="ready" title="Is the directory ready?">
             <GraphBlock copy={COPY.readiness} wide>
               <DirectoryReadiness data={data} />

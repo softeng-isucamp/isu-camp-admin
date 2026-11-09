@@ -6,7 +6,7 @@ import { AXIS_TICK, ALERT, INK, MUTED_MARK, SERIES } from "../dashboard/analytic
 import { ClickTip } from "./ClickTip";
 import { Empty } from "../../components/UI";
 import { locationsListLink, pathwayLink } from "./links";
-import { RowLabelTick } from "./RowLabelTick";
+import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type ClosureRow = DecisionAnalytics["closures"][number] & { cut: number };
 
@@ -22,6 +22,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
     if (!row) return;
     navigate(pathwayLink(row.id));
   };
+  const links: RowLink[] = rows.map((row) => ({ label: `${row.pathway}: open this pathway in the Map Editor`, open: () => navigate(pathwayLink(row.id)) }));
   return (
     <>
       <div className="decision-legend" aria-label="Legend">
@@ -32,7 +33,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
         <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 28, bottom: 4, left: 0 }} barCategoryGap="26%">
           <CartesianGrid horizontal={false} stroke={INK.grid} />
           <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
-          <YAxis type="category" dataKey="pathway" tick={<RowLabelTick />} tickLine={false} axisLine={{ stroke: INK.grid }} width={168} interval={0} />
+          <YAxis type="category" dataKey="pathway" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={168} interval={0} />
           <Tooltip
             cursor={{ fill: "#f3f6f4" }}
             content={({ active, payload }) => {
@@ -74,6 +75,9 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
   const navigate = useNavigate();
   if (!data.reach) return <Empty>Name exactly one route node "Main Gate" in the Map Editor to measure reach.</Empty>;
   const { origin, total, modes } = data.reach;
+  const openRow = (row: ReachRow) => navigate(locationsListLink(row.unreachable, `Not reachable by ${row.mode.toLowerCase()}`));
+  const links: RowLink[] = modes.map((row) =>
+    row.unreachable.length ? { label: `${row.mode}: list the ${row.unreachable.length} places it can't reach`, open: () => openRow(row) } : undefined);
   const step = total <= 20 ? 4 : 10;
   const ticks = Array.from({ length: Math.floor(total / step) + 1 }, (_, i) => i * step);
   return (
@@ -81,7 +85,7 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
       <BarChart data={modes} layout="vertical" margin={{ top: 22, right: 52, bottom: 4, left: 0 }} barCategoryGap="28%">
         <CartesianGrid horizontal={false} stroke={INK.grid} />
         <XAxis type="number" domain={[0, total]} ticks={ticks} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
-        <YAxis type="category" dataKey="mode" tick={<RowLabelTick />} tickLine={false} axisLine={{ stroke: INK.grid }} width={86} interval={0} />
+        <YAxis type="category" dataKey="mode" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={86} interval={0} />
         <ReferenceLine x={total} stroke={INK.secondary} strokeDasharray="4 4" label={{ value: `all ${total} from ${origin}`, position: "top", fill: INK.secondary, fontSize: 11 }} />
         <Tooltip
           cursor={{ fill: "#f3f6f4" }}
@@ -104,7 +108,7 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
           cursor="pointer"
           onClick={(entry) => {
             const row = (entry as { payload?: ReachRow } | undefined)?.payload;
-            if (row?.unreachable.length) navigate(locationsListLink(row.unreachable, `Not reachable by ${row.mode.toLowerCase()}`));
+            if (row?.unreachable.length) openRow(row);
           }}
           isAnimationActive={false}
         >
