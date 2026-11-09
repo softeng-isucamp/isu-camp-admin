@@ -46,12 +46,21 @@ it("explains a failed load and retries on request", async () => {
 });
 
 it("says what to fix when the server finds no main gate", async () => {
-  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...generateDecisionAnalytics("week", locations), reach: null, closures: [] });
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...generateDecisionAnalytics("week", locations), reach: null, closures: null });
   renderPage();
 
-  expect(await screen.findByText(/Main Gate" in the Map Editor/)).toBeInTheDocument();
-  expect(screen.getByText(/No single pathway closure/)).toBeInTheDocument();
+  expect(await screen.findByText(/to measure reach/)).toBeInTheDocument();
+  expect(screen.getByText(/to measure closures/)).toBeInTheDocument();
+  expect(screen.queryByText(/No single pathway closure/)).not.toBeInTheDocument();
 });
+
+it("says no closure matters only when closures were measured", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...generateDecisionAnalytics("week", locations), closures: [] });
+  renderPage();
+
+  expect(await screen.findByText(/No single pathway closure/)).toBeInTheDocument();
+});
+
 
 it("offers calendar years from the first recorded year and labels searches with the year", async () => {
   const request = vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => ({

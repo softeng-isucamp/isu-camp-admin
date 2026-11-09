@@ -1863,7 +1863,7 @@ describe("decision analytics", () => {
   it("accepts the fixture and a server with no main gate", async () => {
     const week = await services.dashboard.decisionAnalytics("week");
     expect(normalizeBackendDecisionAnalytics({ success: true, data: week })).toEqual(week);
-    expect(normalizeBackendDecisionAnalytics({ data: { ...week, reach: null, closures: [] } }).reach).toBeNull();
+    expect(normalizeBackendDecisionAnalytics({ data: { ...week, reach: null, closures: null } })).toMatchObject({ reach: null, closures: null });
   });
 
   it("rejects a malformed payload", async () => {
