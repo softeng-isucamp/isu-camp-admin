@@ -399,6 +399,37 @@ describe("Map Editor preview", () => {
     })));
   });
 
+  it.each([
+    ["Building Polygon", "Draw Building Footprint"],
+    ["Route Node", "Place Route Node"],
+  ])("replaces a selected Pathway's inspector with the %s panel", async (toolName, heading) => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    expect(screen.getByRole("complementary", { name: "North Walk object details" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: toolName }));
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "North Walk object details" })).not.toBeInTheDocument();
+  });
+
+  it("replaces a selected Pathway's inspector with the Pathway tool panel when the Pathway tool opens", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    await choosePathwayEditor();
+
+    expect(await screen.findByRole("heading", { name: "Calibrate Path Points" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "North Walk object details" })).not.toBeInTheDocument();
+  });
+
   it("shows one panel with one Save Pathway control for a new Pathway and reports it as created", async () => {
     vi.mocked(services.map.pathways).mockResolvedValue([]);
     renderEditor();

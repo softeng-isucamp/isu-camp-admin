@@ -32,11 +32,15 @@ export function enterToolMode(
       setMode("place");
       setSelected(null);
     },
-    polygon: () => setMode("area"),
+    // A tool's own panel replaces the inspector of whatever was selected before the switch.
+    polygon: () => {
+      setMode("area");
+      setSelected(null);
+    },
     pathway: () => {
       setMode("path");
       setNetworkBrowserOpen(false);
-      if (openedPathway) setSelected({ type: "pathway", id: openedPathway.id });
+      setSelected(openedPathway ? { type: "pathway", id: openedPathway.id } : null);
     },
   };
   activationHandlers[toolType]();
@@ -62,7 +66,10 @@ export function restoreToolMode(
       ) setSelected({ type: restoredSelection.type, id: restoredSelection.id });
       else setSelected(null);
     },
-    polygon: () => setMode("area"),
+    polygon: () => {
+      setMode("area");
+      setSelected(null);
+    },
     pathway: () => setMode("path"),
   };
   restoreHandlers[toolType]();
