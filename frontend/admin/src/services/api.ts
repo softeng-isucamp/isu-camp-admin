@@ -223,7 +223,7 @@ const decisionAnalyticsSchema = z.object({
       missing: z.array(placeRefSchema),
     })),
   }),
-  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt })),
+  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt })).nullable(),
   reach: z.object({
     origin: z.string(),
     total: nonNegInt,

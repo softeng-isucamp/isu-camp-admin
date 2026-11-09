@@ -186,14 +186,14 @@ def test_reach_follows_modes_and_one_way_pathways_from_the_main_gate(app):
         assert ids(modes[mode]["unreachable"]) == sorted([str(ANNEX), str(COLLEGE)])
 
 
-def test_no_unique_main_gate_means_no_reach_and_no_closures(app):
+def test_no_unique_main_gate_means_reach_and_closures_are_not_measured(app):
     with app.app_context():
         node(99, 16.7, 121.7, name="gate")
         db.session.commit()
         result = summary()
 
     assert result["reach"] is None
-    assert result["closures"] == []
+    assert result["closures"] is None
 
 
 # ==========================================

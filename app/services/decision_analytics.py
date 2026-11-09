@@ -263,7 +263,7 @@ def _readiness(places, graph):
     for place in places:
         footprint = place.polygon_coordinates
         enclosed = isinstance(footprint, list) and len(footprint) >= MINIMUM_POLYGON_POINTS
-        pinned = place.latitude is not None and place.longitude is not None
+        pinned = _position(place.latitude, place.longitude) is not None
         holds_rooms = place.can_contain_locations
         passed = {
             "photo": place.has_photo(),
@@ -331,7 +331,8 @@ def _closures(places, graph):
     """
 
     if graph.gate is None:
-        return []
+        # Not measured, which is different from "no closure changes anything".
+        return None
     by_id = {place.building_id: place for place in places}
     walking = graph.adjacency(CLOSURE_MODE)
     distance, via = _shortest(walking, graph.gate.node_id)

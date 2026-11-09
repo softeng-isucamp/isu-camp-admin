@@ -7,11 +7,12 @@ import { Empty } from "../../components/UI";
 import { locationsListLink, pathwayLink, useOpenModule } from "./links";
 import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
-type ClosureRow = DecisionAnalytics["closures"][number] & { cut: number };
+type ClosureRow = NonNullable<DecisionAnalytics["closures"]>[number] & { cut: number };
 
 /** Per pathway: places cut off (red) and places that only get a longer walk (grey). A click opens that pathway in the Map Editor. */
 export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
   const navigate = useOpenModule();
+  if (!data.closures) return <Empty>Name exactly one route node "Main Gate" in the Map Editor to measure closures.</Empty>;
   if (!data.closures.length) return <Empty>No single pathway closure changes any walk from the main gate.</Empty>;
   const rows: ClosureRow[] = [...data.closures]
     .map((row) => ({ ...row, cut: row.cutOff.length }))
