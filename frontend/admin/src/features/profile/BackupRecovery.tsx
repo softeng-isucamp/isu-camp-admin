@@ -162,7 +162,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     {error && <div role="alert" className="admin-table-error profile-inline-error">{error}<Button variant="subtle" onClick={() => setRetry((n) => n + 1)}>Retry</Button></div>}
     {loading ? <LoadingState size={20}>Loading backups…</LoadingState> : !error && <div className="table-wrap" style={{ overflow: 'visible' }}>
       <table className="profile-backup-table">
-        <colgroup><col style={{ width: '30%' }} /><col style={{ width: '26%' }} /><col style={{ width: '16%' }} /><col style={{ width: '16%' }} /><col style={{ width: '96px' }} /></colgroup>
+        {/* Status is sized to its badge and Actions takes the rest, left-aligned, so the menu button sits right after the status instead of at the table's far edge. */}<colgroup><col style={{ width: '30%' }} /><col style={{ width: '26%' }} /><col style={{ width: '14%' }} /><col style={{ width: '140px' }} /><col /></colgroup>
         <thead><tr><th>Created <TimeZoneTag /></th><th>Type</th><th>Size</th><th>Status</th><th style={{ textAlign: 'left' }}>Actions</th></tr></thead>
         <tbody>{items.map((backup) => {
           const actions = rowActions(backup);

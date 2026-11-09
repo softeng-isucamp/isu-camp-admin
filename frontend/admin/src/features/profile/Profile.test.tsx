@@ -863,13 +863,13 @@ describe('backup & recovery', () => {
     expect(trigger).toHaveFocus();
   });
 
-  it('gives the Actions column a compact fixed width', async () => {
+  it('sizes Status to its badge and lets a left-aligned Actions column follow it directly', async () => {
     history();
     page();
     await screen.findByRole('table');
     const cols = Array.from(document.querySelectorAll<HTMLElement>('.profile-backup-table col'));
-    expect(cols[4].style.width).toMatch(/^\d+px$/);
-    expect(parseInt(cols[4].style.width, 10)).toBeLessThanOrEqual(120);
+    expect(cols[3].style.width).toMatch(/^\d+px$/);
+    expect(cols[4].style.width).toBe('');
     expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveStyle({ textAlign: 'left' });
   });
 
