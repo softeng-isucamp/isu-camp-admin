@@ -5,6 +5,7 @@ import { services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
 import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner, Stamp, TimeZoneTag } from "../../components/UI";
 import { FilterCombobox } from "../../components/FilterCombobox";
+import { FittedPopover } from "../../components/FittedPopover";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
 import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
@@ -147,7 +148,7 @@ function AppUserDirectory() {
                         •••
                       </button>
                       {actionMenuId === user.id && (
-                        <div className="row-action-menu" role="menu">
+                        <FittedPopover className="row-action-menu" role="menu">
                           {/* An app account's details are the User App's, so
                               the portal offers what it owns: their recorded
                               activity, and whether the account may sign in
@@ -172,7 +173,7 @@ function AppUserDirectory() {
                               {user.status === "Active" ? "Deactivate account" : "Activate account"}
                             </button>
                           )}
-                        </div>
+                        </FittedPopover>
                       )}
                     </div>
                   </td>

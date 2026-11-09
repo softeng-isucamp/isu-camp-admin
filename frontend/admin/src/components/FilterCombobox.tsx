@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cx } from "../lib/format";
+import { FittedPopover } from "./FittedPopover";
 
 /** How long a pause ends the typed prefix of a select-only type-ahead. */
 const TYPE_AHEAD_RESET_MS = 500;
@@ -271,7 +272,7 @@ export function FilterCombobox({ label, options: items, value, allLabel, noun, s
         </span>
 
         {open && (
-          <div
+          <FittedPopover
             className="parent-building-popover filter-combobox-popover"
             // Keep focus on the input so the list is not torn down before the click lands.
             onMouseDown={(event) => event.preventDefault()}
@@ -314,7 +315,7 @@ export function FilterCombobox({ label, options: items, value, allLabel, noun, s
                 );
               })}
             </ul>
-          </div>
+          </FittedPopover>
         )}
       </div>
     </div>
