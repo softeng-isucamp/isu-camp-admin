@@ -31,7 +31,8 @@ export const measureLabel = (text: string) => {
     }
     if (measureContext) {
       const family = getComputedStyle(document.body).fontFamily || "sans-serif";
-      measureContext.font = `12px ${family}`;
+      // Bold: a focused row label renders at weight 700, so fit the wider of the two weights.
+      measureContext.font = `700 12px ${family}`;
     }
   }
   return measureContext ? measureContext.measureText(text).width : text.length * CHAR_WIDTH;
@@ -44,7 +45,8 @@ export const measureLabel = (text: string) => {
 export const fitLabel = (text: string, width: number, measure: (value: string) => number = measureLabel) => {
   const room = width - LABEL_GAP;
   if (!(width > 0) || measure(text) <= room) return text;
-  let low = 1;
+  // Longest prefix whose text plus ellipsis fits; 0 leaves just the ellipsis when not even one character does.
+  let low = 0;
   let high = text.length - 1;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);

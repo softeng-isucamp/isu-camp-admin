@@ -165,6 +165,8 @@ it("keeps a tooltip to a few names and a long axis label to its axis", () => {
   expect(cut.endsWith("…")).toBe(true);
   expect(wide(cut)).toBeLessThanOrEqual(184 - 8);
   expect(fitLabel("i".repeat(28), 184, wide)).toBe("i".repeat(28));
+  // Room for less than one wide character plus the ellipsis leaves only the ellipsis.
+  expect(fitLabel("WW", 20, wide)).toBe("…");
 });
 
 it("opens a closure's cut-off and longer-walk places from the two parts of its bar", async () => {
