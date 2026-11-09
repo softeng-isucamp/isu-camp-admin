@@ -477,8 +477,9 @@ export function MapEditor() {
   };
 
   const handleSavePathShape = async () => {
+    const creating = pathway.provisionalPathwayId !== null && pathway.provisionalPathwayId === pathway.editingPathId;
     if (!await pathway.saveShape()) return;
-    feedback.reportSuccess(`${pathway.activePathway?.name ?? "Pathway"} was saved successfully.`);
+    feedback.reportSuccess(creating ? "Pathway was created successfully." : `${pathway.activePathway?.name ?? "Pathway"} was saved successfully.`);
     finishPathwayTool();
   };
 
@@ -511,8 +512,10 @@ export function MapEditor() {
   });
 
   const applyPathwayFrame = async () => {
+    // A provisional Pathway is saved for the first time here; only a saved one is updated.
+    const creating = pathway.provisionalPathwayId !== null && pathway.pathwayFrame?.id === pathway.provisionalPathwayId;
     if (!await pathway.applyFrame()) return;
-    feedback.reportSuccess("Pathway details were updated successfully.");
+    feedback.reportSuccess(creating ? "Pathway was created successfully." : "Pathway details were updated successfully.");
     finishPathwayTool();
   };
 
@@ -652,6 +655,10 @@ export function MapEditor() {
   const inspectorOpen = Boolean(inspectorModel) && !networkBrowserOpen
     && (mode === "select" || selected?.type === "path_point" || selected?.type === "pathway");
 
+  // A Pathway being created is edited and saved in its inspector, so the tool panel steps aside rather than lie beneath it.
+  const newPathwayInspectorOpen = inspectorOpen && mode === "path" && selected?.type === "pathway"
+    && selected.id === pathway.provisionalPathwayId;
+
   const mapIssues = useMapIssues(
     { buildings: currentBuildings, locations: currentLocations, nodes: currentNodes, pathways: currentPathways, pathwayCrossings },
     campusBoundary,
@@ -784,7 +791,7 @@ export function MapEditor() {
           />
 
           {mode !== "select" && mode !== "move" && selected?.type !== "path_point"
-            && !networkBrowserOpen && (
+            && !newPathwayInspectorOpen && !networkBrowserOpen && (
             <ToolPanel
               mode={mode}
               error={error}
