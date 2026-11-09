@@ -210,7 +210,8 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
 };
 const placeRefSchema = z.object({ id: z.string().min(1), name: z.string() });
 const decisionAnalyticsSchema = z.object({
-  range: z.enum(["week", "month", "all"]),
+  range: z.union([z.enum(["week", "month", "all"]), z.string().regex(/^year-\d{4}$/).transform((value) => value as `year-${number}`)]),
+  firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
   readiness: z.object({
     total: nonNegInt,
     fullyReady: nonNegInt,
@@ -1402,7 +1403,10 @@ export const services: Services = {
         const raw = await apiJson<unknown>(`/api/dashboard/decision-analytics?range=${encodeURIComponent(range)}`);
         return normalizeBackendDecisionAnalytics(raw);
       }
-      return wait(generateDecisionAnalytics(range, locations));
+      return wait({
+        ...generateDecisionAnalytics(range, locations),
+        firstAnalyticsYear: Number(generateDashboardAnalytics("all", locations, Date.now(), localAdapter.buildings.list()).timeline[0]?.date.slice(0, 4)),
+      });
     },
 
     summary: async (range = "week") => {

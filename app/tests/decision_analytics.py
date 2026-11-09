@@ -252,7 +252,8 @@ def test_the_route_rejects_an_unknown_range(app):
     response = app.test_client().get("/api/dashboard/decision-analytics?range=year")
 
     assert response.status_code == 400
-    assert response.get_json()["errors"] == {"range": "Choose week, month or all."}
+    assert response.get_json()["errors"] == {"range": "Choose week, month, all, or year-YYYY up to this year."}
+    assert app.test_client().get("/api/dashboard/decision-analytics?range=year-2999").status_code == 400
 
 
 def test_the_route_returns_the_summary(app):
@@ -262,4 +263,21 @@ def test_the_route_returns_the_summary(app):
     body = response.get_json()
     assert body["success"] is True
     assert body["data"]["range"] == "month"
-    assert set(body["data"]) == {"range", "readiness", "closures", "reach", "searches"}
+    assert set(body["data"]) == {"range", "firstAnalyticsYear", "readiness", "closures", "reach", "searches"}
+
+
+def test_a_calendar_year_counts_only_searches_in_that_manila_year(app):
+    with app.app_context():
+        db.session.add_all([
+            # 2025-12-31 17:00 UTC is already 2026-01-01 in Manila.
+            UserHistory(id=1, building_id=CAFE, created_at=datetime(2025, 12, 31, 17, 0, tzinfo=timezone.utc)),
+            UserHistory(id=2, building_id=CAFE, created_at=datetime(2025, 6, 1, tzinfo=timezone.utc)),
+            UserHistory(id=3, building_id=CAFE, created_at=datetime(2025, 12, 31, 15, 0, tzinfo=timezone.utc)),
+        ])
+        db.session.commit()
+        this_year = summary("year-2026")
+        last_year = summary("year-2025")
+
+    assert this_year["searches"]["total"] == 1
+    assert last_year["searches"]["total"] == 2
+    assert last_year["firstAnalyticsYear"] == 2025

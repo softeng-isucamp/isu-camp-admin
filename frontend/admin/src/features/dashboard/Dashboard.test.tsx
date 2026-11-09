@@ -58,7 +58,7 @@ function RouteProbe() {
 }
 
 describe("Calendar year range", () => {
-  it("offers the current year and requests that range on both dashboard views", async () => {
+  it("offers the current year and requests that range for the Overview", async () => {
     const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
     const summaryRequest = vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
     const analyticsRequest = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
@@ -67,7 +67,7 @@ describe("Calendar year range", () => {
     await waitFor(() => expect(select).toBeEnabled());
     await userEvent.selectOptions(select, `year-${currentYear}`);
     await waitFor(() => expect(summaryRequest).toHaveBeenCalledWith(`year-${currentYear}`));
-    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    // The Overview's Top Destinations read the analytics endpoint for the same range.
     await waitFor(() => expect(analyticsRequest).toHaveBeenCalledWith(`year-${currentYear}`));
     vi.restoreAllMocks();
   });

@@ -256,6 +256,8 @@ export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entra
  */
 export interface DecisionAnalytics {
   range: DashboardRange;
+  /** The first calendar year with any Search or registration, for the range picker. */
+  firstAnalyticsYear?: number;
   /** Active Places only; each check counts on its own over the Places it applies to. */
   readiness: {
     total: number;

@@ -13,8 +13,9 @@ Zod schema, and every number is read from tables that already exist:
   one-way, a pathway only carries the modes it allows ("Vehicle" covers every
   wheeled mode), a Place is reached at one of its entrance nodes, and the
   origin is the one node named like the main gate. Not range-dependent.
-- **searches** - ``UserHistory`` rows in the range, split by account type and
-  destination type with the same rules as ``services.dashboard_analytics``.
+- **searches** - ``UserHistory`` rows in the range (week, month, all, or a
+  Manila calendar year ``year-YYYY``), split by account type and destination
+  type with the same rules as ``services.dashboard_analytics``.
 
 Place references carry the Place's id as the directory's DTO spells it
 (``str(building_id)``) so a chart mark can open exactly those records. No app
@@ -42,6 +43,7 @@ from services.dashboard_analytics import (
     _has_text,
     _history_rows,
     _period,
+    earliest_analytics_day,
     manila_day,
 )
 
@@ -406,6 +408,7 @@ def summarize_decision_analytics(range_key, now=None):
     graph = RouteGraph()
     return {
         "range": range_key,
+        "firstAnalyticsYear": (earliest_analytics_day() or today).year,
         "readiness": _readiness(places, graph),
         "closures": _closures(places, graph),
         "reach": _reach(places, graph),

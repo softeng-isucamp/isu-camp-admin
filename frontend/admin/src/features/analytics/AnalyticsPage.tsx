@@ -4,6 +4,7 @@ import { Button, Card, Empty, ProgressBar, Spinner } from "../../components/UI";
 import { services, USE_HTTP_API } from "../../services/api";
 import { errorMessage } from "../../services/errors";
 import type { DashboardRange } from "../../types";
+import { RangeSelect, rangeLabel } from "../dashboard/RangeSelect";
 import { COPY } from "./copy";
 import { GraphBlock } from "./GraphBlock";
 import { ClosureImpact, TravelModeReach } from "./NetworkCharts";
@@ -12,7 +13,6 @@ import { SearchesByAccountType, SearchesByDestinationType } from "./SearchCharts
 
 export const decisionAnalyticsQueryKey = (range: DashboardRange) => ["decision-analytics", range] as const;
 
-const RANGE_LABEL: Record<DashboardRange, string> = { week: "this week", month: "this month", all: "all time" };
 
 function Section({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
   return (
@@ -40,7 +40,7 @@ export function AnalyticsPage() {
     retry: false,
   });
   // Label what is on screen: while another range loads, the previous range's numbers stay up.
-  const rangeLabel = data ? RANGE_LABEL[data.range] : RANGE_LABEL[range];
+  const rangeText = rangeLabel(data ? data.range : range);
 
   return (
     <div className="page analytics-page">
@@ -50,17 +50,7 @@ export function AnalyticsPage() {
           <h1>Analytics</h1>
           {!USE_HTTP_API && <p>Sample data (local mode).</p>}
         </div>
-        <select
-          className="dashboard-time-filter"
-          aria-label="Search time range"
-          value={range}
-          disabled={isFetching}
-          onChange={(event) => setRange(event.target.value as DashboardRange)}
-        >
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-          <option value="all">All time</option>
-        </select>
+        <RangeSelect value={range} onChange={setRange} firstYear={data?.firstAnalyticsYear} disabled={isFetching} label="Search time range" />
       </section>
       <ProgressBar active={isFetching && !isLoading} />
       {error && !data ? (
@@ -93,7 +83,7 @@ export function AnalyticsPage() {
               <TravelModeReach data={data} />
             </GraphBlock>
           </Section>
-          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeLabel}`}>
+          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeText}`}>
             <GraphBlock copy={COPY.byAccount}>
               <SearchesByAccountType data={data} />
             </GraphBlock>

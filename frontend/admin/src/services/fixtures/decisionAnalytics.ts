@@ -9,7 +9,13 @@ import { mulberry32 } from "./prng";
  * indoor rooms are read from the Locations; entrance links, searches, pathways and
  * travel modes are seeded, since the local adapter has no route graph or history.
  */
-const SEARCH_SCALE: Record<DashboardRange, number> = { week: 1, month: 3.4, all: 9 };
+/** Searches relative to a week: a past year is a full school year, this year is part of one. */
+const searchScale = (range: DashboardRange) => {
+  if (range === "week") return 1;
+  if (range === "month") return 3.4;
+  if (range === "all") return 9;
+  return Number(range.slice(5)) === new Date().getFullYear() ? 6 : 4.5;
+};
 // Real fixture pathway IDs, so a closure bar opens a pathway the Map Editor can find.
 const PATHWAY_IDS = mapFixture.walkingNetwork.pathways.map((pathway) => pathway.id);
 
@@ -45,7 +51,7 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     };
   });
 
-  const scale = SEARCH_SCALE[range];
+  const scale = searchScale(range);
 
   const gapsOf = (fact: (typeof facts)[number]): ReadinessGap[] => {
     const { place } = fact;

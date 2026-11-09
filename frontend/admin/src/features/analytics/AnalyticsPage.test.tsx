@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -52,3 +52,23 @@ it("says what to fix when the server finds no main gate", async () => {
   expect(await screen.findByText(/Main Gate" in the Map Editor/)).toBeInTheDocument();
   expect(screen.getByText(/No single pathway closure/)).toBeInTheDocument();
 });
+
+it("offers calendar years from the first recorded year and labels searches with the year", async () => {
+  const request = vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => ({
+    ...generateDecisionAnalytics(range, locations),
+    firstAnalyticsYear: 2024,
+  }));
+  renderPage();
+
+  const select = await screen.findByRole("combobox", { name: "Search time range" });
+  await waitFor(() => expect(select).toBeEnabled());
+  const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
+  expect(screen.getByRole("option", { name: `This year (${currentYear})` })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "2024" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "2023" })).not.toBeInTheDocument();
+
+  await userEvent.selectOptions(select, "year-2024");
+  expect(request).toHaveBeenCalledWith("year-2024");
+  expect(await screen.findByText(/searches in 2024$/)).toBeInTheDocument();
+});
+
