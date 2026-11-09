@@ -14,16 +14,44 @@ type Props = {
   links?: RowLink[];
 };
 
-/** Rough width of one 12px label character, to fit a name into its axis without measuring text. */
+/** Rough width of one 12px label character, used only where text cannot be measured (jsdom). */
 const CHAR_WIDTH = 6.2;
 /** Room kept between a label and the axis line. */
 const LABEL_GAP = 8;
 
-/** The name cut with an ellipsis so it fits `width` pixels; untouched when it already fits or the width is unknown. */
-export const fitLabel = (text: string, width: number) => {
-  const room = Math.floor((width - LABEL_GAP) / CHAR_WIDTH);
-  if (!(width > 0) || text.length <= room) return text;
-  return `${text.slice(0, Math.max(1, room - 1)).trimEnd()}…`;
+let measureContext: CanvasRenderingContext2D | null | undefined;
+
+/** Rendered width of a 12px label in the page font; falls back to the per-character estimate without a canvas. */
+export const measureLabel = (text: string) => {
+  if (measureContext === undefined) {
+    try {
+      measureContext = document.createElement("canvas").getContext("2d");
+    } catch {
+      measureContext = null;
+    }
+    if (measureContext) {
+      const family = getComputedStyle(document.body).fontFamily || "sans-serif";
+      measureContext.font = `12px ${family}`;
+    }
+  }
+  return measureContext ? measureContext.measureText(text).width : text.length * CHAR_WIDTH;
+};
+
+/**
+ * The name cut with an ellipsis so its rendered width (ellipsis included) fits `width` pixels less the label gap;
+ * untouched when it already fits or the width is unknown.
+ */
+export const fitLabel = (text: string, width: number, measure: (value: string) => number = measureLabel) => {
+  const room = width - LABEL_GAP;
+  if (!(width > 0) || measure(text) <= room) return text;
+  let low = 1;
+  let high = text.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (measure(`${text.slice(0, mid).trimEnd()}…`) <= room) low = mid;
+    else high = mid - 1;
+  }
+  return `${text.slice(0, low).trimEnd()}…`;
 };
 
 /**

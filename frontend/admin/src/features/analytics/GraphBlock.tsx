@@ -25,6 +25,12 @@ export function GraphBlock({ copy, wide = false, aside, children }: Props) {
     const onPointerDown = (event: MouseEvent) => {
       if (event.target instanceof Node && anchorRef.current?.contains(event.target)) return;
       setOpen(false);
+      // A click on another control keeps focus there; a click on plain page content would drop focus
+      // to <body>, so hand it back to the (i) button instead.
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body) buttonRef.current?.focus();
+      }, 0);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("mousedown", onPointerDown);

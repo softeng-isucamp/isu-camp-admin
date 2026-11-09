@@ -131,6 +131,17 @@ it("opens the reading guide as a floating popover that closes on Esc, outside cl
   expect(screen.getByRole("dialog")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("heading", { name: "Reach by travel mode" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  // Clicking plain content would drop focus to <body>; it goes back to the (i) button instead.
+  await waitFor(() => expect(button).toHaveFocus());
+
+  // Clicking another control closes the guide but leaves focus on that control.
+  await userEvent.click(button);
+  const other = screen.getByRole("button", { name: "How to read Reach by travel mode" });
+  fireEvent.mouseDown(other);
+  other.focus();
+  expect(screen.queryByRole("dialog", { name: "How to read Closure impact" })).not.toBeInTheDocument();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(other).toHaveFocus();
 
   await userEvent.click(button);
   await userEvent.click(button);
@@ -147,6 +158,13 @@ it("keeps a tooltip to a few names and a long axis label to its axis", () => {
   expect(fitLabel(long, 184).endsWith("…")).toBe(true);
   expect(fitLabel("Walking", 86)).toBe("Walking");
   expect(fitLabel(long, 0)).toBe(long);
+  // Fitting uses rendered width, not character count: wide glyphs are cut sooner than narrow ones.
+  const wide = (value: string) => [...value].reduce((sum, ch) => sum + (ch === "W" ? 12 : 5), 0);
+  const ws = "W".repeat(28);
+  const cut = fitLabel(ws, 184, wide);
+  expect(cut.endsWith("…")).toBe(true);
+  expect(wide(cut)).toBeLessThanOrEqual(184 - 8);
+  expect(fitLabel("i".repeat(28), 184, wide)).toBe("i".repeat(28));
 });
 
 it("opens a closure's cut-off and longer-walk places from the two parts of its bar", async () => {
@@ -216,6 +234,33 @@ it("leaves the half of a bar a server sent no list for unclickable", async () =>
   await screen.findByText("Closure impact");
   fireEvent.click(segments("Closure impact")[1][0]);
   expect(destination().path).toBe("/");
+  expect(segments("Closure impact")[1][0]).toHaveAttribute("cursor", "default");
+  expect(segments("Closure impact")[0][0]).toHaveAttribute("cursor", "pointer");
+});
+
+it("leaves the reachable and readiness 'with' halves unclickable when the server sends no list, as today's backend does", async () => {
+  const base = fixture();
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
+    ...base,
+    readiness: { ...base.readiness, checks: base.readiness.checks.map(({ have: _have, ...check }) => check) },
+    reach: { ...base.reach!, modes: base.reach!.modes.map(({ reachablePlaces: _reachable, ...mode }) => mode) },
+  });
+  renderPage();
+  await screen.findByText("Reach by travel mode");
+
+  const reached = segments("Reach by travel mode")[0][0];
+  expect(reached).toHaveAttribute("cursor", "default");
+  fireEvent.click(reached);
+  expect(destination().path).toBe("/");
+
+  const ready = segments("Directory readiness")[0][0];
+  expect(ready).toHaveAttribute("cursor", "default");
+  fireEvent.click(ready);
+  expect(destination().path).toBe("/");
+
+  // The halves the backend does send still open their places.
+  fireEvent.click(segments("Directory readiness")[1][0]);
+  expect(destination().path).toBe("/locations");
 });
 
 it("keeps the optional place lists for the other half of each bar when the server sends them", () => {
