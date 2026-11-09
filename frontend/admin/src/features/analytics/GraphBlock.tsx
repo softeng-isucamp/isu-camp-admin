@@ -3,7 +3,7 @@ import type { ChartCopy } from "./copy";
 
 type Props = { copy: ChartCopy; wide?: boolean; aside?: ReactNode; children: ReactNode };
 
-/** One graph inside a section panel: title, the question it answers, the chart, and an (i) button that opens the reading guide. */
+/** One graph inside a section panel: title, the chart, and an (i) button that opens the reading guide. */
 export function GraphBlock({ copy, wide = false, aside, children }: Props) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
@@ -12,7 +12,6 @@ export function GraphBlock({ copy, wide = false, aside, children }: Props) {
       <div className="graph-head">
         <div className="graph-title">
           <h3>{copy.title}</h3>
-          <p>{copy.question}</p>
         </div>
         <div className="graph-aside">
           {aside}

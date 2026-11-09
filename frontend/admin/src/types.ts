@@ -263,8 +263,6 @@ export interface DecisionAnalytics {
     fullyReady: number;
     checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[] }>;
   };
-  /** Places with at least one gap, most searched first. `searches` counts recorded searches in the range. */
-  attention: Array<AnalyticsPlaceRef & { searches: number; gaps: ReadinessGap[] }>;
   /** What closing each pathway would do to walking routes from the origin. */
   closures: Array<{ id: string; pathway: string; cutOff: AnalyticsPlaceRef[]; longerTrip: number }>;
   /** Routable Places each travel mode reaches from `origin`. */

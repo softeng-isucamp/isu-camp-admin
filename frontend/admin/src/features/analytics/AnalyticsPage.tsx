@@ -7,19 +7,19 @@ import type { DashboardRange } from "../../types";
 import { COPY } from "./copy";
 import { GraphBlock } from "./GraphBlock";
 import { ClosureImpact, TravelModeReach } from "./NetworkCharts";
-import { DirectoryReadiness, PlacesNeedingAttention } from "./ReadinessCharts";
+import { DirectoryReadiness } from "./ReadinessCharts";
 import { SearchesByAccountType, SearchesByDestinationType } from "./SearchCharts";
 
 export const decisionAnalyticsQueryKey = (range: DashboardRange) => ["decision-analytics", range] as const;
 
 const RANGE_LABEL: Record<DashboardRange, string> = { week: "this week", month: "this month", all: "all time" };
 
-function Section({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
+function Section({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
   return (
     <section className="decision-group" aria-labelledby={`analytics-${id}`}>
       <div className="decision-group-head">
         <h2 id={`analytics-${id}`}>{title}</h2>
-        <span className="decision-tag">{note}</span>
+        {note && <span className="decision-tag">{note}</span>}
       </div>
       <div className="graph-panel">{children}</div>
     </section>
@@ -28,7 +28,8 @@ function Section({ id, title, note, children }: { id: string; title: string; not
 
 /**
  * The Analytics page, ordered the way an admin reads it: is the directory ready,
- * what to fix first, can people get there, then who is searching for what.
+ * can people get there, then who is searching for what. Every bar and slice
+ * opens the module where that thing gets fixed.
  */
 export function AnalyticsPage() {
   const [range, setRange] = useState<DashboardRange>("week");
@@ -46,7 +47,7 @@ export function AnalyticsPage() {
         <div>
           <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Analytics</h1>
-          <p>What to fix first, whether people can get there, and who is searching.</p>
+          <p>Sample data until the server provides these numbers.</p>
         </div>
         <select
           className="dashboard-time-filter"
@@ -72,16 +73,12 @@ export function AnalyticsPage() {
         <div className="dashboard-state" role="status" aria-live="polite"><Spinner size={18} /> Loading analytics…</div>
       ) : (
         <div className="analytics decision-analytics">
-          <p className="decision-notice">Sample data. These charts use fixture numbers until the server provides them.</p>
-          <Section id="ready" title="Is the directory ready?" note="Current snapshot">
+          <Section id="ready" title="Is the directory ready?">
             <GraphBlock copy={COPY.readiness} wide>
               <DirectoryReadiness data={data} />
             </GraphBlock>
-            <GraphBlock copy={COPY.attention} wide aside={<span className="graph-range">Searches {rangeLabel}</span>}>
-              <PlacesNeedingAttention data={data} rangeLabel={rangeLabel} />
-            </GraphBlock>
           </Section>
-          <Section id="routes" title="Can people get there?" note="Current map">
+          <Section id="routes" title="Can people get there?">
             <GraphBlock copy={COPY.closures}>
               <ClosureImpact data={data} />
             </GraphBlock>
@@ -89,7 +86,7 @@ export function AnalyticsPage() {
               <TravelModeReach data={data} />
             </GraphBlock>
           </Section>
-          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} recorded searches ${rangeLabel}`}>
+          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeLabel}`}>
             <GraphBlock copy={COPY.byAccount}>
               <SearchesByAccountType data={data} />
             </GraphBlock>

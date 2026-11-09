@@ -1,93 +1,77 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import type { DecisionAnalytics, ReadinessGap } from "../../types";
-import { formatNumber } from "../dashboard/analytics/format";
-import { GAP_MODULE, GAP_SHORT, gapLink, locationLink, logsLink } from "./links";
-import { PlaceLinks } from "./PlaceLinks";
+import { useNavigate } from "react-router-dom";
+import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
+import type { DecisionAnalytics } from "../../types";
+import { ChartArea } from "../dashboard/analytics/ChartCard";
+import { AXIS_TICK, ALERT, INK, SERIES } from "../dashboard/analytics/palette";
+import { ClickTip } from "./ClickTip";
+import { locationsListLink } from "./links";
+import { RowLabelTick } from "./RowLabelTick";
 
-/** Headline count of fully ready places beside one independent bar per check; clicking a bar lists the places missing it. */
+type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: number };
+
+/** Fully-ready count beside one bar per check (has it / missing it). Clicking a bar opens Locations filtered to the places missing it. */
 export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
+  const navigate = useNavigate();
   const { readiness } = data;
-  const worst = [...readiness.checks].sort((a, b) => a.complete / (a.total || 1) - b.complete / (b.total || 1))[0];
-  const [selected, setSelected] = useState<ReadinessGap>(worst?.key ?? "photo");
-  const active = readiness.checks.find((check) => check.key === selected);
-  const share = readiness.total ? readiness.fullyReady / readiness.total : 0;
+  const rows: Row[] = readiness.checks.map((check) => ({ ...check, missingCount: check.total - check.complete }));
+  const open = (entry: unknown) => {
+    const row = (entry as { payload?: Row } | undefined)?.payload;
+    if (row && row.missing.length) navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));
+  };
   return (
     <div className="readiness">
-      <div className="readiness-headline">
-        <strong className={share < 0.5 ? "bad" : undefined}>{formatNumber(readiness.fullyReady)}</strong>
-        <span>of {formatNumber(readiness.total)} places are fully ready</span>
-        <Link to="/locations" className="readiness-open">Open Locations ↗</Link>
-      </div>
-      <div className="readiness-bars" role="list">
-        {readiness.checks.map((check) => {
-          const ratio = check.total ? check.complete / check.total : 0;
-          const missing = check.total - check.complete;
-          return (
-            <button
-              key={check.key}
-              type="button"
-              role="listitem"
-              className={`readiness-row${selected === check.key ? " selected" : ""}`}
-              aria-pressed={selected === check.key}
-              onClick={() => setSelected(check.key)}
-              title={`Show the ${missing} places missing ${check.label.toLowerCase()}`}
-            >
-              <span className="readiness-label">{check.label}</span>
-              <span className="readiness-track" aria-hidden="true">
-                <i style={{ width: `${ratio * 100}%` }} />
-              </span>
-              <b>{formatNumber(check.complete)}<small> / {formatNumber(check.total)}</small></b>
-              <em className={missing ? "gap" : "ok"}>{missing ? `${missing} missing` : "All done"}</em>
-            </button>
-          );
-        })}
-      </div>
-      {active && (
-        <PlaceLinks
-          heading={`Missing ${active.label.toLowerCase()} (${active.missing.length})`}
-          places={active.missing}
-          href={(place) => gapLink(active.key, place)}
-          module={GAP_MODULE[active.key]}
-          empty="Every place has this."
-        />
-      )}
-    </div>
-  );
-}
-
-/** Places with gaps, most searched first: a search bar, then one tag per gap that opens where it gets fixed. */
-export function PlacesNeedingAttention({ data, rangeLabel }: { data: DecisionAnalytics; rangeLabel: string }) {
-  const rows = data.attention;
-  if (rows.length === 0) return <p className="place-links-empty">No searched place has a gap. Nothing to fix.</p>;
-  const max = Math.max(...rows.map((row) => row.searches));
-  return (
-    <div className="attention">
-      <div className="attention-head" aria-hidden="true">
-        <span>Place</span>
-        <span>Searches {rangeLabel}</span>
-        <span>What is missing (click to fix)</span>
-      </div>
-      {rows.map((row, i) => (
-        <div className="attention-row" key={row.id}>
-          <span className="attention-rank">{i + 1}</span>
-          <Link className="attention-name" to={locationLink(row)} title={`Open ${row.name} in Locations`}>{row.name}</Link>
-          <span className="attention-bar">
-            <i style={{ width: `${(row.searches / max) * 100}%` }} />
-            <b>{row.searches}</b>
-          </span>
-          <span className="attention-gaps">
-            {row.gaps.map((gap) => (
-              <Link key={gap} className={`gap-tag gap-${gap}`} to={gapLink(gap, row)} title={`Fix in ${GAP_MODULE[gap]}`}>
-                {GAP_SHORT[gap]}
-              </Link>
-            ))}
-          </span>
-          <Link className="attention-log" to={logsLink(row)} title={`Admin changes to ${row.name} in System Logs`} aria-label={`History of ${row.name}`}>
-            History
-          </Link>
-        </div>
-      ))}
+      <button
+        type="button"
+        className="readiness-headline"
+        onClick={() => navigate("/locations")}
+        title="Open Locations"
+      >
+        <strong className={readiness.fullyReady < readiness.total / 2 ? "bad" : undefined}>{readiness.fullyReady}</strong>
+        <span>/ {readiness.total} fully ready</span>
+      </button>
+      <ChartArea height={262}>
+        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 0 }} barCategoryGap="26%">
+          <CartesianGrid horizontal={false} stroke={INK.grid} />
+          <XAxis type="number" hide domain={[0, "dataMax"]} />
+          <YAxis yAxisId="checks" type="category" dataKey="label" tick={<RowLabelTick />} tickLine={false} axisLine={{ stroke: INK.grid }} width={128} interval={0} />
+          {/* Right-hand axis carries the "N missing" labels: a zero-width bar renders no label, so they cannot ride on the bars. */}
+          <YAxis
+            yAxisId="gaps"
+            orientation="right"
+            type="category"
+            dataKey="label"
+            tickLine={false}
+            axisLine={false}
+            width={92}
+            interval={0}
+            tick={({ x, y, index }: { x?: number | string; y?: number | string; index?: number }) => {
+              const row = rows[Number(index)];
+              if (!row) return <g />;
+              return (
+                <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={12} fontWeight={600} fill={row.missingCount ? ALERT : INK.muted}>
+                  {row.missingCount ? `${row.missingCount} missing` : "done"}
+                </text>
+              );
+            }}
+          />
+          <Tooltip
+            cursor={{ fill: "#f3f6f4" }}
+            content={({ active, payload }) => {
+              const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
+              if (!row) return null;
+              return (
+                <ClickTip
+                  title={row.label}
+                  value={`${row.complete} of ${row.total} have it · ${row.missingCount} missing`}
+                  action={row.missingCount ? `list the ${row.missingCount} in Locations` : undefined}
+                />
+              );
+            }}
+          />
+          <Bar yAxisId="checks" dataKey="complete" stackId="r" fill={SERIES.blue} cursor="pointer" onClick={open} isAnimationActive={false} />
+          <Bar yAxisId="checks" dataKey="missingCount" stackId="r" fill={ALERT} fillOpacity={0.22} radius={[0, 4, 4, 0]} cursor="pointer" onClick={open} isAnimationActive={false} />
+        </BarChart>
+      </ChartArea>
     </div>
   );
 }

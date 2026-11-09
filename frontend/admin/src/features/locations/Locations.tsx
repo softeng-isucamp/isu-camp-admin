@@ -36,6 +36,18 @@ const keyParam = (params: URLSearchParams) => {
   return key === null ? null : normalizeLocationKey(key);
 };
 
+/** The Analytics hand-off: `ids` (comma-separated Location IDs) narrows the list, `why` names the reason in the filter chip. */
+const analyticsParam = (params: URLSearchParams) => {
+  const ids = params.get("ids");
+  if (!ids) return null;
+  return { ids: new Set(ids.split(",").filter(Boolean)), label: params.get("why") ?? "From Analytics" };
+};
+/** A TYPE filter value requested by link, accepted only when it is a real option. */
+const typeParam = (params: URLSearchParams) => {
+  const requested = params.get("type");
+  return requested && typeFilterOptions.some((option) => option.id === requested) ? requested : "All Types";
+};
+
 /** Prefix of a FLOOR filter value that stands for a floor name across all Buildings, so it never collides with a floor record ID. */
 const floorNameValuePrefix = "floor-name:";
 
@@ -97,21 +109,24 @@ export function Locations() {
 
   const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
   const [targetKey, setTargetKey] = useState<string | null>(() => keyParam(new URLSearchParams(routeLocation.search)));
+  const [analyticsFilter, setAnalyticsFilter] = useState(() => analyticsParam(new URLSearchParams(routeLocation.search)));
+  const [type, setType] = useState(() => typeParam(new URLSearchParams(routeLocation.search)));
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
     const q = params.get("q");
     setQuery(q ?? "");
     setTargetKey(keyParam(params));
+    setAnalyticsFilter(analyticsParam(params));
+    if (params.has("type")) setType(typeParam(params));
   }, [routeLocation.search]);
 
-  const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
   const [buildingId, setBuildingId] = useState("All Buildings");
   const [floorId, setFloorId] = useState("All Floors");
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
   // Nodes with children start collapsed; with search/filters/deep link active they start expanded. toggledNodes flips that default.
   const [toggledNodes, setToggledNodes] = useState<Set<string>>(new Set());
-  const expandByDefault = query.trim() !== "" || !!targetKey || type !== "All Types" || buildingId !== "All Buildings" || floorId !== "All Floors" || status !== "All Statuses";
+  const expandByDefault = query.trim() !== "" || !!targetKey || !!analyticsFilter || type !== "All Types" || buildingId !== "All Buildings" || floorId !== "All Floors" || status !== "All Statuses";
   useEffect(() => setToggledNodes(new Set()), [expandByDefault]);
 
   const [dialog, setDialog] = useState<
@@ -418,24 +433,26 @@ export function Locations() {
     return rawItems.filter(
       (item) =>
         (!targetKey || locationIdentityKey(item) === targetKey) &&
+        (!analyticsFilter || analyticsFilter.ids.has(item.id)) &&
         (type === "All Types" || backendLocationType(item) === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
         matchesFloor(item),
     );
-  }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  }, [rawItems, targetKey, analyticsFilter, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
 
   useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
   const hierarchyFilterItems = useMemo(() => {
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
+      (!analyticsFilter || analyticsFilter.ids.has(item.id)) &&
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
       (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
       matchesFloor(item)
     );
-  }, [allLocations, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  }, [allLocations, targetKey, analyticsFilter, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
   const hierarchyFilterKeys = useMemo(() => new Set(hierarchyFilterItems.map(locationIdentityKey)), [hierarchyFilterItems]);
   const hierarchyItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -769,6 +786,7 @@ export function Locations() {
   const reclassifyingChildren = dialog === "edit" && selected && isPlace(draft) ? indoorLocationsOf(selected, allLocations) : [];
 
   const activeFilters = [
+    ...(analyticsFilter ? [{ key: "analytics", label: `${analyticsFilter.label} (${analyticsFilter.ids.size})`, clear: () => setAnalyticsFilter(null) }] : []),
     ...(query.trim() ? [{ key: "q", label: `Search: ${query.trim()}`, clear: () => { setTargetKey(null); setQuery(""); } }] : []),
     ...(targetKey && !query.trim() ? [{ key: "target", label: "Selected location", clear: () => setTargetKey(null) }] : []),
     ...(type !== "All Types" ? [{ key: "type", label: `Type: ${locationTypeOptionLabel(type as BackendLocationType)}`, clear: () => setType("All Types") }] : []),
@@ -778,6 +796,7 @@ export function Locations() {
   ];
   const clearFilters = () => {
     setTargetKey(null);
+    setAnalyticsFilter(null);
     setQuery("");
     setType("All Types");
     setBuildingId("All Buildings");

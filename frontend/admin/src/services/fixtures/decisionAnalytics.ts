@@ -34,13 +34,10 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
       entrance: index % 3 !== 1 && roll > 0.18,
       holdsRooms,
       rooms: holdsRooms && rand() > 0.72,
-      // A long tail: a few places get most of the searches.
-      weight: Math.pow(rand(), 2.6),
     };
   });
 
   const scale = SEARCH_SCALE[range];
-  const searchesFor = (weight: number) => Math.round(weight * 46 * scale);
 
   const gapsOf = (fact: (typeof facts)[number]): ReadinessGap[] => {
     const { place } = fact;
@@ -60,13 +57,6 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     const missing = applies.filter(({ gaps }) => gaps.includes(key)).map(({ fact }) => ref(fact.place));
     return { key, label: LABELS[key], complete: applies.length - missing.length, total: applies.length, missing };
   });
-
-  const attention = withGaps
-    .filter(({ gaps }) => gaps.length > 0)
-    .map(({ fact, gaps }) => ({ ...ref(fact.place), searches: searchesFor(fact.weight), gaps }))
-    .filter((row) => row.searches > 0)
-    .sort((a, b) => b.searches - a.searches)
-    .slice(0, 8);
 
   const routable = facts.filter((fact) => fact.entrance).map((fact) => fact.place);
   const pick = (start: number, count: number) => routable.slice(start, start + count).map(ref);
@@ -105,7 +95,6 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
       fullyReady: withGaps.filter(({ gaps }) => gaps.length === 0).length,
       checks,
     },
-    attention,
     closures,
     reach: { origin: "Main Gate", total: routable.length, modes },
     searches: {
