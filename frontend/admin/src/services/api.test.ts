@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   normalizeBackendDashboardAnalytics,
+  normalizeBackendDecisionAnalytics,
   normalizeBackendDashboardSummary,
   normalizeBackendUser,
   normalizeBackendLocation,
@@ -1855,5 +1856,18 @@ describe("friendly request failures at the HTTP boundary", () => {
     expect(error.message).toBe("This route node hasn't been saved to the server yet. Reload the map and try again.");
     expect(error.message).not.toMatch(/database|ID/);
     expect(error.detail).toContain("node-local-1");
+  });
+});
+
+describe("decision analytics", () => {
+  it("accepts the fixture and a server with no main gate", async () => {
+    const week = await services.dashboard.decisionAnalytics("week");
+    expect(normalizeBackendDecisionAnalytics({ success: true, data: week })).toEqual(week);
+    expect(normalizeBackendDecisionAnalytics({ data: { ...week, reach: null, closures: [] } }).reach).toBeNull();
+  });
+
+  it("rejects a malformed payload", async () => {
+    const week = await services.dashboard.decisionAnalytics("week");
+    expect(invalidResponseDetail(() => normalizeBackendDecisionAnalytics({ data: { ...week, readiness: undefined } }))).toContain("malformed analytics");
   });
 });

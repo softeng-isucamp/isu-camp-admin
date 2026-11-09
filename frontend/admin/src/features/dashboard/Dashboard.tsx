@@ -10,15 +10,13 @@ import metricBuildings from "../../assets/figma/dashboard/metric-buildings.svg";
 import metricOffices from "../../assets/figma/dashboard/metric-offices.svg";
 import { DashboardMapPreview } from "./DashboardMapPreview";
 import { AccountTypeSplit } from "./AccountTypeSplit";
-import { AnalyticsTab, dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
-import { formatAnalyticsPeriod } from "./analytics/format";
+import { RangeSelect, rangeLabel } from "./RangeSelect";
+import { dashboardAnalyticsQueryKey } from "./analytics/AnalyticsTab";
 import { usePermissions } from "../auth/usePermissions";
-import type { DashboardTab } from "./dashboardTabs";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const [tab, setTab] = useState<DashboardTab>("overview");
   const [range, setRange] = useState<DashboardRange>("week");
   const { data, error, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["dashboard", range],
@@ -32,7 +30,7 @@ export function Dashboard() {
     queryKey: dashboardAnalyticsQueryKey(range),
     queryFn: () => services.dashboard.analytics(range),
     placeholderData: (previous) => previous,
-    enabled: useAnalyticsDestinations || tab === "analytics",
+    enabled: useAnalyticsDestinations,
     retry: false,
   });
   const destinations: Array<{ rank: string; locationId?: string; name: string; context: string; searches: number; visits?: number }> =
@@ -40,11 +38,7 @@ export function Dashboard() {
   const destinationsLoading = useAnalyticsDestinations ? destinationsQuery.isLoading : isLoading;
   const destinationsFailed = useAnalyticsDestinations ? !!destinationsQuery.error && !destinationsQuery.data : !!error && !data;
 
-  const periodText = destinationsQuery.data?.range === range ? formatAnalyticsPeriod(destinationsQuery.data) : null;
-  const rangeLabel = range === "week" ? "this week" : range === "month" ? "this month" : range.startsWith("year-") ? `in ${range.slice(5)}` : "all time";
-  const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
-  const firstYear = Math.min(currentYear, Math.max(1900, data?.firstAnalyticsYear ?? currentYear));
-  const years = Array.from({ length: currentYear - firstYear + 1 }, (_, index) => currentYear - index);
+  const rangeText = rangeLabel(range);
   const buildingChange = data?.buildingChange;
   const recentAdminActivity = (data?.recent ?? []).filter((entry) => entry.category === "Admin");
 
@@ -61,37 +55,11 @@ export function Dashboard() {
         </Link>
       </section>
       <div className="dashboard-bar">
-        <div className="hero-tabs" role="tablist" aria-label="Dashboard sections">
-          {(["overview", "analytics"] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              className={tab === key ? "active" : undefined}
-              onClick={() => setTab(key)}
-            >
-              {key === "overview" ? "Overview" : "Analytics"}
-            </button>
-          ))}
-        </div>
         <div className="dashboard-range">
-          {tab === "analytics" && periodText && <span className="dashboard-range-dates">{periodText}</span>}
-          <select
-            className="dashboard-time-filter"
-            aria-label="Dashboard time range"
-            value={range}
-            disabled={isFetching}
-            onChange={(event) => setRange(event.target.value as DashboardRange)}
-          >
-            <optgroup label="Recent"><option value="week">This week</option><option value="month">This month</option></optgroup>
-            <optgroup label="Calendar year">{years.map((year) => <option key={year} value={`year-${year}`}>{year === currentYear ? `This year (${year})` : year}</option>)}</optgroup>
-            <option value="all">All time</option>
-          </select>
+          <RangeSelect value={range} onChange={setRange} firstYear={data?.firstAnalyticsYear} disabled={isFetching} label="Dashboard time range" />
         </div>
       </div>
-      {tab === "analytics" ? <AnalyticsTab range={range} /> : (
-        <>
+      <>
           <div className="metric-grid">
             <Link className="card dashboard-link" to="/locations">
               <div className="metric-top">
@@ -100,7 +68,7 @@ export function Dashboard() {
                 </span>
                 {buildingChange !== null && buildingChange !== undefined && (
                   <Badge>
-                    {buildingChange >= 0 ? "+" : ""}{buildingChange} {buildingChange >= 0 ? "added" : "change"} {rangeLabel}
+                    {buildingChange >= 0 ? "+" : ""}{buildingChange} {buildingChange >= 0 ? "added" : "change"} {rangeText}
                   </Badge>
                 )}
               </div>
@@ -237,8 +205,7 @@ export function Dashboard() {
               </Card>
             </div>
           </div>
-        </>
-      )}
+      </>
     </div>
   );
 }

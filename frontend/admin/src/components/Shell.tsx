@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import logo from "../assets/figma/brand/kumpas-logo.png";
 import dashboardIcon from "../assets/figma/navigation/dashboard.svg";
+import analyticsIcon from "../assets/figma/navigation/analytics.svg";
 import mapEditorIcon from "../assets/figma/navigation/map-editor.svg";
 import locationsIcon from "../assets/figma/navigation/locations.svg";
 import usersIcon from "../assets/figma/navigation/users.svg";
@@ -15,6 +16,12 @@ export const links = [
     icon: dashboardIcon,
     label: "Dashboard Overview",
     description: "System overview and campus metrics",
+  },
+  {
+    to: "/analytics",
+    icon: analyticsIcon,
+    label: "Analytics",
+    description: "What to fix first and who is searching",
   },
   {
     to: "/map-editor",

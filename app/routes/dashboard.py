@@ -11,6 +11,7 @@ from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
 from services.dashboard_analytics import calendar_year, earliest_analytics_day, manila_day, search_window, summarize_dashboard_analytics, valid_range, year_window
+from services.decision_analytics import summarize_decision_analytics
 from services.search_analytics import summarize_user_searches
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
@@ -126,3 +127,29 @@ def dashboard_analytics():
     except Exception:
         logger.exception("Failed to load dashboard analytics")
         return jsonify({"success": False, "message": "Failed to load dashboard analytics."}), 500
+
+
+@dashboard_bp.get("/decision-analytics")
+def decision_analytics():
+    """Serves the Analytics page: directory readiness, route reach, closure
+    impact and Searches - see ``services.decision_analytics``. Read-only, so
+    it writes no audit entry.
+    """
+
+    _, error = admin_required()
+    if error:
+        return error
+
+    range_key = request.args.get("range", "week")
+    if not valid_range(range_key):
+        return jsonify({
+            "success": False,
+            "message": "Invalid range.",
+            "errors": {"range": "Choose week, month, all, or year-YYYY up to this year."},
+        }), 400
+
+    try:
+        return jsonify({"success": True, "data": summarize_decision_analytics(range_key)}), 200
+    except Exception:
+        logger.exception("Failed to load decision analytics")
+        return jsonify({"success": False, "message": "Failed to load analytics."}), 500

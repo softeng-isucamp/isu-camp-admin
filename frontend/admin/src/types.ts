@@ -245,6 +245,37 @@ export interface DashboardAnalytics {
   completeness: CompletenessCheck[];
   completenessTotal: number;
 }
+/** A place an Analytics quick link can open: `id` is its Location ID. */
+export interface AnalyticsPlaceRef { id: string; name: string }
+/** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
+export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entrance" | "rooms";
+/**
+ * The Analytics page, served by `GET /api/dashboard/decision-analytics`
+ * (`app/services/decision_analytics.py`). Readiness, closures and reach are a
+ * current snapshot; searches follow the selected range.
+ */
+export interface DecisionAnalytics {
+  range: DashboardRange;
+  /** The first calendar year with any Search or registration, for the range picker. */
+  firstAnalyticsYear?: number;
+  /** Active Places only; each check counts on its own over the Places it applies to. */
+  readiness: {
+    total: number;
+    /** Places that pass every check that applies to them. */
+    fullyReady: number;
+    checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[] }>;
+  };
+  /** What closing each pathway would do to walking routes from the main gate: only pathways that change something, worst first. `id` is the Pathway ID. */
+  closures: Array<{ id: string; pathway: string; cutOff: AnalyticsPlaceRef[]; longerTrip: number }>;
+  /** Routable Places each travel mode reaches from `origin`; null when no single node is named as the main gate. */
+  reach: null | { origin: string; total: number; modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[] }> };
+  /** Recorded searches in the range (UserHistory rows that survived deletion). */
+  searches: {
+    total: number;
+    byAccountType: Record<UserAccountType, number>;
+    byDestinationType: Record<DestinationType, number>;
+  };
+}
 export interface TopSearchedLocation {
   rank: string;
   locationId?: string;

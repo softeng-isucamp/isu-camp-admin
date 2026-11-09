@@ -8,6 +8,7 @@ import type {
   AuditEntry,
   Building,
   DashboardAnalytics,
+  DecisionAnalytics,
   DashboardRange,
   DashboardSummary,
   Location,
@@ -64,6 +65,7 @@ import { readPermissions } from "../lib/permissions";
 import { createMockAuditLogs } from "./fixtures/mockAuditLogs";
 import { createMockUsers } from "./fixtures/mockUsers";
 import { generateDashboardAnalytics } from "./fixtures/dashboardAnalytics";
+import { generateDecisionAnalytics } from "./fixtures/decisionAnalytics";
 import { backendLocationType, indoorLocationTypes, isLocationContainer, isPlace, isUnclassifiedPlace, classificationFromBackend, isPlaceClassification, LocationPolicyError, locationPolicy, normalizeLocationKey, placeFieldsFromBackendType, type BackendLocationType } from "../lib/locationPolicy";
 import type { Building as NetworkBuilding, BuildingWriteRequest, MapDraftSaveRequest, NetworkSnapshot, Pathway as NetworkPathway, PathwayWriteRequest, RouteNode as NetworkRouteNode, RouteNodeWriteRequest } from "./network";
 import { createCanonicalNetworkStore, normalizeBuilding, normalizePathway, normalizeRouteNode, validatePathway } from "./network";
@@ -205,6 +207,41 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
   const parsed = dashboardAnalyticsSchema.safeParse(value);
   if (!parsed.success) throw new InvalidResponseError("Backend returned malformed dashboard analytics.");
   return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
+};
+const placeRefSchema = z.object({ id: z.string().min(1), name: z.string() });
+const decisionAnalyticsSchema = z.object({
+  range: z.union([z.enum(["week", "month", "all"]), z.string().regex(/^year-\d{4}$/).transform((value) => value as `year-${number}`)]),
+  firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
+  readiness: z.object({
+    total: nonNegInt,
+    fullyReady: nonNegInt,
+    checks: z.array(z.object({
+      key: z.enum(["photo", "description", "keywords", "pin", "entrance", "rooms"]),
+      label: z.string(),
+      complete: nonNegInt,
+      total: nonNegInt,
+      missing: z.array(placeRefSchema),
+    })),
+  }),
+  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt })),
+  reach: z.object({
+    origin: z.string(),
+    total: nonNegInt,
+    modes: z.array(z.object({ mode: z.string(), reachable: nonNegInt, unreachable: z.array(placeRefSchema) })),
+  }).nullable(),
+  searches: z.object({
+    total: nonNegInt,
+    byAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt }),
+    byDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
+  }),
+});
+
+/** Contract for `GET /api/dashboard/decision-analytics`, served by `app/services/decision_analytics.py`. */
+export const normalizeBackendDecisionAnalytics = (raw: unknown): DecisionAnalytics => {
+  const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const parsed = decisionAnalyticsSchema.safeParse(value);
+  if (!parsed.success) throw new InvalidResponseError("Backend returned malformed analytics.");
+  return parsed.data;
 };
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
@@ -757,6 +794,8 @@ export interface Services {
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
     analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
+    /** Decision-support charts for the Analytics tab. Fixture only: the HTTP adapter rejects until the backend serves it. */
+    decisionAnalytics(range?: DashboardRange): Promise<DecisionAnalytics>;
   };
 
   locations: {
@@ -1357,6 +1396,17 @@ export const services: Services = {
         return normalizeBackendDashboardAnalytics(raw);
       }
       return wait(generateDashboardAnalytics(range, locations, Date.now(), localAdapter.buildings.list()));
+    },
+
+    decisionAnalytics: async (range = "week") => {
+      if (USE_HTTP_API) {
+        const raw = await apiJson<unknown>(`/api/dashboard/decision-analytics?range=${encodeURIComponent(range)}`);
+        return normalizeBackendDecisionAnalytics(raw);
+      }
+      return wait({
+        ...generateDecisionAnalytics(range, locations),
+        firstAnalyticsYear: Number(generateDashboardAnalytics("all", locations, Date.now(), localAdapter.buildings.list()).timeline[0]?.date.slice(0, 4)),
+      });
     },
 
     summary: async (range = "week") => {

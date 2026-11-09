@@ -274,6 +274,40 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.queryByRole("row", { name: /Other Hall/ })).not.toBeInTheDocument();
   });
 
+  it("lists only the Places an Analytics link names, and clearing it drops the link from the URL", async () => {
+    const records = [
+      { id: "42", name: "Named Hall", code: "N-42", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "43", name: "Unnamed Hall", code: "N-43", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      // Same ID as the Place: Place and indoor Location IDs come from different tables.
+      { id: "42", name: "Colliding Room", code: "R-42", type: "Room" as const, parentId: "43", building: "Unnamed Hall", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations(["/locations?ids=42&why=Missing%20photo"]);
+    expect(await screen.findByRole("row", { name: /Named Hall/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Unnamed Hall/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Colliding Room/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter Missing photo (1)" }));
+    expect(await screen.findByRole("row", { name: /Unnamed Hall/ })).toBeInTheDocument();
+    expect(screen.getByTestId("location-route")).toHaveTextContent(/^\/locations$/);
+  });
+
+  it("opens every Place and no indoor Location for the Analytics Places scope", async () => {
+    const records = [
+      { id: "p1", name: "Scope Hall", code: "S-1", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "p2", name: "Scope Canteen", code: "S-2", type: "Place" as const, classification: "Food" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "r1", name: "Scope Room", code: "S-R", type: "Room" as const, parentId: "p1", building: "Scope Hall", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations(["/locations?scope=places&why=Places%20only"]);
+    expect(await screen.findByRole("row", { name: /Scope Hall/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Scope Canteen/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Scope Room/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle view mode" })).toBeDisabled();
+  });
+
   it("renders an orphaned duplicate-name record as an ungrouped row", async () => {
     const records = [
       { id: "orphan-building-a", name: "Orphan Duplicate Building", code: "ORPHAN-A", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },

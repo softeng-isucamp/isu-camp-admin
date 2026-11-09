@@ -36,6 +36,24 @@ const keyParam = (params: URLSearchParams) => {
   return key === null ? null : normalizeLocationKey(key);
 };
 
+/** The Analytics hand-off: `ids` (comma-separated Place IDs) or `scope=places` narrows the list, `why` names the reason in the filter chip. */
+const analyticsParam = (params: URLSearchParams): { ids: Set<string> | null; label: string } | null => {
+  const ids = params.get("ids");
+  if (ids) return { ids: new Set(ids.split(",").filter(Boolean)), label: params.get("why") ?? "From Analytics" };
+  // Every Place and no indoor Location: the Analytics "Places" slice spans every classification.
+  if (params.get("scope") === "places") return { ids: null, label: params.get("why") ?? "Places only" };
+  return null;
+};
+/** Analytics links only ever name Places, and Place and indoor Location IDs can collide, so only Places match. */
+const matchesAnalytics = (filter: ReturnType<typeof analyticsParam>, item: Location) =>
+  !filter || (isPlace(item) && (!filter.ids || filter.ids.has(item.id)));
+const ANALYTICS_PARAMS = ["ids", "why", "scope"];
+/** A TYPE filter value requested by link, accepted only when it is a real option. */
+const typeParam = (params: URLSearchParams) => {
+  const requested = params.get("type");
+  return requested && typeFilterOptions.some((option) => option.id === requested) ? requested : "All Types";
+};
+
 /** Prefix of a FLOOR filter value that stands for a floor name across all Buildings, so it never collides with a floor record ID. */
 const floorNameValuePrefix = "floor-name:";
 
@@ -97,21 +115,39 @@ export function Locations() {
 
   const [query, setQuery] = useState(() => new URLSearchParams(routeLocation.search).get("q") ?? "");
   const [targetKey, setTargetKey] = useState<string | null>(() => keyParam(new URLSearchParams(routeLocation.search)));
+  const [analyticsFilter, setAnalyticsFilter] = useState(() => analyticsParam(new URLSearchParams(routeLocation.search)));
+  const [type, setType] = useState(() => typeParam(new URLSearchParams(routeLocation.search)));
+  const previousSearch = useRef(routeLocation.search);
   useEffect(() => {
     const params = new URLSearchParams(routeLocation.search);
+    const hadType = new URLSearchParams(previousSearch.current).has("type");
+    previousSearch.current = routeLocation.search;
     const q = params.get("q");
     setQuery(q ?? "");
     setTargetKey(keyParam(params));
+    setAnalyticsFilter(analyticsParam(params));
+    // A link that sets or drops ?type= decides the TYPE filter; any other URL change keeps the admin's choice.
+    if (params.has("type") || hadType) setType(typeParam(params));
   }, [routeLocation.search]);
+  /** Clears the Analytics filter from the URL too, so a reload does not bring it back. */
+  const clearAnalyticsFilter = () => {
+    setAnalyticsFilter(null);
+    const params = new URLSearchParams(routeLocation.search);
+    if (!ANALYTICS_PARAMS.some((name) => params.has(name))) return;
+    ANALYTICS_PARAMS.forEach((name) => params.delete(name));
+    const search = params.toString();
+    navigate({ pathname: routeLocation.pathname, search: search ? `?${search}` : "" }, { replace: true });
+  };
 
-  const [type, setType] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
   const [buildingId, setBuildingId] = useState("All Buildings");
   const [floorId, setFloorId] = useState("All Floors");
   const [viewMode, setViewMode] = useState<"hierarchy" | "flat">("hierarchy");
+  // An Analytics list is narrowed in the hierarchy view only; see the view toggle.
+  useEffect(() => { if (analyticsFilter) setViewMode("hierarchy"); }, [analyticsFilter]);
   // Nodes with children start collapsed; with search/filters/deep link active they start expanded. toggledNodes flips that default.
   const [toggledNodes, setToggledNodes] = useState<Set<string>>(new Set());
-  const expandByDefault = query.trim() !== "" || !!targetKey || type !== "All Types" || buildingId !== "All Buildings" || floorId !== "All Floors" || status !== "All Statuses";
+  const expandByDefault = query.trim() !== "" || !!targetKey || !!analyticsFilter || type !== "All Types" || buildingId !== "All Buildings" || floorId !== "All Floors" || status !== "All Statuses";
   useEffect(() => setToggledNodes(new Set()), [expandByDefault]);
 
   const [dialog, setDialog] = useState<
@@ -418,24 +454,26 @@ export function Locations() {
     return rawItems.filter(
       (item) =>
         (!targetKey || locationIdentityKey(item) === targetKey) &&
+        matchesAnalytics(analyticsFilter, item) &&
         (type === "All Types" || backendLocationType(item) === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
         matchesFloor(item),
     );
-  }, [rawItems, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  }, [rawItems, targetKey, analyticsFilter, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
 
   useEffect(() => setPage(1), [query, type, status, buildingId, floorId, viewMode]);
 
   const hierarchyFilterItems = useMemo(() => {
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
+      matchesAnalytics(analyticsFilter, item) &&
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
       (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
       matchesFloor(item)
     );
-  }, [allLocations, targetKey, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
+  }, [allLocations, targetKey, analyticsFilter, type, status, buildingId, floorId, selectedFloorRecord, selectedFloorName]);
   const hierarchyFilterKeys = useMemo(() => new Set(hierarchyFilterItems.map(locationIdentityKey)), [hierarchyFilterItems]);
   const hierarchyItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -769,6 +807,7 @@ export function Locations() {
   const reclassifyingChildren = dialog === "edit" && selected && isPlace(draft) ? indoorLocationsOf(selected, allLocations) : [];
 
   const activeFilters = [
+    ...(analyticsFilter ? [{ key: "analytics", label: analyticsFilter.ids ? `${analyticsFilter.label} (${analyticsFilter.ids.size})` : analyticsFilter.label, clear: clearAnalyticsFilter }] : []),
     ...(query.trim() ? [{ key: "q", label: `Search: ${query.trim()}`, clear: () => { setTargetKey(null); setQuery(""); } }] : []),
     ...(targetKey && !query.trim() ? [{ key: "target", label: "Selected location", clear: () => setTargetKey(null) }] : []),
     ...(type !== "All Types" ? [{ key: "type", label: `Type: ${locationTypeOptionLabel(type as BackendLocationType)}`, clear: () => setType("All Types") }] : []),
@@ -778,6 +817,7 @@ export function Locations() {
   ];
   const clearFilters = () => {
     setTargetKey(null);
+    clearAnalyticsFilter();
     setQuery("");
     setType("All Types");
     setBuildingId("All Buildings");
@@ -989,8 +1029,11 @@ export function Locations() {
             <button
               type="button"
               className="btn btn-subtle"
-              style={{ padding: "8px 16px", borderRadius: "999px", fontSize: "13px", fontWeight: 600, border: "1px solid #d1d5db" }}
+              style={{ padding: "8px 16px", borderRadius: "999px", fontSize: "13px", fontWeight: 600, border: "1px solid #d1d5db", ...(analyticsFilter && viewMode === "hierarchy" ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}
               aria-label="Toggle view mode"
+              // The flat view pages through the server, so it cannot narrow to an Analytics list; that list stays in the hierarchy.
+              disabled={!!analyticsFilter && viewMode === "hierarchy"}
+              title={analyticsFilter && viewMode === "hierarchy" ? "Clear the Analytics filter to use the flat view" : undefined}
               onClick={() => setViewMode(viewMode === "hierarchy" ? "flat" : "hierarchy")}
             >
               {viewMode === "hierarchy" ? "Switch to Flat View" : "Switch to Hierarchy View"}

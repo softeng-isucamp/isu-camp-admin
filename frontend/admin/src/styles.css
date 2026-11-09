@@ -4276,6 +4276,314 @@ td small {
   border-radius: 5px;
   background: #2a78d6;
 }
+/* Decision analytics (Analytics tab) */
+.decision-notice {
+  margin: 0 4px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.decision-group + .decision-group {
+  margin-top: 32px;
+}
+.decision-group-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 4px;
+}
+.decision-group-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+.decision-tag {
+  padding: 2px 10px;
+  border-radius: 99px;
+  background: var(--mint);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+}
+.decision-sub {
+  margin: 4px 4px 14px;
+  max-width: 880px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.graph-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+.graph {
+  min-width: 0;
+  padding: 20px 24px 18px;
+}
+.graph-wide {
+  grid-column: 1 / -1;
+}
+.graph + .graph {
+  border-top: 1px solid var(--border);
+}
+.graph:not(.graph-wide) + .graph:not(.graph-wide) {
+  border-top: 0;
+  border-left: 1px solid var(--border);
+}
+.graph-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.graph-title h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.graph-rank {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--mint);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+}
+.graph-title p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.graph-info {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--muted);
+  font: italic 700 12px Georgia, serif;
+}
+.graph-info:hover,
+.graph-info.open {
+  border-color: var(--green-2);
+  color: var(--green-2);
+  background: var(--mint);
+}
+.graph-help {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f6f8f7;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.graph-help p {
+  margin: 0;
+}
+.graph-help ul {
+  margin: 8px 0 0;
+  padding-left: 16px;
+}
+.graph-help li {
+  margin: 3px 0;
+}
+.graph-do {
+  color: var(--muted);
+}
+.graph-help .graph-data {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.graph-plot {
+  min-width: 0;
+}
+.decision-legend {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.decision-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.decision-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.decision-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 4px 14px #0000001a;
+  font-size: 12px;
+}
+.graph-aside {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.analytics-page .hero select {
+  align-self: center;
+}
+/* Directory readiness */
+.readiness {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+}
+.readiness-headline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 24px 12px 0;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.readiness-headline strong {
+  font-size: 64px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--text);
+}
+.readiness-headline strong.bad {
+  color: var(--danger);
+}
+.readiness-headline span {
+  font-size: 14px;
+  color: var(--muted);
+}
+.readiness-headline:hover span {
+  color: var(--green-2);
+}
+.tip-action {
+  margin-top: 2px;
+  color: var(--green-2);
+  font-weight: 600;
+}
+button.analytics-legend-row {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.analytics-legend-row:hover {
+  background: #f3f6f4;
+}
+/* Quietest-hours heatmap */
+.heatmap-hours {
+  display: grid;
+  margin: 0 0 4px 42px;
+  font-size: 11px;
+  text-align: center;
+  color: var(--muted);
+}
+.heatmap-body {
+  display: flex;
+  gap: 8px;
+}
+.heatmap-days {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  width: 34px;
+  font-size: 12px;
+  color: var(--text);
+}
+.heatmap-days span {
+  display: flex;
+  align-items: center;
+}
+.heatmap-cells {
+  position: relative;
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  height: 252px;
+}
+.heatmap-cells i {
+  border-radius: 3px;
+}
+.heatmap-quiet {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2.5px solid var(--text);
+  border-radius: 4px;
+}
+.heatmap-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 12px 0 0 42px;
+}
+.heatmap-caption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.heatmap-caption strong {
+  color: var(--text);
+}
+.heatmap-key-box {
+  width: 22px;
+  height: 12px;
+  border: 2.5px solid var(--text);
+  border-radius: 3px;
+}
+.heatmap-scale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.heatmap-scale i {
+  width: 140px;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(42, 120, 214, 0.08), rgba(42, 120, 214, 1));
+}
+@media (max-width: 900px) {
+  .graph-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .graph:not(.graph-wide) + .graph:not(.graph-wide) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
 @media (max-width: 1100px) {
   .analytics-grid {
     grid-template-columns: 1fr;
@@ -4866,3 +5174,7 @@ p.inspector-notice { margin: 10px 18px 0; padding: 8px 10px; border-radius: 10px
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Analytics row labels double as keyboard links to what the bar opens. */
+.chart-row-link:focus { outline: none; }
+.chart-row-link:focus-visible text { fill: #0c7441; font-weight: 700; }

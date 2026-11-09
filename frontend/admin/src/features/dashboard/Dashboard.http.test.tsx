@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { services } from "../../services/api";
@@ -15,7 +14,7 @@ vi.mock("../../services/api", async (importOriginal) => ({
 
 afterEach(() => vi.restoreAllMocks());
 
-it("keeps HTTP Overview searches usable without the future analytics endpoint", async () => {
+it("keeps HTTP Overview searches usable without the analytics endpoint", async () => {
   vi.spyOn(services.dashboard, "summary").mockResolvedValue({
     buildings: 1, buildingChange: null, indoorLocations: 0, users: 0,
     usersByType: null, locations: 1, pathways: 0, searches: 18, recent: [],
@@ -34,10 +33,4 @@ it("keeps HTTP Overview searches usable without the future analytics endpoint", 
   expect(within(destination).queryByText("visits")).not.toBeInTheDocument();
   expect(within(destination).queryByText("arrival rate")).not.toBeInTheDocument();
   expect(analytics).not.toHaveBeenCalled();
-
-  await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-  expect(await screen.findByText("Analytics couldn't be loaded. Please try again.")).toBeInTheDocument();
-  expect(screen.getByRole("alert")).not.toHaveTextContent("Not found");
-  expect(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" })).toBeEnabled();
-  expect(analytics).toHaveBeenCalledWith("week");
 });
