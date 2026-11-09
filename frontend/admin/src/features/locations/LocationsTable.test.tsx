@@ -608,6 +608,24 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(dialog).toHaveTextContent("locked to preserve that context");
   });
 
+  it("announces a server refusal of a locked parent Building in the banner, since the locked field cannot take focus", async () => {
+    const building = await services.locations.save({
+      id: "locked-refusal-building", name: "Locked Refusal Building", code: "LOCK-REF", type: "Place", classification: "College",
+      parentId: null, status: "Active", lat: null, lng: null, positioned: false,
+    });
+    renderLocations([`/locations?add=indoor&parentId=${building.id}&floor=${encodeURIComponent("Ground Floor")}`]);
+    await screen.findByRole("dialog", { name: "Add Location" });
+    fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Locked Refusal Room" } });
+    fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "LOCK-ROOM" } });
+    const refusal = Object.assign(new Error("Parent Building was not found."), { fieldErrors: { parentId: "That Building no longer exists." } });
+    vi.spyOn(services.locations, "save").mockRejectedValueOnce(refusal);
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("That Building no longer exists.");
+    await waitFor(() => expect(banner).toHaveFocus());
+  });
+
   it("opens an indoor-location handoff for a newly created Building before directory refresh", async () => {
     const pendingBuilding = {
       id: "pending-map-building",

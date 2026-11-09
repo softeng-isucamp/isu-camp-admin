@@ -170,7 +170,7 @@ export function Locations() {
     if (!focusInvalidRef.current || !fieldErrors.length) return;
     focusInvalidRef.current = false;
     const body = document.querySelector<HTMLElement>(".locations-modal-body");
-    const target = body?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? body?.querySelector<HTMLElement>('[role="alert"]');
+    const target = body?.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled)') ?? body?.querySelector<HTMLElement>('[role="alert"]');
     target?.focus();
   }, [fieldErrors]);
   const [page, setPage] = useState(1);
@@ -843,7 +843,8 @@ export function Locations() {
   const fieldIsShown = (field?: keyof LocationDraft) => {
     switch (field) {
       case "type": case "name": case "code": case "function": return true;
-      case "parentId": return showsParentFields;
+      // A locked parent (quick-add) cannot take focus, so its error belongs in the announced banner.
+      case "parentId": return showsParentFields && lockedParentId === null;
       case "floor": return showsParentFields && draft.type !== "Floor";
       case "photo": return !photoLoadFailed;
       default: return false;
