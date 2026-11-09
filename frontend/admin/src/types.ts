@@ -191,8 +191,9 @@ export interface Session {
    */
   permissions?: AdminPermissions;
 }
-export type DashboardRange = "week" | "month" | "all";
+export type DashboardRange = "week" | "month" | "all" | `year-${number}`;
 export interface DashboardSummary {
+  firstAnalyticsYear?: number;
   buildings: number;
   buildingChange: number | null;
   indoorLocations: number;

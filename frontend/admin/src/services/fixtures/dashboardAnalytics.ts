@@ -242,9 +242,10 @@ export function generateDashboardAnalytics(range: DashboardRange, locations: Loc
   const model = buildModel(locations, manilaDayNumber(now));
   const { days, destinations } = model;
   const length = range === "week" ? 7 : range === "month" ? 30 : days.length;
-  const current = days.slice(days.length - length);
-  const previous = range === "all" ? null : days.slice(days.length - 2 * length, days.length - length);
-  const bucketSize = range === "all" ? 7 : 1;
+  const year = range.startsWith("year-") ? range.slice(5) : null;
+  const current = year ? days.filter((day) => day.date.startsWith(year)) : days.slice(days.length - length);
+  const previous = range === "all" || year ? null : days.slice(days.length - 2 * length, days.length - length);
+  const bucketSize = range === "all" || year ? 7 : 1;
 
   const sumBy = (selector: (day: Day) => number) => current.reduce((sum, day) => sum + selector(day), 0);
 

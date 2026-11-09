@@ -1,5 +1,5 @@
 import logging
-from datetime import timezone
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -10,7 +10,7 @@ from model.building import Building
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.location import LOCATION_TYPE_IDS, Location
 from model.pathway import Pathway
-from services.dashboard_analytics import RANGE_DAYS, search_window, summarize_dashboard_analytics
+from services.dashboard_analytics import calendar_year, earliest_analytics_day, manila_day, search_window, summarize_dashboard_analytics, valid_range, year_window
 from services.search_analytics import summarize_user_searches
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
@@ -24,10 +24,10 @@ def _as_utc(value):
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-def _building_change(days):
-    if days is None:
+def _building_change(days, window=None):
+    if days is None and window is None:
         return None
-    start, _ = search_window(days)
+    start, end = window or search_window(days)
     records = AuditLog.query.filter(
         AuditLog.target == "Building",
         AuditLog.action.in_(("create", "delete")),
@@ -35,7 +35,7 @@ def _building_change(days):
     return sum(
         (1 if record.action == "create" else -1)
         for record in records
-        if _as_utc(record.created_at) >= start
+        if start <= _as_utc(record.created_at) < end
     )
 
 
@@ -67,7 +67,7 @@ def dashboard_summary():
         return error
 
     range_key = request.args.get("range", "week")
-    if range_key not in RANGES:
+    if not valid_range(range_key):
         return jsonify({"success": False, "message": "Invalid range."}), 400
 
     try:
@@ -78,13 +78,18 @@ def dashboard_summary():
         users = AppUser.query.count()
         pathways = Pathway.query.filter_by(status="active").count()
         recent = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(3).all()
-        search_analytics = summarize_user_searches(RANGES[range_key])
+        today = manila_day(datetime.now(timezone.utc))
+        year = calendar_year(range_key, today)
+        window = year_window(year, today) if year is not None else None
+        days = RANGES.get(range_key)
+        search_analytics = summarize_user_searches(days, window=window)
 
         return jsonify({
             "success": True,
             "data": {
+                "firstAnalyticsYear": (earliest_analytics_day() or today).year,
                 "buildings": buildings,
-                "buildingChange": _building_change(RANGES[range_key]),
+                "buildingChange": _building_change(days, window),
                 "indoorLocations": indoor_locations,
                 "users": users,
                 "usersByType": _users_by_type(),
@@ -113,7 +118,7 @@ def dashboard_analytics():
         return error
 
     range_key = request.args.get("range", "week")
-    if range_key not in RANGE_DAYS:
+    if not valid_range(range_key):
         return jsonify({"success": False, "message": "Invalid range."}), 400
 
     try:

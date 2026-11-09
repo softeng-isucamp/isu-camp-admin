@@ -57,6 +57,22 @@ function RouteProbe() {
   return <output data-testid="dashboard-route">{location.pathname}{location.search}</output>;
 }
 
+describe("Calendar year range", () => {
+  it("offers the current year and requests that range on both dashboard views", async () => {
+    const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
+    const summaryRequest = vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
+    const analyticsRequest = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
+    renderDashboard();
+    const select = await screen.findByRole("combobox", { name: "Dashboard time range" });
+    await waitFor(() => expect(select).toBeEnabled());
+    await userEvent.selectOptions(select, `year-${currentYear}`);
+    await waitFor(() => expect(summaryRequest).toHaveBeenCalledWith(`year-${currentYear}`));
+    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
+    await waitFor(() => expect(analyticsRequest).toHaveBeenCalledWith(`year-${currentYear}`));
+    vi.restoreAllMocks();
+  });
+});
+
 describe("Dashboard backend boundary", () => {
   afterEach(() => vi.restoreAllMocks());
 

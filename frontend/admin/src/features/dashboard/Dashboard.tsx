@@ -41,7 +41,10 @@ export function Dashboard() {
   const destinationsFailed = useAnalyticsDestinations ? !!destinationsQuery.error && !destinationsQuery.data : !!error && !data;
 
   const periodText = destinationsQuery.data?.range === range ? formatAnalyticsPeriod(destinationsQuery.data) : null;
-  const rangeLabel = range === "week" ? "this week" : range === "month" ? "this month" : "all time";
+  const rangeLabel = range === "week" ? "this week" : range === "month" ? "this month" : range.startsWith("year-") ? `in ${range.slice(5)}` : "all time";
+  const currentYear = Number(new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Manila" }).format(new Date()));
+  const firstYear = Math.min(currentYear, Math.max(1900, data?.firstAnalyticsYear ?? currentYear));
+  const years = Array.from({ length: currentYear - firstYear + 1 }, (_, index) => currentYear - index);
   const buildingChange = data?.buildingChange;
   const recentAdminActivity = (data?.recent ?? []).filter((entry) => entry.category === "Admin");
 
@@ -81,8 +84,8 @@ export function Dashboard() {
             disabled={isFetching}
             onChange={(event) => setRange(event.target.value as DashboardRange)}
           >
-            <option value="week">This week</option>
-            <option value="month">This month</option>
+            <optgroup label="Recent"><option value="week">This week</option><option value="month">This month</option></optgroup>
+            <optgroup label="Calendar year">{years.map((year) => <option key={year} value={`year-${year}`}>{year === currentYear ? `This year (${year})` : year}</option>)}</optgroup>
             <option value="all">All time</option>
           </select>
         </div>

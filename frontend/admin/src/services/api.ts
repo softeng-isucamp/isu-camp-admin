@@ -117,6 +117,7 @@ export const normalizeBackendAudit = (raw: BackendAudit): AuditEntry => {
 };
 
 const dashboardMetricsSchema = z.object({
+  firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
   buildings: z.number().int().nonnegative(),
   buildingChange: z.number().int().nullable(),
   indoorLocations: z.number().int().nonnegative(),
@@ -169,7 +170,7 @@ const analyticsTotalsSchema = z.object({
   arrivalRate: z.number().min(0).max(1),
 });
 const dashboardAnalyticsSchema = z.object({
-  range: z.enum(["week", "month", "all"]),
+  range: z.union([z.enum(["week", "month", "all"]), z.string().regex(/^year-\d{4}$/).transform((value) => value as `year-${number}`)]),
   current: analyticsTotalsSchema,
   previous: analyticsTotalsSchema.nullable(),
   timeline: z.array(z.object({ date: z.string().min(1), searches: nonNegInt, visits: nonNegInt })),
@@ -1364,9 +1365,10 @@ export const services: Services = {
         return normalizeBackendDashboardSummary(raw);
       }
       return wait({
+        firstAnalyticsYear: Number(generateDashboardAnalytics("all", locations, Date.now(), localAdapter.buildings.list()).timeline[0]?.date.slice(0, 4)),
         buildings: 142,
 
-        buildingChange: 2,
+        buildingChange: range.startsWith("year-") ? null : 2,
 
         indoorLocations: locations.filter((location) =>
           ["Room", "Office", "Laboratory", "Restroom"].includes(location.type),
