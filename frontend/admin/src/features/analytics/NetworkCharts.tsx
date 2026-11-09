@@ -4,21 +4,23 @@ import type { DecisionAnalytics } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, MUTED_MARK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip } from "./ClickTip";
-import { locationsListLink, mapLink } from "./links";
+import { Empty } from "../../components/UI";
+import { locationsListLink, pathwayLink } from "./links";
 import { RowLabelTick } from "./RowLabelTick";
 
 type ClosureRow = DecisionAnalytics["closures"][number] & { cut: number };
 
-/** Per pathway: places cut off (red) and places that only get a longer walk (grey). A click opens the Map Editor at the first cut-off place. */
+/** Per pathway: places cut off (red) and places that only get a longer walk (grey). A click opens that pathway in the Map Editor. */
 export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
   const navigate = useNavigate();
+  if (!data.closures.length) return <Empty>No single pathway closure changes any walk from the main gate.</Empty>;
   const rows: ClosureRow[] = [...data.closures]
     .map((row) => ({ ...row, cut: row.cutOff.length }))
     .sort((a, b) => b.cut - a.cut || b.longerTrip - a.longerTrip);
   const open = (entry: unknown) => {
     const row = (entry as { payload?: ClosureRow } | undefined)?.payload;
     if (!row) return;
-    navigate(row.cutOff[0] ? mapLink(row.cutOff[0]) : "/map-editor");
+    navigate(pathwayLink(row.id));
   };
   return (
     <>
@@ -40,7 +42,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
                 <ClickTip
                   title={row.pathway}
                   value={row.cut ? `Cuts off ${row.cutOff.map((place) => place.name).join(", ")} · ${row.longerTrip} longer walks` : `Nobody cut off · ${row.longerTrip} longer walks`}
-                  action="open in Map Editor"
+                  action="open this pathway in Map Editor"
                 />
               );
             }}
@@ -65,11 +67,12 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
   );
 }
 
-type ReachRow = DecisionAnalytics["reach"]["modes"][number];
+type ReachRow = NonNullable<DecisionAnalytics["reach"]>["modes"][number];
 
 /** Routable places each travel mode reaches, against the total. A click opens Locations filtered to the places it cannot reach. */
 export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
   const navigate = useNavigate();
+  if (!data.reach) return <Empty>Name exactly one route node "Main Gate" in the Map Editor to measure reach.</Empty>;
   const { origin, total, modes } = data.reach;
   const step = total <= 20 ? 4 : 10;
   const ticks = Array.from({ length: Math.floor(total / step) + 1 }, (_, i) => i * step);

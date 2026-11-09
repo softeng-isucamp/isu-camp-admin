@@ -433,7 +433,7 @@ export function Locations() {
     return rawItems.filter(
       (item) =>
         (!targetKey || locationIdentityKey(item) === targetKey) &&
-        (!analyticsFilter || analyticsFilter.ids.has(item.id)) &&
+        (!analyticsFilter || (isPlace(item) && analyticsFilter.ids.has(item.id))) &&
         (type === "All Types" || backendLocationType(item) === type) &&
         (status === "All Statuses" || status === "All Status" || item.status === status) &&
         (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&
@@ -446,7 +446,7 @@ export function Locations() {
   const hierarchyFilterItems = useMemo(() => {
     return allLocations.filter((item) =>
       (!targetKey || locationIdentityKey(item) === targetKey) &&
-      (!analyticsFilter || analyticsFilter.ids.has(item.id)) &&
+      (!analyticsFilter || (isPlace(item) && analyticsFilter.ids.has(item.id))) &&
       (type === "All Types" || backendLocationType(item) === type) &&
       (status === "All Statuses" || status === "All Status" || item.status === status) &&
       (buildingId === "All Buildings" || item.parentId === buildingId || (isPlace(item) && item.id === buildingId)) &&

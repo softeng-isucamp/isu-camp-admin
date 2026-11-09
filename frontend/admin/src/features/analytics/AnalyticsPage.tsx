@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Button, Card, Empty, ProgressBar, Spinner } from "../../components/UI";
-import { services } from "../../services/api";
+import { services, USE_HTTP_API } from "../../services/api";
 import { errorMessage } from "../../services/errors";
 import type { DashboardRange } from "../../types";
 import { COPY } from "./copy";
@@ -47,7 +47,7 @@ export function AnalyticsPage() {
         <div>
           <p className="eyebrow">KUMPAS ADMIN</p>
           <h1>Analytics</h1>
-          <p>Sample data until the server provides these numbers.</p>
+          {!USE_HTTP_API && <p>Sample data (local mode).</p>}
         </div>
         <select
           className="dashboard-time-filter"

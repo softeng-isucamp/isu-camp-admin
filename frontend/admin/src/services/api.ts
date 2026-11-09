@@ -208,6 +208,40 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
   if (!parsed.success) throw new InvalidResponseError("Backend returned malformed dashboard analytics.");
   return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
 };
+const placeRefSchema = z.object({ id: z.string().min(1), name: z.string() });
+const decisionAnalyticsSchema = z.object({
+  range: z.enum(["week", "month", "all"]),
+  readiness: z.object({
+    total: nonNegInt,
+    fullyReady: nonNegInt,
+    checks: z.array(z.object({
+      key: z.enum(["photo", "description", "keywords", "pin", "entrance", "rooms"]),
+      label: z.string(),
+      complete: nonNegInt,
+      total: nonNegInt,
+      missing: z.array(placeRefSchema),
+    })),
+  }),
+  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt })),
+  reach: z.object({
+    origin: z.string(),
+    total: nonNegInt,
+    modes: z.array(z.object({ mode: z.string(), reachable: nonNegInt, unreachable: z.array(placeRefSchema) })),
+  }).nullable(),
+  searches: z.object({
+    total: nonNegInt,
+    byAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt }),
+    byDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
+  }),
+});
+
+/** Contract for `GET /api/dashboard/decision-analytics`, served by `app/services/decision_analytics.py`. */
+export const normalizeBackendDecisionAnalytics = (raw: unknown): DecisionAnalytics => {
+  const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
+  const parsed = decisionAnalyticsSchema.safeParse(value);
+  if (!parsed.success) throw new InvalidResponseError("Backend returned malformed analytics.");
+  return parsed.data;
+};
 const normalizeBackendPage = <T>(raw: unknown, normalize: (row: unknown) => T, label: string): Page<T> => {
   const value = raw && typeof raw === "object" && "data" in raw ? (raw as { data: unknown }).data : raw;
   const page = value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -1365,8 +1399,8 @@ export const services: Services = {
 
     decisionAnalytics: async (range = "week") => {
       if (USE_HTTP_API) {
-        // A plain Error keeps this message visible; a "server" RequestError would be replaced by the caller's fallback.
-        throw new Error("These analytics are not available from the server yet.");
+        const raw = await apiJson<unknown>(`/api/dashboard/decision-analytics?range=${encodeURIComponent(range)}`);
+        return normalizeBackendDecisionAnalytics(raw);
       }
       return wait(generateDecisionAnalytics(range, locations));
     },

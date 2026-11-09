@@ -1,4 +1,5 @@
 import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, ReadinessGap } from "../../types";
+import mapFixture from "../generated-map-fixture.json";
 import { mulberry32 } from "./prng";
 
 /**
@@ -8,7 +9,10 @@ import { mulberry32 } from "./prng";
  * travel modes are seeded, since the local adapter has no route graph or history.
  */
 const SEARCH_SCALE: Record<DashboardRange, number> = { week: 1, month: 3.4, all: 9 };
-const ROOM_HOLDERS = new Set(["College", "Campus Services", "Facility", undefined]);
+// Matches the backend: only these (and legacy, unclassified Places) may hold indoor Locations.
+const ROOM_HOLDERS = new Set(["College", "Campus Services", "Building", undefined]);
+// Real fixture pathway IDs, so a closure bar opens a pathway the Map Editor can find.
+const PATHWAY_IDS = mapFixture.walkingNetwork.pathways.map((pathway) => pathway.id);
 
 const LABELS: Record<ReadinessGap, string> = {
   photo: "Photo",
@@ -61,12 +65,10 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   const routable = facts.filter((fact) => fact.entrance).map((fact) => fact.place);
   const pick = (start: number, count: number) => routable.slice(start, start + count).map(ref);
   const closures = [
-    { id: "pw-junction-ccsict", pathway: "Junction → CCSICT walkway", cutOff: pick(0, 4), longerTrip: 6 },
-    { id: "pw-infirmary", pathway: "Infirmary entrance path", cutOff: pick(4, 2), longerTrip: 9 },
-    { id: "pw-old-ca", pathway: "Old CA spur", cutOff: pick(6, 1), longerTrip: 3 },
-    { id: "pw-oval-loop", pathway: "Oval loop road", cutOff: [], longerTrip: 11 },
-    { id: "pw-gate-road", pathway: "Main gate road (east)", cutOff: [], longerTrip: 4 },
-  ];
+    { pathway: "Junction → CCSICT walkway", cutOff: pick(0, 4), longerTrip: 6 },
+    { pathway: "Infirmary entrance path", cutOff: pick(4, 2), longerTrip: 9 },
+    { pathway: "Oval loop road", cutOff: [], longerTrip: 11 },
+  ].map((row, index) => ({ id: PATHWAY_IDS[index % PATHWAY_IDS.length] ?? `pathway-${index}`, ...row }));
 
   const unreachable = (share: number, offset: number) => {
     const count = Math.round(routable.length * share);

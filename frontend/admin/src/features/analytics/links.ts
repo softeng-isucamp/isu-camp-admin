@@ -4,5 +4,5 @@ import type { AnalyticsPlaceRef } from "../../types";
 export const locationsListLink = (places: AnalyticsPlaceRef[], why: string) =>
   `/locations?${new URLSearchParams({ ids: places.map((place) => place.id).join(","), why })}`;
 
-/** The Map Editor zoomed to a place. */
-export const mapLink = (place: AnalyticsPlaceRef) => `/map-editor?${new URLSearchParams({ location: place.id })}`;
+/** The Map Editor with one pathway open. */
+export const pathwayLink = (pathwayId: string) => `/map-editor?${new URLSearchParams({ pathway: pathwayId })}`;

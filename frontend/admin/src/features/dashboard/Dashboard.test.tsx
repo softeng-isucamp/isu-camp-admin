@@ -159,60 +159,6 @@ describe("Dashboard backend boundary", () => {
     expect(within(student).getAllByText("—")).toHaveLength(2);
     expect(screen.getByText("56")).toBeInTheDocument();
   });
-
-  it("renders the Analytics tab sections from fixture data", async () => {
-    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    renderDashboard();
-
-    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByRole("heading", { name: "App usage" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Data health" })).toBeInTheDocument();
-    expect(await screen.findByText("Active users")).toBeInTheDocument();
-    for (const title of ["Searches and visits", "Visits by account type", "Visits by destination type", "New registrations", "Directory completeness"]) {
-      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
-    }
-    expect(screen.getByRole("link", { name: /Photo/ })).toHaveAttribute("href", "/locations");
-    expect(screen.getByText(/^[\d,]+ active locations$/)).toBeInTheDocument();
-  });
-
-  it("explains that analytics failed to load and retries on request", async () => {
-    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    const request = vi.spyOn(services.dashboard, "analytics").mockRejectedValue(new RequestError("server", { status: 500, detail: "Not found" }));
-    renderDashboard();
-
-    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Analytics couldn't be loaded. Please try again.")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).not.toHaveTextContent("Not found");
-    const failedCalls = request.mock.calls.length;
-
-    request.mockResolvedValue(analytics());
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(await screen.findByText("Active users")).toBeInTheDocument();
-    expect(request.mock.calls.length).toBeGreaterThan(failedCalls);
-  });
-
-  it("keeps the cards and warns when a later refresh fails", async () => {
-    vi.spyOn(services.dashboard, "summary").mockResolvedValue(summary);
-    const request = vi.spyOn(services.dashboard, "analytics").mockImplementation(async (range) => analytics(range));
-    renderDashboard();
-
-    await userEvent.click(screen.getByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText("Active users")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "month");
-    await waitFor(() => expect(request).toHaveBeenCalledWith("month"));
-
-    // Back to the cached week: its numbers stay up while the refetch fails.
-    request.mockRejectedValue(new Error("Gateway timeout"));
-    await userEvent.selectOptions(screen.getByLabelText("Dashboard time range"), "week");
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/latest refresh of analytics failed/i);
-    expect(alert).toHaveTextContent(/may be out of date/i);
-    expect(screen.getByText("Active users")).toBeInTheDocument();
-
-    request.mockImplementation(async (range) => analytics(range));
-    await userEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-  });
 });
 
 describe("Dashboard Open Locations link for a restricted administrator", () => {
@@ -232,14 +178,7 @@ describe("Dashboard Open Locations link for a restricted administrator", () => {
     expect(link).toHaveAttribute("href", "/locations");
     expect(screen.queryByRole("link", { name: /new location/i })).not.toBeInTheDocument();
     expect(screen.getByText("Registered Users")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Analytics" })).toBeInTheDocument();
-  });
-
-  it("shows the exact period for the selected range on the Analytics tab", async () => {
-    loadCards();
-    renderDashboard(["admin", { permissions: viewOnlyPermissions() }]);
-
-    await userEvent.click(await screen.findByRole("tab", { name: "Analytics" }));
-    expect(await screen.findByText(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})? \u2013 [A-Z][a-z]{2} \d{1,2}, \d{4}$/)).toBeInTheDocument();
+    // Analytics moved to its own page; the Dashboard has no tabs.
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   });
 });
