@@ -247,8 +247,6 @@ export interface DashboardAnalytics {
 }
 /** A place an Analytics quick link can open: `id` is its Location ID. */
 export interface AnalyticsPlaceRef { id: string; name: string }
-/** A destination people searched for in the range. `id` is a Place's or an indoor Location's own ID, which can collide: pair it with the row's `type`. */
-export interface SearchedDestination extends AnalyticsPlaceRef { searches: number }
 /** One bucket of the Search activity series: a day, or a week named by its first day (Asia/Manila). */
 export interface SearchActivityPoint {
   date: string;
@@ -258,22 +256,17 @@ export interface SearchActivityPoint {
   teacher: number;
   visitor: number;
 }
-/** Recorded searches for one destination type, and how many were for a destination with no map marker. */
-export interface MarkerGapRow {
-  type: DestinationType;
-  /** Searches for active destinations of this type. */
-  searches: number;
-  /** Of those, searches for a destination with no marker: no point or footprint for a Place, no coordinates of its own for an indoor Location. */
-  withoutMarker: number;
-  /**
-   * Of those, searches that leave nothing to show on the map. The User App opens an indoor Location with no marker at
-   * its building, so for those only a building that has no position either counts; a Place without one always counts.
-   */
-  notOnMap: number;
-  /** The destinations behind `withoutMarker`, most searched first. */
-  missing: SearchedDestination[];
-  /** The destinations that have a marker, most searched first. */
-  have: SearchedDestination[];
+/** Active indoor Locations of one type, with and without a map marker of their own, searched or not. */
+export interface IndoorMarkerRow {
+  type: Exclude<DestinationType, "Building">;
+  /** Active indoor Locations of this type under an active Place. */
+  total: number;
+  /** Of those, the ones with their own coordinates. */
+  marked: number;
+  /** Indoor Location IDs (not Place IDs: pair each with `type`) with no marker, by name. */
+  missing: AnalyticsPlaceRef[];
+  /** The ones that have a marker, by name. */
+  have: AnalyticsPlaceRef[];
 }
 /** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
 export type ReadinessGap = "photo" | "keywords" | "entrance" | "rooms";
@@ -291,6 +284,8 @@ export interface DecisionAnalytics {
     total: number;
     /** `have` (proposed) lists the places that pass the check, so the "has it" half of a bar can open them like `missing`; a server that omits it leaves that half unclickable. */
     checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[]; have?: AnalyticsPlaceRef[] }>;
+    /** One row per indoor type (Room, Laboratory, Office, Restroom). Places are not listed: their position comes from the footprint. */
+    indoorMarkers: IndoorMarkerRow[];
   };
   /** What closing each pathway would do to walking routes from the main gate: only pathways that change something, worst first. `id` is the Pathway ID. */
   closures: null | Array<{
@@ -317,8 +312,6 @@ export interface DecisionAnalytics {
     byAccountType: Record<UserAccountType, number>;
     /** Searches over time, stacked by account type: days for a week or month, weeks for all time and a year. */
     activity: { bucket: "day" | "week"; points: SearchActivityPoint[] };
-    /** One row per destination type, in the order Place, Room, Laboratory, Office, Restroom. */
-    markerGap: MarkerGapRow[];
   };
 }
 export interface TopSearchedLocation {

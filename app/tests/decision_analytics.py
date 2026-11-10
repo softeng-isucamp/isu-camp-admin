@@ -302,15 +302,13 @@ def test_search_activity_is_weekly_for_all_time_and_for_a_year_and_buckets_by_ma
     assert sum(point["total"] for point in year["points"]) == 2
 
 
-def test_marker_gap_counts_searches_for_destinations_without_markers_next_to_the_totals(app):
-    ring = [[16.7, 121.7], [16.7, 121.701], [16.701, 121.701]]
+def test_indoor_markers_count_every_active_indoor_location_searched_or_not(app):
     with app.app_context():
-        place(60, "Pavilion", "Food", polygon_coordinates=ring)
-        place(61, "Sliver", "Food", polygon_coordinates=ring[:2])
         for identifier, name, type_id, building, coordinates, status in (
             (2, "Room 102", 1, LIBRARY, {}, "active"),
             (3, "Dean's Office", 3, COLLEGE, {"latitude": 16.7221, "longitude": 121.6901}, "active"),
             (4, "Old Lab", 2, COLLEGE, {}, "inactive"),
+            (7, "Chem Lab", 2, COLLEGE, {}, "active"),
             # Its building is inactive, so the app lists neither: not a destination anyone can reach.
             (5, "Closed Hall Room", 1, CLOSED, {"latitude": 16.7, "longitude": 121.7}, "active"),
             (6, "Orphan Room", 1, None, {}, "active"),
@@ -319,50 +317,24 @@ def test_marker_gap_counts_searches_for_destinations_without_markers_next_to_the
                 location_id=identifier, location_code=f"L{identifier}", location_name=name, type_id=type_id,
                 building_id=building, status=status, created_at=NOW, updated_at=NOW, **coordinates,
             ))
-        history = [
-            (COLLEGE, None), (COLLEGE, None),      # Place with a point
-            (60, None),                            # Place with only a footprint: on the map
-            (61, None), (61, None),                # a two-point ring encloses nothing
-            (LIBRARY, None),                       # no position at all
-            (None, 1), (None, 1), (None, 1),       # Room 101: no marker, building on the map
-            (None, 2),                             # Room 102: no marker, building not on the map
-            (None, 3), (None, 3),                  # Office with its own marker
-            (None, 4),                             # inactive Laboratory: not counted
-            (None, 5), (None, 6),                  # room under an inactive building / with no building: not counted
-            (None, 99),                            # deleted Location: not counted
-            (CLOSED, None),                        # inactive Place: not counted
-        ]
-        db.session.add_all(
-            UserHistory(id=index, building_id=building, location_id=location, created_at=NOW)
-            for index, (building, location) in enumerate(history, start=1)
-        )
+        # No search history at all: the backlog must not depend on it.
         db.session.commit()
-        searches = summary()["searches"]
+        markers = {row["type"]: row for row in summary()["readiness"]["indoorMarkers"]}
 
-    gap = {row["type"]: row for row in searches["markerGap"]}
-    assert list(gap) == ["Building", "Room", "Laboratory", "Office", "Restroom"]
-
-    places = gap["Building"]
-    assert (places["searches"], places["withoutMarker"], places["notOnMap"]) == (6, 3, 3)
-    assert [(row["id"], row["searches"]) for row in places["missing"]] == [("61", 2), (str(LIBRARY), 1)]
-    assert [(row["id"], row["searches"]) for row in places["have"]] == [(str(COLLEGE), 2), ("60", 1)]
-
-    # A Room with no marker is still shown at its building: only Room 102's
-    # building is also off the map, so only its search leaves nothing to show.
-    rooms = gap["Room"]
-    assert (rooms["searches"], rooms["withoutMarker"], rooms["notOnMap"]) == (4, 4, 1)
-    assert [(row["id"], row["name"], row["searches"]) for row in rooms["missing"]] == [
-        ("1", "Room 101", 3), ("2", "Room 102", 1),
-    ]
+    assert list(markers) == ["Room", "Laboratory", "Office", "Restroom"]
+    rooms = markers["Room"]
+    assert (rooms["total"], rooms["marked"]) == (2, 0)
+    assert [(row["id"], row["name"]) for row in rooms["missing"]] == [("1", "Room 101"), ("2", "Room 102")]
     assert rooms["have"] == []
 
-    offices = gap["Office"]
-    assert (offices["searches"], offices["withoutMarker"], offices["notOnMap"]) == (2, 0, 0)
-    assert [row["id"] for row in offices["have"]] == ["3"] and offices["missing"] == []
+    offices = markers["Office"]
+    assert (offices["total"], offices["marked"]) == (1, 1)
+    assert [row["name"] for row in offices["have"]] == ["Dean's Office"] and offices["missing"] == []
 
-    # The inactive Laboratory is not a destination anyone can reach.
-    assert (gap["Laboratory"]["searches"], gap["Laboratory"]["missing"]) == (0, [])
-    assert gap["Restroom"]["searches"] == 0
+    # The inactive Laboratory and the rooms with no active building are not counted.
+    assert [(row["name"]) for row in markers["Laboratory"]["missing"]] == ["Chem Lab"]
+    assert markers["Restroom"]["total"] == 0
+    assert "markerGap" not in summary()["searches"]
 
 
 # ==========================================

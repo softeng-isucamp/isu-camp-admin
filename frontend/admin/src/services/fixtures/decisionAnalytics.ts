@@ -1,4 +1,4 @@
-import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, MarkerGapRow, ReadinessGap, SearchActivityPoint, SearchedDestination, UserAccountType } from "../../types";
+import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, IndoorMarkerRow, ReadinessGap, SearchActivityPoint, UserAccountType } from "../../types";
 import mapFixture from "../generated-map-fixture.json";
 import { indoorLocationTypes, isLocationContainer } from "../../lib/locationPolicy";
 import { mulberry32 } from "./prng";
@@ -152,39 +152,14 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   });
   const byAccountType = Object.fromEntries(accountKeys.map((key) => [key, points.reduce((sum, point) => sum + point[key], 0)])) as Record<UserAccountType, number>;
 
-  // Searches by destination type, spread over the real fixture records so a quick link opens records that exist.
-  const placeOf = new Map(places.map((place) => [place.id, place]));
-  // The app lists an indoor Location only under its active building, so a room without one is not a destination.
-  const indoor = locations.filter((item) => item.status === "Active" && item.parentId && placeOf.has(item.parentId) && item.type !== "Place" && item.type !== "Floor");
-  const typeShares: Array<[DestinationType, Location[], number]> = [
-    ["Building", places, 0.55],
-    ["Room", indoor.filter((item) => item.type === "Room"), 0.18],
-    ["Laboratory", indoor.filter((item) => item.type === "Laboratory"), 0.09],
-    ["Office", indoor.filter((item) => item.type === "Office"), 0.14],
-    ["Restroom", indoor.filter((item) => item.type === "Restroom"), 0.04],
-  ];
-  const typeTotals = apportion(total, typeShares.map(([, records, share]) => (records.length ? share : 0)));
-  const markerGap: MarkerGapRow[] = typeShares.map(([type, records], index) => {
-    const counts = apportion(typeTotals[index], records.map(() => rand() ** 3 + 0.02));
-    const searched = records.map((record, i) => ({ record, searches: counts[i] })).filter((entry) => entry.searches > 0);
-    const asRow = ({ record, searches }: { record: Location; searches: number }): SearchedDestination => ({ id: record.id, name: record.name, searches });
-    const order = (a: SearchedDestination, b: SearchedDestination) => b.searches - a.searches || a.name.localeCompare(b.name);
-    // A Place is on the map by its point or footprint; an indoor Location only by its own coordinates.
-    const marked = (record: Location) => (type === "Building" ? hasMapPosition(record) : hasMarker(record));
-    const missing = searched.filter(({ record }) => !marked(record));
-    const parentMapped = (record: Location) => {
-      const parent = record.parentId ? placeOf.get(record.parentId) : undefined;
-      return !!parent && hasMapPosition(parent);
-    };
-    return {
-      type,
-      searches: typeTotals[index],
-      withoutMarker: missing.reduce((sum, entry) => sum + entry.searches, 0),
-      // An indoor Location with no marker still opens at its building; only a building off the map leaves nothing to show.
-      notOnMap: missing.filter(({ record }) => type === "Building" || !parentMapped(record)).reduce((sum, entry) => sum + entry.searches, 0),
-      missing: missing.map(asRow).sort(order),
-      have: searched.filter(({ record }) => marked(record)).map(asRow).sort(order),
-    };
+  // Every active indoor Location under an active Place, searched or not. A marker is the Location's own coordinates.
+  const placeIds = new Set(places.map((place) => place.id));
+  const indoorMarkers: IndoorMarkerRow[] = (["Room", "Laboratory", "Office", "Restroom"] as const).map((type) => {
+    const records = locations
+      .filter((item) => item.status === "Active" && item.type === type && item.parentId && placeIds.has(item.parentId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const have = records.filter(hasMarker).map(ref);
+    return { type, total: records.length, marked: have.length, missing: records.filter((record) => !hasMarker(record)).map(ref), have };
   });
 
   return {
@@ -192,9 +167,10 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     readiness: {
       total: places.length,
       checks,
+      indoorMarkers,
     },
     closures,
     reach: { origin: "Main Gate", total: routable.length, modes },
-    searches: { total, byAccountType, activity: { bucket, points }, markerGap },
+    searches: { total, byAccountType, activity: { bucket, points } },
   };
 }

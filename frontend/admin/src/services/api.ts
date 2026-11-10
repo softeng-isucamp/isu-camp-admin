@@ -209,7 +209,6 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
   return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
 };
 const placeRefSchema = z.object({ id: z.string().min(1), name: z.string() });
-const searchedDestinationSchema = placeRefSchema.extend({ searches: nonNegInt });
 const decisionAnalyticsSchema = z.object({
   range: z.union([z.enum(["week", "month", "all"]), z.string().regex(/^year-\d{4}$/).transform((value) => value as `year-${number}`)]),
   firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
@@ -222,6 +221,13 @@ const decisionAnalyticsSchema = z.object({
       total: nonNegInt,
       missing: z.array(placeRefSchema),
       have: z.array(placeRefSchema).optional(),
+    })),
+    indoorMarkers: z.array(z.object({
+      type: z.enum(["Room", "Laboratory", "Office", "Restroom"]),
+      total: nonNegInt,
+      marked: nonNegInt,
+      missing: z.array(placeRefSchema),
+      have: z.array(placeRefSchema),
     })),
   }),
   closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt, longerPlaces: z.array(placeRefSchema).optional() })).nullable(),
@@ -237,14 +243,6 @@ const decisionAnalyticsSchema = z.object({
       bucket: z.enum(["day", "week"]),
       points: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), total: nonNegInt, student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt })),
     }),
-    markerGap: z.array(z.object({
-      type: z.enum(["Building", "Room", "Laboratory", "Office", "Restroom"]),
-      searches: nonNegInt,
-      withoutMarker: nonNegInt,
-      notOnMap: nonNegInt,
-      missing: z.array(searchedDestinationSchema),
-      have: z.array(searchedDestinationSchema),
-    })),
   }),
 });
 

@@ -10,6 +10,10 @@ Zod schema, and every number is read from tables that already exist:
   map position are not checked: the admin forms require a description, and a
   Place gets its map position from its footprint in the Map Editor, so neither
   is a separate task. A snapshot, not range-dependent.
+- **indoorMarkers** - every active indoor Location under an active Place, per
+  type, with or without its own map marker, whether or not anyone searched for
+  it. A snapshot. Places are not listed: their position comes from their
+  footprint, so they would always read as marked.
 - **reach** and **closures** - the route graph (``route_node``, ``pathway``,
   ``pathway_allowed_mode``, ``path_point``), read with the User App router's
   rules (``isu-camp-app/server/app/utils/routing.py``) so the admin reports the
@@ -19,10 +23,9 @@ Zod schema, and every number is read from tables that already exist:
   stands for a legacy car, motorcycle or bicycle permission), a Place is reached at one of its entrance nodes, and the
   origin is the one node named like the main gate. Not range-dependent.
 - **searches** - ``UserHistory`` rows in the range (week, month, all, or a
-  Manila calendar year ``year-YYYY``): a time series stacked by account type,
-  and, per destination type, how many searches were for a destination with no
-  map marker. A Search is a recorded navigation request, not a visit, an
-  arrival, a person or a route attempt.
+  Manila calendar year ``year-YYYY``): a time series stacked by account type.
+  A Search is a recorded navigation request, not a visit, an arrival, a person
+  or a route attempt.
 
 Place references carry the Place's id as the directory's DTO spells it
 (``str(building_id)``) so a chart mark can open exactly those records. No app
@@ -44,7 +47,6 @@ from model.pathway_allowed_mode import PathwayAllowedMode
 from model.route_node import RouteNode
 from services.dashboard_analytics import (
     DESTINATION_TYPES,
-    MINIMUM_POLYGON_POINTS,
     RANGE_BUCKET_DAYS,
     _bucket_of,
     _bucket_starts,
@@ -120,17 +122,6 @@ def _position(latitude, longitude):
 
 def _is_active(status):
     return str(status or "").strip().lower() == "active"
-
-
-def _placed(latitude, longitude, footprint):
-    """Whether a Place is on the map: a point, or a footprint that encloses an area.
-
-    Either one puts it on the User App's map (a footprint is shown at its
-    centre), so a Place with only a footprint is not missing a pin.
-    """
-
-    enclosed = isinstance(footprint, list) and len(footprint) >= MINIMUM_POLYGON_POINTS
-    return enclosed or _position(latitude, longitude) is not None
 
 
 class RouteGraph:
@@ -382,91 +373,46 @@ def _closures(places, graph):
     return top
 
 
-def _marker_lookups():
-    """Active Places and indoor Locations with whether each has a map marker.
+INDOOR_TYPES = tuple(name for name in DESTINATION_TYPES if name != "Building")
 
-    A Place's marker is its point or footprint. An indoor Location's marker is
-    its own coordinates, which are optional and independent of its building's.
+
+def _indoor_markers():
+    """Per indoor type: active Locations with and without a marker of their own.
+
+    The User App lists an indoor Location only under an active building, so
+    those are the ones counted. A marker is the Location's own coordinates,
+    optional and independent of its building's. Without one the app still
+    opens the Location at its building, so a missing marker is a less exact
+    spot, not an unreachable destination.
     """
 
-    places = {
-        row.building_id: (row.building_name, _placed(row.latitude, row.longitude, row.polygon_coordinates))
-        for row in db.session.query(
-            Building.building_id, Building.building_name, Building.latitude, Building.longitude,
-            Building.polygon_coordinates,
-        ).filter(Building.status == "active").all()
+    active_places = {
+        building_id for (building_id,) in db.session.query(Building.building_id).filter(Building.status == "active").all()
     }
-    indoor = {
-        row.location_id: (
-            row.location_name,
-            LOCATION_TYPE_NAMES.get(row.type_id),
-            row.building_id,
-            _position(row.latitude, row.longitude) is not None,
-        )
-        for row in db.session.query(
-            Location.location_id, Location.location_name, Location.type_id, Location.building_id,
-            Location.latitude, Location.longitude,
-        ).filter(Location.status == "active").all()
-    }
-    return places, indoor
-
-
-def _marker_gap(rows):
-    """Per destination type: searches, and those for a destination with no marker.
-
-    The User App opens an indoor Location with no marker at its parent
-    building (and measures distance to the building), so its marker is missing
-    but the app can still show and route to the building. ``notOnMap`` counts
-    only searches that leave nothing to show: a Place with no position, or an
-    indoor Location with no marker whose building has none either. The app
-    lists indoor Locations only under their active building, so searches for
-    inactive, deleted or untyped destinations, and for rooms whose building is
-    inactive or gone, are not counted here.
-    """
-
-    places, indoor = _marker_lookups()
-    stats = {name: {"searches": 0, "withoutMarker": 0, "notOnMap": 0, "found": {}} for name in DESTINATION_TYPES}
-    for _day, _user, building_id, location_id in rows:
-        if location_id is not None:
-            record = indoor.get(location_id)
-            if record is None or record[1] not in stats:
-                continue
-            name, kind, parent_id, marked = record
-            parent = places.get(parent_id)
-            if parent is None:
-                continue
-            on_map = marked or parent[1]
-            destination_id = location_id
-        elif building_id is not None:
-            record = places.get(building_id)
-            if record is None:
-                continue
-            name, marked = record
-            kind, on_map, destination_id = "Building", record[1], building_id
-        else:
+    found = {name: {"missing": [], "have": []} for name in INDOOR_TYPES}
+    rows = db.session.query(
+        Location.location_id, Location.location_name, Location.type_id, Location.building_id,
+        Location.latitude, Location.longitude,
+    ).filter(Location.status == "active").all()
+    for row in rows:
+        kind = LOCATION_TYPE_NAMES.get(row.type_id)
+        if kind not in found or row.building_id not in active_places:
             continue
-        entry = stats[kind]
-        entry["searches"] += 1
-        entry["withoutMarker"] += 0 if marked else 1
-        entry["notOnMap"] += 0 if on_map else 1
-        found = entry["found"].setdefault(destination_id, {"id": str(destination_id), "name": name, "searches": 0, "marked": marked})
-        found["searches"] += 1
+        marked = _position(row.latitude, row.longitude) is not None
+        found[kind]["have" if marked else "missing"].append({"id": str(row.location_id), "name": row.location_name})
 
-    def listed(found, marked):
-        chosen = [item for item in found.values() if item["marked"] == marked]
-        chosen.sort(key=lambda item: (-item["searches"], item["name"].casefold(), item["id"]))
-        return [{"id": item["id"], "name": item["name"], "searches": item["searches"]} for item in chosen]
+    def ordered(refs):
+        return sorted(refs, key=lambda ref: (ref["name"].casefold(), ref["id"]))
 
     return [
         {
             "type": name,
-            "searches": stats[name]["searches"],
-            "withoutMarker": stats[name]["withoutMarker"],
-            "notOnMap": stats[name]["notOnMap"],
-            "missing": listed(stats[name]["found"], False),
-            "have": listed(stats[name]["found"], True),
+            "total": len(found[name]["missing"]) + len(found[name]["have"]),
+            "marked": len(found[name]["have"]),
+            "missing": ordered(found[name]["missing"]),
+            "have": ordered(found[name]["have"]),
         }
-        for name in DESTINATION_TYPES
+        for name in INDOOR_TYPES
     ]
 
 
@@ -509,7 +455,6 @@ def _searches(range_key, today):
         "total": len(rows),
         "byAccountType": by_account,
         "activity": {"bucket": "day" if size == 1 else "week", "points": list(points.values())},
-        "markerGap": _marker_gap(rows),
     }
 
 
@@ -522,7 +467,7 @@ def summarize_decision_analytics(range_key, now=None):
     return {
         "range": range_key,
         "firstAnalyticsYear": (earliest_analytics_day() or today).year,
-        "readiness": _readiness(places, graph),
+        "readiness": {**_readiness(places, graph), "indoorMarkers": _indoor_markers()},
         "closures": _closures(places, graph),
         "reach": _reach(places, graph),
         "searches": _searches(range_key, today),

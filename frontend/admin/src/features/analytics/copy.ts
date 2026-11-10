@@ -44,14 +44,14 @@ export const COPY = {
     ],
     data: "Search history joined to account type. Users can delete their history; searches from deleted accounts count in the total but in no account type.",
   },
-  markerGap: {
-    title: "Searches for destinations without markers",
-    what: "For each destination type, the searches in the range and how many were for a destination with no map marker (red), as counts and a share. A place's marker is its pin or footprint; a room, office, laboratory or restroom has its own optional point. The app still opens an indoor location with no marker at its building and routes to the building, so only the exact spot is missing, unless its building is not on the map either. Click the red part for the searched destinations with no marker, the blue part for those that have one.",
+  indoorMarkers: {
+    title: "Indoor marker coverage",
+    what: "Active indoor locations (rooms, laboratories, offices and restrooms) with their own map marker (blue) and without one (red), counting every location whether or not anyone has searched for it. The app still opens an unmarked indoor location at its building and routes to the building, so only the exact spot is missing. Places are not listed: their position comes from their footprint in the Map Editor. Click the red part for the locations with no marker, the blue part for those that have one.",
     read: [
-      { see: "Places with red", means: "the app cannot show or route to them.", action: "Pin them or draw a footprint in the Map Editor." },
-      { see: "Rooms or offices with red", means: "people see the building, not the room.", action: "Use Mark indoor location in the Map Editor." },
-      { see: "A small share of a big count", means: "worth fixing before a large share of a handful." },
+      { see: "A long red part", means: "people are shown the building, not the room, office or restroom.", action: "Use Mark indoor location in the Map Editor." },
+      { see: "Mostly blue", means: "indoor locations of that type are already marked." },
+      { see: "Which to mark first", means: "this chart ignores searches on purpose; check Search activity and Locations to decide the order." },
     ],
-    data: "Search history joined to active places and indoor locations. Searches for inactive or deleted destinations are not counted. A search is not a visit.",
+    data: "Active indoor locations under active places (current snapshot, not affected by the time range). A marker is the location's own coordinates.",
   },
 } satisfies Record<string, ChartCopy>;

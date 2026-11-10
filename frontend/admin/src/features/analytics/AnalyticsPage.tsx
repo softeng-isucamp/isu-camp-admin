@@ -8,8 +8,8 @@ import { RangeSelect, rangeLabel } from "../dashboard/RangeSelect";
 import { COPY } from "./copy";
 import { GraphBlock } from "./GraphBlock";
 import { ClosureImpact, TravelModeReach } from "./NetworkCharts";
-import { MissingDetails } from "./ReadinessCharts";
-import { SearchActivity, SearchesWithoutMarkers } from "./SearchCharts";
+import { IndoorMarkerCoverage, MissingDetails } from "./ReadinessCharts";
+import { SearchActivity } from "./SearchCharts";
 
 /** Readiness, closures and reach describe the map as it is now; only the searches follow the range picker. */
 const SNAPSHOT_NOTE = "Current snapshot";
@@ -74,8 +74,11 @@ export function AnalyticsPage() {
             </div>
           )}
           <Section id="ready" title="Directory completeness" note={SNAPSHOT_NOTE}>
-            <GraphBlock copy={COPY.readiness} wide>
+            <GraphBlock copy={COPY.readiness}>
               <MissingDetails data={data} />
+            </GraphBlock>
+            <GraphBlock copy={COPY.indoorMarkers}>
+              <IndoorMarkerCoverage data={data} />
             </GraphBlock>
           </Section>
           <Section id="routes" title="Route network" note={SNAPSHOT_NOTE}>
@@ -87,11 +90,8 @@ export function AnalyticsPage() {
             </GraphBlock>
           </Section>
           <Section id="searches" title="Search demand" note={`${data.searches.total} searches ${rangeText}`}>
-            <GraphBlock copy={COPY.activity}>
+            <GraphBlock copy={COPY.activity} wide>
               <SearchActivity data={data} />
-            </GraphBlock>
-            <GraphBlock copy={COPY.markerGap}>
-              <SearchesWithoutMarkers data={data} />
             </GraphBlock>
           </Section>
         </div>

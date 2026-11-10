@@ -44,7 +44,7 @@ it("shows the five charts and refetches searches for another range", async () =>
   const request = vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
   renderPage();
 
-  for (const title of ["Missing details", "Closure impact", "Reach by access type", "Search activity", "Searches for destinations without markers"]) {
+  for (const title of ["Missing details", "Closure impact", "Reach by access type", "Search activity", "Indoor marker coverage"]) {
     expect(await screen.findByText(title)).toBeInTheDocument();
   }
   await userEvent.selectOptions(screen.getByRole("combobox"), "month");
@@ -276,14 +276,19 @@ it("titles each group by what it covers, not as a question", async () => {
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Directory completeness", "Route network", "Search demand"]);
 });
 
-it("counts a searched footprint-only place as having a marker and a room under no active building as no destination", () => {
-  const places = locations.filter((item) => item.type === "Place" && item.status === "Active");
-  const footprintOnly = { ...places[0], id: "fp-only", positioned: false, lat: null, lng: null, polygonCoordinates: [[1, 1], [1, 2], [2, 2]] as [number, number][] };
-  const orphanRoom = { ...locations.find((item) => item.type === "Room" && item.status === "Active")!, id: "orphan-room", parentId: "missing-parent" };
-  const gap = generateDecisionAnalytics("all", [...locations, footprintOnly, orphanRoom]).searches.markerGap;
-  const place = gap.find((row) => row.type === "Building")!;
-  expect(place.missing.map((item) => item.id)).not.toContain("fp-only");
-  expect(gap.flatMap((row) => [...row.missing, ...row.have]).map((item) => item.id)).not.toContain("orphan-room");
+it("counts every active indoor location under an active place, searched or not, and skips rooms with no active building", () => {
+  const room = locations.find((item) => item.type === "Room" && item.status === "Active" && item.parentId)!;
+  const orphanRoom = { ...room, id: "orphan-room", parentId: "missing-parent" };
+  const marked = { ...room, id: "marked-room", name: "Marked Room", positioned: true, lat: 1, lng: 2 };
+  const rooms = (list: typeof locations) => generateDecisionAnalytics("week", list).readiness.indoorMarkers.find((row) => row.type === "Room")!;
+  const before = rooms(locations);
+  const after = rooms([...locations, orphanRoom, marked]);
+
+  expect(after.total).toBe(before.total + 1);
+  expect(after.marked).toBe(before.marked + 1);
+  expect(after.have.map((item) => item.id)).toContain("marked-room");
+  expect([...after.missing, ...after.have].map((item) => item.id)).not.toContain("orphan-room");
+  expect(after.missing.length + after.have.length).toBe(after.total);
 });
 
 it("leaves the half of a bar a server sent no list for unclickable", async () => {
@@ -373,12 +378,13 @@ it("tags the current-snapshot graphs apart from the range-dependent search graph
 it("accepts the new contract and rejects the removed fully-ready shape's replacement being malformed", () => {
   const parsed = normalizeBackendDecisionAnalytics(fixture());
   expect(parsed.searches.activity.points).toEqual(fixture().searches.activity.points);
-  expect(parsed.searches.markerGap).toEqual(fixture().searches.markerGap);
+  expect(parsed.readiness.indoorMarkers).toEqual(fixture().readiness.indoorMarkers);
   expect(() => normalizeBackendDecisionAnalytics({ ...fixture(), searches: { ...fixture().searches, activity: { bucket: "month", points: [] } } })).toThrow();
-  expect(() => normalizeBackendDecisionAnalytics({ ...fixture(), searches: { ...fixture().searches, markerGap: [{ type: "Floor", searches: 1, withoutMarker: 0, notOnMap: 0, missing: [], have: [] }] } })).toThrow();
+  // Places are not part of marker coverage: their position comes from the footprint.
+  expect(() => normalizeBackendDecisionAnalytics({ ...fixture(), readiness: { ...fixture().readiness, indoorMarkers: [{ type: "Building", total: 1, marked: 0, missing: [], have: [] }] } })).toThrow();
 });
 
-it("builds a fixture whose searches add up across the time series, the account types and the destination types", () => {
+it("builds a fixture whose searches add up across the time series and the account types", () => {
   for (const range of ["week", "month", "all", "year-2026"] as const) {
     const { searches } = generateDecisionAnalytics(range, locations);
     const { points, bucket } = searches.activity;
@@ -387,13 +393,6 @@ it("builds a fixture whose searches add up across the time series, the account t
     expect(points.reduce((sum, point) => sum + point.total, 0)).toBe(searches.total);
     for (const point of points) expect(point.student + point.teacher + point.visitor).toBe(point.total);
     expect(searches.byAccountType.student + searches.byAccountType.teacher + searches.byAccountType.visitor).toBe(searches.total);
-    expect(searches.markerGap.map((row) => row.type)).toEqual(["Building", "Room", "Laboratory", "Office", "Restroom"]);
-    for (const row of searches.markerGap) {
-      expect(row.withoutMarker).toBeLessThanOrEqual(row.searches);
-      expect(row.notOnMap).toBeLessThanOrEqual(row.withoutMarker);
-      expect(row.missing.reduce((sum, item) => sum + item.searches, 0)).toBe(row.withoutMarker);
-      expect(row.missing.reduce((sum, item) => sum + item.searches, 0) + row.have.reduce((sum, item) => sum + item.searches, 0)).toBe(row.searches);
-    }
   }
 });
 
@@ -428,61 +427,68 @@ it("says what a search is not, and shows an empty state when nothing was searche
   const base = fixture();
   vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
     ...base,
-    searches: { ...base.searches, total: 0, byAccountType: { student: 0, teacher: 0, visitor: 0 }, activity: { bucket: "day", points: base.searches.activity.points.map((point) => ({ ...point, total: 0, student: 0, teacher: 0, visitor: 0 })) }, markerGap: base.searches.markerGap.map((row) => ({ ...row, searches: 0, withoutMarker: 0, notOnMap: 0, missing: [], have: [] })) },
+    searches: { ...base.searches, total: 0, byAccountType: { student: 0, teacher: 0, visitor: 0 }, activity: { bucket: "day", points: base.searches.activity.points.map((point) => ({ ...point, total: 0, student: 0, teacher: 0, visitor: 0 })) } },
   });
   renderPage();
   expect(await screen.findByText("No searches were recorded in this range.")).toBeInTheDocument();
-  expect(screen.getByText("No searches for active destinations were recorded in this range.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "How to read Search activity" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("not visits, arrivals, unique people or route attempts");
 });
 
-/** The marker-gap rows in the order the chart ranks them. */
-const rankedGap = () => [...fixture().searches.markerGap].sort((a, b) => b.withoutMarker - a.withoutMarker || b.searches - a.searches);
-const gapLabels = { Building: "Places", Room: "Rooms", Laboratory: "Laboratories", Office: "Offices", Restroom: "Restrooms" } as const;
+/** The indoor marker rows in the order the chart ranks them: the most unmarked first. */
+const rankedMarkers = () => [...fixture().readiness.indoorMarkers].sort((a, b) => (b.total - b.marked) - (a.total - a.marked) || b.total - a.total || a.type.localeCompare(b.type));
+const markerLabels = { Room: "Rooms", Laboratory: "Laboratories", Office: "Offices", Restroom: "Restrooms" } as const;
 
-it("shows both the missing-marker count and the total for each destination type, not a percentage alone", async () => {
+it("counts indoor locations with and without a marker, searched or not, and lists no Places row", async () => {
   vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
   renderPage();
-  await screen.findByText("Searches for destinations without markers");
-  const block = screen.getByRole("heading", { name: "Searches for destinations without markers" }).closest(".graph") as HTMLElement;
-  const text = Array.from(block.querySelectorAll("text")).map((node) => node.textContent);
+  await screen.findByText("Indoor marker coverage");
+  const block = screen.getByRole("heading", { name: "Indoor marker coverage" }).closest(".graph") as HTMLElement;
+  const text = Array.from(block.querySelectorAll("text")).map((node) => node.textContent ?? "");
 
-  // Ranked by missing-marker searches; each row states both counts and the share.
-  const expected = rankedGap().map((row) => (row.searches ? `${row.withoutMarker} of ${row.searches} · ${Math.round((row.withoutMarker / row.searches) * 100)}%` : "no searches"));
-  expect(text.filter((value) => / of \d+ · \d+%$|^no searches$/.test(value ?? ""))).toEqual(expected);
+  const expected = rankedMarkers().map((row) => (row.total ? `${row.total - row.marked} of ${row.total} · ${Math.round(((row.total - row.marked) / row.total) * 100)}%` : "none yet"));
+  expect(text.filter((value) => / of \d+ · \d+%$|^none yet$/.test(value))).toEqual(expected);
+  expect(text).not.toContain("Places");
+  expect(text).toContain("Active indoor locations");
+  expect(fixture().readiness.indoorMarkers.map((row) => row.type)).toEqual(["Room", "Laboratory", "Office", "Restroom"]);
+  for (const row of fixture().readiness.indoorMarkers) expect(row.missing.length + row.have.length).toBe(row.total);
 });
 
-it("opens the searched destinations with no marker from the red part and those with one from the blue part, by typed key", async () => {
-  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+it("opens the indoor locations with no marker from the red part and those with one from the blue part, by typed key", async () => {
+  const base = fixture();
+  const rooms = base.readiness.indoorMarkers.find((row) => row.type === "Room")!;
+  const mixed = { ...rooms, total: rooms.total + 2, marked: 2, have: [{ id: "12", name: "Marked A" }, { id: "13", name: "Marked B" }] };
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
+    ...base,
+    readiness: { ...base.readiness, indoorMarkers: base.readiness.indoorMarkers.map((row) => (row.type === "Room" ? mixed : row)) },
+  });
   renderPage();
-  await screen.findByText("Searches for destinations without markers");
-  const ranked = rankedGap();
-  const without = ranked.find((row) => row.missing.length)!;
-  const withIt = ranked.find((row) => row.have.length)!;
-  expect(without.type).not.toBe("Building");
+  await screen.findByText("Indoor marker coverage");
+  const ranked = [...base.readiness.indoorMarkers.map((row) => (row.type === "Room" ? mixed : row))]
+    .sort((a, b) => (b.total - b.marked) - (a.total - a.marked) || b.total - a.total || a.type.localeCompare(b.type));
+  const first = ranked[0];
 
-  fireEvent.click(segments("Searches for destinations without markers")[0][0]);
+  fireEvent.click(segments("Indoor marker coverage")[0][0]);
   expect(destination().path).toBe("/locations");
-  expect(destination().params.get("keys")).toBe(without.missing.map((item) => `${without.type}:${item.id}`).join(","));
-  expect(destination().params.get("why")).toBe(`${gapLabels[without.type]} searched, no marker`);
+  expect(destination().params.get("keys")).toBe(first.missing.map((item) => `${first.type}:${item.id}`).join(","));
+  expect(destination().params.get("why")).toBe(`${markerLabels[first.type]} with no marker`);
   expect(destination().params.get("ids")).toBeNull();
 
-  fireEvent.click(segments("Searches for destinations without markers")[1][0]);
-  const prefix = withIt.type === "Building" ? "Place" : withIt.type;
-  expect(destination().params.get("keys")).toBe(withIt.have.map((item) => `${prefix}:${item.id}`).join(","));
-  expect(destination().params.get("why")).toBe(`${gapLabels[withIt.type]} searched, with a marker`);
+  fireEvent.click(segments("Indoor marker coverage")[1][0]);
+  expect(destination().params.get("keys")).toBe("Room:12,Room:13");
+  expect(destination().params.get("why")).toBe("Rooms with a marker");
 });
 
-it("never says an unmarked room cannot be found: the app falls back to its building", async () => {
+it("says an unmarked indoor location is still opened at its building, and that searches do not decide the list", async () => {
   vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
   renderPage();
-  await screen.findByText("Searches for destinations without markers");
-  await userEvent.click(screen.getByRole("button", { name: "How to read Searches for destinations without markers" }));
+  await screen.findByText("Indoor marker coverage");
+  await userEvent.click(screen.getByRole("button", { name: "How to read Indoor marker coverage" }));
   const guide = screen.getByRole("dialog");
-  expect(guide).toHaveTextContent("still opens an indoor location with no marker at its building");
+  expect(guide).toHaveTextContent("still opens an unmarked indoor location at its building");
   expect(guide).toHaveTextContent("only the exact spot is missing");
-  expect(guide).toHaveTextContent("not a visit");
+  expect(guide).toHaveTextContent("whether or not anyone has searched for it");
+  expect(screen.queryByText("Searches for destinations without markers")).not.toBeInTheDocument();
 });
 
 it("plots searches from deleted or unrecognised accounts as a neutral Unattributed stack so a column's height is its total", async () => {
@@ -508,27 +514,21 @@ it("does not show an Unattributed series when every search belongs to an account
 
 it("gives the marker chart keyboard access to both groups: the row label, plus the count label on a row with both", async () => {
   const base = fixture();
-  const rooms = base.searches.markerGap.find((row) => row.type === "Room")!;
-  const mixed = { ...rooms, searches: rooms.searches + 3, have: [{ id: "marked-room", name: "Marked Room", searches: 3 }] };
+  const rooms = base.readiness.indoorMarkers.find((row) => row.type === "Room")!;
+  const mixed = { ...rooms, total: rooms.total + 1, marked: 1, have: [{ id: "marked-room", name: "Marked Room" }] };
   vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
     ...base,
-    searches: { ...base.searches, markerGap: base.searches.markerGap.map((row) => (row.type === "Room" ? mixed : row)) },
+    readiness: { ...base.readiness, indoorMarkers: base.readiness.indoorMarkers.map((row) => (row.type === "Room" ? mixed : row)) },
   });
   renderPage();
-  await screen.findByText("Searches for destinations without markers");
-
-  // A row whose searched places all have markers still has a keyboard link to them.
-  const places = base.searches.markerGap.find((row) => row.type === "Building")!;
-  expect(places.missing).toHaveLength(0);
-  const placesLink = screen.getByRole("link", { name: `Places: list the ${places.have.length} searched places with a marker in Locations` });
-  placesLink.focus();
-  await userEvent.keyboard("{Enter}");
-  expect(destination().params.get("keys")).toBe(places.have.map((item) => `Place:${item.id}`).join(","));
+  await screen.findByText("Indoor marker coverage");
 
   // A mixed row: the label opens the unmarked ones, the count label the marked ones.
-  await userEvent.click(screen.getByRole("link", { name: new RegExp(`^Rooms: list the ${rooms.missing.length} searched rooms with no marker`) }));
-  expect(destination().params.get("keys")).toBe(rooms.missing.map((item) => `Room:${item.id}`).join(","));
-  fireEvent.click(screen.getByRole("link", { name: "Rooms: list the 1 searched rooms with a marker in Locations" }));
+  await userEvent.click(screen.getByRole("link", { name: `Rooms: list the ${mixed.missing.length} rooms with no marker in Locations` }));
+  expect(destination().params.get("keys")).toBe(mixed.missing.map((item) => `Room:${item.id}`).join(","));
+  const have = screen.getByRole("link", { name: "Rooms: list the 1 rooms with a marker in Locations" });
+  have.focus();
+  await userEvent.keyboard("{Enter}");
   expect(destination().params.get("keys")).toBe("Room:marked-room");
 });
 
