@@ -71,6 +71,24 @@ describe("UI Components", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it("answers Escape in the topmost stacked Modal only", () => {
+    const lower = vi.fn();
+    const upper = vi.fn();
+    const { rerender } = render(
+      <>
+        <Modal title="Lower" onClose={lower}>a</Modal>
+        <Modal title="Upper" onClose={upper}>b</Modal>
+      </>,
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(upper).toHaveBeenCalledTimes(1);
+    expect(lower).not.toHaveBeenCalled();
+
+    rerender(<Modal title="Lower" onClose={lower}>a</Modal>);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(lower).toHaveBeenCalledTimes(1);
+  });
+
   it("renders Button and Field with label, required indicator, and subhelper", () => {
     render(
       <div>

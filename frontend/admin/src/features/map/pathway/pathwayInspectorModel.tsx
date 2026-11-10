@@ -28,6 +28,12 @@ interface SelectedPathwayInspectorOptions extends PathwayInspectorOptions {
   onDelete: (confirmation: { kind: "pathway"; id: string; name: string; impact: DeleteImpact }) => void;
 }
 
+/** A Pathway that has never been saved says Save; a saved one says Update. */
+function pathwaySaveLabel(saving: boolean, provisional: boolean) {
+  if (provisional) return saving ? "Saving Pathway…" : "Save Pathway";
+  return saving ? "Updating Pathway…" : "Update Pathway";
+}
+
 /** The Inspector card for a selected Pathway. */
 export function selectedPathwayInspectorModel({
   pathway,
@@ -50,6 +56,9 @@ export function selectedPathwayInspectorModel({
     adoptSuggestedPathwayName,
     switchEndpoints: switchPathwayEndpoints,
   } = pathway;
+  // A Pathway that is still being created needs Add; a saved one needs Edit.
+  const provisional = pathway.provisionalPathwayId === selectedPath.id;
+  const canChange = can(provisional ? "add" : "edit");
   return {
     id: selectedPath.id,
     kind: "pathway",
@@ -57,19 +66,19 @@ export function selectedPathwayInspectorModel({
     domain: "Walking Network",
     objectLabel: "Pathway",
     subtitle: `${selectedPath.direction} · ${normalizePathwayLifecycleStatus(selectedPath.status)}${pathwayFrameDirty ? " · Unsaved draft" : ""}`,
-    viewOnly: !can("edit") && !can("delete"),
+    viewOnly: !canChange && !can("delete"),
     summary: [
       { label: "Source Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.sourceNodeId)?.name ?? pathwayFrame?.sourceNodeId ?? selectedPath.sourceNodeId },
       { label: "Destination Route Node", value: currentNodes.find((node) => node.id === pathwayFrame?.destinationNodeId)?.name ?? pathwayFrame?.destinationNodeId ?? selectedPath.destinationNodeId },
       // The editing controls below are the only place these show for someone who may edit, so everyone else reads them here.
-      ...(can("edit") ? [] : [
+      ...(canChange ? [] : [
         { label: "Way type", value: selectedPath.type },
         { label: "Shade", value: selectedPath.shade },
         { label: "Allowed modes", value: (selectedPath.allowedModes?.length ? selectedPath.allowedModes : ["Walking"]).join(", ") },
       ]),
     ],
     // Metadata, geometry and Cancel are all edits, so a view-only administrator keeps the facts above.
-    details: can("edit") ? (
+    details: canChange ? (
       <>
         <section className="inspector-section" aria-label="Pathway metadata">
           <h3>Pathway metadata</h3>
@@ -88,14 +97,16 @@ export function selectedPathwayInspectorModel({
             ⇄ Switch source and destination
           </button>
           {pathwayFrameIssues.length > 0 && <div className="inspector-validation" role="alert"><strong>Apply blocked</strong><span>{pathwayFrameIssues[0].message}</span></div>}
-          <button type="button" className="inspector-secondary-action" onClick={() => onReshape(selectedPath)}>⌁ Reshape Pathway</button>
+          {/* A Pathway still being created is already shaped by clicking the map; reshaping is for saved ones. */}
+          {!provisional && <button type="button" className="inspector-secondary-action" onClick={() => onReshape(selectedPath)}>⌁ Reshape Pathway</button>}
           <div className="inspector-inline-actions"><button type="button" onClick={onCancel} disabled={!pathwayFrameDirty}>Cancel</button></div>
         </section>
       </>
     ) : undefined,
-    primaryAction: can("edit") ? {
-      label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
-      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
+    primaryAction: canChange ? {
+      // A new Pathway saves its shape (savingAction "pathway"); an existing one saves its metadata.
+      label: pathwaySaveLabel(savingAction === (provisional ? "pathway" : "pathway-metadata"), provisional),
+      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === (provisional ? "pathway" : "pathway-metadata"),
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
     } : undefined,
@@ -147,6 +158,7 @@ export function pathPointInspectorModel({
   } = pathway;
   if (!editingPathId || selectedPathPointIndex === null || !pathPoints[selectedPathPointIndex]) return null;
   const point = pathPoints[selectedPathPointIndex];
+  const pointParentProvisional = pathway.provisionalPathwayId === activePathway?.id;
   return {
     id,
     kind: "path_point",
@@ -186,15 +198,16 @@ export function pathPointInspectorModel({
       </>
     ),
     // Updating, cancelling and removing a point change the Pathway (Edit); converting a point creates a Route Node (Add).
-    primaryAction: can("edit") ? {
-      label: savingAction === "pathway-metadata" ? "Updating Pathway…" : "Update Pathway",
-      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === "pathway-metadata",
+    // Saving a Pathway still being created needs Add, the same as its parent inspector; an existing one needs Edit.
+    primaryAction: can(pointParentProvisional ? "add" : "edit") ? {
+      label: pathwaySaveLabel(savingAction === (pointParentProvisional ? "pathway" : "pathway-metadata"), pointParentProvisional),
+      disabled: !pathwayFrameDirty || pathwayFrameIssues.length > 0 || savingAction === (pointParentProvisional ? "pathway" : "pathway-metadata"),
       disabledReason: pathwayFrameIssues[0]?.message,
       onSelect: onApply,
     } : undefined,
     overflowActions: [
       // Update lives in the footer and Cancel beside the fields; the menu offers Cancel only when those fields are not shown.
-      ...(can("edit") && !pathway.canModify ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
+      ...(can(pointParentProvisional ? "add" : "edit") && !pathway.canModify ? [{ label: "Cancel changes", disabled: !pathwayFrameDirty, onSelect: onCancel }] : []),
       ...(can("add") ? [{ label: "Convert to Route Node", disabled: pathwayFrameDirty || pathDraftDirty || activePathway?.status === "Closed", onSelect: onStartConversion }] : []),
       {
         label: "↩ Inspect Parent Pathway",

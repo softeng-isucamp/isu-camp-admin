@@ -65,7 +65,16 @@ export function useMapSearch(
   }, [pathways, directoryLocations, directoryNodes, overlayLocations, overlayNodes, search]);
 
   const selectResult = (item: MapSearchResult) => {
-    if (item.kind === "Location") {
+    const placeBuilding = item.kind === "Location" && item.type === "Place"
+      ? buildings.find((building) => building.id === item.id)
+      : undefined;
+    if (item.kind === "Location" && placeBuilding) {
+      // A Place with a footprint opens the same Building inspector as its pin on the map, with all its actions.
+      selectObject({ type: "building", id: placeBuilding.id });
+      const bounds = footprintBounds(placeBuilding.points);
+      if (isPositionedLocation(item)) flyTo([item.lat, item.lng]);
+      else if (bounds) focus.frameBounds(bounds);
+    } else if (item.kind === "Location") {
       selectObject(locationSelection(item));
       if (isPositionedLocation(item)) flyTo([item.lat, item.lng]);
       else focusUnpositionedLocation(item);

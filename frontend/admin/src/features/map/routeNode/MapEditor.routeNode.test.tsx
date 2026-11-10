@@ -26,6 +26,29 @@ describe("Map Editor preview", () => {
     expect(screen.queryByRole("dialog", { name: "Create Outdoor Point Location" })).not.toBeInTheDocument();
   });
 
+  it("flags out-of-range coordinates inline and keeps Save Route Node disabled until they are valid", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Route Node" }));
+    clickMap(16.7208, 121.6902);
+    fireEvent.change(screen.getByLabelText("Route Node name"), { target: { value: "Gate" } });
+    expect(screen.getByText("Between −90 and 90.")).toBeInTheDocument();
+    expect(screen.getByText("Between −180 and 180.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Placement latitude"), { target: { value: "999" } });
+    fireEvent.change(screen.getByLabelText("Placement longitude"), { target: { value: "500" } });
+
+    expect(screen.getByText("Latitude must be between −90 and 90.")).toBeInTheDocument();
+    expect(screen.getByText("Longitude must be between −180 and 180.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Placement latitude")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Placement latitude"), { target: { value: "16.7208" } });
+    fireEvent.change(screen.getByLabelText("Placement longitude"), { target: { value: "121.6902" } });
+    expect(screen.queryByText(/must be between/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save Route Node" })).toBeEnabled();
+  });
+
   it("moves an imported route node from the generated fixture", async () => {
     vi.mocked(services.map.buildings).mockResolvedValue(generatedMapFixture.buildings);
     vi.mocked(services.map.locations).mockResolvedValue(generatedMapFixture.locations);
@@ -35,7 +58,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: importedNode.name } });
-    fireEvent.click(await screen.findByRole("button", { name: `${importedNode.name} Route Node` }));
+    fireEvent.click(await screen.findByRole("option", { name: `${importedNode.name} Route Node` }));
     fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
     clickMap(16.7214, 121.6908);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
@@ -88,7 +111,7 @@ describe("Map Editor preview", () => {
   it("persists a seeded Route Node's moved position", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /North Entrance Route Node/ }));
     fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
     clickMap(16.7214, 121.6908);
     fireEvent.click(screen.getByRole("button", { name: "Save Position" }));
@@ -104,7 +127,7 @@ describe("Map Editor preview", () => {
   it("shows the move distance and outside-campus feedback until the move is cancelled", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /North Entrance Route Node/ }));
     fireEvent.click(screen.getByRole("button", { name: /Move (Entrance|Route Node)/ }));
 
     const panel = screen.getByRole("region", { name: "Move North Entrance" });
@@ -135,7 +158,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Entrance Route Node" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Entrance Route Node" }));
     fireEvent.change(screen.getByLabelText("Route Node name"), { target: { value: "North Gate" } });
     fireEvent.change(screen.getByLabelText("Route Node type"), { target: { value: "Junction" } });
 
@@ -163,7 +186,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Entrance Route Node" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Entrance Route Node" }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for North Entrance" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "⎋ Convert to Junction" }));
 
@@ -188,7 +211,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /North Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /North Entrance Route Node/ }));
 
     const association = await screen.findByRole("combobox", { name: "Route Node association" });
     expect(association).toHaveAttribute("placeholder", expect.stringContaining("No Building association"));
@@ -219,7 +242,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library Entrance" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Entrance Route Node/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Entrance Route Node/ }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library Entrance" }));
     vi.mocked(services.map.deleteRouteNode).mockRejectedValueOnce(new Error("network unavailable"));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Route Node" }));

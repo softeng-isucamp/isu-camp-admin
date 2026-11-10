@@ -442,14 +442,49 @@ describe("mock service contracts", () => {
     await services.map.save({ buildings: [building] });
     await services.map.removeBuilding(building.id);
 
-    expect((await services.map.buildings()).find((item) => item.id === building.id)).toMatchObject({
-      status: "Inactive",
-    });
+    expect((await services.map.buildings()).find((item) => item.id === building.id)).toBeUndefined();
     expect((await services.logs.forLocation(building.id)).items[0]).toMatchObject({
       action: "Removed Building",
       target: building.name,
       targetId: building.id,
     });
+  });
+
+  it("hard-deletes a map Building with its Place and indoor Locations, leaving unrelated records", async () => {
+    const building = {
+      id: "ticket-delete-hall",
+      name: "Delete Hall",
+      code: "DEL-HALL",
+      points: [[16.72, 121.69], [16.721, 121.69], [16.72, 121.691]] as [number, number][],
+      status: "Active" as const,
+    };
+    await services.locations.save({
+      id: building.id, name: building.name, code: building.code, type: "Place", classification: "College",
+      parentId: null, status: "Active", lat: 16.72, lng: 121.69, positioned: true,
+    });
+    await services.locations.save({
+      id: "ticket-delete-room", name: "Delete Room", code: "DEL-101", type: "Room", parentId: building.id,
+      floor: "Ground Floor", status: "Active", lat: null, lng: null, positioned: false,
+    });
+    await services.map.save({ buildings: [building] });
+    const entrance = await services.map.createRouteNode({ name: "Delete Hall Entrance", nodeType: "Entrance", associatedPlaceId: building.id, lat: 16.7205, lng: 121.6905, status: "Active" });
+    const before = (await services.map.buildings()).length;
+
+    await services.map.removeBuilding(building.id);
+
+    // Like purge_building's SET NULL: the waypoint stays, only its reference to the deleted Building goes.
+    const node = (await services.map.nodes()).find((item) => item.id === entrance.id);
+    expect(node).toBeDefined();
+    expect(node?.associatedPlaceId ?? null).toBeNull();
+
+    expect((await services.map.buildings()).length).toBe(before - 1);
+    expect((await services.map.buildings()).find((item) => item.id === building.id)).toBeUndefined();
+    const remaining = (await services.map.locations()).map((item) => item.id);
+    expect(remaining).not.toContain(building.id);
+    expect(remaining).not.toContain("ticket-delete-room");
+    const directory = (await services.locations.list()).items.map((item) => item.id);
+    expect(directory).not.toContain(building.id);
+    expect(directory).not.toContain("ticket-delete-room");
   });
 
   it("rejects positioned child locations", async () => {

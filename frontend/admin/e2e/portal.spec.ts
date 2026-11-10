@@ -331,7 +331,7 @@ test("locations, users, logs, and map expose their key state transitions", async
     .getByPlaceholder("Search campus places...")
     .fill("CCSICT Entrance");
   await page
-    .getByRole("button", { name: /CCSICT Entrance Route Node/ })
+    .getByRole("option", { name: /CCSICT Entrance Route Node/ })
     .click();
   await expect(page.getByText("SELECTED ROUTE NODE")).toBeVisible();
   await expect(page).toHaveScreenshot("map-selected-route-node.png", {
@@ -353,7 +353,7 @@ test("locations, users, logs, and map expose their key state transitions", async
   });
   await page.goto("/map-editor");
   await page.getByPlaceholder("Search campus places...").fill("Gate–Arts");
-  await page.getByRole("button", { name: /Gate–Arts/ }).click();
+  await page.getByRole("option", { name: /Gate–Arts/ }).click();
   await expect(page.getByText("SELECTED CONNECTION")).toBeVisible();
   await expect(page).toHaveScreenshot("map-selected-pathway.png", {
     animations: "disabled",

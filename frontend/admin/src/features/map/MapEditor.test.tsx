@@ -66,7 +66,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Main Library" } });
-    expect(await screen.findByRole("button", { name: /Main Library Location/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /Main Library Location/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Route Node" }));
     clickMap(16.8, 121.7);
 

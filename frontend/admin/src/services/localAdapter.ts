@@ -368,6 +368,26 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
     },
     buildings: {
       list: (): Building[] => structuredClone(mapData.buildings ?? []),
+      /**
+       * Hard-deletes a Building with its footprint and its indoor Locations, as
+       * the backend's `delete_map_building` does. The Place Location that
+       * shares the Building's identity goes too; an indoor Location that merely
+       * shares its ID does not.
+       */
+      remove: (id: string): { building: Building | undefined; locationIds: string[] } => {
+        const buildings = mapData.buildings ?? [];
+        const index = buildings.findIndex((item) => item.id === id);
+        const [removed] = index >= 0 ? buildings.splice(index, 1) : [];
+        const locationIds: string[] = [];
+        for (let position = mapData.locations.length - 1; position >= 0; position -= 1) {
+          const location = mapData.locations[position];
+          if (location.parentId === id || (isPlace(location) && location.id === id)) {
+            locationIds.push(location.id);
+            mapData.locations.splice(position, 1);
+          }
+        }
+        return { building: removed, locationIds };
+      },
     },
   };
 };

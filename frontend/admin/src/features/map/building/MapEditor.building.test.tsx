@@ -40,6 +40,22 @@ describe("Map Editor preview", () => {
     expect(screen.getByRole("complementary", { name: "Auto Code Hall object details" })).toBeInTheDocument();
   });
 
+  it("closes only the Add Building dialog on Escape and keeps the draft", async () => {
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));
+    clickMap(16.720, 121.689);
+    clickMap(16.721, 121.689);
+    clickMap(16.721, 121.690);
+    fireEvent.click(screen.getByRole("button", { name: "Finish drawing" }));
+    expect(screen.getByRole("dialog", { name: "Add Building" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Add Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Building details" })).toBeInTheDocument();
+  });
+
   it("preserves a manually changed draft code and generates a default after discarding it", async () => {
     renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Building Polygon" }));

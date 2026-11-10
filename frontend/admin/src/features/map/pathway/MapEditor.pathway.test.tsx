@@ -71,7 +71,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: generatedMapFixture.pathways[0].name } });
-    fireEvent.click((await screen.findAllByRole("button", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
+    fireEvent.click((await screen.findAllByRole("option", { name: `${generatedMapFixture.pathways[0].name} Pathway` }))[0]);
     fireEvent.click(screen.getByRole("button", { name: "⌁ Reshape Pathway" }));
     const importedPoint = generatedMapFixture.pathways[0].pathPoints[0];
     fireEvent.click((await screen.findAllByRole("button", { name: `Path Point at ${importedPoint.join(",")}` }))[0]);
@@ -80,6 +80,9 @@ describe("Map Editor preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
 
     await waitFor(() => expect(services.map.updatePathway).toHaveBeenCalledWith(expect.objectContaining({ id: generatedMapFixture.pathways[0].id })));
+    // Saving an existing Pathway confirms it, and the Pathway stays open for further edits.
+    expect(await screen.findByText("Pathway details were updated successfully.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update Pathway" })).toBeInTheDocument();
   });
 
   it("lets Reshape Pathway drag a point immediately without calculating distance or ETA", async () => {
@@ -146,7 +149,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Walk Pathway/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Walk Pathway/ }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library Walk" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "🗑 Delete Pathway" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("1 Path Point");
@@ -317,7 +320,7 @@ describe("Map Editor preview", () => {
 
     await screen.findByTestId("path-geometry");
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     fireEvent.change(screen.getByLabelText("Pathway shade"), { target: { value: "Fully Shaded" } });
     fireEvent.change(screen.getByLabelText("Pathway direction"), { target: { value: "One-way" } });
     fireEvent.click(await screen.findByRole("button", { name: "Path Point at 16.7207,121.6897" }));
@@ -344,7 +347,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
-    fireEvent.click(await screen.findByRole("button", { name: "North Walk Pathway" }));
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
     fireEvent.click(screen.getByRole("button", { name: "Switch source and destination" }));
 
     const inspector = screen.getByRole("complementary", { name: "North Walk object details" });
@@ -393,10 +396,62 @@ describe("Map Editor preview", () => {
     ).toBe(true);
 
     fireEvent.change(name, { target: { value: "New Campus Walk" } });
-    fireEvent.click(screen.getByRole("button", { name: "Update Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Pathway" }));
     await waitFor(() => expect(services.map.createPathway).toHaveBeenCalledWith(expect.objectContaining({
       name: "New Campus Walk",
     })));
+  });
+
+  it.each([
+    ["Building Polygon", "Draw Building Footprint"],
+    ["Route Node", "Place Route Node"],
+  ])("replaces a selected Pathway's inspector with the %s panel", async (toolName, heading) => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
+    expect(screen.getByRole("complementary", { name: "North Walk object details" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: toolName }));
+
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "North Walk object details" })).not.toBeInTheDocument();
+  });
+
+  it("replaces a selected Pathway's inspector with the Pathway tool panel when the Pathway tool opens", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([
+      { id: "path-1", name: "North Walk", sourceNodeId: "node-a", destinationNodeId: "node-b", shade: "Unknown", type: "Walkway", direction: "Two-way", status: "Active", pathPoints: [] },
+    ]);
+    renderEditor();
+    fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "North Walk" } });
+    fireEvent.click(await screen.findByRole("option", { name: "North Walk Pathway" }));
+    await choosePathwayEditor();
+
+    expect(await screen.findByRole("heading", { name: "Calibrate Path Points" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "North Walk object details" })).not.toBeInTheDocument();
+  });
+
+  it("shows one panel with one Save Pathway control for a new Pathway and reports it as created", async () => {
+    vi.mocked(services.map.pathways).mockResolvedValue([]);
+    renderEditor();
+    await choosePathwayEditor();
+    fireEvent.click(screen.getByRole("button", { name: "＋ New Pathway" }));
+    fireEvent.click(screen.getByRole("button", { name: "Map marker at 16.721,121.69" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Map marker at 16.7205,121.6895" })[1]);
+
+    // The inspector replaces the tool panel instead of covering it.
+    expect(screen.queryByRole("heading", { name: "Calibrate Path Points" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("New Pathway name")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Save Pathway" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Update Pathway" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Pathway name" }), { target: { value: "Created Walk" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Pathway" }));
+
+    expect(await screen.findByText("Pathway was created successfully.")).toBeInTheDocument();
+    expect(screen.queryByText("Pathway details were updated successfully.")).not.toBeInTheDocument();
   });
 
   it("adds a midpoint Path Point without creating a Route Node", async () => {

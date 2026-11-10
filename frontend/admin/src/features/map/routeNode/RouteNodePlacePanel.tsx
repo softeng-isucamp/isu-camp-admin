@@ -4,6 +4,7 @@ import { buildingIdentifier } from "../building/buildingIdentifier";
 import type { Building } from "../../../types";
 import type { SaveAction } from "../session/useSavingAction";
 import type { MapPoint } from "../campusBoundary";
+import { coordinateRangeIssues, LATITUDE_HINT, LONGITUDE_HINT } from "./coordinateRange";
 import type { useRouteNodePointTool } from "./useRouteNodePointTool";
 
 interface RouteNodePlacePanelProps {
@@ -23,6 +24,8 @@ export function RouteNodePlacePanel({
   onSave: handleSavePlacedNode,
   onCancel,
 }: RouteNodePlacePanelProps) {
+  const rangeIssues = coordinateRangeIssues(pointTool.position);
+  const coordinatesValid = !rangeIssues.latitude && !rangeIssues.longitude;
   return (
     <div>
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#005931]">Place on Map</div>
@@ -76,10 +79,12 @@ export function RouteNodePlacePanel({
           : "Click the map to position this Route Node."}
       </div>
       <label className="block text-xs font-semibold text-[#3f4941]">Latitude
-        <input aria-label="Placement latitude" type="number" step="any" value={pointTool.position?.[0] ?? ""} onChange={(e) => pointTool.editPosition([Number(e.target.value), pointTool.position?.[1] ?? campusCenter[1]])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+        <input aria-label="Placement latitude" aria-invalid={Boolean(rangeIssues.latitude)} aria-describedby="placement-latitude-note" type="number" step="any" min={-90} max={90} value={pointTool.position?.[0] ?? ""} onChange={(e) => pointTool.editPosition([Number(e.target.value), pointTool.position?.[1] ?? campusCenter[1]])} className={`mt-1 w-full rounded-lg border px-2 py-1.5 text-xs ${rangeIssues.latitude ? "border-red-400" : "border-[#dbe0e2]"}`} />
+        <span id="placement-latitude-note" className={`mt-0.5 block text-[10px] ${rangeIssues.latitude ? "text-red-700" : "font-normal text-[#526359]"}`} role={rangeIssues.latitude ? "alert" : undefined}>{rangeIssues.latitude ?? LATITUDE_HINT}</span>
       </label>
       <label className="mt-2 block text-xs font-semibold text-[#3f4941]">Longitude
-        <input aria-label="Placement longitude" type="number" step="any" value={pointTool.position?.[1] ?? ""} onChange={(e) => pointTool.editPosition([pointTool.position?.[0] ?? campusCenter[0], Number(e.target.value)])} className="mt-1 w-full rounded-lg border border-[#dbe0e2] px-2 py-1.5 text-xs" />
+        <input aria-label="Placement longitude" aria-invalid={Boolean(rangeIssues.longitude)} aria-describedby="placement-longitude-note" type="number" step="any" min={-180} max={180} value={pointTool.position?.[1] ?? ""} onChange={(e) => pointTool.editPosition([pointTool.position?.[0] ?? campusCenter[0], Number(e.target.value)])} className={`mt-1 w-full rounded-lg border px-2 py-1.5 text-xs ${rangeIssues.longitude ? "border-red-400" : "border-[#dbe0e2]"}`} />
+        <span id="placement-longitude-note" className={`mt-0.5 block text-[10px] ${rangeIssues.longitude ? "text-red-700" : "font-normal text-[#526359]"}`} role={rangeIssues.longitude ? "alert" : undefined}>{rangeIssues.longitude ?? LONGITUDE_HINT}</span>
       </label>
       <div className="flex items-center gap-2 mt-4">
         <button
@@ -91,7 +96,7 @@ export function RouteNodePlacePanel({
         </button>
         <button
           type="button"
-          disabled={!pointTool.position || !pointTool.placingNodeName.trim() || savingAction === "route-node"}
+          disabled={!pointTool.position || !coordinatesValid || !pointTool.placingNodeName.trim() || savingAction === "route-node"}
           onClick={handleSavePlacedNode}
           className="px-5 py-2 bg-[#005931] hover:bg-[#004727] text-white rounded-full text-xs font-bold shadow disabled:opacity-40 transition cursor-pointer"
         >

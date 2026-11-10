@@ -19,7 +19,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Room 113" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Room 113 Location/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Room 113 Location/ }));
 
     const locationCard = screen.getByRole("complementary", { name: "Room 113 object details" });
     expect(locationCard).toHaveTextContent("Ground Floor");
@@ -116,7 +116,7 @@ describe("Searching for a Location without a marker", () => {
   const room = { id: "search-room", name: "Room 204", code: "204", type: "Room" as const, parentId: building.id, building: building.name, status: "Active" as const, lat: null, lng: null, positioned: false };
   const searchFor = async (name: string) => {
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: name } });
-    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`${name} Location`) }));
+    fireEvent.click(await screen.findByRole("option", { name: new RegExp(`${name} Location`) }));
   };
 
   it("frames the parent Building while keeping the searched Location selected", async () => {

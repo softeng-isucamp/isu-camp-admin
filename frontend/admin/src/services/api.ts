@@ -1886,8 +1886,23 @@ export const services: Services = {
       }
 
       failIfConfigured("buildingRemove");
-      const removed = buildings.find((item) => item.id === id);
-      if (removed) removed.status = "Inactive";
+      // Like the backend, deleting a Building deletes it outright, with its indoor Locations.
+      const { building: removed, locationIds } = localAdapter.buildings.remove(id);
+      const removedIds = new Set([id, ...locationIds]);
+      // purge_building keeps each waypoint and only nulls its reference (SET NULL), so route nodes stay on the map
+      // but no longer name the deleted Building or its Locations, in the legacy list and the canonical network alike.
+      new Set([...mapNodes, ...routeNodes]).forEach((node) => {
+        if (node.associatedPlaceId && removedIds.has(node.associatedPlaceId)) node.associatedPlaceId = null;
+      });
+      const network = canonicalNetwork.snapshot();
+      canonicalNetwork.save({
+        ...network,
+        buildings: network.buildings.filter((building) => building.id !== id),
+        routeNodes: network.routeNodes.map((node) => {
+          const buildingId = (node as { buildingId?: string | null }).buildingId;
+          return buildingId && removedIds.has(buildingId) ? ({ ...node, type: "access_point", buildingId: null } as typeof node) : node;
+        }),
+      });
       if (removed) addAudit("Removed Building", removed.name, "Admin", removed.id);
       return wait(undefined);
     },

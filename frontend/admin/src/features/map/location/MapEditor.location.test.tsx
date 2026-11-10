@@ -14,7 +14,7 @@ describe("Map Editor preview", () => {
   it("preserves a Location rename while mapped geometry remains read-only", async () => {
     renderEditor();
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Location/ }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     fireEvent.change(screen.getByLabelText("Location name"), { target: { value: "Main Library" } });
@@ -31,7 +31,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Location/ }));
 
     const locationCard = screen.getByRole("complementary", { name: "Library object details" });
     expect(locationCard).toHaveTextContent("Facility");
@@ -41,7 +41,7 @@ describe("Map Editor preview", () => {
     expect(locationCard).toHaveTextContent("Active");
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
-    const typeOptions = within(screen.getAllByRole("combobox")[0]).getAllByRole("option");
+    const typeOptions = within(within(screen.getByRole("dialog")).getAllByRole("combobox")[0]).getAllByRole("option");
     expect(typeOptions.map((option) => option.textContent)).toEqual(["College", "Campus Services", "Food", "Parking", "Facility"]);
     fireEvent.change(screen.getByRole("textbox", { name: "Location name" }), { target: { value: "Main Library" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Save Location" })).toBeEnabled());
@@ -60,7 +60,7 @@ describe("Map Editor preview", () => {
     renderEditor();
 
     fireEvent.change(await screen.findByPlaceholderText("Search campus places..."), { target: { value: "Library" } });
-    fireEvent.click(await screen.findByRole("button", { name: /Library Location/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Library Location/ }));
     fireEvent.click(screen.getByRole("button", { name: "More actions for Library" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "✎ Edit Details" }));
     const select = screen.getByLabelText(/^location type/i);
