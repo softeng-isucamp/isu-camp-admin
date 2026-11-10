@@ -4510,11 +4510,6 @@ td small {
 .readiness-headline:hover span {
   color: var(--green-2);
 }
-.tip-action {
-  margin-top: 2px;
-  color: var(--green-2);
-  font-weight: 600;
-}
 button.analytics-legend-row {
   width: 100%;
   border: 0;

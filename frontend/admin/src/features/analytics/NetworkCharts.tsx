@@ -50,7 +50,6 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
                   title={row.pathway}
                   value={`${plural(row.cut, "place")} cut off · ${plural(row.longer, "longer walk")}`}
                   names={row.cutOff}
-                  action="a part lists those places"
                 />
               );
             }}
@@ -137,7 +136,6 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
                 title={row.mode}
                 value={`${row.reachable} of ${total} places reachable from ${origin}`}
                 names={row.unreachable}
-                action={row.unreachable.length || row.reachablePlaces?.length ? "a part lists those places" : undefined}
               />
             );
           }}

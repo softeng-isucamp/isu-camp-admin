@@ -74,7 +74,6 @@ export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
                 <ClickTip
                   title={row.label}
                   value={`${row.complete} of ${row.total} have it · ${row.missingCount} missing`}
-                  action={row.have?.length || row.missingCount ? "a part lists those places" : undefined}
                 />
               );
             }}
