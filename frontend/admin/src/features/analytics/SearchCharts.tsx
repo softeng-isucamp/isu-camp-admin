@@ -5,7 +5,7 @@ import type { DecisionAnalytics, SearchActivityPoint } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { formatBucket, formatBucketDate, formatNumber } from "../dashboard/analytics/format";
 import { AXIS_TICK, INK, MUTED_MARK } from "../dashboard/analytics/palette";
-import { ClickTip, plural } from "./ClickTip";
+import { plural } from "./ClickTip";
 import { useOpenModule } from "./links";
 
 const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;

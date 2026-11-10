@@ -804,7 +804,7 @@ export interface Services {
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
     analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
-    /** The Analytics page: readiness, closure and reach snapshots plus the range's search activity and marker gap. */
+    /** The Analytics page: readiness (incl. indoor marker coverage), closure and reach snapshots, plus the range's search activity. */
     decisionAnalytics(range?: DashboardRange): Promise<DecisionAnalytics>;
   };
 

@@ -1,4 +1,4 @@
-import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, IndoorMarkerRow, ReadinessGap, SearchActivityPoint, UserAccountType } from "../../types";
+import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, Location, IndoorMarkerRow, ReadinessGap, SearchActivityPoint, UserAccountType } from "../../types";
 import mapFixture from "../generated-map-fixture.json";
 import { indoorLocationTypes, isLocationContainer } from "../../lib/locationPolicy";
 import { mulberry32 } from "./prng";
