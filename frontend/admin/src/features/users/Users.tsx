@@ -5,7 +5,7 @@ import { services } from "../../services/api";
 import { errorMessage } from "../../services/errors";
 import { Badge, Button, Card, Empty, Field, LoadingState, Modal, Pagination, ProgressBar, Spinner, Stamp, TimeZoneTag } from "../../components/UI";
 import { FilterCombobox } from "../../components/FilterCombobox";
-import { FittedPopover } from "../../components/FittedPopover";
+import { RowActionMenu } from "../../components/RowActionMenu";
 import { FeedbackStack, useFeedback } from "../../components/Feedback";
 import { accountTypeLabel, accountTypes, parseAccountType } from "../../lib/accountType";
 import type { AccountStatus, UserAccount, UserAccountType } from "../../types";
@@ -43,8 +43,6 @@ function AppUserDirectory() {
   );
   const [page, setPage] = useState(1);
   const pageSize = 10;
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
   // The search waits for typing to pause so a word is one request, not one per key.
   const searchQ = useDebouncedValue(q);
@@ -59,14 +57,6 @@ function AppUserDirectory() {
     if (data && !isPlaceholderData) setPage((current) => Math.min(current, Math.max(1, Math.ceil(data.total / pageSize))));
   }, [data, isPlaceholderData]);
   const result = data ?? { items: [], total: 0, page: 1, pageSize };
-
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) setActionMenuId(null);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  }, []);
 
   const setStatus = useMutation({
     mutationFn: ({ user, status }: { user: UserAccount; status: AccountStatus }) =>
@@ -84,7 +74,6 @@ function AppUserDirectory() {
   /** Restoring access is harmless and immediate; revoking it asks first. */
   const changeStatus = (user: UserAccount) => {
     if (!canChangeStatusRef.current) return;
-    setActionMenuId(null);
     setStatusError("");
     if (user.status === "Inactive") setStatus.mutate({ user, status: "Active" });
     else setPendingDeactivation(user);
@@ -137,45 +126,30 @@ function AppUserDirectory() {
                   <td>{user.userType ? accountTypeLabel(user.userType) : "—"}</td>
                   <td><Stamp value={user.createdAt} /></td>
                   <td><Badge tone={user.status === "Active" ? "green" : "grey"}>{user.status}</Badge></td>
-                  <td style={{ textAlign: "right", position: "relative" }}>
-                    <div style={{ display: "inline-flex" }} ref={actionMenuId === user.id ? actionMenuRef : undefined}>
+                  <td style={{ textAlign: "right" }}>
+                    <RowActionMenu label={`Actions for ${user.username}`}>
+                      {/* An app account's details are the User App's, so
+                          the portal offers what it owns: their recorded
+                          activity, and whether the account may sign in
+                          (an administrator without that switch is only
+                          offered the activity). */}
                       <button
-                        className="table-action menu-trigger"
-                        aria-label={`Actions for ${user.username}`}
-                        aria-expanded={actionMenuId === user.id}
-                        onClick={() => setActionMenuId((current) => (current === user.id ? null : user.id))}
+                        role="menuitem"
+                        onClick={() => navigate(`/system-logs?${new URLSearchParams({ q: user.username, category: "User" })}`)}
                       >
-                        •••
+                        View activity
                       </button>
-                      {actionMenuId === user.id && (
-                        <FittedPopover className="row-action-menu" role="menu">
-                          {/* An app account's details are the User App's, so
-                              the portal offers what it owns: their recorded
-                              activity, and whether the account may sign in
-                              (an administrator without that switch is only
-                              offered the activity). */}
-                          <button
-                            role="menuitem"
-                            onClick={() => {
-                              setActionMenuId(null);
-                              navigate(`/system-logs?${new URLSearchParams({ q: user.username, category: "User" })}`);
-                            }}
-                          >
-                            View activity
-                          </button>
-                          {can("changeUserStatus") && <div role="separator" />}
-                          {can("changeUserStatus") && (
-                            <button
-                              role="menuitem"
-                              disabled={setStatus.isPending}
-                              onClick={() => changeStatus(user)}
-                            >
-                              {user.status === "Active" ? "Deactivate account" : "Activate account"}
-                            </button>
-                          )}
-                        </FittedPopover>
+                      {can("changeUserStatus") && <div role="separator" />}
+                      {can("changeUserStatus") && (
+                        <button
+                          role="menuitem"
+                          disabled={setStatus.isPending}
+                          onClick={() => changeStatus(user)}
+                        >
+                          {user.status === "Active" ? "Deactivate account" : "Activate account"}
+                        </button>
                       )}
-                    </div>
+                    </RowActionMenu>
                   </td>
                 </tr>
               ))}

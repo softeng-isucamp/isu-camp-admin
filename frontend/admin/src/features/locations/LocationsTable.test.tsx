@@ -608,6 +608,24 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(dialog).toHaveTextContent("locked to preserve that context");
   });
 
+  it("announces a server refusal of a locked parent Building in the banner, since the locked field cannot take focus", async () => {
+    const building = await services.locations.save({
+      id: "locked-refusal-building", name: "Locked Refusal Building", code: "LOCK-REF", type: "Place", classification: "College",
+      parentId: null, status: "Active", lat: null, lng: null, positioned: false,
+    });
+    renderLocations([`/locations?add=indoor&parentId=${building.id}&floor=${encodeURIComponent("Ground Floor")}`]);
+    await screen.findByRole("dialog", { name: "Add Location" });
+    fireEvent.change(screen.getByLabelText(/location name/i), { target: { value: "Locked Refusal Room" } });
+    fireEvent.change(screen.getByLabelText(/location code/i), { target: { value: "LOCK-ROOM" } });
+    const refusal = Object.assign(new Error("Parent Building was not found."), { fieldErrors: { parentId: "That Building no longer exists." } });
+    vi.spyOn(services.locations, "save").mockRejectedValueOnce(refusal);
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("That Building no longer exists.");
+    await waitFor(() => expect(banner).toHaveFocus());
+  });
+
   it("opens an indoor-location handoff for a newly created Building before directory refresh", async () => {
     const pendingBuilding = {
       id: "pending-map-building",
@@ -998,6 +1016,9 @@ describe("Locations screen table and hierarchy toggle validation", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveAttribute("aria-invalid", "true"));
     expect(document.getElementById("select-location-type-error")).toHaveTextContent("Classification is not allowed.");
+    // The field says why; the server's general message would only repeat it, and focus goes to that field.
+    expect(screen.queryByText("Invalid type.")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText(/location type/i)).toHaveFocus());
   });
 
   it("groups the type filter into Places and Locations and sends each option's backend name", async () => {
@@ -1087,12 +1108,12 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     });
   });
 
-  it("keeps row action options above neighboring table rows", async () => {
+  it("opens a row's options as a visible menu that runs the chosen item", async () => {
+    // Stacking above neighboring rows comes from the shared menu's stylesheet rule, which jsdom does not paint.
     renderLocations();
     fireEvent.click(await screen.findByRole("button", { name: "Actions for Administration Building" }));
     const menu = screen.getByRole("menu");
     expect(menu).toBeVisible();
-    expect(menu.parentElement?.parentElement).toHaveStyle({ zIndex: "50" });
     const editOption = screen.getByRole("menuitem", { name: "Edit location" });
     expect(editOption).toBeVisible();
     fireEvent.mouseDown(editOption);
@@ -1277,7 +1298,51 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     const nameInput = await screen.findByLabelText(/location name/i);
     expect(nameInput).toHaveAttribute("aria-invalid", "true");
     expect(nameInput.getAttribute("aria-describedby")).toContain("field-location-name-error");
-    expect(screen.getByRole("alert")).toHaveTextContent("Location name is required.");
+    expect(screen.getByText("Location name is required.")).toHaveAttribute("id", "field-location-name-error");
+    // With no banner to announce the refusal, focus moves to the first invalid field, whose message is its description.
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-invalid", "true"));
+  });
+
+  it("shows each validation message once, inline under its field", async () => {
+    renderLocations();
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+
+    await screen.findByText("Location name is required.");
+    // The banner repeated what the fields already say; with no error left for it to carry, it does not appear.
+    expect(screen.getAllByText("Location name is required.")).toHaveLength(1);
+    expect(screen.getAllByText("Laboratory Locations require a parent Building.")).toHaveLength(1);
+    expect(screen.getAllByText("Indoor Locations require a Floor Level.")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("opens Edit without the validation errors left behind by an abandoned Add", async () => {
+    renderLocations(["/locations?q=Chinese"]);
+    fireEvent.click(await screen.findByRole("button", { name: /add location/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save location/i }));
+    await screen.findByText("Location name is required.");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for Chinese Building" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit location" }));
+    const dialog = await screen.findByRole("dialog", { name: "Edit Location" });
+    expect(within(dialog).queryByText(/is required\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/require a parent Building\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/require a Floor Level\.$/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("closes a row menu on Escape and returns focus to its trigger", async () => {
+    renderLocations(["/locations?q=Chinese"]);
+    const trigger = await screen.findByRole("button", { name: "Actions for Chinese Building" });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getAllByRole("menuitem")[0]).toHaveFocus();
+
+    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0], { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   describe("BUILDING filter combobox", () => {

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Empty, Field, LoadingState, Modal, ProgressBar, SelectField } from "../../components/UI";
-import { FittedPopover } from "../../components/FittedPopover";
+import { RowActionMenu } from "../../components/RowActionMenu";
 import type { useFeedback } from "../../components/Feedback";
 import { PasswordField } from "../../components/PasswordField";
 import { PasswordChecklist } from "../../components/PasswordChecklist";
@@ -110,22 +110,12 @@ export function AdministratorsPanel({ feedback }: {
   const reasonsId = useId();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
   const { data, isLoading, isFetching, error: listError } = useQuery({
     queryKey: ["admins"],
     queryFn: () => services.admins.list(),
   });
   const admins = data ?? [];
-
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) setActionMenuId(null);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  }, []);
 
   const closeDialog = () => {
     submissionGeneration.current += 1;
@@ -148,7 +138,6 @@ export function AdministratorsPanel({ feedback }: {
     setReasons([]);
     setOtherReason("");
     setPermissions(switches);
-    setActionMenuId(null);
     setDialog(next);
   };
 
@@ -244,13 +233,11 @@ export function AdministratorsPanel({ feedback }: {
   });
 
   const viewActivity = (account: AdminAccount) => {
-    setActionMenuId(null);
     navigate(`/system-logs?${new URLSearchParams({ q: account.username, category: "Admin" })}`);
   };
 
   /** Restoring access is harmless and immediate; revoking it asks first. */
   const changeStatus = (account: AdminAccount) => {
-    setActionMenuId(null);
     setError("");
     if (account.status === "Inactive") setStatus.mutate({ account, status: "Active" });
     else setDialog({ kind: "deactivate", account });
@@ -355,72 +342,56 @@ export function AdministratorsPanel({ feedback }: {
                 <td>
                   <Badge tone={account.status === "Active" ? "green" : "grey"}>{account.status}</Badge>
                 </td>
-                <td style={{ textAlign: "right", position: "relative" }}>
-                  <div
-                    style={{ display: "inline-flex" }}
-                    ref={actionMenuId === account.id ? actionMenuRef : undefined}
-                  >
-                    <button
-                      className="table-action menu-trigger"
-                      aria-label={`Actions for ${account.username}`}
-                      aria-expanded={actionMenuId === account.id}
-                      onClick={() => setActionMenuId((current) => (current === account.id ? null : account.id))}
-                    >
-                      •••
+                <td style={{ textAlign: "right" }}>
+                  <RowActionMenu label={`Actions for ${account.username}`}>
+                    <button role="menuitem" onClick={() => viewActivity(account)}>
+                      View activity
                     </button>
-                    {actionMenuId === account.id && (
-                      <FittedPopover className="row-action-menu" role="menu">
-                        <button role="menuitem" onClick={() => viewActivity(account)}>
-                          View activity
-                        </button>
-                        {canManage && <div role="separator" />}
-                        {canManage && account.role === "admin" && !account.isCurrent && (
-                          <button
-                            role="menuitem"
-                            onClick={() => openDialog({ kind: "permissions", account }, account.permissions ?? allPermissions())}
-                          >
-                            Edit permissions
-                          </button>
-                        )}
-                        {canManage && (
-                          <button
-                            role="menuitem"
-                            disabled={account.isCurrent || setStatus.isPending}
-                            title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
-                            onClick={() => changeStatus(account)}
-                          >
-                            {account.status === "Active" ? "Deactivate account" : "Activate account"}
-                          </button>
-                        )}
-                        {canManage && (
-                          <button
-                            role="menuitem"
-                            disabled={account.isCurrent}
-                            title={account.isCurrent ? "You cannot change your own role." : undefined}
-                            // A demoted superadmin starts view only; the dialog's editor lets the superadmin turn things on.
-                            onClick={() => openDialog({ kind: "role", account, role: account.role === "superadmin" ? "admin" : "superadmin" })}
-                          >
-                            {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
-                          </button>
-                        )}
-                        <div role="separator" />
-                        {/* Helps a locked-out colleague without touching their
-                            account: the code only reaches their own inbox. */}
-                        <button
-                          role="menuitem"
-                          disabled={!account.email}
-                          title={account.email ? undefined : "No email address on file."}
-                          onClick={() => {
-                            setError("");
-                            setDialog({ kind: "reset", account });
-                            setActionMenuId(null);
-                          }}
-                        >
-                          Send password reset code
-                        </button>
-                      </FittedPopover>
+                    {canManage && <div role="separator" />}
+                    {canManage && account.role === "admin" && !account.isCurrent && (
+                      <button
+                        role="menuitem"
+                        onClick={() => openDialog({ kind: "permissions", account }, account.permissions ?? allPermissions())}
+                      >
+                        Edit permissions
+                      </button>
                     )}
-                  </div>
+                    {canManage && (
+                      <button
+                        role="menuitem"
+                        disabled={account.isCurrent || setStatus.isPending}
+                        title={account.isCurrent ? "You cannot deactivate your own account." : undefined}
+                        onClick={() => changeStatus(account)}
+                      >
+                        {account.status === "Active" ? "Deactivate account" : "Activate account"}
+                      </button>
+                    )}
+                    {canManage && (
+                      <button
+                        role="menuitem"
+                        disabled={account.isCurrent}
+                        title={account.isCurrent ? "You cannot change your own role." : undefined}
+                        // A demoted superadmin starts view only; the dialog's editor lets the superadmin turn things on.
+                        onClick={() => openDialog({ kind: "role", account, role: account.role === "superadmin" ? "admin" : "superadmin" })}
+                      >
+                        {account.role === "superadmin" ? "Make administrator" : "Make superadmin"}
+                      </button>
+                    )}
+                    <div role="separator" />
+                    {/* Helps a locked-out colleague without touching their
+                        account: the code only reaches their own inbox. */}
+                    <button
+                      role="menuitem"
+                      disabled={!account.email}
+                      title={account.email ? undefined : "No email address on file."}
+                      onClick={() => {
+                        setError("");
+                        setDialog({ kind: "reset", account });
+                      }}
+                    >
+                      Send password reset code
+                    </button>
+                  </RowActionMenu>
                 </td>
               </tr>
             ))}

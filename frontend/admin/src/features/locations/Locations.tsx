@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_MODE, services, setMockFailure } from "../../services/api";
@@ -26,6 +26,7 @@ import { LocationCoordinatesFields, LocationDetailsFields } from "./LocationDeta
 import { LocationTypeIcon } from "./LocationTypeIcon";
 import { LocationPhotoUpload } from "./LocationPhotoUpload";
 import { FilterCombobox } from "../../components/FilterCombobox";
+import { RowActionMenu } from "../../components/RowActionMenu";
 import { ParentBuildingField } from "./ParentBuildingField";
 import { usePermissions } from "../auth/usePermissions";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -155,19 +156,6 @@ export function Locations() {
   >(null);
   const dialogRef = useRef(dialog);
   dialogRef.current = dialog;
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) {
-        setActionMenuId(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const [draft, setDraft] = useState<LocationDraft>(blankLocation());
   const [lockedParentId, setLockedParentId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Location | null>(null);
@@ -175,6 +163,16 @@ export function Locations() {
   const passwordConfirmation = usePasswordConfirmation();
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Array<{ field?: keyof LocationDraft; message: string }>>([]);
+  // Set when a save is refused, so the next render moves focus to the first invalid field and a
+  // screen reader announces its message (the banner no longer repeats messages shown inline).
+  const focusInvalidRef = useRef(false);
+  useEffect(() => {
+    if (!focusInvalidRef.current || !fieldErrors.length) return;
+    focusInvalidRef.current = false;
+    const body = document.querySelector<HTMLElement>(".locations-modal-body");
+    const target = body?.querySelector<HTMLElement>('[aria-invalid="true"]:not(:disabled)') ?? body?.querySelector<HTMLElement>('[role="alert"]');
+    target?.focus();
+  }, [fieldErrors]);
   const [page, setPage] = useState(1);
   const pageSize = 10;
   const [photos, setPhotos] = useState<LocationPhotoDraft[]>([]);
@@ -199,6 +197,13 @@ export function Locations() {
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Every open, close and change of mode starts the form with no errors, so an
+  // abandoned Add's messages never show under an Edit. Layout effect: the reset
+  // lands before the new dialog is painted.
+  useLayoutEffect(() => {
+    setError("");
+    setFieldErrors([]);
+  }, [dialog]);
   const openerRef = useRef<HTMLElement | null>(null);
   const directoryHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const processedIndoorHandoffRef = useRef<string | null>(null);
@@ -658,6 +663,7 @@ export function Locations() {
       ...evaluation.issues.map((issue) => ({ field: issue.field, message: issue.message })),
     ];
     if (validationIssues.length) {
+      focusInvalidRef.current = true;
       setFieldErrors(validationIssues.filter((issue, index, all) => all.findIndex((candidate) => candidate.field === issue.field && candidate.message === issue.message) === index));
       return null;
     }
@@ -701,10 +707,15 @@ export function Locations() {
       return saved;
     } catch (cause) {
       const backendFields = (cause as Error & { fieldErrors?: Record<string, string> }).fieldErrors;
-      if (backendFields) {
-        setFieldErrors(Object.entries(backendFields).map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
+      const fieldEntries = Object.entries(backendFields ?? {});
+      if (fieldEntries.length) {
+        focusInvalidRef.current = true;
+        setFieldErrors(fieldEntries.map(([field, message]) => ({ field: field as keyof LocationDraft, message })));
       }
-      setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
+      // When every refused field shows its own message inline, the server's general message would only repeat it.
+      if (!fieldEntries.length || !fieldEntries.every(([field]) => fieldIsShown(field as keyof LocationDraft))) {
+        setError(errorMessage(cause, "The location couldn't be saved. Please try again.", { mutation: true }));
+      }
       return null;
     } finally {
       setSaving(false);
@@ -793,7 +804,6 @@ export function Locations() {
     setPhotos([]);
     setCustomFloorMode(false);
     setLockedParentId(parent.id);
-    setActionMenuId(null);
     openDialog("add");
   };
 
@@ -826,6 +836,21 @@ export function Locations() {
   };
 
   const errorFor = (field: keyof LocationDraft) => fieldErrors.find((issue) => issue.field === field)?.message;
+  // Mirrors what the form renders: a field's message sits under that field, so the banner
+  // carries only the messages with no field on screen (coordinates, the Building name, a
+  // photo the form replaced with its own load failure, or a field the form is not showing).
+  const showsParentFields = isChildType(draft.type) || draft.parentId !== null;
+  const fieldIsShown = (field?: keyof LocationDraft) => {
+    switch (field) {
+      case "type": case "name": case "code": case "function": return true;
+      // A locked parent (quick-add) cannot take focus, so its error belongs in the announced banner.
+      case "parentId": return showsParentFields && lockedParentId === null;
+      case "floor": return showsParentFields && draft.type !== "Floor";
+      case "photo": return !photoLoadFailed;
+      default: return false;
+    }
+  };
+  const bannerErrors = fieldErrors.filter((issue) => !fieldIsShown(issue.field));
 
   return (
     <div className="page locations-page">
@@ -1063,7 +1088,6 @@ export function Locations() {
             </thead>
             <tbody>
               {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed, childSummary }, index) => {
-                const isNearBottom = index >= 3 && index >= uniqueVisibleRows.length - 2;
                 return (
                 <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
                   <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: "16px 20px" }}>
@@ -1145,106 +1169,61 @@ export function Locations() {
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right", position: "relative", zIndex: actionMenuId === locationIdentityKey(item) ? 50 : 0 }}>
-                    <div style={{ display: "inline-flex", gap: "6px" }} ref={actionMenuId === locationIdentityKey(item) ? actionMenuRef : undefined}>
+                  <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                    <RowActionMenu
+                      label={`Actions for ${item.name}`}
+                      triggerProps={{ style: { background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" } }}
+                    >
                       <button
-                        className="table-action menu-trigger"
-                        aria-label={`Actions for ${item.name}`}
-                        aria-expanded={actionMenuId === locationIdentityKey(item)}
-                        onClick={() => setActionMenuId((current) => (current === locationIdentityKey(item) ? null : locationIdentityKey(item)))}
-                        style={{ background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" }}
+                        role="menuitem"
+                        onClick={() => {
+                          const parent = item.parentId
+                            ? allLocations.find((location) => location.id === item.parentId && isLocationContainer(location))
+                              ?? allLocations.find((location) => location.name === item.building && isLocationContainer(location))
+                            : undefined;
+                          if (isChildLocation(item) && !parent) {
+                            setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
+                            return;
+                          }
+                          if (isChildLocation(item)) navigate(`/map-editor?indoorLocation=${encodeURIComponent(item.id)}`);
+                          else navigate(`/map-editor?location=${encodeURIComponent(item.id)}`);
+                        }}
                       >
-                        •••
+                        {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
                       </button>
-                      {actionMenuId === locationIdentityKey(item) && (
-                        <div
-                          className="row-action-menu"
-                          role="menu"
-                          onMouseDown={(event) => event.stopPropagation()}
-                          style={{
-                            position: "absolute",
-                            right: "20px",
-                            top: isNearBottom ? "auto" : "44px",
-                            bottom: isNearBottom ? "44px" : "auto",
-                            background: "#fff",
-                            borderRadius: "14px",
-                            boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
-                            zIndex: 40,
-                            padding: "6px",
-                            minWidth: "165px",
-                            border: "1px solid #e5e7eb",
-                            textAlign: "left",
+                      {isBuilding(item) && can("add") && (
+                        <button role="menuitem" onClick={() => openAddRoom(item)}>
+                          ＋ Add room to this building
+                        </button>
+                      )}
+                      {can("edit") && (
+                        <button role="menuitem" onClick={() => openEdit(item)}>
+                          Edit location
+                        </button>
+                      )}
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          setSelected(item);
+                          openDialog("history");
+                        }}
+                      >
+                        View history
+                      </button>
+                      {can("delete") && <div role="separator" />}
+                      {can("delete") && (
+                        <button
+                          role="menuitem"
+                          className="danger"
+                          onClick={() => {
+                            setSelected(item);
+                            openDialog("remove");
                           }}
                         >
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              const parent = item.parentId
-                                ? allLocations.find((location) => location.id === item.parentId && isLocationContainer(location))
-                                  ?? allLocations.find((location) => location.name === item.building && isLocationContainer(location))
-                                : undefined;
-                              if (isChildLocation(item) && !parent) {
-                                setError(`Unable to locate ${item.name}: its parent Building is missing. Edit the location to restore its hierarchy.`);
-                                setActionMenuId(null);
-                                return;
-                              }
-                              if (isChildLocation(item)) navigate(`/map-editor?indoorLocation=${encodeURIComponent(item.id)}`);
-                              else navigate(`/map-editor?location=${encodeURIComponent(item.id)}`);
-                              setActionMenuId(null);
-                            }}
-                          >
-                            {isChildLocation(item) ? "Locate parent building on map" : "Locate on map"}
-                          </button>
-                          {isBuilding(item) && can("add") && (
-                            <button
-                              role="menuitem"
-                              style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                              onClick={() => openAddRoom(item)}
-                            >
-                              ＋ Add room to this building
-                            </button>
-                          )}
-                          {can("edit") && (
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              openEdit(item);
-                              setActionMenuId(null);
-                            }}
-                          >
-                            Edit location
-                          </button>
-                          )}
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", cursor: "pointer", borderRadius: "8px", color: "#191c1d" }}
-                            onClick={() => {
-                              setSelected(item);
-                              openDialog("history");
-                              setActionMenuId(null);
-                            }}
-                          >
-                            View history
-                          </button>
-                          {can("delete") && <div role="separator" />}
-                          {can("delete") && (
-                          <button
-                            role="menuitem"
-                            style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", fontSize: "13px", color: "#dc2626", cursor: "pointer", borderRadius: "8px" }}
-                            onClick={() => {
-                              setSelected(item);
-                              openDialog("remove");
-                              setActionMenuId(null);
-                            }}
-                          >
-                            Delete location
-                          </button>
-                          )}
-                        </div>
+                          Delete location
+                        </button>
                       )}
-                    </div>
+                    </RowActionMenu>
                   </td>
                   </>}
                 </tr>
@@ -1307,9 +1286,10 @@ export function Locations() {
 
             {/* Form Body */}
             <div className="locations-modal-body" style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: "16px", maxHeight: "70vh", overflowY: "auto" }}>
-              {(error || fieldErrors.length > 0) && (
-                <div role="alert" style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
-                  {error || <ul style={{ margin: 0, paddingLeft: "18px" }}>{fieldErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
+              {(error || bannerErrors.length > 0) && (
+                <div role="alert" tabIndex={-1} style={{ background: "#fee2e2", color: "#dc2626", padding: "10px 14px", borderRadius: "10px", fontSize: "13px" }}>
+                  {error}
+                  {bannerErrors.length > 0 && <ul style={{ margin: error ? "6px 0 0" : 0, paddingLeft: "18px" }}>{bannerErrors.map(({ field, message }) => <li key={`${field}-${message}`}>{message}</li>)}</ul>}
                 </div>
               )}
               <LocationDetailsFields

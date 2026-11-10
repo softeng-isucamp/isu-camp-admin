@@ -341,4 +341,16 @@ describe("Users filter bar and count", () => {
     await screen.findByText("maria.santos1");
     expect(screen.getByText(/of 1 matching user$/)).toBeInTheDocument();
   });
+
+  it("closes an open row menu on Escape and returns focus to its trigger", async () => {
+    vi.spyOn(services.users, "list").mockResolvedValue(page);
+    renderUsers();
+    const trigger = await screen.findByRole("button", { name: "Actions for maria.santos1" });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "View activity" })).toHaveFocus();
+
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
 });

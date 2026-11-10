@@ -852,6 +852,27 @@ describe('backup & recovery', () => {
     });
   });
 
+  it('closes the row menu on Escape and returns focus to its trigger', async () => {
+    history();
+    page();
+    const trigger = within(await row(1)).getByRole('button', { name: /Actions for backup from/ });
+    await userEvent.click(trigger);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem')[0]).toHaveFocus();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('sizes Status to its badge and lets a left-aligned Actions column follow it directly', async () => {
+    history();
+    page();
+    await screen.findByRole('table');
+    const cols = Array.from(document.querySelectorAll<HTMLElement>('.profile-backup-table col'));
+    expect(cols[3].style.width).toMatch(/^\d+px$/);
+    expect(cols[4].style.width).toBe('');
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveStyle({ textAlign: 'left' });
+  });
+
   describe('dialog focus', () => {
     const inDialog = () => expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
     const openByKeyboard = async (index: number, label: string) => {
@@ -860,7 +881,9 @@ describe('backup & recovery', () => {
       await userEvent.keyboard('{Enter}');
       const items = within(screen.getByRole('menu')).getAllByRole('menuitem');
       const wanted = items.findIndex((item) => item.textContent === label);
-      for (let step = 0; step <= wanted; step++) await userEvent.tab();
+      // Opening focuses the first item; arrow keys move within the menu (Tab would close it).
+      expect(items[0]).toHaveFocus();
+      for (let step = 0; step < wanted; step++) await userEvent.keyboard('{ArrowDown}');
       expect(items[wanted]).toHaveFocus();
       await userEvent.keyboard('{Enter}');
       return trigger;
