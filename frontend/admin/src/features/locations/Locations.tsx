@@ -1098,7 +1098,7 @@ export function Locations() {
                 const isContextRow = isContextBuilding || (hasResultFocus && item.type === "Floor" && !isResultMatch);
                 const rowPadding = isContextRow ? "10px 20px" : "16px 20px";
                 return (
-                <tr key={locationIdentityKey(item)} className={[isContextBuilding && "location-context-building", isContextRow && "location-context-row", isResultMatch && "location-result-match"].filter(Boolean).join(" ")} style={{ background: isResultMatch ? "#f1f3f5" : undefined, color: isContextRow ? "#6b7280" : undefined, borderBottom: "1px solid #edf0ee", transition: "background 0.15s" }}>
+                <tr key={locationIdentityKey(item)} className={[isContextBuilding && "location-context-building", isContextRow && "location-context-row", isResultMatch && "location-result-match"].filter(Boolean).join(" ")} style={{ color: isContextRow ? "#6b7280" : undefined, borderBottom: "1px solid #edf0ee", transition: "background 0.15s" }}>
                   <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: rowPadding }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
                       {/* Tree connector graphics */}

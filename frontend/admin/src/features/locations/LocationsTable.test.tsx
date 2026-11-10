@@ -387,7 +387,7 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(parent).not.toHaveClass("location-result-match");
     const result = screen.getByText("Administration Building 2nd Floor Laboratory 107").closest("tr");
     expect(result).toHaveClass("location-result-match");
-    expect(result).toHaveStyle({ background: "#f1f3f5" });
+    expect(result?.style.background).toBe("");
     expect(screen.getAllByText("2nd Floor", { selector: "strong" })[0].closest("tr")).toHaveClass("location-context-row");
     expect(within(parent).getByRole("button", { name: "Collapse Administration Building" })).toBeEnabled();
     expect(within(parent).getByRole("button", { name: "Actions for Administration Building" })).toBeEnabled();
