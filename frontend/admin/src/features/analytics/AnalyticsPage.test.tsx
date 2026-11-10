@@ -260,8 +260,20 @@ it("keeps map pins honest: a footprint-only place has a position, so only places
   const footprintOnly = { ...places[0], id: "fp-only", positioned: false, lat: null, lng: null, polygonCoordinates: [[1, 1], [1, 2], [2, 2]] as [number, number][] };
   const neither = { ...places[1], id: "nothing", positioned: false, lat: null, lng: null };
   const pin = generateDecisionAnalytics("week", [...locations, footprintOnly, neither]).readiness.checks.find((check) => check.key === "pin")!;
-  // The fixture mirrors the server's rule on the Location's own position flag; the footprint-only case is covered server-side.
+  // The fixture applies the server's rule: a footprint is a position, so only the place with neither is missing a pin.
   expect(pin.missing.map((place) => place.id)).toContain("nothing");
+  expect(pin.missing.map((place) => place.id)).not.toContain("fp-only");
+  expect(pin.have!.map((place) => place.id)).toContain("fp-only");
+});
+
+it("counts a searched footprint-only place as having a marker and a room under no active building as no destination", () => {
+  const places = locations.filter((item) => item.type === "Place" && item.status === "Active");
+  const footprintOnly = { ...places[0], id: "fp-only", positioned: false, lat: null, lng: null, polygonCoordinates: [[1, 1], [1, 2], [2, 2]] as [number, number][] };
+  const orphanRoom = { ...locations.find((item) => item.type === "Room" && item.status === "Active")!, id: "orphan-room", parentId: "missing-parent" };
+  const gap = generateDecisionAnalytics("all", [...locations, footprintOnly, orphanRoom]).searches.markerGap;
+  const place = gap.find((row) => row.type === "Building")!;
+  expect(place.missing.map((item) => item.id)).not.toContain("fp-only");
+  expect(gap.flatMap((row) => [...row.missing, ...row.have]).map((item) => item.id)).not.toContain("orphan-room");
 });
 
 it("leaves the half of a bar a server sent no list for unclickable", async () => {
@@ -461,4 +473,64 @@ it("never says an unmarked room cannot be found: the app falls back to its build
   expect(guide).toHaveTextContent("still opens an indoor location with no marker at its building");
   expect(guide).toHaveTextContent("only the exact spot is missing");
   expect(guide).toHaveTextContent("not a visit");
+});
+
+it("plots searches from deleted or unrecognised accounts as a neutral Unattributed stack so a column's height is its total", async () => {
+  const base = fixture();
+  const points = base.searches.activity.points.map((point, index) => (index === 6 ? { ...point, total: point.total + 4 } : point));
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...base, searches: { ...base.searches, total: base.searches.total + 4, activity: { ...base.searches.activity, points } } });
+  renderPage();
+  await screen.findByText("Search activity");
+  const block = screen.getByRole("heading", { name: "Search activity" }).closest(".graph") as HTMLElement;
+
+  expect(within(block).getByText("Unattributed")).toBeInTheDocument();
+  expect(block.querySelectorAll(".recharts-bar")).toHaveLength(accountTypes.length + 1);
+  const lastBar = Array.from(block.querySelectorAll(".recharts-bar")).at(-1)!;
+  expect(lastBar.querySelectorAll(".recharts-bar-rectangle")).toHaveLength(1);
+});
+
+it("does not show an Unattributed series when every search belongs to an account type", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Search activity");
+  expect(screen.queryByText("Unattributed")).not.toBeInTheDocument();
+});
+
+it("gives the marker chart keyboard access to both groups: the row label, plus the count label on a row with both", async () => {
+  const base = fixture();
+  const rooms = base.searches.markerGap.find((row) => row.type === "Room")!;
+  const mixed = { ...rooms, searches: rooms.searches + 3, have: [{ id: "marked-room", name: "Marked Room", searches: 3 }] };
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
+    ...base,
+    searches: { ...base.searches, markerGap: base.searches.markerGap.map((row) => (row.type === "Room" ? mixed : row)) },
+  });
+  renderPage();
+  await screen.findByText("Searches for destinations without markers");
+
+  // A row whose searched places all have markers still has a keyboard link to them.
+  const places = base.searches.markerGap.find((row) => row.type === "Building")!;
+  expect(places.missing).toHaveLength(0);
+  const placesLink = screen.getByRole("link", { name: `Places: list the ${places.have.length} searched places with a marker in Locations` });
+  placesLink.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(destination().params.get("keys")).toBe(places.have.map((item) => `Place:${item.id}`).join(","));
+
+  // A mixed row: the label opens the unmarked ones, the count label the marked ones.
+  await userEvent.click(screen.getByRole("link", { name: new RegExp(`^Rooms: list the ${rooms.missing.length} searched rooms with no marker`) }));
+  expect(destination().params.get("keys")).toBe(rooms.missing.map((item) => `Room:${item.id}`).join(","));
+  fireEvent.click(screen.getByRole("link", { name: "Rooms: list the 1 searched rooms with a marker in Locations" }));
+  expect(destination().params.get("keys")).toBe("Room:marked-room");
+});
+
+it("gives Missing details keyboard access to the places that have a check as well as those missing it", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Missing details");
+  const ranked = rankedChecks();
+  const done = ranked.find((row) => !row.missing.length && row.have?.length)!;
+  fireEvent.click(screen.getByRole("link", { name: `${done.label}: list the ${done.have!.length} places that have it in Locations` }));
+  expect(destination().params.get("ids")).toBe(done.have!.map((place) => place.id).join(","));
+  const mixed = ranked.find((row) => row.missing.length && row.have?.length)!;
+  fireEvent.click(screen.getByRole("link", { name: `${mixed.label}: list the ${mixed.have!.length} places that have it in Locations` }));
+  expect(destination().params.get("why")).toBe(`With ${mixed.label.toLowerCase()}`);
 });

@@ -4,16 +4,19 @@ import { accountTypes } from "../../lib/accountType";
 import type { DecisionAnalytics, DestinationType, MarkerGapRow, SearchActivityPoint } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { formatBucket, formatBucketDate, formatNumber, formatPercent } from "../dashboard/analytics/format";
-import { ALERT, AXIS_TICK, INK, SERIES } from "../dashboard/analytics/palette";
+import { ALERT, AXIS_TICK, INK, MUTED_MARK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip, plural } from "./ClickTip";
 import { locationsKeysLink, useOpenModule } from "./links";
-import { RowLabelTick, type RowLink } from "./RowLabelTick";
+import { LinkedTick, RowLabelTick, type RowLink } from "./RowLabelTick";
 
 const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
 
+type ActivityRow = SearchActivityPoint & { unattributed: number };
+const UNATTRIBUTED = "Unattributed";
+
 /** Search activity's tooltip: the bucket, each account type's searches, and the searches no account type claims. */
-function ActivityTip({ point, range }: { point: SearchActivityPoint; range: DecisionAnalytics["range"] }) {
-  const unattributed = point.total - point.student - point.teacher - point.visitor;
+function ActivityTip({ point, range }: { point: ActivityRow; range: DecisionAnalytics["range"] }) {
+  const { unattributed } = point;
   return (
     <div className="decision-tooltip">
       <strong>{formatBucket(point.date, range)}</strong>
@@ -21,7 +24,10 @@ function ActivityTip({ point, range }: { point: SearchActivityPoint; range: Deci
       {accountTypes.map((type) => (
         <span key={type.key} className="tip-split"><i style={{ background: type.color }} aria-hidden="true" />{type.label}: {formatNumber(point[type.key])}</span>
       ))}
-      {unattributed > 0 && <span className="tip-names">{formatNumber(unattributed)} from deleted or unrecognised accounts</span>}
+      {unattributed > 0 && (
+        <span className="tip-split"><i style={{ background: MUTED_MARK, opacity: 0.45 }} aria-hidden="true" />{UNATTRIBUTED}: {formatNumber(unattributed)}</span>
+      )}
+      {unattributed > 0 && <span className="tip-names">From deleted or unrecognised accounts.</span>}
     </div>
   );
 }
@@ -36,6 +42,9 @@ export function SearchActivity({ data }: { data: DecisionAnalytics }) {
   const { total, byAccountType, activity } = data.searches;
   if (!total) return <Empty>No searches were recorded in this range.</Empty>;
   const perWeek = activity.bucket === "week";
+  // Searches from a deleted or unrecognised account still happened: plot them in a neutral stack so a column's height is its total.
+  const points: ActivityRow[] = activity.points.map((point) => ({ ...point, unattributed: Math.max(0, point.total - point.student - point.teacher - point.visitor) }));
+  const unattributed = points.reduce((sum, point) => sum + point.unattributed, 0);
   return (
     <>
       <ul className="decision-legend decision-legend-links" aria-label="Account types">
@@ -52,9 +61,15 @@ export function SearchActivity({ data }: { data: DecisionAnalytics }) {
             </button>
           </li>
         ))}
+        {unattributed > 0 && (
+          <li className="decision-legend-note" title="Searches from deleted or unrecognised accounts">
+            <i style={{ background: MUTED_MARK, opacity: 0.45 }} aria-hidden="true" />
+            {UNATTRIBUTED}<small>{formatNumber(unattributed)}</small>
+          </li>
+        )}
       </ul>
       <ChartArea height={252}>
-        <BarChart data={activity.points} margin={{ top: 6, right: 8, bottom: 22, left: 0 }}>
+        <BarChart data={points} margin={{ top: 6, right: 8, bottom: 22, left: 0 }}>
           <CartesianGrid vertical={false} stroke={INK.grid} />
           <XAxis
             dataKey="date"
@@ -75,12 +90,13 @@ export function SearchActivity({ data }: { data: DecisionAnalytics }) {
             label={{ value: perWeek ? "Searches per week" : "Searches per day", angle: -90, position: "insideLeft", offset: 12, fill: INK.muted, fontSize: 11, style: { textAnchor: "middle" } }}
           />
           <Tooltip cursor={{ fill: "#f3f6f4" }} content={({ active, payload }) => {
-            const point = active ? (payload?.[0]?.payload as SearchActivityPoint | undefined) : undefined;
+            const point = active ? (payload?.[0]?.payload as ActivityRow | undefined) : undefined;
             return point ? <ActivityTip point={point} range={data.range} /> : null;
           }} />
           {accountTypes.map((type) => (
             <Bar key={type.key} dataKey={type.key} name={type.label} stackId="searches" fill={type.color} maxBarSize={30} isAnimationActive={false} />
           ))}
+          {unattributed > 0 && <Bar dataKey="unattributed" name={UNATTRIBUTED} stackId="searches" fill={MUTED_MARK} fillOpacity={0.45} maxBarSize={30} isAnimationActive={false} />}
         </BarChart>
       </ChartArea>
     </>
@@ -123,8 +139,12 @@ export function SearchesWithoutMarkers({ data }: { data: DecisionAnalytics }) {
   const openMissing = (row: GapRow) => navigate(locationsKeysLink(row.type, row.missing, `${row.label} searched, no marker`));
   const openHave = (row: GapRow) => navigate(locationsKeysLink(row.type, row.have, `${row.label} searched, with a marker`));
   const fromBar = (entry: unknown) => (entry as { payload?: GapRow } | undefined)?.payload;
-  const links: RowLink[] = rows.map((row) =>
-    row.missing.length ? { label: `${row.label}: list the ${row.missing.length} searched ${TYPE_LABELS[row.type].noun} with no marker in Locations`, open: () => openMissing(row) } : undefined);
+  // Keyboard access to both groups: the row label opens the ones with no marker (or, when every searched one has a marker,
+  // those), and a row that has both also makes its count label a link to the ones that have a marker.
+  const linkMissing = (row: GapRow): RowLink => ({ label: `${row.label}: list the ${row.missing.length} searched ${TYPE_LABELS[row.type].noun} with no marker in Locations`, open: () => openMissing(row) });
+  const linkHave = (row: GapRow): RowLink => ({ label: `${row.label}: list the ${row.have.length} searched ${TYPE_LABELS[row.type].noun} with a marker in Locations`, open: () => openHave(row) });
+  const links: RowLink[] = rows.map((row) => (row.missing.length ? linkMissing(row) : row.have.length ? linkHave(row) : undefined));
+  const countLinks: RowLink[] = rows.map((row) => (row.missing.length && row.have.length ? linkHave(row) : undefined));
   return (
     <>
       <div className="decision-legend" aria-label="Legend">
@@ -158,9 +178,11 @@ export function SearchesWithoutMarkers({ data }: { data: DecisionAnalytics }) {
               const row = rows[Number(index)];
               if (!row) return <g />;
               return (
-                <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={12} fontWeight={row.withoutMarker ? 600 : 400} fill={row.withoutMarker ? ALERT : INK.muted}>
-                  {row.searches ? `${row.withoutMarker} of ${row.searches} · ${formatPercent(row.withoutMarker / row.searches)}` : "no searches"}
-                </text>
+                <LinkedTick link={countLinks[Number(index)]}>
+                  <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={12} fontWeight={row.withoutMarker ? 600 : 400} fill={row.withoutMarker ? ALERT : INK.muted}>
+                    {row.searches ? `${row.withoutMarker} of ${row.searches} · ${formatPercent(row.withoutMarker / row.searches)}` : "no searches"}
+                  </text>
+                </LinkedTick>
               );
             }}
           />

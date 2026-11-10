@@ -252,6 +252,7 @@ export interface SearchedDestination extends AnalyticsPlaceRef { searches: numbe
 /** One bucket of the Search activity series: a day, or a week named by its first day (Asia/Manila). */
 export interface SearchActivityPoint {
   date: string;
+  /** Every recorded search in the bucket; the account types can add up to less (a deleted or unrecognised account). */
   total: number;
   student: number;
   teacher: number;

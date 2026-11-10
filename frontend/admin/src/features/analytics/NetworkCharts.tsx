@@ -37,7 +37,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
         <span><i style={{ background: MUTED_MARK, opacity: 0.5 }} /> Longer walk</span>
       </div>
       <ChartArea height={240}>
-        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 28, bottom: 4, left: 0 }} barCategoryGap="26%">
+        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 72, bottom: 4, left: 0 }} barCategoryGap="26%">
           <CartesianGrid horizontal={false} stroke={INK.grid} />
           <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
           <YAxis type="category" dataKey="pathway" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={184} interval={0} />

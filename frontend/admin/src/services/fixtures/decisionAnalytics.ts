@@ -39,6 +39,9 @@ const bucketStarts = (range: DashboardRange): { bucket: "day" | "week"; dates: s
   return { bucket: "week", dates };
 };
 
+/** On the map: a point, or a footprint that encloses an area (three points), as the server counts a Place's marker. */
+const hasMapPosition = (place: Location) =>
+  place.positioned || (place.lat != null && place.lng != null) || (place.polygonCoordinates?.length ?? 0) >= 3;
 const hasMarker = (place: Location) => place.positioned || (place.lat != null && place.lng != null);
 
 /** Searches relative to a week: a past year is a full school year, this year is part of one. */
@@ -91,7 +94,7 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     if (!(place.hasPhoto || place.photo)) gaps.push("photo");
     if (!place.function?.trim()) gaps.push("description");
     if (!place.keywords?.trim()) gaps.push("keywords");
-    if (!(place.positioned || (place.lat != null && place.lng != null))) gaps.push("pin");
+    if (!hasMapPosition(place)) gaps.push("pin");
     if (!fact.entrance) gaps.push("entrance");
     if (fact.holdsRooms && !fact.rooms) gaps.push("rooms");
     return gaps;
@@ -155,8 +158,9 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   const byAccountType = Object.fromEntries(accountKeys.map((key) => [key, points.reduce((sum, point) => sum + point[key], 0)])) as Record<UserAccountType, number>;
 
   // Searches by destination type, spread over the real fixture records so a quick link opens records that exist.
-  const indoor = locations.filter((item) => item.status === "Active" && item.parentId && item.type !== "Place" && item.type !== "Floor");
   const placeOf = new Map(places.map((place) => [place.id, place]));
+  // The app lists an indoor Location only under its active building, so a room without one is not a destination.
+  const indoor = locations.filter((item) => item.status === "Active" && item.parentId && placeOf.has(item.parentId) && item.type !== "Place" && item.type !== "Floor");
   const typeShares: Array<[DestinationType, Location[], number]> = [
     ["Building", places, 0.55],
     ["Room", indoor.filter((item) => item.type === "Room"), 0.18],
@@ -170,10 +174,12 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     const searched = records.map((record, i) => ({ record, searches: counts[i] })).filter((entry) => entry.searches > 0);
     const asRow = ({ record, searches }: { record: Location; searches: number }): SearchedDestination => ({ id: record.id, name: record.name, searches });
     const order = (a: SearchedDestination, b: SearchedDestination) => b.searches - a.searches || a.name.localeCompare(b.name);
-    const missing = searched.filter(({ record }) => !hasMarker(record));
+    // A Place is on the map by its point or footprint; an indoor Location only by its own coordinates.
+    const marked = (record: Location) => (type === "Building" ? hasMapPosition(record) : hasMarker(record));
+    const missing = searched.filter(({ record }) => !marked(record));
     const parentMapped = (record: Location) => {
       const parent = record.parentId ? placeOf.get(record.parentId) : undefined;
-      return !!parent && hasMarker(parent);
+      return !!parent && hasMapPosition(parent);
     };
     return {
       type,
@@ -182,7 +188,7 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
       // An indoor Location with no marker still opens at its building; only a building off the map leaves nothing to show.
       notOnMap: missing.filter(({ record }) => type === "Building" || !parentMapped(record)).reduce((sum, entry) => sum + entry.searches, 0),
       missing: missing.map(asRow).sort(order),
-      have: searched.filter(({ record }) => hasMarker(record)).map(asRow).sort(order),
+      have: searched.filter(({ record }) => marked(record)).map(asRow).sort(order),
     };
   });
 

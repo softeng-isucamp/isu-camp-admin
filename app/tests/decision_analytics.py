@@ -312,6 +312,9 @@ def test_marker_gap_counts_searches_for_destinations_without_markers_next_to_the
             (2, "Room 102", 1, LIBRARY, {}, "active"),
             (3, "Dean's Office", 3, COLLEGE, {"latitude": 16.7221, "longitude": 121.6901}, "active"),
             (4, "Old Lab", 2, COLLEGE, {}, "inactive"),
+            # Its building is inactive, so the app lists neither: not a destination anyone can reach.
+            (5, "Closed Hall Room", 1, CLOSED, {"latitude": 16.7, "longitude": 121.7}, "active"),
+            (6, "Orphan Room", 1, None, {}, "active"),
         ):
             db.session.add(Location(
                 location_id=identifier, location_code=f"L{identifier}", location_name=name, type_id=type_id,
@@ -326,6 +329,7 @@ def test_marker_gap_counts_searches_for_destinations_without_markers_next_to_the
             (None, 2),                             # Room 102: no marker, building not on the map
             (None, 3), (None, 3),                  # Office with its own marker
             (None, 4),                             # inactive Laboratory: not counted
+            (None, 5), (None, 6),                  # room under an inactive building / with no building: not counted
             (None, 99),                            # deleted Location: not counted
             (CLOSED, None),                        # inactive Place: not counted
         ]

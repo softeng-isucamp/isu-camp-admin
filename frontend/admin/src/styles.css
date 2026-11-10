@@ -5213,3 +5213,20 @@ p.inspector-notice { margin: 10px 18px 0; padding: 8px 10px; border-radius: 10px
 /* Analytics row labels double as keyboard links to what the bar opens. */
 .chart-row-link:focus { outline: none; }
 .chart-row-link:focus-visible text { fill: #0c7441; font-weight: 700; }
+.decision-legend-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+.decision-legend-note i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.decision-legend-note small {
+  color: var(--muted);
+  font-size: 11px;
+}

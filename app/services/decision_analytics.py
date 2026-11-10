@@ -418,8 +418,10 @@ def _marker_gap(rows):
     building (and measures distance to the building), so its marker is missing
     but the app can still show and route to the building. ``notOnMap`` counts
     only searches that leave nothing to show: a Place with no position, or an
-    indoor Location with no marker whose building has none either. Searches for
-    inactive, deleted or untyped destinations are not counted here.
+    indoor Location with no marker whose building has none either. The app
+    lists indoor Locations only under their active building, so searches for
+    inactive, deleted or untyped destinations, and for rooms whose building is
+    inactive or gone, are not counted here.
     """
 
     places, indoor = _marker_lookups()
@@ -431,7 +433,9 @@ def _marker_gap(rows):
                 continue
             name, kind, parent_id, marked = record
             parent = places.get(parent_id)
-            on_map = marked or (parent is not None and parent[1])
+            if parent is None:
+                continue
+            on_map = marked or parent[1]
             destination_id = location_id
         elif building_id is not None:
             record = places.get(building_id)

@@ -6,7 +6,7 @@ import { formatPercent } from "../dashboard/analytics/format";
 import { ALERT, AXIS_TICK, INK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip, plural } from "./ClickTip";
 import { locationsListLink, useOpenModule } from "./links";
-import { RowLabelTick, type RowLink } from "./RowLabelTick";
+import { LinkedTick, RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: number };
 
@@ -28,8 +28,12 @@ export function MissingDetails({ data }: { data: DecisionAnalytics }) {
   const openMissing = (row: Row) => navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));
   const openHave = (row: Row) => row.have && navigate(locationsListLink(row.have, `With ${row.label.toLowerCase()}`));
   const fromBar = (entry: unknown) => (entry as { payload?: Row } | undefined)?.payload;
-  const links: RowLink[] = rows.map((row) =>
-    row.missing.length ? { label: `${row.label}: list the ${row.missing.length} places missing it in Locations`, open: () => openMissing(row) } : undefined);
+  // Keyboard access to both halves: the row label opens the places missing it (or, when none are, those that have it), and a
+  // row with both also makes its count label a link to the places that have it.
+  const linkMissing = (row: Row): RowLink => ({ label: `${row.label}: list the ${row.missing.length} places missing it in Locations`, open: () => openMissing(row) });
+  const linkHave = (row: Row): RowLink => ({ label: `${row.label}: list the ${row.have?.length ?? 0} places that have it in Locations`, open: () => openHave(row) });
+  const links: RowLink[] = rows.map((row) => (row.missing.length ? linkMissing(row) : row.have?.length ? linkHave(row) : undefined));
+  const countLinks: RowLink[] = rows.map((row) => (row.missing.length && row.have?.length ? linkHave(row) : undefined));
   return (
     <>
       <div className="decision-legend" aria-label="Legend">
@@ -63,9 +67,11 @@ export function MissingDetails({ data }: { data: DecisionAnalytics }) {
               const row = rows[Number(index)];
               if (!row) return <g />;
               return (
-                <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={12} fontWeight={row.missingCount ? 600 : 400} fill={row.missingCount ? ALERT : INK.muted}>
-                  {row.missingCount ? `${row.missingCount} of ${row.total} missing` : `none of ${row.total} missing`}
-                </text>
+                <LinkedTick link={countLinks[Number(index)]}>
+                  <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={12} fontWeight={row.missingCount ? 600 : 400} fill={row.missingCount ? ALERT : INK.muted}>
+                    {row.missingCount ? `${row.missingCount} of ${row.total} missing` : `none of ${row.total} missing`}
+                  </text>
+                </LinkedTick>
               );
             }}
           />
