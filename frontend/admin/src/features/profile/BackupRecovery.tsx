@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge, Button, Card, Empty, LoadingState, Stamp, TimeZoneTag } from '../../components/UI';
+import { Badge, Button, Card, Empty, LoadingState, Pagination, Stamp, TimeZoneTag } from '../../components/UI';
 import { RowActionMenu } from '../../components/RowActionMenu';
 import { formatDateTime } from '../../lib/format';
 import { services } from '../../services/api';
 import { errorMessage, isTechnicalMessage, reportError } from '../../services/errors';
-import type { AutomaticHistory, BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
-import { isAutomatic, RUN_OUTCOMES, runText, scheduleWhen, sizeText } from './backupFormat';
+import type { BackupHistory, BackupJob, BackupSchedule, SystemBackup } from '../../services/profile';
+import { isAutomatic, scheduleWhen, sizeText } from './backupFormat';
 import { DeleteDialog, DownloadDialog, FailureDialog, RestoreDialog, StopRestoreDialog } from './BackupDialogs';
 import { ScheduleDialog } from './BackupScheduleDialog';
 /** A job's own message when it is plain; the server appends raw exception text after a colon, which is replaced by a line for the kind of job. */
@@ -18,15 +18,16 @@ const jobFailureText = (job: BackupJob) => {
     : "The backup couldn't be completed. Try again, or check the server logs if it keeps failing.";
 };
 const FailedIcon = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 7v6M12 17h.01" /></svg>;
+const PAGE_SIZE = 5;
 const pending = (job: BackupJob | null) => job?.status === 'queued' || job?.status === 'running';
 type Target = { action: 'download' | 'restore' | 'delete' | 'failure'; backup: SystemBackup };
 
 /** Superadmin backups; `onSuccess` reports completed operations through the page's feedback stack. */
 export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => void }) {
+  const [page, setPage] = useState(1);
   const [items, setItems] = useState<SystemBackup[]>([]);
   const [capabilities, setCapabilities] = useState<Pick<BackupHistory, 'canDownload' | 'canDelete'>>({});
   const [schedule, setSchedule] = useState<BackupSchedule>();
-  const [automatic, setAutomatic] = useState<AutomaticHistory>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [job, setJob] = useState<BackupJob | null>(null);
@@ -38,8 +39,6 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const [actionError, setActionError] = useState('');
   const [retry, setRetry] = useState(0);
   const [pollError, setPollError] = useState('');
-  // After a schedule save, the shown next run is the old schedule's until the server answers.
-  const [nextRunStale, setNextRunStale] = useState(false);
   // Async answers are checked against what is on screen now, and a cancel that lost its race is reported once.
   const jobRef = useRef(job);
   jobRef.current = job;
@@ -48,7 +47,6 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     setItems(history.items);
     setCapabilities({ canDownload: history.canDownload, canDelete: history.canDelete });
     setSchedule(history.schedule);
-    setAutomatic(history.automatic);
   };
   // Re-reads the history after a change; a failure says so without undoing the change's own report.
   const refresh = (live = () => true) => services.profile.history().then((history) => { if (live()) apply(history); })
@@ -88,6 +86,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     // A cancel that lost the race shows only "had already finished"; the history still refreshes.
     if (cancelAsked.current !== completedJobId) onSuccess(services.profile.isFixture ? 'Demo operation completed. No server data was changed.'
       : completedKind === 'restore' ? 'Data was restored successfully.' : 'Backup was created successfully.');
+    setPage(1);
     void refresh(() => live);
     return () => { live = false; };
   }, [completedJobId, completedKind, onSuccess]);
@@ -133,6 +132,8 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
     showedCancel.current = showsCancel;
     if (lost) (document.querySelector<HTMLElement>('[data-create-backup]') ?? document.getElementById('backup-heading'))?.focus();
   }, [showsCancel]);
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(items.length / PAGE_SIZE)));
+  const visibleItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const readyCount = items.filter((backup) => backup.status === 'ready').length;
   // A cancelled run leaves no history row, so it is reported here; a cancel that lost the race says so.
   const outcome = job?.status === 'cancelled' ? (job.kind === 'backup' ? 'Backup cancelled.' : 'Restore cancelled; no data was changed.')
@@ -173,7 +174,7 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       <table className="profile-backup-table">
         {/* Status is sized to its badge and Actions takes the rest, left-aligned, so the menu button sits right after the status instead of at the table's far edge. */}<colgroup><col style={{ width: '30%' }} /><col style={{ width: '26%' }} /><col style={{ width: '14%' }} /><col style={{ width: '140px' }} /><col /></colgroup>
         <thead><tr><th>Created <TimeZoneTag /></th><th>Type</th><th>Size</th><th>Status</th><th style={{ textAlign: 'left' }}>Actions</th></tr></thead>
-        <tbody>{items.map((backup) => {
+        <tbody>{visibleItems.map((backup) => {
           const actions = rowActions(backup);
           return <tr key={backup.id}>
             <td><Stamp value={backup.createdAt} /></td>
@@ -191,36 +192,18 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
       </table>
       {!items.length && <Empty>No backups yet.</Empty>}
     </div>}
-    {/* The schedule's own runs. Shown whenever the server reports them and there is something to say: a night that failed left no archive above, and one that succeeded outlives its archive by a fortnight of retention. */}
-    {!loading && !error && automatic && (automatic.runs.length > 0 || schedule?.enabled) && <section className="profile-auto-history" aria-labelledby="auto-history-heading">
-      <div className="profile-auto-heading">
-        <h3 id="auto-history-heading">Automatic Backup History</h3>
-        {nextRunStale ? null : automatic.nextRunAt
-          ? <span className="profile-muted">Next run: <time dateTime={automatic.nextRunAt}>{formatDateTime(automatic.nextRunAt)}</time></span>
-          : <span className="profile-muted">No next run scheduled</span>}
-      </div>
-      {automatic.runs.length > 0
-        ? <ul className="profile-auto-runs">
-            {automatic.runs.map((run) => <li key={run.id}>
-              {run.at ? <time dateTime={run.at}>{formatDateTime(run.at)}</time> : <span>—</span>}
-              <Badge tone={RUN_OUTCOMES[run.outcome].tone}>{RUN_OUTCOMES[run.outcome].label}</Badge>
-              <span className="profile-muted">{runText(run)}</span>
-            </li>)}
-          </ul>
-        : <p className="profile-muted profile-auto-empty">No automatic backup has run yet.</p>}
-    </section>}
+    {!loading && !error && items.length > PAGE_SIZE && <Pagination total={items.length} page={currentPage} pageSize={PAGE_SIZE} onChange={setPage} />}
     {target?.action === 'download' && <DownloadDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)}
       onStarted={() => { setTarget(null); onSuccess('Download started. The link works once and expires shortly.'); }} />}
     {target?.action === 'failure' && <FailureDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)} />}
     {target?.action === 'restore' && <RestoreDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onClose={() => setTarget(null)} onStarted={(started) => { setJob(started); setTarget(null); }} />}
     {target?.action === 'delete' && <DeleteDialog backup={target.backup} returnTo={focusTargets(target.backup.id)} onlyRestorable={target.backup.status === 'ready' && readyCount === 1} onClose={() => setTarget(null)}
-      onDeleted={() => { setItems((list) => list.filter((backup) => backup.id !== target.backup.id)); setTarget(null); onSuccess('Backup was deleted successfully.'); }} />}
+      onDeleted={() => { setPage(Math.min(currentPage, Math.max(1, Math.ceil((items.length - 1) / PAGE_SIZE)))); setItems((list) => list.filter((backup) => backup.id !== target.backup.id)); setTarget(null); onSuccess('Backup was deleted successfully.'); }} />}
     {stopping && <StopRestoreDialog returnTo={focusTargets()} onClose={() => setStopping(false)} onStop={() => void cancel()} />}
     {editingSchedule && schedule && <ScheduleDialog initial={schedule} onClose={() => setEditingSchedule(false)}
       onSaved={(saved) => {
         setSchedule(saved); setEditingSchedule(false); onSuccess('Automatic backup settings saved.');
-        // The server computes the next run from the saved schedule.
-        setNextRunStale(true); void refresh().finally(() => setNextRunStale(false));
+        void refresh();
       }} />}
   </Card>;
 }

@@ -1,14 +1,47 @@
-import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, ReadinessGap } from "../../types";
+import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, Location, IndoorMarkerRow, ReadinessGap, SearchActivityPoint, UserAccountType } from "../../types";
 import mapFixture from "../generated-map-fixture.json";
 import { indoorLocationTypes, isLocationContainer } from "../../lib/locationPolicy";
 import { mulberry32 } from "./prng";
 
 /**
  * Fixture for the Analytics page, built from the session's own Locations so every
- * quick link opens a record that exists. Photo, description, keywords, map pin and
- * indoor rooms are read from the Locations; entrance links, searches, pathways and
- * travel modes are seeded, since the local adapter has no route graph or history.
+ * quick link opens a record that exists. Photo, keywords and
+ * indoor locations are read from the Locations; entrance links, searches, pathways and
+ * Walking and Vehicle reach are seeded, since the local adapter has no route graph or history.
  */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const manilaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+const shiftDay = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+
+/** Splits `total` across `weights` in whole numbers that add up to it exactly (largest remainder). */
+const apportion = (total: number, weights: number[]): number[] => {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!weights.length || sum <= 0) return weights.map(() => 0);
+  const exact = weights.map((weight) => (total * weight) / sum);
+  const counts = exact.map(Math.floor);
+  const order = exact.map((value, index) => ({ index, rest: value - Math.floor(value) })).sort((a, b) => b.rest - a.rest || a.index - b.index);
+  const remainder = total - counts.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < remainder; i += 1) counts[order[i].index] += 1;
+  return counts;
+};
+
+/** The bucket start days a range plots: days for a week or month, weeks (named by their first day) for all time and a year. */
+const bucketStarts = (range: DashboardRange): { bucket: "day" | "week"; dates: string[] } => {
+  const today = manilaToday();
+  if (range === "week" || range === "month") {
+    const length = range === "week" ? 7 : 30;
+    return { bucket: "day", dates: Array.from({ length }, (_, i) => shiftDay(today, i - (length - 1))) };
+  }
+  const first = range === "all" ? shiftDay(today, -7 * 25) : `${range.slice(5)}-01-01`;
+  const last = range === "all" ? today : `${range.slice(5)}-12-31` < today ? `${range.slice(5)}-12-31` : today;
+  const dates: string[] = [];
+  for (let day = first; day <= last; day = shiftDay(day, 7)) dates.push(day);
+  return { bucket: "week", dates };
+};
+
+/** An indoor Location has a marker only with its own coordinates (or a position the fixture already resolved). */
+const hasMarker = (place: Location) => place.positioned || (place.lat != null && place.lng != null);
+
 /** Searches relative to a week: a past year is a full school year, this year is part of one. */
 const searchScale = (range: DashboardRange) => {
   if (range === "week") return 1;
@@ -21,11 +54,9 @@ const PATHWAY_IDS = mapFixture.walkingNetwork.pathways.map((pathway) => pathway.
 
 const LABELS: Record<ReadinessGap, string> = {
   photo: "Photo",
-  description: "Description",
   keywords: "Search keywords",
-  pin: "Map pin",
   entrance: "Entrance linked",
-  rooms: "Indoor rooms",
+  rooms: "Indoor locations",
 };
 
 const ref = (place: Location): AnalyticsPlaceRef => ({ id: place.id, name: place.name });
@@ -57,9 +88,7 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     const { place } = fact;
     const gaps: ReadinessGap[] = [];
     if (!(place.hasPhoto || place.photo)) gaps.push("photo");
-    if (!place.function?.trim()) gaps.push("description");
     if (!place.keywords?.trim()) gaps.push("keywords");
-    if (!(place.positioned || (place.lat != null && place.lng != null))) gaps.push("pin");
     if (!fact.entrance) gaps.push("entrance");
     if (fact.holdsRooms && !fact.rooms) gaps.push("rooms");
     return gaps;
@@ -97,9 +126,8 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   };
   const modes = [
     { mode: "Walking", unreachable: unreachable(0.05, 2) },
-    { mode: "Bicycle", unreachable: unreachable(0.3, 1) },
-    { mode: "Motorcycle", unreachable: unreachable(0.55, 0) },
-    { mode: "Car", unreachable: unreachable(0.62, 5) },
+    // One Vehicle bar: the admin stores a single Vehicle permission for bicycles, motorcycles and cars.
+    { mode: "Vehicle", unreachable: unreachable(0.45, 0) },
   ].map((row) => {
     const missed = new Set(row.unreachable.map((place) => place.id));
     const reachablePlaces = routable.filter((place) => !missed.has(place.id)).map(ref);
@@ -107,25 +135,40 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   });
 
   const total = Math.round(59 * scale);
-  const split = <K extends string>(keys: K[], shares: number[]) => {
-    const values = shares.map((share) => Math.round(total * share));
-    values[0] += total - values.reduce((sum, value) => sum + value, 0);
-    return Object.fromEntries(keys.map((key, i) => [key, values[i]])) as Record<K, number>;
-  };
+  const accountShares = [0.64, 0.22, 0.14];
+  const accountKeys: UserAccountType[] = ["student", "teacher", "visitor"];
+
+  // Searches over time: busier on weekdays, split by account type per bucket.
+  const { bucket, dates } = bucketStarts(range);
+  const perBucket = apportion(total, dates.map((date) => {
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    return bucket === "day" ? (weekday === 0 || weekday === 6 ? 0.25 : 1) * (0.6 + rand()) : 0.6 + rand();
+  }));
+  const points: SearchActivityPoint[] = dates.map((date, index) => {
+    const [student, teacher, visitor] = apportion(perBucket[index], accountShares.map((share) => share * (0.7 + rand() * 0.6)));
+    return { date, total: perBucket[index], student, teacher, visitor };
+  });
+  const byAccountType = Object.fromEntries(accountKeys.map((key) => [key, points.reduce((sum, point) => sum + point[key], 0)])) as Record<UserAccountType, number>;
+
+  // Every active indoor Location under an active Place, searched or not. A marker is the Location's own coordinates.
+  const placeIds = new Set(places.map((place) => place.id));
+  const indoorMarkers: IndoorMarkerRow[] = (["Room", "Laboratory", "Office", "Restroom"] as const).map((type) => {
+    const records = locations
+      .filter((item) => item.status === "Active" && item.type === type && item.parentId && placeIds.has(item.parentId))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const have = records.filter(hasMarker).map(ref);
+    return { type, total: records.length, marked: have.length, missing: records.filter((record) => !hasMarker(record)).map(ref), have };
+  });
 
   return {
     range,
     readiness: {
       total: places.length,
-      fullyReady: withGaps.filter(({ gaps }) => gaps.length === 0).length,
       checks,
+      indoorMarkers,
     },
     closures,
     reach: { origin: "Main Gate", total: routable.length, modes },
-    searches: {
-      total,
-      byAccountType: split(["student", "teacher", "visitor"], [0.64, 0.22, 0.14]),
-      byDestinationType: split<DestinationType>(["Building", "Room", "Office", "Laboratory", "Restroom"], [0.55, 0.18, 0.14, 0.09, 0.04]),
-    },
+    searches: { total, byAccountType, activity: { bucket, points } },
   };
 }

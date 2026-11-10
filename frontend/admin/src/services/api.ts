@@ -214,14 +214,20 @@ const decisionAnalyticsSchema = z.object({
   firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
   readiness: z.object({
     total: nonNegInt,
-    fullyReady: nonNegInt,
     checks: z.array(z.object({
-      key: z.enum(["photo", "description", "keywords", "pin", "entrance", "rooms"]),
+      key: z.enum(["photo", "keywords", "entrance", "rooms"]),
       label: z.string(),
       complete: nonNegInt,
       total: nonNegInt,
       missing: z.array(placeRefSchema),
       have: z.array(placeRefSchema).optional(),
+    })),
+    indoorMarkers: z.array(z.object({
+      type: z.enum(["Room", "Laboratory", "Office", "Restroom"]),
+      total: nonNegInt,
+      marked: nonNegInt,
+      missing: z.array(placeRefSchema),
+      have: z.array(placeRefSchema),
     })),
   }),
   closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt, longerPlaces: z.array(placeRefSchema).optional() })).nullable(),
@@ -233,7 +239,10 @@ const decisionAnalyticsSchema = z.object({
   searches: z.object({
     total: nonNegInt,
     byAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt }),
-    byDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
+    activity: z.object({
+      bucket: z.enum(["day", "week"]),
+      points: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), total: nonNegInt, student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt })),
+    }),
   }),
 });
 
@@ -795,7 +804,7 @@ export interface Services {
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
     analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
-    /** Decision-support charts for the Analytics tab. Fixture only: the HTTP adapter rejects until the backend serves it. */
+    /** The Analytics page: readiness (incl. indoor marker coverage), closure and reach snapshots, plus the range's search activity. */
     decisionAnalytics(range?: DashboardRange): Promise<DecisionAnalytics>;
   };
 

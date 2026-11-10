@@ -132,7 +132,7 @@ describe("forgot-username flow", () => {
 describe("forgot-username: same instructions and feedback as forgot password", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("shows the shared email helper, code-step instructions, countdown and resend cooldown", async () => {
+  it("shows the shared email helper, code-step instructions and resend cooldown without an expiry countdown", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     mockBackend({ [REQUEST]: [issued({ expiresInSeconds: 600, resendAfterSeconds: 60 })] });
     renderFrom("/forgot-username");
@@ -147,12 +147,12 @@ describe("forgot-username: same instructions and feedback as forgot password", (
       `A 6-digit verification code has been sent to ${EMAIL}.`,
     );
     expect(screen.getByText(/Only the newest code works/)).toBeInTheDocument();
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 10:00");
+    expect(screen.queryByRole("timer")).toBeNull();
     expect(screen.getByText("Resend available in 60s.")).toBeInTheDocument();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    expect(screen.getByRole("timer")).toHaveTextContent("Code expires in 09:59");
+    expect(screen.queryByRole("timer")).toBeNull();
   });
 
   it.each([

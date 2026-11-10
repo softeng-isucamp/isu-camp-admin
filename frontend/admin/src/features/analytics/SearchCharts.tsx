@@ -1,98 +1,113 @@
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
+import { Empty } from "../../components/UI";
 import { accountTypes } from "../../lib/accountType";
-import type { DecisionAnalytics, DestinationType } from "../../types";
+import type { DecisionAnalytics, SearchActivityPoint } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
-import { formatNumber, formatPercent } from "../dashboard/analytics/format";
-import { AXIS_TICK, INK, SERIES, TOOLTIP_STYLE } from "../dashboard/analytics/palette";
-import { ClickTip } from "./ClickTip";
+import { formatBucket, formatBucketDate, formatNumber } from "../dashboard/analytics/format";
+import { AXIS_TICK, INK, MUTED_MARK } from "../dashboard/analytics/palette";
+import { plural } from "./ClickTip";
 import { useOpenModule } from "./links";
-import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
-/** Same layout as the Dashboard's "Visits by account type", fed by recorded searches. A bar opens that account type in User Management. */
-export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
-  const navigate = useOpenModule();
-  const { total, byAccountType } = data.searches;
-  const rows = accountTypes.map((type) => ({ key: type.key, name: type.label, value: byAccountType[type.key], color: type.color }));
-  const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
-  const links: RowLink[] = rows.map((row) => ({ label: `${row.name}: see these accounts in User Management`, open: () => navigate(usersLink(row.key)) }));
+const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
+
+const manilaDay = (date: string) => new Date(`${date}T12:00:00+08:00`);
+const yearOf = (date: string) => manilaDay(date).toLocaleDateString("en-US", { year: "numeric", timeZone: "Asia/Manila" });
+const dateWithYear = (date: string) => manilaDay(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" });
+
+/** All-time history can span several years, so its tooltip always names the year and its axis names it where the year changes. */
+export const bucketTooltipLabel = (date: string, range: DecisionAnalytics["range"]) =>
+  range === "all" ? `Week of ${dateWithYear(date)}` : formatBucket(date, range);
+export const bucketAxisLabel = (date: string, index: number, dates: string[], range: DecisionAnalytics["range"]) =>
+  range === "all" && (index === 0 || yearOf(dates[index - 1]) !== yearOf(date)) ? dateWithYear(date) : formatBucketDate(date);
+
+type ActivityRow = SearchActivityPoint & { unattributed: number };
+const UNATTRIBUTED = "Unattributed";
+
+/** Search activity's tooltip: the bucket, each account type's searches, and the searches no account type claims. */
+function ActivityTip({ point, range }: { point: ActivityRow; range: DecisionAnalytics["range"] }) {
+  const { unattributed } = point;
   return (
-    <>
-      <ChartArea height={220}>
-        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 92, bottom: 4, left: 8 }} barCategoryGap={18}>
-          <CartesianGrid horizontal={false} stroke={INK.grid} />
-          <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
-          <YAxis type="category" dataKey="name" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={70} interval={0} />
-          <Tooltip
-            cursor={{ fill: "#f3f6f4" }}
-            content={({ active, payload }) => {
-              const row = active ? (payload?.[0]?.payload as (typeof rows)[number] | undefined) : undefined;
-              if (!row) return null;
-              return <ClickTip title={row.name} value={`${formatNumber(row.value)} searches (${formatPercent(row.value / (total || 1))})`} />;
-            }}
-          />
-          <Bar
-            dataKey="value"
-            radius={[0, 4, 4, 0]}
-            maxBarSize={30}
-            cursor="pointer"
-            onClick={(entry) => {
-              const key = (entry as { payload?: { key?: string } } | undefined)?.payload?.key;
-              if (key) navigate(usersLink(key));
-            }}
-            isAnimationActive={false}
-          >
-            {rows.map((row) => <Cell key={row.key} fill={row.color} />)}
-            <LabelList dataKey="value" position="right" fontSize={12} fill={INK.secondary} formatter={(value) => `${formatNumber(Number(value))} · ${formatPercent(Number(value) / (total || 1))}`} />
-          </Bar>
-        </BarChart>
-      </ChartArea>
-    </>
+    <div className="decision-tooltip">
+      <strong>{bucketTooltipLabel(point.date, range)}</strong>
+      <span>{plural(point.total, "search", "searches")}</span>
+      {accountTypes.map((type) => (
+        <span key={type.key} className="tip-split"><i style={{ background: type.color }} aria-hidden="true" />{type.label}: {formatNumber(point[type.key])}</span>
+      ))}
+      {unattributed > 0 && (
+        <span className="tip-split"><i style={{ background: MUTED_MARK, opacity: 0.45 }} aria-hidden="true" />{UNATTRIBUTED}: {formatNumber(unattributed)}</span>
+      )}
+      {unattributed > 0 && <span className="tip-names">From deleted or unrecognised accounts.</span>}
+    </div>
   );
 }
 
-/** Where a destination type opens: indoor types filter Locations by type; Places list every Place and no indoor Location. */
-const typeLink = (key: DestinationType) =>
-  `/locations?${new URLSearchParams(key === "Building" ? { scope: "places", why: "Places only" } : { type: key })}`;
-
-const TYPES: Array<{ key: DestinationType; label: string; color: string }> = [
-  { key: "Building", label: "Places", color: SERIES.blue },
-  { key: "Room", label: "Rooms", color: SERIES.orange },
-  { key: "Laboratory", label: "Laboratories", color: SERIES.aqua },
-  { key: "Office", label: "Offices", color: SERIES.yellow },
-  { key: "Restroom", label: "Restrooms", color: SERIES.magenta },
-];
-
-/** Same donut and legend as the Dashboard's "Visits by destination type", fed by recorded searches. */
-export function SearchesByDestinationType({ data }: { data: DecisionAnalytics }) {
+/**
+ * Recorded searches over time, stacked by account type: one column per day (per week for all time and for a year).
+ * A search is a recorded navigation request, not a visit, an arrival or a person. The account legend opens each type's
+ * accounts in User Management.
+ */
+export function SearchActivity({ data }: { data: DecisionAnalytics }) {
   const navigate = useOpenModule();
-  const { byDestinationType } = data.searches;
-  const rows = TYPES.map((type) => ({ ...type, value: byDestinationType[type.key] })).sort((a, b) => b.value - a.value);
-  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  const { total, byAccountType, activity } = data.searches;
+  if (!total) return <Empty>No searches were recorded in this range.</Empty>;
+  const perWeek = activity.bucket === "week";
+  // Searches from a deleted or unrecognised account still happened: plot them in a neutral stack so a column's height is its total.
+  const points: ActivityRow[] = activity.points.map((point) => ({ ...point, unattributed: Math.max(0, point.total - point.student - point.teacher - point.visitor) }));
+  const unattributed = points.reduce((sum, point) => sum + point.unattributed, 0);
   return (
-    <div className="analytics-donut">
-      <div className="analytics-donut-chart">
-        <ChartArea height={220}>
-          <PieChart>
-            <Pie data={rows} dataKey="value" nameKey="label" innerRadius={62} outerRadius={94} paddingAngle={2} stroke={INK.surface} strokeWidth={2} cornerRadius={4} cursor="pointer" onClick={(_entry, index) => { const row = rows[index]; if (row) navigate(typeLink(row.key)); }} isAnimationActive={false}>
-              {rows.map((row) => <Cell key={row.key} fill={row.color} />)}
-            </Pie>
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(value, name) => [`${formatNumber(Number(value))} (${formatPercent(Number(value) / (total || 1))})`, String(name)]} />
-          </PieChart>
-        </ChartArea>
-        <div className="analytics-donut-total"><strong>{formatNumber(total)}</strong><small>searches</small></div>
-      </div>
-      <ul className="account-type-legend">
-        {rows.map((row) => (
-          <li key={row.key}>
-            <button type="button" className="analytics-legend-row" onClick={() => navigate(typeLink(row.key))}>
-              <i style={{ background: row.color }} aria-hidden="true" />
-              <span>{row.label}</span>
-              <b>{formatPercent(row.value / (total || 1))}</b>
-              <small>{formatNumber(row.value)}</small>
+    <>
+      <ul className="decision-legend decision-legend-links" aria-label="Account types">
+        {accountTypes.map((type) => (
+          <li key={type.key}>
+            <button
+              type="button"
+              onClick={() => navigate(usersLink(type.key))}
+              aria-label={`${type.label}: ${plural(byAccountType[type.key], "search", "searches")}. Open ${type.label} accounts in User Management`}
+              title={`Open ${type.label} accounts in User Management`}
+            >
+              <i style={{ background: type.color }} aria-hidden="true" />
+              {type.label}<small>{formatNumber(byAccountType[type.key])}</small>
             </button>
           </li>
         ))}
+        {unattributed > 0 && (
+          <li className="decision-legend-note" title="Searches from deleted or unrecognised accounts">
+            <i style={{ background: MUTED_MARK, opacity: 0.45 }} aria-hidden="true" />
+            {UNATTRIBUTED}<small>{formatNumber(unattributed)}</small>
+          </li>
+        )}
       </ul>
-    </div>
+      <ChartArea height={252}>
+        <BarChart data={points} margin={{ top: 6, right: 8, bottom: 22, left: 0 }}>
+          <CartesianGrid vertical={false} stroke={INK.grid} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={(date: string, index: number) => bucketAxisLabel(date, index, points.map((point) => point.date), data.range)}
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={{ stroke: INK.grid }}
+            minTickGap={18}
+            label={{ value: perWeek ? "Week starting" : "Day", position: "insideBottom", offset: -12, fill: INK.muted, fontSize: 11 }}
+          />
+          <YAxis
+            allowDecimals={false}
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            width={52}
+            tickFormatter={formatNumber}
+            label={{ value: perWeek ? "Searches per week" : "Searches per day", angle: -90, position: "insideLeft", offset: 12, fill: INK.muted, fontSize: 11, style: { textAnchor: "middle" } }}
+          />
+          <Tooltip cursor={{ fill: "#f3f6f4" }} content={({ active, payload }) => {
+            const point = active ? (payload?.[0]?.payload as ActivityRow | undefined) : undefined;
+            return point ? <ActivityTip point={point} range={data.range} /> : null;
+          }} />
+          {accountTypes.map((type) => (
+            <Bar key={type.key} dataKey={type.key} name={type.label} stackId="searches" fill={type.color} maxBarSize={30} isAnimationActive={false} />
+          ))}
+          {unattributed > 0 && <Bar dataKey="unattributed" name={UNATTRIBUTED} stackId="searches" fill={MUTED_MARK} fillOpacity={0.45} maxBarSize={30} isAnimationActive={false} />}
+        </BarChart>
+      </ChartArea>
+    </>
   );
 }

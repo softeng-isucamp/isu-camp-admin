@@ -8,8 +8,11 @@ import { RangeSelect, rangeLabel } from "../dashboard/RangeSelect";
 import { COPY } from "./copy";
 import { GraphBlock } from "./GraphBlock";
 import { ClosureImpact, TravelModeReach } from "./NetworkCharts";
-import { DirectoryReadiness } from "./ReadinessCharts";
-import { SearchesByAccountType, SearchesByDestinationType } from "./SearchCharts";
+import { IndoorMarkerCoverage, MissingDetails } from "./ReadinessCharts";
+import { SearchActivity } from "./SearchCharts";
+
+/** Readiness, closures and reach describe the map as it is now; only the searches follow the range picker. */
+const SNAPSHOT_NOTE = "Current snapshot";
 
 export const decisionAnalyticsQueryKey = (range: DashboardRange) => ["decision-analytics", range] as const;
 
@@ -19,7 +22,7 @@ function Section({ id, title, note, children }: { id: string; title: string; not
     <section className="decision-group" aria-labelledby={`analytics-${id}`}>
       <div className="decision-group-head">
         <h2 id={`analytics-${id}`}>{title}</h2>
-        {note && <span className="decision-tag">{note}</span>}
+        {note && <span className={`decision-tag${note === SNAPSHOT_NOTE ? " decision-tag-snapshot" : ""}`}>{note}</span>}
       </div>
       <div className="graph-panel">{children}</div>
     </section>
@@ -27,8 +30,8 @@ function Section({ id, title, note, children }: { id: string; title: string; not
 }
 
 /**
- * The Analytics page, ordered the way an admin reads it: is the directory ready,
- * can people get there, then who is searching for what. Every bar and slice
+ * The Analytics page, ordered the way an admin reads it: directory completeness,
+ * the route network, then search demand. Every bar and slice
  * opens the module where that thing gets fixed.
  */
 export function AnalyticsPage() {
@@ -70,12 +73,15 @@ export function AnalyticsPage() {
               <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>Try again</Button>
             </div>
           )}
-          <Section id="ready" title="Is the directory ready?">
-            <GraphBlock copy={COPY.readiness} wide>
-              <DirectoryReadiness data={data} />
+          <Section id="ready" title="Directory completeness" note={SNAPSHOT_NOTE}>
+            <GraphBlock copy={COPY.readiness}>
+              <MissingDetails data={data} />
+            </GraphBlock>
+            <GraphBlock copy={COPY.indoorMarkers}>
+              <IndoorMarkerCoverage data={data} />
             </GraphBlock>
           </Section>
-          <Section id="routes" title="Can people get there?">
+          <Section id="routes" title="Route network" note={SNAPSHOT_NOTE}>
             <GraphBlock copy={COPY.closures}>
               <ClosureImpact data={data} />
             </GraphBlock>
@@ -83,12 +89,9 @@ export function AnalyticsPage() {
               <TravelModeReach data={data} />
             </GraphBlock>
           </Section>
-          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeText}`}>
-            <GraphBlock copy={COPY.byAccount}>
-              <SearchesByAccountType data={data} />
-            </GraphBlock>
-            <GraphBlock copy={COPY.byDestination}>
-              <SearchesByDestinationType data={data} />
+          <Section id="searches" title="Search demand" note={`${data.searches.total} searches ${rangeText}`}>
+            <GraphBlock copy={COPY.activity} wide>
+              <SearchActivity data={data} />
             </GraphBlock>
           </Section>
         </div>

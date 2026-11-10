@@ -37,18 +37,36 @@ const keyParam = (params: URLSearchParams) => {
   return key === null ? null : normalizeLocationKey(key);
 };
 
-/** The Analytics hand-off: `ids` (comma-separated Place IDs) or `scope=places` narrows the list, `why` names the reason in the filter chip. */
-const analyticsParam = (params: URLSearchParams): { ids: Set<string> | null; label: string } | null => {
+/**
+ * The Analytics hand-off, in three forms; `why` names the reason in the filter chip.
+ * - `keys=Place:12,Room:5` (comma-separated typed identity keys, as `locationIdentityKey` spells them) narrows to exactly those records. Legacy "Building:12" / "Facility:12" read as "Place:12". Wins over `ids`.
+ * - `ids=12,13` (Place IDs) narrows to those Places only.
+ * - `scope=places` shows every Place and no indoor Location.
+ */
+const analyticsParam = (params: URLSearchParams): { ids: Set<string> | null; keys: Set<string> | null; label: string } | null => {
+  const keys = params.get("keys");
+  if (keys) {
+    const entries = keys.split(",").map((entry) => entry.trim()).filter(Boolean).map(normalizeLocationKey);
+    return { ids: null, keys: new Set(entries), label: params.get("why") ?? "From Analytics" };
+  }
   const ids = params.get("ids");
-  if (ids) return { ids: new Set(ids.split(",").filter(Boolean)), label: params.get("why") ?? "From Analytics" };
+  if (ids) return { ids: new Set(ids.split(",").filter(Boolean)), keys: null, label: params.get("why") ?? "From Analytics" };
   // Every Place and no indoor Location: the Analytics "Places" slice spans every classification.
-  if (params.get("scope") === "places") return { ids: null, label: params.get("why") ?? "Places only" };
+  if (params.get("scope") === "places") return { ids: null, keys: null, label: params.get("why") ?? "Places only" };
   return null;
 };
-/** Analytics links only ever name Places, and Place and indoor Location IDs can collide, so only Places match. */
-const matchesAnalytics = (filter: ReturnType<typeof analyticsParam>, item: Location) =>
-  !filter || (isPlace(item) && (!filter.ids || filter.ids.has(item.id)));
-const ANALYTICS_PARAMS = ["ids", "why", "scope"];
+/** A `keys` filter matches typed identities exactly. Otherwise Analytics `ids` links only name Places, and Place and indoor Location IDs can collide, so only Places match. */
+const matchesAnalytics = (filter: ReturnType<typeof analyticsParam>, item: Location) => {
+  if (!filter) return true;
+  if (filter.keys) return filter.keys.has(locationIdentityKey(item));
+  return isPlace(item) && (!filter.ids || filter.ids.has(item.id));
+};
+const ANALYTICS_PARAMS = ["keys", "ids", "why", "scope"];
+/** The chip names the reason and, for a keys or ids narrowing, how many records it names. */
+const analyticsChipLabel = (filter: NonNullable<ReturnType<typeof analyticsParam>>) => {
+  const named = filter.keys ?? filter.ids;
+  return named ? `${filter.label} (${named.size})` : filter.label;
+};
 /** A TYPE filter value requested by link, accepted only when it is a real option. */
 const typeParam = (params: URLSearchParams) => {
   const requested = params.get("type");
@@ -817,7 +835,7 @@ export function Locations() {
   const reclassifyingChildren = dialog === "edit" && selected && isPlace(draft) ? indoorLocationsOf(selected, allLocations) : [];
 
   const activeFilters = [
-    ...(analyticsFilter ? [{ key: "analytics", label: analyticsFilter.ids ? `${analyticsFilter.label} (${analyticsFilter.ids.size})` : analyticsFilter.label, clear: clearAnalyticsFilter }] : []),
+    ...(analyticsFilter ? [{ key: "analytics", label: analyticsChipLabel(analyticsFilter), clear: clearAnalyticsFilter }] : []),
     ...(query.trim() ? [{ key: "q", label: `Search: ${query.trim()}`, clear: () => { setTargetKey(null); setQuery(""); } }] : []),
     ...(targetKey && !query.trim() ? [{ key: "target", label: "Selected location", clear: () => setTargetKey(null) }] : []),
     ...(type !== "All Types" ? [{ key: "type", label: `Type: ${locationTypeOptionLabel(type as BackendLocationType)}`, clear: () => setType("All Types") }] : []),
