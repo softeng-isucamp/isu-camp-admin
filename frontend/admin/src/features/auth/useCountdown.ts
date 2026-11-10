@@ -36,9 +36,3 @@ export function useCountdown(initialSeconds = 0, onEnd?: () => void) {
   }, []);
   return { seconds: deadline > now ? Math.ceil((deadline - now) / 1000) : 0, start };
 }
-
-/** "09:42": minutes and seconds, zero-padded; minutes may pass 99. */
-export const formatClock = (totalSeconds: number) => {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-};
