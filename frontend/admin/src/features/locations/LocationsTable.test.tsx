@@ -382,7 +382,39 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect((await screen.findAllByText("2nd Floor")).length).toBeGreaterThan(0);
     expect(screen.getByText("Administration Building 2nd Floor Laboratory 107")).toBeInTheDocument();
     expect(screen.getByText("1 location, including indoor")).toBeInTheDocument();
+    const parent = screen.getByRole("row", { name: /BLD-ADM-01/ });
+    expect(parent).toHaveClass("location-context-building");
+    expect(parent).not.toHaveClass("location-result-match");
+    const result = screen.getByText("Administration Building 2nd Floor Laboratory 107").closest("tr");
+    expect(result).toHaveClass("location-result-match");
+    expect(result).toHaveStyle({ background: "#f1f3f5" });
+    expect(screen.getAllByText("2nd Floor", { selector: "strong" })[0].closest("tr")).toHaveClass("location-context-row");
+    expect(within(parent).getByRole("button", { name: "Collapse Administration Building" })).toBeEnabled();
+    expect(within(parent).getByRole("button", { name: "Actions for Administration Building" })).toBeEnabled();
     await waitFor(() => expect(screen.queryByText("Administration Building Ground Floor Room 101")).not.toBeInTheDocument());
+  });
+
+  it("greys parent Buildings for floor searches and restores them for building searches or cleared filters", async () => {
+    renderLocations(["/locations?q=2nd%20Floor"]);
+    const parent = await screen.findByRole("row", { name: /BLD-ADM-01/ });
+    expect(parent).toHaveClass("location-context-building");
+    expect(screen.getAllByText("2nd Floor", { selector: "strong" })[0].closest("tr")).toHaveClass("location-result-match");
+
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "BLD-ADM-01" } });
+    await waitFor(() => expect(screen.getByRole("row", { name: /BLD-ADM-01/ })).not.toHaveClass("location-context-building"));
+
+    fireEvent.change(screen.getByLabelText(/search locations/i), { target: { value: "" } });
+    await waitFor(() => expect(screen.getByRole("row", { name: /BLD-ADM-01/ })).not.toHaveClass("location-context-building"));
+
+    chooseFilterOption("FLOOR", "2nd Floor");
+    await waitFor(() => expect(screen.getByRole("row", { name: /BLD-ADM-01/ })).toHaveClass("location-context-building"));
+  });
+
+  it("keeps a directly matching empty compatibility floor under its grey parent", async () => {
+    await services.locations.save({ id: "empty-matching-floor", name: "Mezzanine Search Match", code: "MEZZ-MATCH", type: "Floor", parentId: "osm-location-c5fb7a267a8ca63d", building: "Administration Building", status: "Active", lat: null, lng: null, positioned: false });
+    renderLocations(["/locations?q=Mezzanine%20Search%20Match"]);
+    expect(await screen.findByRole("row", { name: /BLD-ADM-01/ })).toHaveClass("location-context-building");
+    expect(screen.getByRole("row", { name: "Mezzanine Search Match" })).toBeInTheDocument();
   });
 
   it("omits empty compatibility Floor Levels from a filtered hierarchy family", async () => {

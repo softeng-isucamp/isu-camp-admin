@@ -517,7 +517,7 @@ export function Locations() {
       const explicitFloors = allLocations.filter((loc) =>
         loc.parentId === bldg.id &&
         loc.type === "Floor" &&
-        ((rootWasMatched && type === "All Types" && (status === "All Statuses" || status === "All Status")) || childLocations.some((child) =>
+        ((query.trim() !== "" && matchingKeys.has(locationIdentityKey(loc))) || (rootWasMatched && type === "All Types" && (status === "All Statuses" || status === "All Status")) || childLocations.some((child) =>
           child.parentId === loc.id ||
           (child.floor === loc.name && child.parentId === bldg.id)
         )),
@@ -602,7 +602,7 @@ export function Locations() {
     }
 
     return result;
-  }, [items, hierarchyItems, hierarchyFilterKeys, matchingKeys, allLocations, viewMode, toggledNodes, expandByDefault, type, status]);
+  }, [items, hierarchyItems, hierarchyFilterKeys, matchingKeys, allLocations, viewMode, toggledNodes, expandByDefault, type, status, query]);
 
   const hierarchyRows = hierarchyFamilies.flat();
   const hierarchyTotal = hierarchyFamilies.length;
@@ -1088,9 +1088,18 @@ export function Locations() {
             </thead>
             <tbody>
               {uniqueVisibleRows.map(({ item, level, hasChildren, isCollapsed, childSummary }, index) => {
+                const hasResultFocus = query.trim() !== "" || !!targetKey || floorId !== "All Floors";
+                // Derived Floors are grouping rows, so resolve their match independently
+                // of the directory's typed record identities.
+                const isResultMatch = hasResultFocus && (item.type === "Floor"
+                  ? (query.trim() !== "" && item.name.toLowerCase().includes(query.trim().toLowerCase())) || (floorId !== "All Floors" && matchesFloor(item))
+                  : matchingKeys.has(locationIdentityKey(item)));
+                const isContextBuilding = viewMode === "hierarchy" && isLocationContainer(item) && !matchingKeys.has(locationIdentityKey(item));
+                const isContextRow = isContextBuilding || (hasResultFocus && item.type === "Floor" && !isResultMatch);
+                const rowPadding = isContextRow ? "10px 20px" : "16px 20px";
                 return (
-                <tr key={locationIdentityKey(item)} style={{ borderBottom: "1px solid #f3f4f6", transition: "background 0.15s" }}>
-                  <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: "16px 20px" }}>
+                <tr key={locationIdentityKey(item)} className={[isContextBuilding && "location-context-building", isContextRow && "location-context-row", isResultMatch && "location-result-match"].filter(Boolean).join(" ")} style={{ background: isResultMatch ? "#f1f3f5" : undefined, color: isContextRow ? "#6b7280" : undefined, borderBottom: "1px solid #edf0ee", transition: "background 0.15s" }}>
+                  <td colSpan={item.type === "Floor" ? 5 : undefined} style={{ padding: rowPadding }}>
                     <div style={{ display: "flex", alignItems: "center", paddingLeft: `${level * 28}px` }}>
                       {/* Tree connector graphics */}
                       {level === 1 && (
@@ -1140,7 +1149,7 @@ export function Locations() {
                         <LocationTypeIcon type={item.type} classification={item.classification} />
                       </div>
                       <div>
-                        <strong style={{ display: "block", fontSize: "14px", color: "#111827" }}>{item.name}</strong>
+                        <strong style={{ display: "block", fontSize: "14px", fontWeight: isContextRow ? 500 : 700, color: isContextRow ? "#6b7280" : "#111827" }}>{item.name}</strong>
                         {item.type !== "Floor" && (
                           <small style={{ color: "#6b7280", fontSize: "12px" }}>{item.code}</small>
                         )}
@@ -1154,22 +1163,22 @@ export function Locations() {
                     </div>
                   </td>
                   {item.type !== "Floor" && <>
-                  <td style={{ padding: "16px 20px" }}>
+                  <td style={{ padding: rowPadding }}>
                     {isUnclassifiedPlace(item)
                       ? <Badge tone="grey">Unclassified</Badge>
-                      : <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: "#d6ede0", color: "#0c7441", whiteSpace: "nowrap" }}>
+                      : <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: isContextBuilding ? "#f3f4f6" : "#d6ede0", color: isContextBuilding ? "#6b7280" : "#0c7441", whiteSpace: "nowrap" }}>
                         {backendLocationType(item)}
                       </span>}
                   </td>
-                  <td style={{ padding: "16px 20px", color: "#374151", fontSize: "14px" }}>
+                  <td style={{ padding: rowPadding, color: isContextBuilding ? "#6b7280" : "#374151", fontSize: "14px" }}>
                     {item.function || "—"}
                   </td>
-                  <td style={{ padding: "16px 20px" }}>
-                    <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: item.status === "Active" ? "#e6f7ec" : "#fee2e2", color: item.status === "Active" ? "#0c7441" : "#dc2626" }}>
+                  <td style={{ padding: rowPadding }}>
+                    <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 500, background: isContextBuilding ? "#f3f4f6" : item.status === "Active" ? "#e6f7ec" : "#fee2e2", color: isContextBuilding ? "#6b7280" : item.status === "Active" ? "#0c7441" : "#dc2626" }}>
                       {item.status}
                     </span>
                   </td>
-                  <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                  <td style={{ padding: rowPadding, textAlign: "right" }}>
                     <RowActionMenu
                       label={`Actions for ${item.name}`}
                       triggerProps={{ style: { background: "#f3f4f6", border: "none", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", color: "#4b5563" } }}
