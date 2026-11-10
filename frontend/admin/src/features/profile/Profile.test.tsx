@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -99,6 +99,26 @@ describe('change password rules', () => {
     await submit('abc');
     expect(await screen.findByText('Password must be at least 8 characters.')).toBeInTheDocument();
     expect(screen.queryByText('Password must include an uppercase letter.')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the Change Password button after a successful change', async () => {
+    vi.spyOn(services.profile, 'changePassword').mockResolvedValue(undefined);
+    page();
+    // fireEvent.click does not move focus, as a pointer press in some browsers does not: the button is only the opener.
+    const trigger = await screen.findByRole('button', { name: 'Change Password' });
+    fireEvent.click(trigger);
+    await submit('Abcdef1!');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('refuses eight spaces with a message that says so, and does not send it', async () => {
+    const changePassword = vi.spyOn(services.profile, 'changePassword');
+    await openDialog();
+    await submit('        ');
+    expect(await screen.findByText("Password can't be only spaces.")).toBeInTheDocument();
+    expect(changePassword).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('New password')).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('sends a password that meets every rule and closes the dialog', async () => {
@@ -366,6 +386,17 @@ describe('alternative email', () => {
     expect(screen.getByLabelText('Alternative email')).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('refuses a username over 255 characters under the field, as Add Administrator does, and saves nothing', async () => {
+    const update = vi.spyOn(services.profile, 'update');
+    page();
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit Profile' }));
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'u'.repeat(256) } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Username must be 255 characters or fewer.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('shows a taken username under the username field', async () => {
     await openDialog();
     await type('Username', 'admin_dean');
@@ -626,6 +657,43 @@ describe('backup & recovery', () => {
       expect(await screen.findByRole('button', { name: /Automatic backups are off/ })).toHaveTextContent('Auto backups off');
     });
 
+    it('refuses more than 99 backups to keep with an inline message and saves nothing', async () => {
+      history();
+      const save = saveSchedule();
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '999999999999');
+      expect(within(dialog).getByText('Enter a whole number from 1 to 99.')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Backups to keep')).toHaveAttribute('aria-invalid', 'true');
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+      expect(save).not.toHaveBeenCalled();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '99');
+      expect(within(dialog).queryByText('Enter a whole number from 1 to 99.')).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+
+    it('keeps a retention saved before the cap while only the time changes, and caps it once edited', async () => {
+      history({ schedule: { ...SCHEDULE, keep: 365 } });
+      const save = saveSchedule();
+      page();
+      await userEvent.click(await screen.findByRole('button', { name: /Edit schedule/ }));
+      const dialog = screen.getByRole('dialog');
+      expect(within(dialog).getByLabelText('Backups to keep')).toHaveValue(365);
+      expect(within(dialog).queryByText('Enter a whole number from 1 to 99.')).not.toBeInTheDocument();
+      fireEvent.change(within(dialog).getByLabelText('Time'), { target: { value: '04:00' } });
+      expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '200');
+      expect(within(dialog).getByText('Enter a whole number from 1 to 99.')).toBeInTheDocument();
+      await userEvent.clear(within(dialog).getByLabelText('Backups to keep'));
+      await userEvent.type(within(dialog).getByLabelText('Backups to keep'), '365');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ keep: 365, time: '04:00' })));
+    });
+
     it('refuses a keep count below one and keeps the dialog open when the save fails', async () => {
       history();
       vi.spyOn(services.profile, 'saveSchedule').mockRejectedValue(new Error('Schedule is unavailable.'));
@@ -702,6 +770,29 @@ describe('backup & recovery', () => {
       expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
       expect(screen.getAllByRole('row')).toHaveLength(3);
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('says to enter the password inline when Delete is pressed with the field empty', async () => {
+      history();
+      const remove = vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      const dialog = await openDelete(3);
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Backup' }));
+      expect(await within(dialog).findByText('Enter your password to confirm this deletion.')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Confirm your password')).toHaveAttribute('aria-invalid', 'true');
+      expect(remove).not.toHaveBeenCalled();
+      expect(dialog).toBeInTheDocument();
+    });
+
+    it('says to enter the password inline when Enter is pressed with the field empty', async () => {
+      history();
+      const remove = vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      const dialog = await openDelete(3);
+      within(dialog).getByLabelText('Confirm your password').focus();
+      await userEvent.keyboard('{Enter}');
+      expect(await within(dialog).findByText('Enter your password to confirm this deletion.')).toBeInTheDocument();
+      expect(remove).not.toHaveBeenCalled();
     });
 
     it('warns, but still allows it, when deleting the only ready backup', async () => {
@@ -923,6 +1014,57 @@ describe('backup & recovery', () => {
       expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Create Backup/ })).toHaveFocus();
+    });
+
+    it.each([
+      ['a press that moves focus', (element: HTMLElement) => userEvent.click(element)],
+      ['a click that does not move focus', (element: HTMLElement) => fireEvent.click(element)],
+    ])('keeps focus on a control, not the body, when a delete removes its row (%s)', async (_label, press) => {
+      history();
+      vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
+      page();
+      await press(within(await row(3)).getByRole('button', { name: /Actions for backup from/ }));
+      await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument());
+      await press(screen.getByRole('menuitem', { name: 'Delete' }));
+      const dialog = screen.getByRole('dialog', { name: 'Delete this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Confirm your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Backup' }));
+      expect(await screen.findByText('Backup was deleted successfully.')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(document.activeElement).not.toBe(document.body);
+      expect(screen.getByRole('button', { name: /Create Backup/ })).toHaveFocus();
+    });
+
+    it('keeps focus on a control, not the body, when a restore starts', async () => {
+      history();
+      vi.spyOn(services.profile, 'restore').mockResolvedValue({ id: 'job-2', kind: 'restore', status: 'running', cancellable: true });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-2', kind: 'restore', status: 'running', cancellable: true });
+      page();
+      await openMenu(1);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+      const dialog = screen.getByRole('dialog', { name: 'Restore this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Type RESTORE to confirm'), 'RESTORE');
+      await userEvent.type(within(dialog).getByLabelText('Your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Restore Backup' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(document.activeElement).not.toBe(document.body);
+    });
+
+    it('moves focus on from the running job Cancel button when the restore finishes and that button goes', async () => {
+      history();
+      vi.spyOn(services.profile, 'restore').mockResolvedValue({ id: 'job-3', kind: 'restore', status: 'running', cancellable: true });
+      vi.spyOn(services.profile, 'job').mockResolvedValue({ id: 'job-3', kind: 'restore', status: 'succeeded' });
+      page();
+      await openMenu(1);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+      const dialog = screen.getByRole('dialog', { name: 'Restore this backup?' });
+      await userEvent.type(within(dialog).getByLabelText('Type RESTORE to confirm'), 'RESTORE');
+      await userEvent.type(within(dialog).getByLabelText('Your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Restore Backup' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      // The first poll (after a second) reports the restore finished, which removes the Cancel button.
+      await waitFor(() => expect(document.querySelector('[data-job-cancel]')).toBeNull(), { timeout: 4000 });
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     });
 
     it('returns focus to the Edit schedule button', async () => {

@@ -6,6 +6,7 @@ import { AuthError, RateLimitError, RequestError, fieldErrorsOf } from "./errors
 import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
 import { allPermissions, viewOnlyPermissions } from "../lib/permissions";
+import { USERNAME_MAX_LENGTH } from "../lib/username";
 import type { CodeRequestResult, RecoveryPurpose, RecoveryResult } from "./recovery";
 
 const LOCAL_SESSION_KEY = "isucamp_local_session";
@@ -207,6 +208,7 @@ export const createLocalAdapter = (mapData: LocalMapData, storage: Storage | nul
         const alternativeChanged = changes.alternativeEmail !== undefined
           && normalizeEmail(alternative) !== normalizeEmail(account.alternativeEmail ?? "");
         if (!username) errors.username = "Username is required";
+        else if ([...username].length > USERNAME_MAX_LENGTH) errors.username = `Username must be ${USERNAME_MAX_LENGTH} characters or fewer`;
         else if (username.toLowerCase() !== account.username.toLowerCase()
           && accounts.some((record) => record.id !== account.id && record.username.toLowerCase() === username.toLowerCase())) {
           errors.username = "That username is already taken";

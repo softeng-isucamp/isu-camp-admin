@@ -251,6 +251,49 @@ describe("Logs search requests", () => {
 
     expect(await screen.findByText("Matched Target")).toBeInTheDocument();
   });
+  it("offers a System tab that asks for system activity, and opens on it from a link", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+
+    fireEvent.click(await screen.findByRole("button", { name: "System Activity" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("System", "", "All Actors", "all", 1, 10));
+    expect(screen.getByRole("button", { name: "System Activity" })).toHaveAttribute("aria-pressed", "true");
+    cleanup();
+
+    renderLogs("/system-logs?category=System");
+    expect(await screen.findByRole("button", { name: "System Activity" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("says no activity is recorded for the account named in the search, and offers to clear the filter", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs("/system-logs?q=maria.santos1&category=Admin");
+
+    expect(await screen.findByText("No activity recorded for maria.santos1 yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No logs found.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByPlaceholderText(/search actions/i)).toHaveValue("");
+    expect(screen.getByRole("button", { name: "All Logs" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
+  });
+
+  it("clears the DATE filter too, so older activity for the account is not still hidden", async () => {
+    const list = vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs("/system-logs?q=maria.santos1&category=Admin");
+    await screen.findByText("No activity recorded for maria.santos1 yet.");
+    chooseFilterOption("DATE", "Last 7 days");
+    await waitFor(() => expect(list.mock.lastCall?.[3]).not.toBe("all"));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("All", "", "All Actors", "all", 1, 10));
+  });
+
+  it("keeps the plain empty message when no search is active", async () => {
+    vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
+    renderLogs();
+    expect(await screen.findByText("No logs found.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
   it("exposes which log category is selected", async () => {
     vi.spyOn(services.logs, "list").mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 10 });
     renderLogs();

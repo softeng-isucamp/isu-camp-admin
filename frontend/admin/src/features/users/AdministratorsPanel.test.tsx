@@ -166,6 +166,18 @@ describe("Administrator accounts in User Management", () => {
     expect(await screen.findByText("admin_new was added successfully.")).toBeInTheDocument();
   });
 
+  it("refuses a username over 255 characters with the same message as My Profile", async () => {
+    const save = vi.spyOn(services.admins, "save");
+    await openAdministrators();
+    fireEvent.click(screen.getByRole("button", { name: /add administrator/i }));
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "u".repeat(256) } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new.admin@isu.edu.ph" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Abcdef1!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Administrator" }));
+    expect(await screen.findByText("Username must be 255 characters or fewer.")).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("validates the new account before calling the service", async () => {
     const save = vi.spyOn(services.admins, "save");
     await openAdministrators();

@@ -131,6 +131,23 @@ describe("new password step: length counts characters", () => {
   });
 });
 
+describe("new password step: a password of spaces only", () => {
+  it("ticks the length rule for eight spaces, as the backend counts them, and refuses it with a message that says why", async () => {
+    const { resets } = mockBackend();
+    await reachNewPassword();
+
+    type(newPassword(), "        ");
+    requirement("Met", LENGTH);
+    requirement("Not met", UPPERCASE);
+    type(confirmPassword(), "        ");
+    submit();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Password can't be only spaces.");
+    expect(newPassword()).toHaveAttribute("aria-invalid", "true");
+    expect(resets).toEqual([]);
+  });
+});
+
 describe("new password step: match indicator", () => {
   it("says nothing until the confirmation is started, then follows what is typed", async () => {
     mockBackend();

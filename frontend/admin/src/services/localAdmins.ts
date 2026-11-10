@@ -4,6 +4,7 @@ import type { FixtureAccount, createLocalAdapter } from "./localAdapter";
 import { EMAIL_IN_USE_MESSAGE, emailInUse, normalizeEmail } from "./fixtureEmails";
 import { firstPasswordIssue } from "./passwordRules";
 import { viewOnlyPermissions } from "../lib/permissions";
+import { USERNAME_MAX_LENGTH } from "../lib/username";
 import {
   OTHER_REASON_MAX, OTHER_REASON_REQUIRED_MESSAGE,
   DEMOTION_REASONS, isDemotionReasonCode,
@@ -86,7 +87,7 @@ export const createLocalAdmins = ({ accounts, viewer, caller: activeCaller, rece
     const email = draft.email.trim();
     const password = draft.password ?? "";
     if (!username) throw fieldError("username", "Username is required");
-    if (username.length > 255) throw fieldError("username", "Username must be 255 characters or fewer");
+    if ([...username].length > USERNAME_MAX_LENGTH) throw fieldError("username", `Username must be ${USERNAME_MAX_LENGTH} characters or fewer`);
     if (!email) throw fieldError("email", "Email is required");
     if (!EMAIL_PATTERN.test(email)) throw fieldError("email", "Enter a valid email address");
     const weakness = requirePassword || password ? firstPasswordIssue(password) : undefined;

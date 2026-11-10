@@ -124,6 +124,15 @@ export function BackupRecovery({ onSuccess }: { onSuccess: (text: string) => voi
   const active = pending(job);
   const cancelling = active && cancelRequested === job!.id;
   const locked = busy || active;
+  // The running job's Cancel button is where a closed Restore dialog sends focus; when the job finishes or stops
+  // being cancellable that button unmounts, so focus moves on to what still stands instead of dropping to <body>.
+  const showsCancel = Boolean(active && job?.cancellable);
+  const showedCancel = useRef(showsCancel);
+  useEffect(() => {
+    const lost = showedCancel.current && !showsCancel && (!document.activeElement || document.activeElement === document.body);
+    showedCancel.current = showsCancel;
+    if (lost) (document.querySelector<HTMLElement>('[data-create-backup]') ?? document.getElementById('backup-heading'))?.focus();
+  }, [showsCancel]);
   const readyCount = items.filter((backup) => backup.status === 'ready').length;
   // A cancelled run leaves no history row, so it is reported here; a cancel that lost the race says so.
   const outcome = job?.status === 'cancelled' ? (job.kind === 'backup' ? 'Backup cancelled.' : 'Restore cancelled; no data was changed.')

@@ -62,6 +62,11 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
   const restrictedWait = useRef(false);
   const otp = useRef<OtpInputHandle>(null);
   const inFlight = useRef(false);
+  // The last code the server rejected. Until the boxes change, it is not sent again: that would spend another attempt on a guess already refused.
+  const rejectedCode = useRef<string | null>(null);
+  // Whether anything was entered since that rejection; typing or pasting the same code again is a deliberate new entry.
+  const editedSinceRejection = useRef(false);
+  const [repeatsRejected, setRepeatsRejected] = useState(false);
   // The issued code can no longer be accepted. Set the moment that is known, ahead of any render, so no timer's callback can still send it.
   const unusable = useRef(initialDead !== undefined);
   const verifyWait = useCountdown();
@@ -97,6 +102,8 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       setError(parsed.error.issues[0]?.message ?? CODE_INCOMPLETE);
       return;
     }
+    // The same rejected code again, with nothing edited: leave its message and the attempt count as they are.
+    if (parsed.data === rejectedCode.current && !editedSinceRejection.current) return;
     inFlight.current = true;
     setError("");
     setAttemptsRemaining(undefined);
@@ -128,6 +135,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       } else {
         if (err instanceof AuthError && err.kind === "invalid_code") {
           // The digits stay as editable values, marked invalid, so the admin can fix one or retype them.
+          rejectedCode.current = parsed.data;
+          editedSinceRejection.current = false;
+          setRepeatsRejected(true);
           otp.current?.markRejected();
         } else {
           otp.current?.clear();
@@ -182,6 +192,9 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
       const next = await services.auth.requestRecovery(email, purpose);
       otp.current?.clear();
       unusable.current = false;
+      rejectedCode.current = null;
+      editedSinceRejection.current = false;
+      setRepeatsRejected(false);
       // Expiry may have retired the code while this request was pending; the new code supersedes that.
       setError("");
       setState("entering");
@@ -270,6 +283,10 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           describedBy={error ? alertId : undefined}
           onChange={(next) => {
             setCode(next);
+            // Any input after a rejection is a new entry, even retyping or re-pasting the same digits: that is
+            // the administrator deliberately checking it again. Only Enter or Verify with nothing entered is held back.
+            if (rejectedCode.current !== null) editedSinceRejection.current = true;
+            setRepeatsRejected(false);
             // Typing answers "enter the code"; a rejected code's message stays until the next attempt.
             setError((current) => (current === CODE_INCOMPLETE ? "" : current));
           }}
@@ -307,7 +324,7 @@ export function RecoveryCodeStep({ email, purpose, issued, onVerified, onChangeE
           type="submit"
           className="recovery-primary recovery-submit"
           loading={verifying}
-          disabled={verifyWait.seconds > 0}
+          disabled={verifyWait.seconds > 0 || repeatsRejected}
         >
           {verifying ? "Verifying…" : verifyWait.seconds > 0 ? tryAgainLabel(verifyWait.seconds) : "Verify"}
         </Button>

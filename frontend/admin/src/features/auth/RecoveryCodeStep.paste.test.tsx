@@ -308,15 +308,16 @@ describe("code step: a rejected code stays as real, editable values", () => {
     expect(sentCodes(sent)).toEqual([REJECTED, inserted]);
   });
 
-  it("sends an unedited rejected code again when Verify is clicked", async () => {
+  it("does not spend an attempt on Verify with the unedited rejected code; Verify waits for a new entry", async () => {
     const user = userEvent.setup();
     const { sent } = await rejectBy(user, "paste");
 
-    await user.click(screen.getByRole("button", { name: "Verify" }));
+    expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("button", { name: "Verify" }).closest("form")!);
     await settle();
 
-    expect(sentCodes(sent)).toEqual([REJECTED, REJECTED]);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 3 attempts remaining.");
+    expect(sentCodes(sent)).toEqual([REJECTED]);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 4 attempts remaining.");
     expect(boxValues()).toBe(REJECTED);
     expectAllInvalid();
   });
@@ -613,7 +614,8 @@ describe("code step: a rejected code and a rate-limit wait", () => {
     await openCodeStep();
     pasteCode(1, "123456");
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    // Re-pasting the rejected code is a deliberate new entry, so it is checked again (and rate-limited here).
+    pasteCode(1, "123456");
     await settle();
     expect(screen.getByRole("button", { name: "Try again in 2s" })).toBeDisabled();
     expect(sentCodes(sent)).toEqual(["123456", "123456"]);
@@ -633,7 +635,8 @@ describe("code step: a rejected code and a rate-limit wait", () => {
     await openCodeStep();
     pasteCode(1, "123456");
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    // Re-pasting the rejected code is a deliberate new entry, so it is checked again (and rate-limited here).
+    pasteCode(1, "123456");
     await settle();
 
     fireEvent.input(box(3), { target: { value: "7" } });

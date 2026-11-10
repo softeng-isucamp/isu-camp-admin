@@ -323,7 +323,7 @@ describe("forgot-password: code step", () => {
     expect(screen.queryByText(/attempt/i)).toBeNull();
   });
 
-  it("does not resend rejected digits on its own; the same code entered again is checked, and so is Verify on the unedited boxes", async () => {
+  it("does not resend rejected digits on its own or on Verify; the same code entered again is checked", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { sent } = mockBackend({ [REQUEST]: [issued()], [VERIFY]: [wrongCode(4), wrongCode(3), wrongCode(2), wrongCode(1)] });
     renderForgotPassword();
@@ -349,11 +349,12 @@ describe("forgot-password: code step", () => {
     expect(sent[VERIFY]).toHaveLength(3);
     expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
 
-    // An explicit retry of the unedited rejected code is fine.
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    // Verify on the unedited rejected code would only spend an attempt on a refused guess, so it waits for a new entry.
+    expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("button", { name: "Verify" }).closest("form")!);
     await settle();
-    expect(sent[VERIFY]).toHaveLength(4);
-    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 1 attempt remaining.");
+    expect(sent[VERIFY]).toHaveLength(3);
+    expect(screen.getByRole("alert")).toHaveTextContent("Incorrect verification code. You have 2 attempts remaining.");
   });
 
   it("still auto-submits a different code after one was rejected", async () => {

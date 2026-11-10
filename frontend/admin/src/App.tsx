@@ -1,5 +1,5 @@
 import { Profile } from './features/profile/Profile'
-import { Link, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { Shell } from './components/Shell'
 import { Card, LoadingState } from './components/UI'
 import logo from './assets/figma/brand/kumpas-logo.png'
@@ -13,8 +13,13 @@ import { Locations } from './features/locations/Locations'
 import { MapEditor } from './features/map/MapEditor'
 import { Users } from './features/users/Users'
 import { Logs } from './features/logs/Logs'
+import { landingAfterSignIn, returnPointOf } from './features/auth/returnPath'
 
-function Guard() { const { session, loading } = useAuth(); if (loading) return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}><LoadingState size={26}>Restoring your session…</LoadingState></div>; return session ? <Shell><Outlet /></Shell> : <Navigate to="/login" replace /> }
+function RestoringSession() { return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}><LoadingState size={26}>Restoring your session…</LoadingState></div> }
+/** Every admin page: signed out, the visitor goes to sign-in with the page remembered, so sign-in can bring them back to it. */
+function Guard() { const { session, loading } = useAuth(); const location = useLocation(); if (loading) return <RestoringSession />; return session ? <Shell><Outlet /></Shell> : <Navigate to="/login" replace state={{ from: returnPointOf(location) }} /> }
+/** Sign-in and password recovery: a signed-in administrator is sent on to the page they asked for, or the Dashboard. */
+function GuestOnly() { const { session, loading } = useAuth(); const location = useLocation(); if (loading) return <RestoringSession />; return session ? <Navigate to={landingAfterSignIn(location.state)} replace /> : <Outlet /> }
 /** Unknown address. Signed in, it sits inside the sidebar layout; signed out, the only way forward is the login page. */
 export function MissingRoute() {
   const { session, loading } = useAuth()
@@ -33,5 +38,5 @@ export function MissingRoute() {
   if (session) return <Shell>{card}</Shell>
   return <div className="auth-page"><div className="ambient" />{card}</div>
 }
-function AppRoutes() { return <Routes><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
+function AppRoutes() { return <Routes><Route element={<GuestOnly />}><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /></Route><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
 export function App() { return <AuthProvider><AppRoutes /></AuthProvider> }
