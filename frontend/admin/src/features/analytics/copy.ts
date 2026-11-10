@@ -8,13 +8,13 @@ export type ChartCopy = {
 export const COPY = {
   readiness: {
     title: "Missing details",
-    what: "Active places missing each detail, the biggest gap first. Each bar is every place the check applies to: red is the places missing it, pale blue the places that have it. Rooms are only expected of places that hold them (not Food or Parking), so that bar is shorter. A map pin counts as present for a place with a point or a footprint. Click the red part for the places missing it, the pale part for the places that have it.",
+    what: "Active places missing each detail, the biggest gap first. Each bar is every place the check applies to: red is the places missing it, pale blue the places that have it. Indoor locations (rooms, offices, laboratories and restrooms) are only expected of places that can hold them (not Food or Parking), so that bar is shorter. Description and map position are not listed: every location form requires a description, and a place's map position comes from its footprint in the Map Editor. Whether searched indoor locations have a marker is the last chart on this page. Click the red part for the places missing it, the pale part for the places that have it.",
     read: [
       { see: "A long red part", means: "many places are missing that one thing.", action: "Click it and work down the list." },
       { see: "Entrance linked is red", means: "those places show on the map but the app cannot route to them.", action: "Link an entrance in the Map Editor." },
       { see: "Several short red parts", means: "the gaps are different problems on different places; each check is counted on its own." },
     ],
-    data: "Places, photos, text fields, map positions, entrances and rooms (current snapshot, not affected by the time range).",
+    data: "Places, photos, search keywords, entrances and indoor locations (current snapshot, not affected by the time range).",
   },
   closures: {
     title: "Closure impact",
@@ -26,13 +26,13 @@ export const COPY = {
     data: "Pathways and route nodes (current map, walking only, not affected by the time range).",
   },
   reach: {
-    title: "Reach by travel mode",
-    what: "Routable places each travel mode can get to from the Main Gate (blue), and the ones it cannot (grey), out of all routable places. Grey is not an error: a place may be walk-only on purpose. Click the blue part to list the places it reaches, the grey part for the places it cannot.",
+    title: "Reach by access type",
+    what: "Routable places that people on foot (Walking) or in a vehicle (Vehicle: bicycle, motorcycle or car, which share one pathway permission) can get to from the Main Gate (blue), and the ones they cannot (grey), out of all routable places. Grey is not an error: a place may be walk-only on purpose. Click the blue part to list the places it reaches, the grey part for the places it cannot.",
     read: [
       { see: "Walking below the line", means: "a place has an entrance but no connected walkway.", action: "Fix it in the Map Editor." },
-      { see: "Car or motorcycle well below", means: "either roads are not tagged for that mode, or those places are meant to be walk-only.", action: "Check the listed places; tag roads only where vehicles really can go." },
+      { see: "Vehicle well below", means: "either roads are not marked Vehicle, or those places are meant to be walk-only.", action: "Check the listed places; allow Vehicle only on pathways where vehicles really can go." },
     ],
-    data: "Pathways and their allowed travel modes (current map, not affected by the time range).",
+    data: "Pathways and their allowed access types, Walking and Vehicle (current map, not affected by the time range).",
   },
   activity: {
     title: "Search activity",

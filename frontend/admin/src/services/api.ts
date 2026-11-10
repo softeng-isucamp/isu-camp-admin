@@ -216,7 +216,7 @@ const decisionAnalyticsSchema = z.object({
   readiness: z.object({
     total: nonNegInt,
     checks: z.array(z.object({
-      key: z.enum(["photo", "description", "keywords", "pin", "entrance", "rooms"]),
+      key: z.enum(["photo", "keywords", "entrance", "rooms"]),
       label: z.string(),
       complete: nonNegInt,
       total: nonNegInt,

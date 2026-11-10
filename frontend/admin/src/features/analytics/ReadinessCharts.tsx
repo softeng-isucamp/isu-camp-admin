@@ -12,7 +12,7 @@ type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: nu
 
 /**
  * The directory's gaps, ranked: one bar per check, the red part is the places missing it and the pale part is the places
- * that have it, so the bar's full length is how many places the check applies to (Indoor rooms asks fewer places than the
+ * that have it, so the bar's full length is how many places the check applies to (Indoor locations asks fewer places than the
  * rest). There is deliberately no "fully ready" total: it would weigh a missing photo and a missing entrance the same.
  * The red part opens Locations narrowed to the places missing it, the pale part to the places that have it; a part the
  * server sent no list for is not clickable.

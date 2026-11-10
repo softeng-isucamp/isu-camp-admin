@@ -276,7 +276,7 @@ export interface MarkerGapRow {
   have: SearchedDestination[];
 }
 /** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
-export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entrance" | "rooms";
+export type ReadinessGap = "photo" | "keywords" | "entrance" | "rooms";
 /**
  * The Analytics page, served by `GET /api/dashboard/decision-analytics`
  * (`app/services/decision_analytics.py`). Readiness, closures and reach are a

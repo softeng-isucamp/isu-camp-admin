@@ -5,9 +5,9 @@ import { mulberry32 } from "./prng";
 
 /**
  * Fixture for the Analytics page, built from the session's own Locations so every
- * quick link opens a record that exists. Photo, description, keywords, map pin and
- * indoor rooms are read from the Locations; entrance links, searches, pathways and
- * travel modes are seeded, since the local adapter has no route graph or history.
+ * quick link opens a record that exists. Photo, keywords and
+ * indoor locations are read from the Locations; entrance links, searches, pathways and
+ * Walking and Vehicle reach are seeded, since the local adapter has no route graph or history.
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
 const manilaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
@@ -56,11 +56,9 @@ const PATHWAY_IDS = mapFixture.walkingNetwork.pathways.map((pathway) => pathway.
 
 const LABELS: Record<ReadinessGap, string> = {
   photo: "Photo",
-  description: "Description",
   keywords: "Search keywords",
-  pin: "Map pin",
   entrance: "Entrance linked",
-  rooms: "Indoor rooms",
+  rooms: "Indoor locations",
 };
 
 const ref = (place: Location): AnalyticsPlaceRef => ({ id: place.id, name: place.name });
@@ -92,9 +90,7 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
     const { place } = fact;
     const gaps: ReadinessGap[] = [];
     if (!(place.hasPhoto || place.photo)) gaps.push("photo");
-    if (!place.function?.trim()) gaps.push("description");
     if (!place.keywords?.trim()) gaps.push("keywords");
-    if (!hasMapPosition(place)) gaps.push("pin");
     if (!fact.entrance) gaps.push("entrance");
     if (fact.holdsRooms && !fact.rooms) gaps.push("rooms");
     return gaps;
@@ -132,9 +128,8 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   };
   const modes = [
     { mode: "Walking", unreachable: unreachable(0.05, 2) },
-    { mode: "Bicycle", unreachable: unreachable(0.3, 1) },
-    { mode: "Motorcycle", unreachable: unreachable(0.55, 0) },
-    { mode: "Car", unreachable: unreachable(0.62, 5) },
+    // One Vehicle bar: the admin stores a single Vehicle permission for bicycles, motorcycles and cars.
+    { mode: "Vehicle", unreachable: unreachable(0.45, 0) },
   ].map((row) => {
     const missed = new Set(row.unreachable.map((place) => place.id));
     const reachablePlaces = routable.filter((place) => !missed.has(place.id)).map(ref);

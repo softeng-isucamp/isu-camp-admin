@@ -81,7 +81,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
 type ReachRow = NonNullable<DecisionAnalytics["reach"]>["modes"][number] & { gap: number };
 
 /**
- * Routable places each travel mode reaches (blue) and the unreached remainder up to the total (grey). The grey part opens
+ * Routable places each access type (Walking, Vehicle) reaches (blue) and the unreached remainder up to the total (grey). The grey part opens
  * Locations narrowed to the places it cannot reach, the blue part to the places it can (when the server lists them).
  */
 export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
@@ -103,7 +103,7 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
   const step = total <= 20 ? 4 : 10;
   const ticks = Array.from({ length: Math.floor(total / step) + 1 }, (_, i) => i * step);
   return (
-    <ChartArea height={266}>
+    <ChartArea height={200}>
       <BarChart data={rows} layout="vertical" margin={{ top: 22, right: 8, bottom: 4, left: 0 }} barCategoryGap="28%">
         <CartesianGrid horizontal={false} stroke={INK.grid} />
         <XAxis type="number" domain={[0, total]} ticks={ticks} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />

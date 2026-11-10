@@ -30,8 +30,8 @@ function Section({ id, title, note, children }: { id: string; title: string; not
 }
 
 /**
- * The Analytics page, ordered the way an admin reads it: is the directory ready,
- * can people get there, then who is searching for what. Every bar and slice
+ * The Analytics page, ordered the way an admin reads it: directory completeness,
+ * the route network, then search demand. Every bar and slice
  * opens the module where that thing gets fixed.
  */
 export function AnalyticsPage() {
@@ -73,12 +73,12 @@ export function AnalyticsPage() {
               <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>Try again</Button>
             </div>
           )}
-          <Section id="ready" title="Is the directory ready?" note={SNAPSHOT_NOTE}>
+          <Section id="ready" title="Directory completeness" note={SNAPSHOT_NOTE}>
             <GraphBlock copy={COPY.readiness} wide>
               <MissingDetails data={data} />
             </GraphBlock>
           </Section>
-          <Section id="routes" title="Can people get there?" note={SNAPSHOT_NOTE}>
+          <Section id="routes" title="Route network" note={SNAPSHOT_NOTE}>
             <GraphBlock copy={COPY.closures}>
               <ClosureImpact data={data} />
             </GraphBlock>
@@ -86,7 +86,7 @@ export function AnalyticsPage() {
               <TravelModeReach data={data} />
             </GraphBlock>
           </Section>
-          <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeText}`}>
+          <Section id="searches" title="Search demand" note={`${data.searches.total} searches ${rangeText}`}>
             <GraphBlock copy={COPY.activity}>
               <SearchActivity data={data} />
             </GraphBlock>

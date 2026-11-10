@@ -165,24 +165,12 @@ def test_each_check_lists_who_has_it_and_who_lacks_it_with_no_fully_ready_total(
     photo = check(result, "photo")
     assert (photo["complete"], photo["total"]) == (0, 4)
     assert photo["have"] == []
-    pin = check(result, "pin")
-    assert ids(pin["missing"]) == [str(LIBRARY)]
-    assert ids(pin["have"]) == sorted([str(COLLEGE), str(CAFE), str(ANNEX)])
+    # Description and map position are set by the forms and the Map Editor, so they are not checks.
+    assert [row["key"] for row in result["readiness"]["checks"]] == ["photo", "keywords", "entrance", "rooms"]
+    assert check(result, "rooms")["label"] == "Indoor locations"
     for row in result["readiness"]["checks"]:
         assert row["complete"] + len(row["missing"]) == row["total"]
         assert len(row["have"]) == row["complete"]
-
-
-def test_a_footprint_without_a_pin_is_on_the_map_but_a_two_point_ring_is_not(app):
-    ring = [[16.7, 121.7], [16.7, 121.701], [16.701, 121.701]]
-    with app.app_context():
-        place(60, "Pavilion", "Food", polygon_coordinates=ring)
-        place(61, "Sliver", "Food", polygon_coordinates=ring[:2])
-        db.session.commit()
-        pin = check(summary(), "pin")
-
-    assert str(60) in ids(pin["have"])
-    assert ids(pin["missing"]) == sorted([str(LIBRARY), str(61)])
 
 
 # ==========================================
@@ -201,10 +189,21 @@ def test_reach_follows_modes_and_one_way_pathways_from_the_main_gate(app):
     assert ids(modes["Walking"]["unreachable"]) == [str(ANNEX)]
     assert modes["Walking"]["reachable"] == 2
     assert ids(modes["Walking"]["reachablePlaces"]) == sorted([str(COLLEGE), str(CAFE)])
-    # Vehicle covers wheeled modes; the College walk is walking-only.
-    for mode in ("Bicycle", "Motorcycle", "Car"):
-        assert modes[mode]["reachable"] == 1
-        assert ids(modes[mode]["unreachable"]) == sorted([str(ANNEX), str(COLLEGE)])
+    # One Vehicle bar stands for bicycle, motorcycle and car; the College walk is walking-only.
+    assert list(modes) == ["Walking", "Vehicle"]
+    assert modes["Vehicle"]["reachable"] == 1
+    assert ids(modes["Vehicle"]["unreachable"]) == sorted([str(ANNEX), str(COLLEGE)])
+
+
+def test_a_legacy_wheeled_permission_counts_as_vehicle(app):
+    with app.app_context():
+        # The College walk is rewritten as a stored "Car" permission: it now carries vehicles.
+        PathwayAllowedMode.query.filter_by(pathway_id=101).delete()
+        db.session.add(PathwayAllowedMode(pathway_id=101, mode="Car"))
+        db.session.commit()
+        modes = {row["mode"]: row for row in summary()["reach"]["modes"]}
+
+    assert str(COLLEGE) in ids(modes["Vehicle"]["reachablePlaces"])
 
 
 def test_no_unique_main_gate_means_reach_and_closures_are_not_measured(app):

@@ -44,7 +44,7 @@ it("shows the five charts and refetches searches for another range", async () =>
   const request = vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
   renderPage();
 
-  for (const title of ["Missing details", "Closure impact", "Reach by travel mode", "Search activity", "Searches for destinations without markers"]) {
+  for (const title of ["Missing details", "Closure impact", "Reach by access type", "Search activity", "Searches for destinations without markers"]) {
     expect(await screen.findByText(title)).toBeInTheDocument();
   }
   await userEvent.selectOptions(screen.getByRole("combobox"), "month");
@@ -130,14 +130,14 @@ it("opens the reading guide as a floating popover that closes on Esc, outside cl
   await userEvent.click(button);
   await userEvent.click(within(screen.getByRole("dialog")).getByText(/^Data:/));
   expect(screen.getByRole("dialog")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("heading", { name: "Reach by travel mode" }));
+  await userEvent.click(screen.getByRole("heading", { name: "Reach by access type" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   // Clicking plain content would drop focus to <body>; it goes back to the (i) button instead.
   await waitFor(() => expect(button).toHaveFocus());
 
   // Clicking another control closes the guide but leaves focus on that control.
   await userEvent.click(button);
-  const other = screen.getByRole("button", { name: "How to read Reach by travel mode" });
+  const other = screen.getByRole("button", { name: "How to read Reach by access type" });
   fireEvent.mouseDown(other);
   other.focus();
   expect(screen.queryByRole("dialog", { name: "How to read Closure impact" })).not.toBeInTheDocument();
@@ -193,20 +193,20 @@ it("opens a closure's cut-off and longer-walk places from the two parts of its b
   expect(destination().params.get("pathway")).toBe(worst.id);
 });
 
-it("opens the reachable and unreachable places from the two parts of a travel mode's bar", async () => {
+it("opens the reachable and unreachable places from the two parts of an access type's bar", async () => {
   vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
   renderPage();
-  await screen.findByText("Reach by travel mode");
-    const bicycle = fixture().reach!.modes.findIndex((mode) => mode.mode === "Bicycle");
-  const mode = fixture().reach!.modes[bicycle];
+  await screen.findByText("Reach by access type");
+  const vehicle = fixture().reach!.modes.findIndex((mode) => mode.mode === "Vehicle");
+  const mode = fixture().reach!.modes[vehicle];
 
-  fireEvent.click(segments("Reach by travel mode")[0][bicycle]);
+  fireEvent.click(segments("Reach by access type")[0][vehicle]);
   expect(destination().params.get("ids")).toBe(mode.reachablePlaces!.map((place) => place.id).join(","));
-  expect(destination().params.get("why")).toBe("Reachable by bicycle");
+  expect(destination().params.get("why")).toBe("Reachable by vehicle");
 
-  fireEvent.click(segments("Reach by travel mode")[1][bicycle]);
+  fireEvent.click(segments("Reach by access type")[1][vehicle]);
   expect(destination().params.get("ids")).toBe(mode.unreachable.map((place) => place.id).join(","));
-  expect(destination().params.get("why")).toBe("Not reachable by bicycle");
+  expect(destination().params.get("why")).toBe("Not reachable by vehicle");
 });
 
 /** The readiness checks in the order the chart ranks them: the biggest gap first. */
@@ -255,15 +255,25 @@ it("opens the places missing a check from its red part and those that have it fr
   expect(destination().params.get("why")).toBe(`With ${withIt.label.toLowerCase()}`);
 });
 
-it("keeps map pins honest: a footprint-only place has a position, so only places with neither are missing a pin", () => {
-  const places = locations.filter((item) => item.type === "Place" && item.status === "Active");
-  const footprintOnly = { ...places[0], id: "fp-only", positioned: false, lat: null, lng: null, polygonCoordinates: [[1, 1], [1, 2], [2, 2]] as [number, number][] };
-  const neither = { ...places[1], id: "nothing", positioned: false, lat: null, lng: null };
-  const pin = generateDecisionAnalytics("week", [...locations, footprintOnly, neither]).readiness.checks.find((check) => check.key === "pin")!;
-  // The fixture applies the server's rule: a footprint is a position, so only the place with neither is missing a pin.
-  expect(pin.missing.map((place) => place.id)).toContain("nothing");
-  expect(pin.missing.map((place) => place.id)).not.toContain("fp-only");
-  expect(pin.have!.map((place) => place.id)).toContain("fp-only");
+it("checks only what stays unfinished after a save: photo, keywords, entrance and indoor locations", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Missing details");
+  const block = screen.getByRole("heading", { name: "Missing details" }).closest(".graph") as HTMLElement;
+  const text = Array.from(block.querySelectorAll("text")).map((node) => node.textContent ?? "").join("|");
+  for (const label of ["Photo", "Search keywords", "Entrance linked", "Indoor locations"]) expect(text).toContain(label);
+  // The forms require a description and the Map Editor sets the position, so neither is a task to count here.
+  expect(text).not.toMatch(/Description|Map pin|Indoor rooms/);
+  expect(fixture().readiness.checks.map((check) => check.key).sort()).toEqual(["entrance", "keywords", "photo", "rooms"]);
+  // One Walking bar and one Vehicle bar: bicycle, motorcycle and car share a single pathway permission.
+  expect(fixture().reach!.modes.map((mode) => mode.mode)).toEqual(["Walking", "Vehicle"]);
+});
+
+it("titles each group by what it covers, not as a question", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Missing details");
+  expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual(["Directory completeness", "Route network", "Search demand"]);
 });
 
 it("counts a searched footprint-only place as having a marker and a room under no active building as no destination", () => {
@@ -298,9 +308,9 @@ it("leaves the reachable and readiness 'has it' halves unclickable when an older
     reach: { ...base.reach!, modes: base.reach!.modes.map(({ reachablePlaces: _reachable, ...mode }) => mode) },
   });
   renderPage();
-  await screen.findByText("Reach by travel mode");
+  await screen.findByText("Reach by access type");
 
-  const reached = segments("Reach by travel mode")[0][0];
+  const reached = segments("Reach by access type")[0][0];
   expect(reached).toHaveAttribute("cursor", "default");
   fireEvent.click(reached);
   expect(destination().path).toBe("/");
@@ -341,9 +351,9 @@ it("labels a detour-only closure as longer walks, never as safe to close", async
 it("draws unreachable destinations in the neutral grey, not the alert red", async () => {
   vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
   renderPage();
-  await screen.findByText("Reach by travel mode");
+  await screen.findByText("Reach by access type");
 
-  const unreachable = segments("Reach by travel mode")[1][0];
+  const unreachable = segments("Reach by access type")[1][0];
   expect(unreachable.getAttribute("fill")).toBe("#8a948f");
   expect(unreachable.getAttribute("fill")).not.toBe("#d64545");
 });

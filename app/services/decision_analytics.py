@@ -4,16 +4,19 @@ Serves the Analytics page. The response shape is the frontend's
 ``DecisionAnalytics`` (``frontend/admin/src/types.ts``), validated there by a
 Zod schema, and every number is read from tables that already exist:
 
-- **readiness** - active Places, their cover photos, text fields, map positions,
-  entrance nodes and indoor Locations, one count per check (no "fully ready"
-  total: it would weigh a missing photo and a missing entrance the same).
-  A snapshot, not range-dependent.
+- **readiness** - active Places, their cover photos, search keywords, entrance
+  nodes and indoor Locations, one count per check (no "fully ready" total: it
+  would weigh a missing photo and a missing entrance the same). Description and
+  map position are not checked: the admin forms require a description, and a
+  Place gets its map position from its footprint in the Map Editor, so neither
+  is a separate task. A snapshot, not range-dependent.
 - **reach** and **closures** - the route graph (``route_node``, ``pathway``,
   ``pathway_allowed_mode``, ``path_point``), read with the User App router's
   rules (``isu-camp-app/server/app/utils/routing.py``) so the admin reports the
   routes users actually get: active records only, one-way pathways stay
-  one-way, a pathway only carries the modes it allows ("Vehicle" covers every
-  wheeled mode), a Place is reached at one of its entrance nodes, and the
+  one-way, a pathway only carries the modes it allows. The admin stores only
+  Walking and Vehicle, so reach is reported for those two ("Vehicle" also
+  stands for a legacy car, motorcycle or bicycle permission), a Place is reached at one of its entrance nodes, and the
   origin is the one node named like the main gate. Not range-dependent.
 - **searches** - ``UserHistory`` rows in the range (week, month, all, or a
   Manila calendar year ``year-YYYY``): a time series stacked by account type,
@@ -54,20 +57,21 @@ from services.dashboard_analytics import (
 
 READINESS_CHECKS = (
     ("photo", "Photo"),
-    ("description", "Description"),
     ("keywords", "Search keywords"),
-    ("pin", "Map pin"),
     ("entrance", "Entrance linked"),
-    ("rooms", "Indoor rooms"),
+    # Rooms, offices, laboratories and restrooms: any active indoor Location.
+    ("rooms", "Indoor locations"),
 )
 
-# The User App's modes, in the order the chart lists them, with its labels.
+# The access types a pathway can be given in the admin (Walking, Vehicle). A
+# Vehicle pathway carries bicycles, motorcycles and cars alike, so one bar
+# stands for all three.
 TRAVEL_MODES = (
     ("walking", "Walking"),
-    ("bicycle", "Bicycle"),
-    ("motorcycle", "Motorcycle"),
-    ("car", "Car"),
+    ("vehicle", "Vehicle"),
 )
+
+WHEELED_MODES = ("vehicle", "car", "motorcycle", "bicycle")
 
 # Mirrors routing.MODE_ALIASES: what a stored allowed-mode string means.
 MODE_ALIASES = {
@@ -92,7 +96,9 @@ CLOSURE_LIMIT = 5
 
 def _allows(stored, mode):
     label = MODE_ALIASES.get(str(stored or "").strip().lower())
-    return label == mode or (label == "vehicle" and mode in ("car", "motorcycle", "bicycle"))
+    if mode == "vehicle":
+        return label in WHEELED_MODES
+    return label == mode or (label == "vehicle" and mode in WHEELED_MODES)
 
 
 def _meters(a, b):
@@ -125,10 +131,6 @@ def _placed(latitude, longitude, footprint):
 
     enclosed = isinstance(footprint, list) and len(footprint) >= MINIMUM_POLYGON_POINTS
     return enclosed or _position(latitude, longitude) is not None
-
-
-def _has_map_position(place):
-    return _placed(place.latitude, place.longitude, place.polygon_coordinates)
 
 
 class RouteGraph:
@@ -283,9 +285,7 @@ def _readiness(places, graph):
         holds_rooms = place.can_contain_locations
         passed = {
             "photo": place.has_photo(),
-            "description": _has_text(place.description),
             "keywords": _has_text(place.keywords),
-            "pin": _has_map_position(place),
             "entrance": place.building_id in graph.entrances,
             # Only Places that may hold indoor Locations are asked to have one.
             "rooms": place.building_id in with_rooms if holds_rooms else None,
