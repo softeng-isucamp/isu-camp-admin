@@ -531,88 +531,51 @@ describe('backup & recovery', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  describe('automatic history', () => {
-    type Automatic = NonNullable<Awaited<ReturnType<typeof services.profile.history>>['automatic']>;
-    const RUNS: Automatic['runs'] = [
-      { id: 'r4', at: '2026-10-09T18:30:12Z', outcome: 'taken', message: '', archiveId: 'b1', stored: true, sizeBytes: 5 * 1024 * 1024 },
-      { id: 'r3', at: '2026-10-08T18:30:09Z', outcome: 'taken', message: 'removed 1 archive past the 14 kept', archiveId: 'b0', stored: false },
-      { id: 'r2', at: '2026-10-07T18:30:00Z', outcome: 'failed', message: 'pg_dump is not installed on the server.' },
-      { id: 'r1', at: '2026-10-06T18:30:00Z', outcome: 'skipped', message: 'Another backup or restore is already running.' },
-    ];
-    const section = async () => screen.findByRole('region', { name: 'Automatic Backup History' });
-    const runs = async () => within(await section()).getAllByRole('listitem').map((item) => item.textContent);
+  describe('compact backup table', () => {
+    const archives = (count: number): Backup[] => Array.from({ length: count }, (_, index) => ({
+      ...READY, id: `archive-${index}`, createdAt: new Date(Date.UTC(2026, 9, 14 - index)).toISOString(),
+      createdBy: index % 2 ? `operator-${index}` : 'scheduled',
+    }));
 
-    it('lists what the schedule has done, newest first, with the next run due', async () => {
-      history({ automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } });
+    it('paginates 14 archives in five-row pages and keeps actions tied to their archive', async () => {
+      history({ items: archives(14), automatic: { runs: [{ id: 'r1', at: READY.createdAt, outcome: 'failed', message: 'Backup failed.' }] } });
       page();
-      expect(within(await section()).getByText(/Next run:/)).toBeInTheDocument();
-      expect(await runs()).toEqual([
-        expect.stringContaining('Taken5.00 MB'),
-        // The archive is gone, which is retention working rather than a failure.
-        expect.stringContaining('TakenArchive no longer stored · removed 1 archive past the 14 kept'),
-        expect.stringContaining('Failedpg_dump is not installed on the server.'),
-        expect.stringContaining('SkippedAnother backup or restore is already running.'),
-      ]);
-      expect(within(await section()).getAllByRole('listitem')[0].querySelector('time')).toHaveAttribute('datetime', '2026-10-09T18:30:12Z');
+      expect(await screen.findByText('Showing 1–5 of 14')).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
+      expect(screen.getAllByRole('row')).toHaveLength(6);
+      expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByText('Showing 6–10 of 14')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: '3' }));
+      expect(screen.getByText('Showing 11–14 of 14')).toBeInTheDocument();
+      expect(screen.getAllByRole('row')).toHaveLength(5);
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+      await openMenu(2);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Restore' }));
+      expect(screen.getByRole('dialog')).toHaveTextContent('operator-11');
     });
 
-    it('keeps the runs of a schedule that is now off, and promises no next one', async () => {
-      history({ schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: RUNS } });
-      page();
-      expect(within(await section()).getByText('No next run scheduled')).toBeInTheDocument();
-      expect(await runs()).toHaveLength(4);
-    });
-
-    it('says a schedule that is on has not run yet', async () => {
-      history({ automatic: { runs: [], nextRunAt: '2026-10-10T18:30:00Z' } });
-      page();
-      expect(within(await section()).getByText('No automatic backup has run yet.')).toBeInTheDocument();
-    });
-
-    it('hides the section when the server reports no history and nothing is scheduled', async () => {
-      history({ schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: [] } });
+    it('hides pagination for a single page', async () => {
+      history();
       page();
       await screen.findByRole('table');
-      expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
     });
 
-    it('promises no next run once the schedule is turned off and saved', async () => {
-      history()
-        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: SCHEDULE, automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } })
-        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: { ...SCHEDULE, enabled: false }, automatic: { runs: RUNS } });
-      vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
+    it('returns to the previous page when the last archive on a page is deleted', async () => {
+      history({ items: archives(6) });
+      vi.spyOn(services.profile, 'remove').mockResolvedValue(undefined);
       page();
-      expect(within(await section()).getByText(/Next run:/)).toBeInTheDocument();
-      await userEvent.click(screen.getByRole('button', { name: /Edit schedule/ }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Next' }));
+      await openMenu(1);
+      await userEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
       const dialog = screen.getByRole('dialog');
-      await userEvent.click(within(dialog).getByRole('switch'));
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-      expect(await within(await section()).findByText('No next run scheduled')).toBeInTheDocument();
-      expect(within(await section()).queryByText(/Next run:/)).not.toBeInTheDocument();
-      expect(screen.getByText('Automatic backup settings saved.')).toBeInTheDocument();
-    });
-
-    it('shows the new next run after the run time is changed and saved', async () => {
-      history()
-        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: SCHEDULE, automatic: { runs: RUNS, nextRunAt: '2026-10-10T18:30:00Z' } })
-        .mockResolvedValueOnce({ items: [READY], activeJob: null, schedule: { ...SCHEDULE, time: '04:00' }, automatic: { runs: RUNS, nextRunAt: '2026-10-10T20:00:00Z' } });
-      vi.spyOn(services.profile, 'saveSchedule').mockImplementation(async (next) => next);
-      page();
-      expect(within(await section()).getByText(/Next run:/).querySelector('time')).toHaveAttribute('datetime', '2026-10-10T18:30:00Z');
-      await userEvent.click(screen.getByRole('button', { name: /Edit schedule/ }));
-      const dialog = screen.getByRole('dialog');
-      await userEvent.clear(within(dialog).getByLabelText('Time'));
-      await userEvent.type(within(dialog).getByLabelText('Time'), '04:00');
-      await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
-      await waitFor(async () => expect(within(await section()).getByText(/Next run:/).querySelector('time')).toHaveAttribute('datetime', '2026-10-10T20:00:00Z'));
-      expect(screen.getByRole('button', { name: /Daily at 4:00 AM/ })).toBeInTheDocument();
-    });
-
-    it('hides the section on a server that cannot read its own audit log', async () => {
-      history({ automatic: undefined });
-      page();
-      await screen.findByRole('table');
-      expect(screen.queryByRole('region', { name: 'Automatic Backup History' })).not.toBeInTheDocument();
+      await userEvent.type(within(dialog).getByLabelText('Confirm your password'), 'password123');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Delete Backup' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.getAllByRole('row')).toHaveLength(6);
+      expect(screen.queryByText('operator-5')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
     });
   });
 
