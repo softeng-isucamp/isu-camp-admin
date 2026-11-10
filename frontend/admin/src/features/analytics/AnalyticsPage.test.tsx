@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { normalizeBackendDecisionAnalytics, services } from "../../services/api";
+import { bucketAxisLabel, bucketTooltipLabel } from "./SearchCharts";
 import { generateDecisionAnalytics } from "../../services/fixtures/decisionAnalytics";
 import { locations } from "../../services/mockData";
 import { signInAs } from "../../test/session";
@@ -543,4 +544,62 @@ it("gives Missing details keyboard access to the places that have a check as wel
   const mixed = ranked.find((row) => row.missing.length && row.have?.length)!;
   fireEvent.click(screen.getByRole("link", { name: `${mixed.label}: list the ${mixed.have!.length} places that have it in Locations` }));
   expect(destination().params.get("why")).toBe(`With ${mixed.label.toLowerCase()}`);
+});
+
+it("opens the cut-off and longer-walk lists from keyboard links, including a detour-only pathway", async () => {
+  const base = fixture();
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...base, reach: base.reach });
+  renderPage();
+  await screen.findByText("Closure impact");
+  const rows = [...base.closures!].sort((a, b) => b.cutOff.length - a.cutOff.length || b.longerTrip - a.longerTrip);
+  const withCut = rows.find((row) => row.cutOff.length && row.longerPlaces?.length)!;
+  const detourOnly = rows.find((row) => !row.cutOff.length && row.longerPlaces?.length)!;
+  expect(detourOnly).toBeDefined();
+
+  const cut = screen.getByRole("link", { name: `${withCut.pathway}: list the ${withCut.cutOff.length} ${withCut.cutOff.length === 1 ? "place" : "places"} cut off in Locations` });
+  cut.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(destination().params.get("ids")).toBe(withCut.cutOff.map((place) => place.id).join(","));
+  expect(destination().params.get("why")).toBe(`Cut off if ${withCut.pathway} closes`);
+
+  const longer = screen.getByRole("link", { name: new RegExp(`^${withCut.pathway}: list the \\d+ places with a longer walk in Locations$`) });
+  longer.focus();
+  await userEvent.keyboard(" ");
+  expect(destination().params.get("ids")).toBe(withCut.longerPlaces!.map((place) => place.id).join(","));
+
+  // A detour-only pathway has no cut-off link, only the longer-walk one.
+  expect(screen.queryByRole("link", { name: new RegExp(`^${detourOnly.pathway}: list the .* cut off`) })).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("link", { name: new RegExp(`^${detourOnly.pathway}: list the \\d+ places with a longer walk`) }), { key: "Enter" });
+  expect(destination().params.get("why")).toBe(`Longer walk if ${detourOnly.pathway} closes`);
+});
+
+it("opens the places an access type reaches from its count label, even when every routable place is reachable", async () => {
+  const base = fixture();
+  const reach = base.reach!;
+  const full = { ...reach.modes[0], reachable: reach.total, unreachable: [], reachablePlaces: reach.modes[0].reachablePlaces!.concat(reach.modes[0].unreachable) };
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({ ...base, reach: { ...reach, modes: [full, reach.modes[1]] } });
+  renderPage();
+  await screen.findByText("Reach by access type");
+
+  // Fully reachable: no row-label link for the empty gap, but the reached list is still reachable by keyboard.
+  expect(screen.queryByRole("link", { name: /Walking: list the \d+ places it can't reach/ })).not.toBeInTheDocument();
+  const reached = screen.getByRole("link", { name: `Walking: list the ${full.reachablePlaces.length} places it reaches` });
+  reached.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(destination().params.get("ids")).toBe(full.reachablePlaces.map((place) => place.id).join(","));
+  expect(destination().params.get("why")).toBe("Reachable by walking");
+
+  const vehicle = reach.modes[1];
+  fireEvent.keyDown(screen.getByRole("link", { name: `Vehicle: list the ${vehicle.unreachable.length} places it can't reach` }), { key: " " });
+  expect(destination().params.get("why")).toBe("Not reachable by vehicle");
+});
+
+it("names the year on all-time search dates where a history spans several years", () => {
+  const dates = ["2025-12-22", "2025-12-29", "2026-01-05", "2026-01-12"];
+  const labels = dates.map((date, index) => bucketAxisLabel(date, index, dates, "all"));
+  expect(labels).toEqual(["Dec 22, 2025", "Dec 29", "Jan 5, 2026", "Jan 12"]);
+  expect(bucketTooltipLabel("2025-12-29", "all")).toBe("Week of Dec 29, 2025");
+  // A calendar year or a short range already says which year it is.
+  expect(bucketAxisLabel("2026-01-05", 0, ["2026-01-05"], "year-2026")).toBe("Jan 5");
+  expect(bucketTooltipLabel("2026-01-05", "year-2026")).toBe("Week of Jan 5");
 });

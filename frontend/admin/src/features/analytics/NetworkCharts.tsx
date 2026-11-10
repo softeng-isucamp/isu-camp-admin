@@ -1,18 +1,19 @@
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 import type { DecisionAnalytics } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, MUTED_MARK, SERIES } from "../dashboard/analytics/palette";
 import { ClickTip, plural } from "./ClickTip";
 import { Empty } from "../../components/UI";
 import { locationsListLink, pathwayLink, useOpenModule } from "./links";
-import { RowLabelTick, type RowLink } from "./RowLabelTick";
+import { LinkedTick, RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type ClosureRow = NonNullable<DecisionAnalytics["closures"]>[number] & { cut: number; longer: number };
 
 /**
  * Per pathway: places cut off (red) and places that only get a longer walk (grey). Counts places, not searches: a rarely
  * searched place is cut off just the same, and a pathway with grey only is a detour, not proof that closing it is safe. Each part opens Locations narrowed to
- * those places (a part with no list is not clickable); the pathway's name opens it in the Map Editor.
+ * those places (a part with no list is not clickable); the pathway's name opens it in the Map Editor. By keyboard, the
+ * "N cut off" and "longer walk" labels on the right are links to the same two lists.
  */
 export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
   const navigate = useOpenModule();
@@ -30,6 +31,10 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
     if (row?.longerPlaces?.length) navigate(locationsListLink(row.longerPlaces, `Longer walk if ${row.pathway} closes`));
   };
   const links: RowLink[] = rows.map((row) => ({ label: `${row.pathway}: open this pathway in the Map Editor`, open: () => navigate(pathwayLink(row.id)) }));
+  const cutLinks: RowLink[] = rows.map((row) =>
+    row.cutOff.length ? { label: `${row.pathway}: list the ${plural(row.cutOff.length, "place")} cut off in Locations`, open: () => openCut({ payload: row }) } : undefined);
+  const longerLinks: RowLink[] = rows.map((row) =>
+    row.longerPlaces?.length ? { label: `${row.pathway}: list the ${plural(row.longerPlaces.length, "place")} with a longer walk in Locations`, open: () => openLonger({ payload: row }) } : undefined);
   return (
     <>
       <div className="decision-legend" aria-label="Legend">
@@ -37,11 +42,43 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
         <span><i style={{ background: MUTED_MARK, opacity: 0.5 }} /> Longer walk</span>
       </div>
       <ChartArea height={240}>
-        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 72, bottom: 4, left: 0 }} barCategoryGap="26%">
+        <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 0 }} barCategoryGap="26%">
           <CartesianGrid horizontal={false} stroke={INK.grid} />
           <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: INK.grid }} />
-          <YAxis type="category" dataKey="pathway" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={184} interval={0} />
+          <YAxis yAxisId="pathways" type="category" dataKey="pathway" tick={<RowLabelTick links={links} />} tickLine={false} axisLine={{ stroke: INK.grid }} width={184} interval={0} />
+          {/* Right-hand axis carries the count labels as links: a zero-width bar renders nothing to focus or click. */}
+          <YAxis
+            yAxisId="counts"
+            orientation="right"
+            type="category"
+            dataKey="pathway"
+            tickLine={false}
+            axisLine={false}
+            width={104}
+            interval={0}
+            tick={({ x, y, index }: { x?: number | string; y?: number | string; index?: number }) => {
+              const row = rows[Number(index)];
+              if (!row) return <g />;
+              const at = Number(index);
+              const left = Number(x) + 8;
+              return (
+                <g>
+                  {row.cut ? (
+                    <LinkedTick link={cutLinks[at]}>
+                      <text x={left} y={Number(y)} dy={row.longer ? -2 : 4} fontSize={11} fontWeight={600} fill={ALERT} textDecoration={cutLinks[at] ? "underline" : undefined}>{`${row.cut} cut off`}</text>
+                    </LinkedTick>
+                  ) : null}
+                  {row.longer ? (
+                    <LinkedTick link={longerLinks[at]}>
+                      <text x={left} y={Number(y)} dy={row.cut ? 12 : 4} fontSize={11} fill={INK.muted} textDecoration={longerLinks[at] ? "underline" : undefined}>{row.cut ? `${row.longer} longer walk` : "detour only"}</text>
+                    </LinkedTick>
+                  ) : null}
+                </g>
+              );
+            }}
+          />
           <Tooltip
+            axisId="pathways"
             cursor={{ fill: "#f3f6f4" }}
             content={({ active, payload }) => {
               const row = active ? (payload?.[0]?.payload as ClosureRow | undefined) : undefined;
@@ -55,22 +92,11 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
               );
             }}
           />
-          <Bar dataKey="cut" stackId="impact" fill={ALERT} onClick={openCut} isAnimationActive={false}>
+          <Bar yAxisId="pathways" dataKey="cut" stackId="impact" fill={ALERT} onClick={openCut} isAnimationActive={false}>
             {rows.map((row) => <Cell key={row.id} cursor={row.cutOff.length ? "pointer" : "default"} />)}
           </Bar>
-          <Bar dataKey="longer" stackId="impact" fill={MUTED_MARK} fillOpacity={0.45} radius={[0, 4, 4, 0]} onClick={openLonger} isAnimationActive={false}>
+          <Bar yAxisId="pathways" dataKey="longer" stackId="impact" fill={MUTED_MARK} fillOpacity={0.45} radius={[0, 4, 4, 0]} onClick={openLonger} isAnimationActive={false}>
             {rows.map((row) => <Cell key={row.id} cursor={row.longerPlaces?.length ? "pointer" : "default"} />)}
-            <LabelList
-              content={({ x, y, width, height, index }) => {
-                const row = rows[Number(index)];
-                if (!row) return null;
-                return (
-                  <text x={Number(x) + Number(width) + 6} y={Number(y) + Number(height) / 2 + 4} fontSize={11} fill={row.cut ? ALERT : INK.muted} fontWeight={row.cut ? 600 : 400}>
-                    {row.cut ? `${row.cut} cut off` : "detour only"}
-                  </text>
-                );
-              }}
-            />
           </Bar>
         </BarChart>
       </ChartArea>
@@ -82,7 +108,8 @@ type ReachRow = NonNullable<DecisionAnalytics["reach"]>["modes"][number] & { gap
 
 /**
  * Routable places each access type (Walking, Vehicle) reaches (blue) and the unreached remainder up to the total (grey). The grey part opens
- * Locations narrowed to the places it cannot reach, the blue part to the places it can (when the server lists them).
+ * Locations narrowed to the places it cannot reach, the blue part to the places it can (when the server lists them). By keyboard, the
+ * row label lists the places it cannot reach and the "reached/total" label the places it can.
  */
 export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
   const navigate = useOpenModule();
@@ -100,6 +127,8 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
   };
   const links: RowLink[] = rows.map((row) =>
     row.unreachable.length ? { label: `${row.mode}: list the ${row.unreachable.length} places it can't reach`, open: () => openGap(row) } : undefined);
+  const reachedLinks: RowLink[] = rows.map((row) =>
+    row.reachablePlaces?.length ? { label: `${row.mode}: list the ${row.reachablePlaces.length} places it reaches`, open: () => navigate(locationsListLink(row.reachablePlaces!, `Reachable by ${row.mode.toLowerCase()}`)) } : undefined);
   const step = total <= 20 ? 4 : 10;
   const ticks = Array.from({ length: Math.floor(total / step) + 1 }, (_, i) => i * step);
   return (
@@ -121,7 +150,11 @@ export function TravelModeReach({ data }: { data: DecisionAnalytics }) {
           tick={({ x, y, index }: { x?: number | string; y?: number | string; index?: number }) => {
             const row = rows[Number(index)];
             if (!row) return <g />;
-            return <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={11} fill={INK.primary}>{`${row.reachable}/${total}`}</text>;
+            return (
+              <LinkedTick link={reachedLinks[Number(index)]}>
+                <text x={Number(x) + 8} y={Number(y)} dy={4} fontSize={11} fill={INK.primary} textDecoration={reachedLinks[Number(index)] ? "underline" : undefined}>{`${row.reachable}/${total}`}</text>
+              </LinkedTick>
+            );
           }}
         />
         <ReferenceLine yAxisId="modes" x={total} stroke={INK.secondary} strokeDasharray="4 4" label={{ value: `all ${total} from ${origin}`, position: "top", fill: INK.secondary, fontSize: 11 }} />

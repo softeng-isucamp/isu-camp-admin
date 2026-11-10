@@ -39,9 +39,7 @@ const bucketStarts = (range: DashboardRange): { bucket: "day" | "week"; dates: s
   return { bucket: "week", dates };
 };
 
-/** On the map: a point, or a footprint that encloses an area (three points), as the server counts a Place's marker. */
-const hasMapPosition = (place: Location) =>
-  place.positioned || (place.lat != null && place.lng != null) || (place.polygonCoordinates?.length ?? 0) >= 3;
+/** An indoor Location has a marker only with its own coordinates (or a position the fixture already resolved). */
 const hasMarker = (place: Location) => place.positioned || (place.lat != null && place.lng != null);
 
 /** Searches relative to a week: a past year is a full school year, this year is part of one. */

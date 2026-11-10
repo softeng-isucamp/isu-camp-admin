@@ -1,15 +1,24 @@
-import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 import { Empty } from "../../components/UI";
 import { accountTypes } from "../../lib/accountType";
 import type { DecisionAnalytics, SearchActivityPoint } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
-import { formatBucket, formatBucketDate, formatNumber, formatPercent } from "../dashboard/analytics/format";
-import { ALERT, AXIS_TICK, INK, MUTED_MARK, SERIES } from "../dashboard/analytics/palette";
+import { formatBucket, formatBucketDate, formatNumber } from "../dashboard/analytics/format";
+import { AXIS_TICK, INK, MUTED_MARK } from "../dashboard/analytics/palette";
 import { ClickTip, plural } from "./ClickTip";
 import { useOpenModule } from "./links";
-import { LinkedTick, RowLabelTick, type RowLink } from "./RowLabelTick";
 
 const usersLink = (key: string) => `/users?${new URLSearchParams({ userType: key })}`;
+
+const manilaDay = (date: string) => new Date(`${date}T12:00:00+08:00`);
+const yearOf = (date: string) => manilaDay(date).toLocaleDateString("en-US", { year: "numeric", timeZone: "Asia/Manila" });
+const dateWithYear = (date: string) => manilaDay(date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" });
+
+/** All-time history can span several years, so its tooltip always names the year and its axis names it where the year changes. */
+export const bucketTooltipLabel = (date: string, range: DecisionAnalytics["range"]) =>
+  range === "all" ? `Week of ${dateWithYear(date)}` : formatBucket(date, range);
+export const bucketAxisLabel = (date: string, index: number, dates: string[], range: DecisionAnalytics["range"]) =>
+  range === "all" && (index === 0 || yearOf(dates[index - 1]) !== yearOf(date)) ? dateWithYear(date) : formatBucketDate(date);
 
 type ActivityRow = SearchActivityPoint & { unattributed: number };
 const UNATTRIBUTED = "Unattributed";
@@ -19,7 +28,7 @@ function ActivityTip({ point, range }: { point: ActivityRow; range: DecisionAnal
   const { unattributed } = point;
   return (
     <div className="decision-tooltip">
-      <strong>{formatBucket(point.date, range)}</strong>
+      <strong>{bucketTooltipLabel(point.date, range)}</strong>
       <span>{plural(point.total, "search", "searches")}</span>
       {accountTypes.map((type) => (
         <span key={type.key} className="tip-split"><i style={{ background: type.color }} aria-hidden="true" />{type.label}: {formatNumber(point[type.key])}</span>
@@ -73,7 +82,7 @@ export function SearchActivity({ data }: { data: DecisionAnalytics }) {
           <CartesianGrid vertical={false} stroke={INK.grid} />
           <XAxis
             dataKey="date"
-            tickFormatter={formatBucketDate}
+            tickFormatter={(date: string, index: number) => bucketAxisLabel(date, index, points.map((point) => point.date), data.range)}
             tick={AXIS_TICK}
             tickLine={false}
             axisLine={{ stroke: INK.grid }}

@@ -8,7 +8,7 @@ export type ChartCopy = {
 export const COPY = {
   readiness: {
     title: "Missing details",
-    what: "Active places missing each detail, the biggest gap first. Each bar is every place the check applies to: red is the places missing it, pale blue the places that have it. Indoor locations (rooms, offices, laboratories and restrooms) are only expected of places that can hold them (not Food or Parking), so that bar is shorter. Description and map position are not listed: every location form requires a description, and a place's map position comes from its footprint in the Map Editor. Whether searched indoor locations have a marker is the last chart on this page. Click the red part for the places missing it, the pale part for the places that have it.",
+    what: "Active places missing each detail, the biggest gap first. Each bar is every place the check applies to: red is the places missing it, pale blue the places that have it. Indoor locations (rooms, offices, laboratories and restrooms) are only expected of places that can hold them (not Food or Parking), so that bar is shorter. Description and map position are not listed: every location form requires a description, and a place's map position comes from its footprint in the Map Editor. Indoor marker coverage, beside this chart, counts every active indoor location with and without a marker, searched or not. Click the red part for the places missing it, the pale part for the places that have it.",
     read: [
       { see: "A long red part", means: "many places are missing that one thing.", action: "Click it and work down the list." },
       { see: "Entrance linked is red", means: "those places show on the map but the app cannot route to them.", action: "Link an entrance in the Map Editor." },
