@@ -10,6 +10,7 @@ import { signInAs } from "../../test/session";
 import { AnalyticsPage } from "./AnalyticsPage";
 import { nameSummary } from "./ClickTip";
 import { fitLabel } from "./RowLabelTick";
+import { accountTypes } from "../../lib/accountType";
 
 function Where() {
   const where = useLocation();
@@ -43,7 +44,7 @@ it("shows the five charts and refetches searches for another range", async () =>
   const request = vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
   renderPage();
 
-  for (const title of ["Directory readiness", "Closure impact", "Reach by travel mode", "Searches by account type", "Searches by destination type"]) {
+  for (const title of ["Missing details", "Closure impact", "Reach by travel mode", "Search activity", "Searches for destinations without markers"]) {
     expect(await screen.findByText(title)).toBeInTheDocument();
   }
   await userEvent.selectOptions(screen.getByRole("combobox"), "month");
@@ -57,7 +58,7 @@ it("explains a failed load and retries on request", async () => {
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   request.mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
   await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-  expect(await screen.findByText("Directory readiness")).toBeInTheDocument();
+  expect(await screen.findByText("Missing details")).toBeInTheDocument();
 });
 
 it("says what to fix when the server finds no main gate", async () => {
@@ -208,22 +209,59 @@ it("opens the reachable and unreachable places from the two parts of a travel mo
   expect(destination().params.get("why")).toBe("Not reachable by bicycle");
 });
 
-it("opens the places with a readiness check from its blue part and those missing it from its red part", async () => {
+/** The readiness checks in the order the chart ranks them: the biggest gap first. */
+const rankedChecks = () => fixture().readiness.checks
+  .map((check) => ({ ...check, missingCount: check.total - check.complete }))
+  .sort((a, b) => b.missingCount - a.missingCount || b.total - a.total || a.label.localeCompare(b.label));
+
+it("ranks the missing details by gap size and shows each applicable total instead of a fully-ready score", async () => {
   vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
   renderPage();
-  await screen.findByText("Directory readiness");
-  // Recharts draws no rectangle for an empty part, so the first drawn part belongs to the first check that has one.
-  const { checks } = fixture().readiness;
-  const withIt = checks.find((check) => check.have?.length)!;
-  const without = checks.find((check) => check.missing.length)!;
+  await screen.findByText("Missing details");
 
-  fireEvent.click(segments("Directory readiness")[0][0]);
-  expect(destination().params.get("ids")).toBe(withIt.have!.map((place) => place.id).join(","));
-  expect(destination().params.get("why")).toBe(`With ${withIt.label.toLowerCase()}`);
+  expect(screen.queryByText(/fully ready/i)).not.toBeInTheDocument();
+  const ranked = rankedChecks();
+  const block = screen.getByRole("heading", { name: "Missing details" }).closest(".graph") as HTMLElement;
+  const labels = Array.from(block.querySelectorAll("text")).map((node) => node.textContent);
+  const shown = labels.filter((text) => /\d+ missing$/.test(text ?? ""));
+  expect(shown).toEqual(ranked.map((row) => (row.missingCount ? `${row.missingCount} of ${row.total} missing` : `none of ${row.total} missing`)));
+  // Ranked: the biggest gap comes first.
+  expect(ranked.map((row) => row.missingCount)).toEqual([...ranked.map((row) => row.missingCount)].sort((a, b) => b - a));
+  // Each check keeps its own applicable total: rooms ask only the places that may hold them.
+  const rooms = ranked.find((row) => row.key === "rooms")!;
+  expect(rooms.total).toBeLessThan(fixture().readiness.total);
+  // Every check with a gap stays reachable by keyboard through its row label.
+  for (const row of ranked.filter((check) => check.missing.length)) {
+    expect(screen.getByRole("link", { name: `${row.label}: list the ${row.missing.length} places missing it in Locations` })).toBeInTheDocument();
+  }
+});
 
-  fireEvent.click(segments("Directory readiness")[1][0]);
+it("opens the places missing a check from its red part and those that have it from its pale part", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Missing details");
+  // Recharts draws no rectangle for an empty part, so the first drawn part belongs to the first ranked check that has one.
+  const ranked = rankedChecks();
+  const without = ranked.find((check) => check.missing.length)!;
+  const withIt = ranked.find((check) => check.have?.length)!;
+
+  fireEvent.click(segments("Missing details")[0][0]);
+  expect(destination().path).toBe("/locations");
   expect(destination().params.get("ids")).toBe(without.missing.map((place) => place.id).join(","));
   expect(destination().params.get("why")).toBe(`Missing ${without.label.toLowerCase()}`);
+
+  fireEvent.click(segments("Missing details")[1][0]);
+  expect(destination().params.get("ids")).toBe(withIt.have!.map((place) => place.id).join(","));
+  expect(destination().params.get("why")).toBe(`With ${withIt.label.toLowerCase()}`);
+});
+
+it("keeps map pins honest: a footprint-only place has a position, so only places with neither are missing a pin", () => {
+  const places = locations.filter((item) => item.type === "Place" && item.status === "Active");
+  const footprintOnly = { ...places[0], id: "fp-only", positioned: false, lat: null, lng: null, polygonCoordinates: [[1, 1], [1, 2], [2, 2]] as [number, number][] };
+  const neither = { ...places[1], id: "nothing", positioned: false, lat: null, lng: null };
+  const pin = generateDecisionAnalytics("week", [...locations, footprintOnly, neither]).readiness.checks.find((check) => check.key === "pin")!;
+  // The fixture mirrors the server's rule on the Location's own position flag; the footprint-only case is covered server-side.
+  expect(pin.missing.map((place) => place.id)).toContain("nothing");
 });
 
 it("leaves the half of a bar a server sent no list for unclickable", async () => {
@@ -240,7 +278,7 @@ it("leaves the half of a bar a server sent no list for unclickable", async () =>
   expect(segments("Closure impact")[0][0]).toHaveAttribute("cursor", "pointer");
 });
 
-it("leaves the reachable and readiness 'with' halves unclickable when the server sends no list, as today's backend does", async () => {
+it("leaves the reachable and readiness 'has it' halves unclickable when an older server sends no list", async () => {
   const base = fixture();
   vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
     ...base,
@@ -255,13 +293,13 @@ it("leaves the reachable and readiness 'with' halves unclickable when the server
   fireEvent.click(reached);
   expect(destination().path).toBe("/");
 
-  const ready = segments("Directory readiness")[0][0];
+  const ready = segments("Missing details")[1][0];
   expect(ready).toHaveAttribute("cursor", "default");
   fireEvent.click(ready);
   expect(destination().path).toBe("/");
 
-  // The halves the backend does send still open their places.
-  fireEvent.click(segments("Directory readiness")[1][0]);
+  // The halves an older server does send still open their places.
+  fireEvent.click(segments("Missing details")[0][0]);
   expect(destination().path).toBe("/locations");
 });
 
@@ -270,4 +308,157 @@ it("keeps the optional place lists for the other half of each bar when the serve
   expect(parsed.readiness.checks[0].have).toEqual(fixture().readiness.checks[0].have);
   expect(parsed.closures![0].longerPlaces).toEqual(fixture().closures![0].longerPlaces);
   expect(parsed.reach!.modes[0].reachablePlaces).toEqual(fixture().reach!.modes[0].reachablePlaces);
+});
+
+it("labels a detour-only closure as longer walks, never as safe to close", async () => {
+  const base = fixture();
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue(base);
+  renderPage();
+  await screen.findByText("Closure impact");
+
+  expect(base.closures!.some((row) => !row.cutOff.length)).toBe(true);
+  expect(screen.getByText("detour only")).toBeInTheDocument();
+  expect(screen.queryByText("safe")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "How to read Closure impact" }));
+  const guide = screen.getByRole("dialog", { name: "How to read Closure impact" });
+  expect(within(guide).queryByText(/safe to close/i)).not.toBeInTheDocument();
+  expect(guide).toHaveTextContent("not proof that closing it is safe");
+  expect(guide).toHaveTextContent("whether or not anyone searches");
+});
+
+it("draws unreachable destinations in the neutral grey, not the alert red", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Reach by travel mode");
+
+  const unreachable = segments("Reach by travel mode")[1][0];
+  expect(unreachable.getAttribute("fill")).toBe("#8a948f");
+  expect(unreachable.getAttribute("fill")).not.toBe("#d64545");
+});
+
+it("tags the current-snapshot graphs apart from the range-dependent search graphs", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
+  renderPage();
+  await screen.findByText("Missing details");
+
+  expect(screen.getAllByText("Current snapshot")).toHaveLength(2);
+  expect(screen.getByText(/searches this week$/)).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByRole("combobox"), "month");
+  expect(await screen.findByText(/searches this month$/)).toBeInTheDocument();
+  expect(screen.getAllByText("Current snapshot")).toHaveLength(2);
+});
+
+it("accepts the new contract and rejects the removed fully-ready shape's replacement being malformed", () => {
+  const parsed = normalizeBackendDecisionAnalytics(fixture());
+  expect(parsed.searches.activity.points).toEqual(fixture().searches.activity.points);
+  expect(parsed.searches.markerGap).toEqual(fixture().searches.markerGap);
+  expect(() => normalizeBackendDecisionAnalytics({ ...fixture(), searches: { ...fixture().searches, activity: { bucket: "month", points: [] } } })).toThrow();
+  expect(() => normalizeBackendDecisionAnalytics({ ...fixture(), searches: { ...fixture().searches, markerGap: [{ type: "Floor", searches: 1, withoutMarker: 0, notOnMap: 0, missing: [], have: [] }] } })).toThrow();
+});
+
+it("builds a fixture whose searches add up across the time series, the account types and the destination types", () => {
+  for (const range of ["week", "month", "all", "year-2026"] as const) {
+    const { searches } = generateDecisionAnalytics(range, locations);
+    const { points, bucket } = searches.activity;
+    expect(bucket).toBe(range === "week" || range === "month" ? "day" : "week");
+    expect(points.length).toBe(range === "week" ? 7 : range === "month" ? 30 : points.length);
+    expect(points.reduce((sum, point) => sum + point.total, 0)).toBe(searches.total);
+    for (const point of points) expect(point.student + point.teacher + point.visitor).toBe(point.total);
+    expect(searches.byAccountType.student + searches.byAccountType.teacher + searches.byAccountType.visitor).toBe(searches.total);
+    expect(searches.markerGap.map((row) => row.type)).toEqual(["Building", "Room", "Laboratory", "Office", "Restroom"]);
+    for (const row of searches.markerGap) {
+      expect(row.withoutMarker).toBeLessThanOrEqual(row.searches);
+      expect(row.notOnMap).toBeLessThanOrEqual(row.withoutMarker);
+      expect(row.missing.reduce((sum, item) => sum + item.searches, 0)).toBe(row.withoutMarker);
+      expect(row.missing.reduce((sum, item) => sum + item.searches, 0) + row.have.reduce((sum, item) => sum + item.searches, 0)).toBe(row.searches);
+    }
+  }
+});
+
+it("plots search activity as a stacked time series with named axes and consistent account colours", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async (range = "week") => generateDecisionAnalytics(range, locations));
+  renderPage();
+  await screen.findByText("Search activity");
+  const block = screen.getByRole("heading", { name: "Search activity" }).closest(".graph") as HTMLElement;
+
+  expect(within(block).getByText("Searches per day")).toBeInTheDocument();
+  expect(within(block).getByText("Day")).toBeInTheDocument();
+  // One stacked series per account type, in the shared account colours.
+  const fills = Array.from(block.querySelectorAll(".recharts-bar")).map((bar) => bar.querySelector("path, rect")?.getAttribute("fill"));
+  expect(fills).toEqual(accountTypes.map((type) => type.color));
+
+  await userEvent.selectOptions(screen.getByRole("combobox"), "all");
+  expect(await within(block).findByText("Searches per week")).toBeInTheDocument();
+  expect(within(block).getByText("Week starting")).toBeInTheDocument();
+});
+
+it("opens an account type's accounts from the Search activity legend", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Search activity");
+
+  await userEvent.click(screen.getByRole("button", { name: /^Staff: \d+ searches?\. Open Staff accounts in User Management$/ }));
+  expect(destination().path).toBe("/users");
+  expect(destination().params.get("userType")).toBe("teacher");
+});
+
+it("says what a search is not, and shows an empty state when nothing was searched", async () => {
+  const base = fixture();
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockResolvedValue({
+    ...base,
+    searches: { ...base.searches, total: 0, byAccountType: { student: 0, teacher: 0, visitor: 0 }, activity: { bucket: "day", points: base.searches.activity.points.map((point) => ({ ...point, total: 0, student: 0, teacher: 0, visitor: 0 })) }, markerGap: base.searches.markerGap.map((row) => ({ ...row, searches: 0, withoutMarker: 0, notOnMap: 0, missing: [], have: [] })) },
+  });
+  renderPage();
+  expect(await screen.findByText("No searches were recorded in this range.")).toBeInTheDocument();
+  expect(screen.getByText("No searches for active destinations were recorded in this range.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "How to read Search activity" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("not visits, arrivals, unique people or route attempts");
+});
+
+/** The marker-gap rows in the order the chart ranks them. */
+const rankedGap = () => [...fixture().searches.markerGap].sort((a, b) => b.withoutMarker - a.withoutMarker || b.searches - a.searches);
+const gapLabels = { Building: "Places", Room: "Rooms", Laboratory: "Laboratories", Office: "Offices", Restroom: "Restrooms" } as const;
+
+it("shows both the missing-marker count and the total for each destination type, not a percentage alone", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Searches for destinations without markers");
+  const block = screen.getByRole("heading", { name: "Searches for destinations without markers" }).closest(".graph") as HTMLElement;
+  const text = Array.from(block.querySelectorAll("text")).map((node) => node.textContent);
+
+  // Ranked by missing-marker searches; each row states both counts and the share.
+  const expected = rankedGap().map((row) => (row.searches ? `${row.withoutMarker} of ${row.searches} · ${Math.round((row.withoutMarker / row.searches) * 100)}%` : "no searches"));
+  expect(text.filter((value) => / of \d+ · \d+%$|^no searches$/.test(value ?? ""))).toEqual(expected);
+});
+
+it("opens the searched destinations with no marker from the red part and those with one from the blue part, by typed key", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Searches for destinations without markers");
+  const ranked = rankedGap();
+  const without = ranked.find((row) => row.missing.length)!;
+  const withIt = ranked.find((row) => row.have.length)!;
+  expect(without.type).not.toBe("Building");
+
+  fireEvent.click(segments("Searches for destinations without markers")[0][0]);
+  expect(destination().path).toBe("/locations");
+  expect(destination().params.get("keys")).toBe(without.missing.map((item) => `${without.type}:${item.id}`).join(","));
+  expect(destination().params.get("why")).toBe(`${gapLabels[without.type]} searched, no marker`);
+  expect(destination().params.get("ids")).toBeNull();
+
+  fireEvent.click(segments("Searches for destinations without markers")[1][0]);
+  const prefix = withIt.type === "Building" ? "Place" : withIt.type;
+  expect(destination().params.get("keys")).toBe(withIt.have.map((item) => `${prefix}:${item.id}`).join(","));
+  expect(destination().params.get("why")).toBe(`${gapLabels[withIt.type]} searched, with a marker`);
+});
+
+it("never says an unmarked room cannot be found: the app falls back to its building", async () => {
+  vi.spyOn(services.dashboard, "decisionAnalytics").mockImplementation(async () => fixture());
+  renderPage();
+  await screen.findByText("Searches for destinations without markers");
+  await userEvent.click(screen.getByRole("button", { name: "How to read Searches for destinations without markers" }));
+  const guide = screen.getByRole("dialog");
+  expect(guide).toHaveTextContent("still opens an indoor location with no marker at its building");
+  expect(guide).toHaveTextContent("only the exact spot is missing");
+  expect(guide).toHaveTextContent("not a visit");
 });

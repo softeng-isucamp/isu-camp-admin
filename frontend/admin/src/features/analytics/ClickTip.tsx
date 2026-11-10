@@ -12,12 +12,13 @@ export const nameSummary = (places: AnalyticsPlaceRef[]) => {
   return places.length > TIP_NAMES ? `${shown} +${places.length - TIP_NAMES} more` : shown;
 };
 
-/** Tooltip body for clickable bars: the title, a count line and at most a few names. */
-export function ClickTip({ title, value, names }: { title: string; value: string; names?: AnalyticsPlaceRef[] }) {
+/** Tooltip body for clickable bars: the title, a count line, an optional sentence of context and at most a few names. */
+export function ClickTip({ title, value, note, names }: { title: string; value: string; note?: string; names?: AnalyticsPlaceRef[] }) {
   return (
     <div className="decision-tooltip">
       <strong>{title}</strong>
       <span>{value}</span>
+      {note && <span className="tip-names">{note}</span>}
       {!!names?.length && <span className="tip-names">{nameSummary(names)}</span>}
     </div>
   );

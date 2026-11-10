@@ -1,4 +1,4 @@
-import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, ReadinessGap } from "../../types";
+import type { AnalyticsPlaceRef, DashboardRange, DecisionAnalytics, DestinationType, Location, MarkerGapRow, ReadinessGap, SearchActivityPoint, SearchedDestination, UserAccountType } from "../../types";
 import mapFixture from "../generated-map-fixture.json";
 import { indoorLocationTypes, isLocationContainer } from "../../lib/locationPolicy";
 import { mulberry32 } from "./prng";
@@ -9,6 +9,38 @@ import { mulberry32 } from "./prng";
  * indoor rooms are read from the Locations; entrance links, searches, pathways and
  * travel modes are seeded, since the local adapter has no route graph or history.
  */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const manilaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+const shiftDay = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+
+/** Splits `total` across `weights` in whole numbers that add up to it exactly (largest remainder). */
+const apportion = (total: number, weights: number[]): number[] => {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!weights.length || sum <= 0) return weights.map(() => 0);
+  const exact = weights.map((weight) => (total * weight) / sum);
+  const counts = exact.map(Math.floor);
+  const order = exact.map((value, index) => ({ index, rest: value - Math.floor(value) })).sort((a, b) => b.rest - a.rest || a.index - b.index);
+  const remainder = total - counts.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < remainder; i += 1) counts[order[i].index] += 1;
+  return counts;
+};
+
+/** The bucket start days a range plots: days for a week or month, weeks (named by their first day) for all time and a year. */
+const bucketStarts = (range: DashboardRange): { bucket: "day" | "week"; dates: string[] } => {
+  const today = manilaToday();
+  if (range === "week" || range === "month") {
+    const length = range === "week" ? 7 : 30;
+    return { bucket: "day", dates: Array.from({ length }, (_, i) => shiftDay(today, i - (length - 1))) };
+  }
+  const first = range === "all" ? shiftDay(today, -7 * 25) : `${range.slice(5)}-01-01`;
+  const last = range === "all" ? today : `${range.slice(5)}-12-31` < today ? `${range.slice(5)}-12-31` : today;
+  const dates: string[] = [];
+  for (let day = first; day <= last; day = shiftDay(day, 7)) dates.push(day);
+  return { bucket: "week", dates };
+};
+
+const hasMarker = (place: Location) => place.positioned || (place.lat != null && place.lng != null);
+
 /** Searches relative to a week: a past year is a full school year, this year is part of one. */
 const searchScale = (range: DashboardRange) => {
   if (range === "week") return 1;
@@ -107,25 +139,61 @@ export function generateDecisionAnalytics(range: DashboardRange, locations: Loca
   });
 
   const total = Math.round(59 * scale);
-  const split = <K extends string>(keys: K[], shares: number[]) => {
-    const values = shares.map((share) => Math.round(total * share));
-    values[0] += total - values.reduce((sum, value) => sum + value, 0);
-    return Object.fromEntries(keys.map((key, i) => [key, values[i]])) as Record<K, number>;
-  };
+  const accountShares = [0.64, 0.22, 0.14];
+  const accountKeys: UserAccountType[] = ["student", "teacher", "visitor"];
+
+  // Searches over time: busier on weekdays, split by account type per bucket.
+  const { bucket, dates } = bucketStarts(range);
+  const perBucket = apportion(total, dates.map((date) => {
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    return bucket === "day" ? (weekday === 0 || weekday === 6 ? 0.25 : 1) * (0.6 + rand()) : 0.6 + rand();
+  }));
+  const points: SearchActivityPoint[] = dates.map((date, index) => {
+    const [student, teacher, visitor] = apportion(perBucket[index], accountShares.map((share) => share * (0.7 + rand() * 0.6)));
+    return { date, total: perBucket[index], student, teacher, visitor };
+  });
+  const byAccountType = Object.fromEntries(accountKeys.map((key) => [key, points.reduce((sum, point) => sum + point[key], 0)])) as Record<UserAccountType, number>;
+
+  // Searches by destination type, spread over the real fixture records so a quick link opens records that exist.
+  const indoor = locations.filter((item) => item.status === "Active" && item.parentId && item.type !== "Place" && item.type !== "Floor");
+  const placeOf = new Map(places.map((place) => [place.id, place]));
+  const typeShares: Array<[DestinationType, Location[], number]> = [
+    ["Building", places, 0.55],
+    ["Room", indoor.filter((item) => item.type === "Room"), 0.18],
+    ["Laboratory", indoor.filter((item) => item.type === "Laboratory"), 0.09],
+    ["Office", indoor.filter((item) => item.type === "Office"), 0.14],
+    ["Restroom", indoor.filter((item) => item.type === "Restroom"), 0.04],
+  ];
+  const typeTotals = apportion(total, typeShares.map(([, records, share]) => (records.length ? share : 0)));
+  const markerGap: MarkerGapRow[] = typeShares.map(([type, records], index) => {
+    const counts = apportion(typeTotals[index], records.map(() => rand() ** 3 + 0.02));
+    const searched = records.map((record, i) => ({ record, searches: counts[i] })).filter((entry) => entry.searches > 0);
+    const asRow = ({ record, searches }: { record: Location; searches: number }): SearchedDestination => ({ id: record.id, name: record.name, searches });
+    const order = (a: SearchedDestination, b: SearchedDestination) => b.searches - a.searches || a.name.localeCompare(b.name);
+    const missing = searched.filter(({ record }) => !hasMarker(record));
+    const parentMapped = (record: Location) => {
+      const parent = record.parentId ? placeOf.get(record.parentId) : undefined;
+      return !!parent && hasMarker(parent);
+    };
+    return {
+      type,
+      searches: typeTotals[index],
+      withoutMarker: missing.reduce((sum, entry) => sum + entry.searches, 0),
+      // An indoor Location with no marker still opens at its building; only a building off the map leaves nothing to show.
+      notOnMap: missing.filter(({ record }) => type === "Building" || !parentMapped(record)).reduce((sum, entry) => sum + entry.searches, 0),
+      missing: missing.map(asRow).sort(order),
+      have: searched.filter(({ record }) => hasMarker(record)).map(asRow).sort(order),
+    };
+  });
 
   return {
     range,
     readiness: {
       total: places.length,
-      fullyReady: withGaps.filter(({ gaps }) => gaps.length === 0).length,
       checks,
     },
     closures,
     reach: { origin: "Main Gate", total: routable.length, modes },
-    searches: {
-      total,
-      byAccountType: split(["student", "teacher", "visitor"], [0.64, 0.22, 0.14]),
-      byDestinationType: split<DestinationType>(["Building", "Room", "Office", "Laboratory", "Restroom"], [0.55, 0.18, 0.14, 0.09, 0.04]),
-    },
+    searches: { total, byAccountType, activity: { bucket, points }, markerGap },
   };
 }

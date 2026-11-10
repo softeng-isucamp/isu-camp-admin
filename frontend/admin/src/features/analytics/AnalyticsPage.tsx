@@ -8,8 +8,11 @@ import { RangeSelect, rangeLabel } from "../dashboard/RangeSelect";
 import { COPY } from "./copy";
 import { GraphBlock } from "./GraphBlock";
 import { ClosureImpact, TravelModeReach } from "./NetworkCharts";
-import { DirectoryReadiness } from "./ReadinessCharts";
-import { SearchesByAccountType, SearchesByDestinationType } from "./SearchCharts";
+import { MissingDetails } from "./ReadinessCharts";
+import { SearchActivity, SearchesWithoutMarkers } from "./SearchCharts";
+
+/** Readiness, closures and reach describe the map as it is now; only the searches follow the range picker. */
+const SNAPSHOT_NOTE = "Current snapshot";
 
 export const decisionAnalyticsQueryKey = (range: DashboardRange) => ["decision-analytics", range] as const;
 
@@ -19,7 +22,7 @@ function Section({ id, title, note, children }: { id: string; title: string; not
     <section className="decision-group" aria-labelledby={`analytics-${id}`}>
       <div className="decision-group-head">
         <h2 id={`analytics-${id}`}>{title}</h2>
-        {note && <span className="decision-tag">{note}</span>}
+        {note && <span className={`decision-tag${note === SNAPSHOT_NOTE ? " decision-tag-snapshot" : ""}`}>{note}</span>}
       </div>
       <div className="graph-panel">{children}</div>
     </section>
@@ -70,12 +73,12 @@ export function AnalyticsPage() {
               <Button type="button" variant="subtle" loading={isFetching} onClick={() => void refetch()}>Try again</Button>
             </div>
           )}
-          <Section id="ready" title="Is the directory ready?">
+          <Section id="ready" title="Is the directory ready?" note={SNAPSHOT_NOTE}>
             <GraphBlock copy={COPY.readiness} wide>
-              <DirectoryReadiness data={data} />
+              <MissingDetails data={data} />
             </GraphBlock>
           </Section>
-          <Section id="routes" title="Can people get there?">
+          <Section id="routes" title="Can people get there?" note={SNAPSHOT_NOTE}>
             <GraphBlock copy={COPY.closures}>
               <ClosureImpact data={data} />
             </GraphBlock>
@@ -84,11 +87,11 @@ export function AnalyticsPage() {
             </GraphBlock>
           </Section>
           <Section id="searches" title="Who is searching, and for what?" note={`${data.searches.total} searches ${rangeText}`}>
-            <GraphBlock copy={COPY.byAccount}>
-              <SearchesByAccountType data={data} />
+            <GraphBlock copy={COPY.activity}>
+              <SearchActivity data={data} />
             </GraphBlock>
-            <GraphBlock copy={COPY.byDestination}>
-              <SearchesByDestinationType data={data} />
+            <GraphBlock copy={COPY.markerGap}>
+              <SearchesWithoutMarkers data={data} />
             </GraphBlock>
           </Section>
         </div>

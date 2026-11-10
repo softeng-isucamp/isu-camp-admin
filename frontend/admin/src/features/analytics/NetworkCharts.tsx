@@ -10,7 +10,8 @@ import { RowLabelTick, type RowLink } from "./RowLabelTick";
 type ClosureRow = NonNullable<DecisionAnalytics["closures"]>[number] & { cut: number; longer: number };
 
 /**
- * Per pathway: places cut off (red) and places that only get a longer walk (grey). Each part opens Locations narrowed to
+ * Per pathway: places cut off (red) and places that only get a longer walk (grey). Counts places, not searches: a rarely
+ * searched place is cut off just the same, and a pathway with grey only is a detour, not proof that closing it is safe. Each part opens Locations narrowed to
  * those places (a part with no list is not clickable); the pathway's name opens it in the Map Editor.
  */
 export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
@@ -65,7 +66,7 @@ export function ClosureImpact({ data }: { data: DecisionAnalytics }) {
                 if (!row) return null;
                 return (
                   <text x={Number(x) + Number(width) + 6} y={Number(y) + Number(height) / 2 + 4} fontSize={11} fill={row.cut ? ALERT : INK.muted} fontWeight={row.cut ? 600 : 400}>
-                    {row.cut ? `${row.cut} cut off` : "safe"}
+                    {row.cut ? `${row.cut} cut off` : "detour only"}
                   </text>
                 );
               }}

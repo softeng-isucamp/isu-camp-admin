@@ -209,12 +209,12 @@ export const normalizeBackendDashboardAnalytics = (raw: unknown): DashboardAnaly
   return { ...parsed.data, topDestinations: parsed.data.topDestinations.map(withNormalizedLocationKey) };
 };
 const placeRefSchema = z.object({ id: z.string().min(1), name: z.string() });
+const searchedDestinationSchema = placeRefSchema.extend({ searches: nonNegInt });
 const decisionAnalyticsSchema = z.object({
   range: z.union([z.enum(["week", "month", "all"]), z.string().regex(/^year-\d{4}$/).transform((value) => value as `year-${number}`)]),
   firstAnalyticsYear: z.number().int().min(1900).max(9999).optional(),
   readiness: z.object({
     total: nonNegInt,
-    fullyReady: nonNegInt,
     checks: z.array(z.object({
       key: z.enum(["photo", "description", "keywords", "pin", "entrance", "rooms"]),
       label: z.string(),
@@ -233,7 +233,18 @@ const decisionAnalyticsSchema = z.object({
   searches: z.object({
     total: nonNegInt,
     byAccountType: z.object({ student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt }),
-    byDestinationType: z.object({ Building: nonNegInt, Room: nonNegInt, Laboratory: nonNegInt, Office: nonNegInt, Restroom: nonNegInt }),
+    activity: z.object({
+      bucket: z.enum(["day", "week"]),
+      points: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), total: nonNegInt, student: nonNegInt, teacher: nonNegInt, visitor: nonNegInt })),
+    }),
+    markerGap: z.array(z.object({
+      type: z.enum(["Building", "Room", "Laboratory", "Office", "Restroom"]),
+      searches: nonNegInt,
+      withoutMarker: nonNegInt,
+      notOnMap: nonNegInt,
+      missing: z.array(searchedDestinationSchema),
+      have: z.array(searchedDestinationSchema),
+    })),
   }),
 });
 
@@ -795,7 +806,7 @@ export interface Services {
   dashboard: {
     summary(range?: DashboardRange): Promise<DashboardSummary>;
     analytics(range?: DashboardRange): Promise<DashboardAnalytics>;
-    /** Decision-support charts for the Analytics tab. Fixture only: the HTTP adapter rejects until the backend serves it. */
+    /** The Analytics page: readiness, closure and reach snapshots plus the range's search activity and marker gap. */
     decisionAnalytics(range?: DashboardRange): Promise<DecisionAnalytics>;
   };
 

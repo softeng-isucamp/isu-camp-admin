@@ -247,6 +247,33 @@ export interface DashboardAnalytics {
 }
 /** A place an Analytics quick link can open: `id` is its Location ID. */
 export interface AnalyticsPlaceRef { id: string; name: string }
+/** A destination people searched for in the range. `id` is a Place's or an indoor Location's own ID, which can collide: pair it with the row's `type`. */
+export interface SearchedDestination extends AnalyticsPlaceRef { searches: number }
+/** One bucket of the Search activity series: a day, or a week named by its first day (Asia/Manila). */
+export interface SearchActivityPoint {
+  date: string;
+  total: number;
+  student: number;
+  teacher: number;
+  visitor: number;
+}
+/** Recorded searches for one destination type, and how many were for a destination with no map marker. */
+export interface MarkerGapRow {
+  type: DestinationType;
+  /** Searches for active destinations of this type. */
+  searches: number;
+  /** Of those, searches for a destination with no marker: no point or footprint for a Place, no coordinates of its own for an indoor Location. */
+  withoutMarker: number;
+  /**
+   * Of those, searches that leave nothing to show on the map. The User App opens an indoor Location with no marker at
+   * its building, so for those only a building that has no position either counts; a Place without one always counts.
+   */
+  notOnMap: number;
+  /** The destinations behind `withoutMarker`, most searched first. */
+  missing: SearchedDestination[];
+  /** The destinations that have a marker, most searched first. */
+  have: SearchedDestination[];
+}
 /** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
 export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entrance" | "rooms";
 /**
@@ -261,8 +288,6 @@ export interface DecisionAnalytics {
   /** Active Places only; each check counts on its own over the Places it applies to. */
   readiness: {
     total: number;
-    /** Places that pass every check that applies to them. */
-    fullyReady: number;
     /** `have` (proposed) lists the places that pass the check, so the "has it" half of a bar can open them like `missing`; a server that omits it leaves that half unclickable. */
     checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[]; have?: AnalyticsPlaceRef[] }>;
   };
@@ -282,11 +307,17 @@ export interface DecisionAnalytics {
     /** `reachablePlaces` (proposed) lists the `reachable` places, so the reached part of a bar can open them like `unreachable`. */
     modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[]; reachablePlaces?: AnalyticsPlaceRef[] }>;
   };
-  /** Recorded searches in the range (UserHistory rows that survived deletion). */
+  /**
+   * Recorded searches in the range (UserHistory rows that survived deletion). A search is not a visit, an arrival, a
+   * person or a route attempt.
+   */
   searches: {
     total: number;
     byAccountType: Record<UserAccountType, number>;
-    byDestinationType: Record<DestinationType, number>;
+    /** Searches over time, stacked by account type: days for a week or month, weeks for all time and a year. */
+    activity: { bucket: "day" | "week"; points: SearchActivityPoint[] };
+    /** One row per destination type, in the order Place, Room, Laboratory, Office, Restroom. */
+    markerGap: MarkerGapRow[];
   };
 }
 export interface TopSearchedLocation {

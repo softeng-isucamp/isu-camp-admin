@@ -4305,6 +4305,10 @@ td small {
   font-size: 11px;
   font-weight: 600;
 }
+.decision-tag-snapshot {
+  background: #eef2f0;
+  color: var(--muted);
+}
 .decision-sub {
   margin: 4px 4px 14px;
   max-width: 880px;
@@ -4448,6 +4452,40 @@ td small {
   height: 9px;
   border-radius: 2px;
 }
+.decision-legend-links {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+}
+.decision-legend-links button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.decision-legend-links button:hover {
+  border-color: var(--border);
+  background: #f3f6f4;
+}
+.decision-legend-links button:focus-visible {
+  outline: 2px solid var(--green-2);
+  outline-offset: 1px;
+}
+.decision-legend-links button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.decision-legend-links small {
+  color: var(--muted);
+  font-size: 11px;
+}
 .decision-tooltip {
   display: flex;
   flex-direction: column;
@@ -4463,6 +4501,16 @@ td small {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.decision-tooltip .tip-split {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.decision-tooltip .tip-split i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
 .decision-tooltip .tip-names {
   color: var(--muted);
 }
@@ -4473,42 +4521,6 @@ td small {
 }
 .analytics-page .hero select {
   align-self: center;
-}
-/* Directory readiness */
-.readiness {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  align-items: center;
-  gap: 24px;
-}
-.readiness-headline {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 12px 24px 12px 0;
-  border: 0;
-  border-right: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.readiness-headline strong {
-  font-size: 64px;
-  line-height: 1;
-  font-weight: 800;
-  color: var(--text);
-}
-.readiness-headline strong.bad {
-  color: var(--danger);
-}
-.readiness-headline span {
-  font-size: 14px;
-  color: var(--muted);
-}
-.readiness-headline:hover span {
-  color: var(--green-2);
 }
 button.analytics-legend-row {
   width: 100%;
