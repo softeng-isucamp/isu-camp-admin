@@ -27,7 +27,7 @@ export function SearchesByAccountType({ data }: { data: DecisionAnalytics }) {
             content={({ active, payload }) => {
               const row = active ? (payload?.[0]?.payload as (typeof rows)[number] | undefined) : undefined;
               if (!row) return null;
-              return <ClickTip title={row.name} value={`${formatNumber(row.value)} searches (${formatPercent(row.value / (total || 1))})`} action={`see ${row.name.toLowerCase()} accounts`} />;
+              return <ClickTip title={row.name} value={`${formatNumber(row.value)} searches (${formatPercent(row.value / (total || 1))})`} />;
             }}
           />
           <Bar

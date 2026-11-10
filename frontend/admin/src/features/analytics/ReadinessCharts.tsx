@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Tooltip, XAxis, YAxis } from "recharts";
 import type { DecisionAnalytics } from "../../types";
 import { ChartArea } from "../dashboard/analytics/ChartCard";
 import { AXIS_TICK, ALERT, INK, SERIES } from "../dashboard/analytics/palette";
@@ -8,13 +8,20 @@ import { RowLabelTick, type RowLink } from "./RowLabelTick";
 
 type Row = DecisionAnalytics["readiness"]["checks"][number] & { missingCount: number };
 
-/** Fully-ready count beside one bar per check (has it / missing it). Clicking a bar opens Locations filtered to the places missing it. */
+/**
+ * Fully-ready count beside one bar per check, in two halves. The blue half opens Locations narrowed to the places that
+ * have it, the red half to the places missing it; a half the server sent no list for is not clickable.
+ */
 export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
   const navigate = useOpenModule();
   const { readiness } = data;
   const rows: Row[] = readiness.checks.map((check) => ({ ...check, missingCount: check.total - check.complete }));
   const openRow = (row: Row) => navigate(locationsListLink(row.missing, `Missing ${row.label.toLowerCase()}`));
-  const open = (entry: unknown) => {
+  const openHave = (entry: unknown) => {
+    const row = (entry as { payload?: Row } | undefined)?.payload;
+    if (row?.have?.length) navigate(locationsListLink(row.have, `With ${row.label.toLowerCase()}`));
+  };
+  const openMissing = (entry: unknown) => {
     const row = (entry as { payload?: Row } | undefined)?.payload;
     if (row && row.missing.length) openRow(row);
   };
@@ -67,13 +74,16 @@ export function DirectoryReadiness({ data }: { data: DecisionAnalytics }) {
                 <ClickTip
                   title={row.label}
                   value={`${row.complete} of ${row.total} have it · ${row.missingCount} missing`}
-                  action={row.missingCount ? `list the ${row.missingCount} in Locations` : undefined}
                 />
               );
             }}
           />
-          <Bar yAxisId="checks" dataKey="complete" stackId="r" fill={SERIES.blue} cursor="pointer" onClick={open} isAnimationActive={false} />
-          <Bar yAxisId="checks" dataKey="missingCount" stackId="r" fill={ALERT} fillOpacity={0.22} radius={[0, 4, 4, 0]} cursor="pointer" onClick={open} isAnimationActive={false} />
+          <Bar yAxisId="checks" dataKey="complete" stackId="r" fill={SERIES.blue} onClick={openHave} isAnimationActive={false}>
+            {rows.map((row) => <Cell key={row.key} cursor={row.have?.length ? "pointer" : "default"} />)}
+          </Bar>
+          <Bar yAxisId="checks" dataKey="missingCount" stackId="r" fill={ALERT} fillOpacity={0.22} radius={[0, 4, 4, 0]} onClick={openMissing} isAnimationActive={false}>
+            {rows.map((row) => <Cell key={row.key} cursor={row.missing.length ? "pointer" : "default"} />)}
+          </Bar>
         </BarChart>
       </ChartArea>
     </div>

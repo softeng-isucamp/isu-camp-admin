@@ -221,13 +221,14 @@ const decisionAnalyticsSchema = z.object({
       complete: nonNegInt,
       total: nonNegInt,
       missing: z.array(placeRefSchema),
+      have: z.array(placeRefSchema).optional(),
     })),
   }),
-  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt })).nullable(),
+  closures: z.array(z.object({ id: z.string().min(1), pathway: z.string(), cutOff: z.array(placeRefSchema), longerTrip: nonNegInt, longerPlaces: z.array(placeRefSchema).optional() })).nullable(),
   reach: z.object({
     origin: z.string(),
     total: nonNegInt,
-    modes: z.array(z.object({ mode: z.string(), reachable: nonNegInt, unreachable: z.array(placeRefSchema) })),
+    modes: z.array(z.object({ mode: z.string(), reachable: nonNegInt, unreachable: z.array(placeRefSchema), reachablePlaces: z.array(placeRefSchema).optional() })),
   }).nullable(),
   searches: z.object({
     total: nonNegInt,
