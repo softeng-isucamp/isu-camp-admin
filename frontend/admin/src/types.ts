@@ -247,8 +247,29 @@ export interface DashboardAnalytics {
 }
 /** A place an Analytics quick link can open: `id` is its Location ID. */
 export interface AnalyticsPlaceRef { id: string; name: string }
+/** One bucket of the Search activity series: a day, or a week named by its first day (Asia/Manila). */
+export interface SearchActivityPoint {
+  date: string;
+  /** Every recorded search in the bucket; the account types can add up to less (a deleted or unrecognised account). */
+  total: number;
+  student: number;
+  teacher: number;
+  visitor: number;
+}
+/** Active indoor Locations of one type, with and without a map marker of their own, searched or not. */
+export interface IndoorMarkerRow {
+  type: Exclude<DestinationType, "Building">;
+  /** Active indoor Locations of this type under an active Place. */
+  total: number;
+  /** Of those, the ones with their own coordinates. */
+  marked: number;
+  /** Indoor Location IDs (not Place IDs: pair each with `type`) with no marker, by name. */
+  missing: AnalyticsPlaceRef[];
+  /** The ones that have a marker, by name. */
+  have: AnalyticsPlaceRef[];
+}
 /** A readiness gap on a Place. `rooms` applies only to Places that hold rooms (not Food or Parking). */
-export type ReadinessGap = "photo" | "description" | "keywords" | "pin" | "entrance" | "rooms";
+export type ReadinessGap = "photo" | "keywords" | "entrance" | "rooms";
 /**
  * The Analytics page, served by `GET /api/dashboard/decision-analytics`
  * (`app/services/decision_analytics.py`). Readiness, closures and reach are a
@@ -261,10 +282,10 @@ export interface DecisionAnalytics {
   /** Active Places only; each check counts on its own over the Places it applies to. */
   readiness: {
     total: number;
-    /** Places that pass every check that applies to them. */
-    fullyReady: number;
     /** `have` (proposed) lists the places that pass the check, so the "has it" half of a bar can open them like `missing`; a server that omits it leaves that half unclickable. */
     checks: Array<{ key: ReadinessGap; label: string; complete: number; total: number; missing: AnalyticsPlaceRef[]; have?: AnalyticsPlaceRef[] }>;
+    /** One row per indoor type (Room, Laboratory, Office, Restroom). Places are not listed: their position comes from the footprint. */
+    indoorMarkers: IndoorMarkerRow[];
   };
   /** What closing each pathway would do to walking routes from the main gate: only pathways that change something, worst first. `id` is the Pathway ID. */
   closures: null | Array<{
@@ -282,11 +303,15 @@ export interface DecisionAnalytics {
     /** `reachablePlaces` (proposed) lists the `reachable` places, so the reached part of a bar can open them like `unreachable`. */
     modes: Array<{ mode: string; reachable: number; unreachable: AnalyticsPlaceRef[]; reachablePlaces?: AnalyticsPlaceRef[] }>;
   };
-  /** Recorded searches in the range (UserHistory rows that survived deletion). */
+  /**
+   * Recorded searches in the range (UserHistory rows that survived deletion). A search is not a visit, an arrival, a
+   * person or a route attempt.
+   */
   searches: {
     total: number;
     byAccountType: Record<UserAccountType, number>;
-    byDestinationType: Record<DestinationType, number>;
+    /** Searches over time, stacked by account type: days for a week or month, weeks for all time and a year. */
+    activity: { bucket: "day" | "week"; points: SearchActivityPoint[] };
   };
 }
 export interface TopSearchedLocation {

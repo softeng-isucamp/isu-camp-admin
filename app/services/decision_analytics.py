@@ -4,18 +4,28 @@ Serves the Analytics page. The response shape is the frontend's
 ``DecisionAnalytics`` (``frontend/admin/src/types.ts``), validated there by a
 Zod schema, and every number is read from tables that already exist:
 
-- **readiness** - active Places, their cover photos, text fields, pins,
-  entrance nodes and indoor Locations. A snapshot, not range-dependent.
+- **readiness** - active Places, their cover photos, search keywords, entrance
+  nodes and indoor Locations, one count per check (no "fully ready" total: it
+  would weigh a missing photo and a missing entrance the same). Description and
+  map position are not checked: the admin forms require a description, and a
+  Place gets its map position from its footprint in the Map Editor, so neither
+  is a separate task. A snapshot, not range-dependent.
+- **indoorMarkers** - every active indoor Location under an active Place, per
+  type, with or without its own map marker, whether or not anyone searched for
+  it. A snapshot. Places are not listed: their position comes from their
+  footprint, so they would always read as marked.
 - **reach** and **closures** - the route graph (``route_node``, ``pathway``,
   ``pathway_allowed_mode``, ``path_point``), read with the User App router's
   rules (``isu-camp-app/server/app/utils/routing.py``) so the admin reports the
   routes users actually get: active records only, one-way pathways stay
-  one-way, a pathway only carries the modes it allows ("Vehicle" covers every
-  wheeled mode), a Place is reached at one of its entrance nodes, and the
+  one-way, a pathway only carries the modes it allows. The admin stores only
+  Walking and Vehicle, so reach is reported for those two ("Vehicle" also
+  stands for a legacy car, motorcycle or bicycle permission), a Place is reached at one of its entrance nodes, and the
   origin is the one node named like the main gate. Not range-dependent.
 - **searches** - ``UserHistory`` rows in the range (week, month, all, or a
-  Manila calendar year ``year-YYYY``), split by account type and destination
-  type with the same rules as ``services.dashboard_analytics``.
+  Manila calendar year ``year-YYYY``): a time series stacked by account type.
+  A Search is a recorded navigation request, not a visit, an arrival, a person
+  or a route attempt.
 
 Place references carry the Place's id as the directory's DTO spells it
 (``str(building_id)``) so a chart mark can open exactly those records. No app
@@ -30,16 +40,16 @@ from datetime import datetime, timezone
 from extensions import db
 from model.app_user import USER_TYPES, AppUser, UserInfo, normalize_user_type
 from model.building import Building
-from model.location import LOCATION_TYPE_IDS, Location
+from model.location import LOCATION_TYPE_IDS, LOCATION_TYPE_NAMES, Location
 from model.path_point import PathPoint
 from model.pathway import Pathway
 from model.pathway_allowed_mode import PathwayAllowedMode
 from model.route_node import RouteNode
 from services.dashboard_analytics import (
     DESTINATION_TYPES,
-    MINIMUM_POLYGON_POINTS,
-    _destination_names,
-    _destination_of,
+    RANGE_BUCKET_DAYS,
+    _bucket_of,
+    _bucket_starts,
     _has_text,
     _history_rows,
     _period,
@@ -49,20 +59,21 @@ from services.dashboard_analytics import (
 
 READINESS_CHECKS = (
     ("photo", "Photo"),
-    ("description", "Description"),
     ("keywords", "Search keywords"),
-    ("pin", "Map pin"),
     ("entrance", "Entrance linked"),
-    ("rooms", "Indoor rooms"),
+    # Rooms, offices, laboratories and restrooms: any active indoor Location.
+    ("rooms", "Indoor locations"),
 )
 
-# The User App's modes, in the order the chart lists them, with its labels.
+# The access types a pathway can be given in the admin (Walking, Vehicle). A
+# Vehicle pathway carries bicycles, motorcycles and cars alike, so one bar
+# stands for all three.
 TRAVEL_MODES = (
     ("walking", "Walking"),
-    ("bicycle", "Bicycle"),
-    ("motorcycle", "Motorcycle"),
-    ("car", "Car"),
+    ("vehicle", "Vehicle"),
 )
+
+WHEELED_MODES = ("vehicle", "car", "motorcycle", "bicycle")
 
 # Mirrors routing.MODE_ALIASES: what a stored allowed-mode string means.
 MODE_ALIASES = {
@@ -87,7 +98,9 @@ CLOSURE_LIMIT = 5
 
 def _allows(stored, mode):
     label = MODE_ALIASES.get(str(stored or "").strip().lower())
-    return label == mode or (label == "vehicle" and mode in ("car", "motorcycle", "bicycle"))
+    if mode == "vehicle":
+        return label in WHEELED_MODES
+    return label == mode or (label == "vehicle" and mode in WHEELED_MODES)
 
 
 def _meters(a, b):
@@ -257,44 +270,32 @@ def _readiness(places, graph):
     }
 
     missing = {key: [] for key, _ in READINESS_CHECKS}
-    applies = {key: 0 for key, _ in READINESS_CHECKS}
-    fully_ready = 0
+    have = {key: [] for key, _ in READINESS_CHECKS}
 
     for place in places:
-        footprint = place.polygon_coordinates
-        enclosed = isinstance(footprint, list) and len(footprint) >= MINIMUM_POLYGON_POINTS
-        pinned = _position(place.latitude, place.longitude) is not None
         holds_rooms = place.can_contain_locations
         passed = {
             "photo": place.has_photo(),
-            "description": _has_text(place.description),
             "keywords": _has_text(place.keywords),
-            "pin": pinned or enclosed,
             "entrance": place.building_id in graph.entrances,
             # Only Places that may hold indoor Locations are asked to have one.
             "rooms": place.building_id in with_rooms if holds_rooms else None,
         }
-        ready = True
         for key, ok in passed.items():
             if ok is None:
                 continue
-            applies[key] += 1
-            if not ok:
-                missing[key].append(_ref(place))
-                ready = False
-        if ready:
-            fully_ready += 1
+            (have if ok else missing)[key].append(_ref(place))
 
     return {
         "total": len(places),
-        "fullyReady": fully_ready,
         "checks": [
             {
                 "key": key,
                 "label": label,
-                "complete": applies[key] - len(missing[key]),
-                "total": applies[key],
+                "complete": len(have[key]),
+                "total": len(have[key]) + len(missing[key]),
                 "missing": missing[key],
+                "have": have[key],
             }
             for key, label in READINESS_CHECKS
         ],
@@ -319,6 +320,7 @@ def _reach(places, graph):
             "mode": label,
             "reachable": sum(1 for place in routable if place.building_id in reached),
             "unreachable": [_ref(place) for place in routable if place.building_id not in reached],
+            "reachablePlaces": [_ref(place) for place in routable if place.building_id in reached],
         })
     return {"origin": (graph.gate.name or "Main gate").strip(), "total": len(routable), "modes": modes}
 
@@ -345,16 +347,17 @@ def _closures(places, graph):
         closed, _ = _shortest(walking, graph.gate.node_id, closed=pathway_id)
         after = _place_distances(closed, graph.entrances)
         cut_off = [by_id[place_id] for place_id in baseline if place_id not in after]
-        longer = sum(
-            1 for place_id, meters in baseline.items()
+        longer = [
+            by_id[place_id] for place_id, meters in baseline.items()
             if place_id in after and after[place_id] - meters > LONGER_TRIP_METERS
-        )
+        ]
         if cut_off or longer:
             impacts.append({
                 "id": str(pathway_id),
                 "pathway": names[pathway_id],
                 "cutOff": [_ref(place) for place in sorted(cut_off, key=lambda p: p.building_name.casefold())],
-                "longerTrip": longer,
+                "longerTrip": len(longer),
+                "longerPlaces": [_ref(place) for place in sorted(longer, key=lambda p: p.building_name.casefold())],
             })
 
     impacts.sort(key=lambda row: (-len(row["cutOff"]), -row["longerTrip"], row["pathway"].casefold(), row["id"]))
@@ -368,6 +371,49 @@ def _closures(places, graph):
         if counts[row["pathway"]] > 1:
             row["pathway"] = f"{row['pathway']} #{row['id']}"
     return top
+
+
+INDOOR_TYPES = tuple(name for name in DESTINATION_TYPES if name != "Building")
+
+
+def _indoor_markers():
+    """Per indoor type: active Locations with and without a marker of their own.
+
+    The User App lists an indoor Location only under an active building, so
+    those are the ones counted. A marker is the Location's own coordinates,
+    optional and independent of its building's. Without one the app still
+    opens the Location at its building, so a missing marker is a less exact
+    spot, not an unreachable destination.
+    """
+
+    active_places = {
+        building_id for (building_id,) in db.session.query(Building.building_id).filter(Building.status == "active").all()
+    }
+    found = {name: {"missing": [], "have": []} for name in INDOOR_TYPES}
+    rows = db.session.query(
+        Location.location_id, Location.location_name, Location.type_id, Location.building_id,
+        Location.latitude, Location.longitude,
+    ).filter(Location.status == "active").all()
+    for row in rows:
+        kind = LOCATION_TYPE_NAMES.get(row.type_id)
+        if kind not in found or row.building_id not in active_places:
+            continue
+        marked = _position(row.latitude, row.longitude) is not None
+        found[kind]["have" if marked else "missing"].append({"id": str(row.location_id), "name": row.location_name})
+
+    def ordered(refs):
+        return sorted(refs, key=lambda ref: (ref["name"].casefold(), ref["id"]))
+
+    return [
+        {
+            "type": name,
+            "total": len(found[name]["missing"]) + len(found[name]["have"]),
+            "marked": len(found[name]["have"]),
+            "missing": ordered(found[name]["missing"]),
+            "have": ordered(found[name]["have"]),
+        }
+        for name in INDOOR_TYPES
+    ]
 
 
 def _searches(range_key, today):
@@ -385,20 +431,31 @@ def _searches(range_key, today):
             .all()
         }
 
-    buildings, locations = _destination_names()
+    # Same buckets as the Dashboard's trend: days for a week or month, seven-day
+    # buckets for all time and for a calendar year, each named by its first day.
+    size = 7 if range_key.startswith("year-") else RANGE_BUCKET_DAYS[range_key]
+    points = {
+        start: {"date": start.isoformat(), "total": 0, **{name: 0 for name in USER_TYPES}}
+        for start in _bucket_starts(days, size)
+    }
     by_account = {name: 0 for name in USER_TYPES}
-    by_destination = {name: 0 for name in DESTINATION_TYPES}
     for row in rows:
+        point = points.get(_bucket_of(row[0], days, size))
         name = account_type.get(row[1])
+        if point is not None:
+            point["total"] += 1
+            if name is not None:
+                point[name] += 1
         if name is not None:
             by_account[name] += 1
-        destination = _destination_of(row, buildings, locations)
-        if destination is not None and destination[3] in by_destination:
-            by_destination[destination[3]] += 1
 
-    # Rows with no recognized account type or destination still count in the
-    # total, so the splits can add up to less than it.
-    return {"total": len(rows), "byAccountType": by_account, "byDestinationType": by_destination}
+    # Rows with no recognized account (a deleted account, an unknown type)
+    # still count in the totals, so the types can add up to less than them.
+    return {
+        "total": len(rows),
+        "byAccountType": by_account,
+        "activity": {"bucket": "day" if size == 1 else "week", "points": list(points.values())},
+    }
 
 
 def summarize_decision_analytics(range_key, now=None):
@@ -410,7 +467,7 @@ def summarize_decision_analytics(range_key, now=None):
     return {
         "range": range_key,
         "firstAnalyticsYear": (earliest_analytics_day() or today).year,
-        "readiness": _readiness(places, graph),
+        "readiness": {**_readiness(places, graph), "indoorMarkers": _indoor_markers()},
         "closures": _closures(places, graph),
         "reach": _reach(places, graph),
         "searches": _searches(range_key, today),

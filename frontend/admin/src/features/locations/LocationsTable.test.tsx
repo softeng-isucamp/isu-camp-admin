@@ -293,6 +293,43 @@ describe("Locations screen table and hierarchy toggle validation", () => {
     expect(screen.getByTestId("location-route")).toHaveTextContent(/^\/locations$/);
   });
 
+  it("lists only the typed records an Analytics keys link names, not another type that shares the ID", async () => {
+    const records = [
+      { id: "42", name: "Keyed Hall", code: "K-42", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "43", name: "Skipped Hall", code: "K-43", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      // Same ID as the Place and the Room, but a different type: a keys link must not match it.
+      { id: "42", name: "Keyed Lab", code: "L-42", type: "Laboratory" as const, parentId: "43", building: "Skipped Hall", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "42", name: "Keyed Room", code: "R-42", type: "Room" as const, parentId: "42", building: "Keyed Hall", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations(["/locations?keys=Place:42,Room:42&why=Keyed%20review"]);
+    expect(await screen.findByRole("row", { name: /Keyed Hall/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Keyed Room/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Keyed Lab/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Skipped Hall/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the keys chip with its count, and clearing it restores the full list and drops keys from the URL", async () => {
+    const records = [
+      { id: "42", name: "Keyed Hall", code: "K-42", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      { id: "43", name: "Skipped Hall", code: "K-43", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },
+      // Parented under Keyed Hall so the hierarchy shows no other Place as context.
+      { id: "42", name: "Keyed Lab", code: "L-42", type: "Laboratory" as const, parentId: "42", building: "Keyed Hall", floor: "Ground Floor", status: "Active" as const, lat: null, lng: null, positioned: false },
+    ];
+    vi.spyOn(services.locations, "list").mockResolvedValue({ items: records, total: records.length, page: 1, pageSize: 100 });
+
+    renderLocations(["/locations?keys=Place:42,Laboratory:42&why=Keyed%20review"]);
+    expect(await screen.findByRole("row", { name: /Keyed Hall/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Keyed Lab/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Skipped Hall/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter Keyed review (2)" }));
+    expect(await screen.findByRole("row", { name: /Skipped Hall/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Keyed Hall/ })).toBeInTheDocument();
+    expect(screen.getByTestId("location-route")).toHaveTextContent(/^\/locations$/);
+  });
+
   it("opens every Place and no indoor Location for the Analytics Places scope", async () => {
     const records = [
       { id: "p1", name: "Scope Hall", code: "S-1", type: "Place" as const, classification: "College" as const, parentId: null, status: "Active" as const, lat: null, lng: null, positioned: false },

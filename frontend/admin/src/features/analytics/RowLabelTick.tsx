@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { INK } from "../dashboard/analytics/palette";
 
 /** What a row's label opens, indexed like the chart's rows. */
@@ -82,7 +82,12 @@ export function RowLabelTick({ x = 0, y = 0, payload, index, width = 0, anchor =
       {text}
     </text>
   );
-  if (!link) return label;
+  return <LinkedTick link={link}>{label}</LinkedTick>;
+}
+
+/** Wraps a chart tick in a focusable link (Enter or Space opens it); without a link the tick is left as it is. */
+export function LinkedTick({ link, children }: { link: RowLink; children: ReactNode }) {
+  if (!link) return <>{children}</>;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
@@ -90,7 +95,7 @@ export function RowLabelTick({ x = 0, y = 0, payload, index, width = 0, anchor =
   };
   return (
     <g className="chart-row-link" role="link" tabIndex={0} aria-label={link.label} onClick={link.open} onKeyDown={onKeyDown} style={{ cursor: "pointer" }}>
-      {label}
+      {children}
     </g>
   );
 }
