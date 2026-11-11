@@ -85,9 +85,14 @@ RUN_OUTCOMES = {
     "backup skipped": "skipped",
 }
 
-# How many runs the panel is sent. A fortnight covers the default retention,
-# and the extra leaves room for the nights that failed and left no archive.
-RUNS_SHOWN = 20
+# How far back the panel's run history reaches is counted in days rather than
+# in rows - see _window_days, which works it out from the schedule, so there is
+# no second number here to drift from the retention it is meant to match.
+#
+# A ceiling, not a page size. Nothing should produce this many runs inside the
+# window - it is here so that a timer stuck in a restart loop cannot turn one
+# panel load into an unbounded response.
+RUNS_LIMIT = 200
 
 # A missed night is picked up this long after start, not immediately: a dump
 # competes with everything else a booting server is doing, and a restart loop
@@ -616,8 +621,45 @@ def _stored_sizes():
         return {}
 
 
-def recent_runs(limit=RUNS_SHOWN):
-    """What the automatic backup has done lately, newest first.
+# How many days one archive stands for, per schedule frequency. Retention
+# counts archives, not days, so the span it covers depends on how often the
+# timer fires: fourteen kept archives is a fortnight of a daily schedule and
+# most of a season of a weekly one.
+DAYS_PER_RUN = {"daily": 1, "weekly": 7}
+
+
+def _window_days(schedule):
+    """How many days of history the panel is sent.
+
+    The span the schedule's retention actually covers, because that is how far
+    back "was there a backup that day?" is still a question with an archive
+    behind it. ``keep`` is a number of archives rather than of days, so it is
+    read together with the frequency - windowing a weekly schedule on its
+    archive count would hide all but the last fortnight of it.
+
+    One day of slack, so a run that landed a few minutes before the boundary
+    is not cut off by the clock moving while somebody reads the panel.
+
+    A schedule this server cannot read falls back to the default rather than
+    showing nothing: the history is the one thing still worth reading when the
+    schedule row is the part that is broken.
+    """
+
+    schedule = schedule or {}
+
+    try:
+        keep = int(schedule.get("keep"))
+    except (TypeError, ValueError):
+        keep = DEFAULT_KEEP
+    if keep <= 0:
+        keep = DEFAULT_KEEP
+
+    per_run = DAYS_PER_RUN.get(schedule.get("frequency"), 1)
+    return keep * per_run + 1
+
+
+def recent_runs(schedule=None, *, limit=RUNS_LIMIT):
+    """Every automatic run inside the retention window, newest first.
 
     Returns None when the rows cannot be read at all - a deployment without the
     audit migration, or one whose database is briefly away - so the route can
@@ -628,6 +670,13 @@ def recent_runs(limit=RUNS_SHOWN):
     Only the timer's own rows, matched on actor and action: a backup somebody
     started from the panel is already in the table above, and the archives
     retention removed are audited separately as deletes.
+
+    Bounded by *time* and not by a row count, so no day drops off the list
+    while the archive it took is still stored. A restart takes a catch-up
+    backup, which puts two or three runs on one day; under a fixed row count
+    those extras pushed the oldest days out of a list that was supposed to
+    cover the fortnight. ``limit`` remains as a ceiling against a timer stuck
+    in a restart loop, not as a page size.
     """
 
     try:
@@ -635,12 +684,19 @@ def recent_runs(limit=RUNS_SHOWN):
     except (ImportError, ModuleNotFoundError):
         return None
 
+    since = datetime.now(timezone.utc) - timedelta(days=_window_days(schedule))
+
     try:
         rows = (
             db.session.query(AuditLog)
             .filter(
                 AuditLog.actor == AUDIT_ACTOR,
                 AuditLog.action.in_(tuple(RUN_OUTCOMES)),
+                # A row with no timestamp is left out rather than kept: this
+                # is a window over time, and a run that cannot say when it
+                # happened cannot be placed in one. The column is NOT NULL, so
+                # this decides nothing in practice.
+                AuditLog.created_at >= since,
             )
             .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
             .limit(max(1, int(limit)))

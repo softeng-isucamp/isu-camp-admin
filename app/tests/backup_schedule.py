@@ -600,7 +600,7 @@ def test_a_broken_audit_write_does_not_lose_the_backup(app, monkeypatch):
     assert job["status"] == "succeeded"
     assert len(backup_jobs.list_backups()) == 1
 
-def record_run(action, detail="", target_id=None, actor=None, minutes_ago=0):
+def record_run(action, detail="", target_id=None, actor=None, minutes_ago=0, days_ago=0):
     """Writes one audit row the way an unattended run leaves it behind."""
 
     row = AuditLog(
@@ -610,7 +610,7 @@ def record_run(action, detail="", target_id=None, actor=None, minutes_ago=0):
         target="Database",
         target_id=target_id,
         detail=detail,
-        created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago, days=days_ago),
     )
     db.session.add(row)
     db.session.commit()
@@ -699,6 +699,110 @@ def test_the_history_is_newest_first_and_bounded(app):
         runs = backup_schedule.recent_runs(limit=3)
 
     assert [run["message"] for run in runs] == ["night 0", "night 1", "night 2"]
+
+
+# ==========================================
+# THE HISTORY REACHES BACK IN DAYS, NOT ROWS
+# ==========================================
+
+# A fixed row count was the first thing here and it quietly lost days. A
+# restart takes a catch-up backup, so one day can hold two or three runs, and
+# those extras pushed older days off the bottom of a list that was supposed to
+# cover the retention window. The window is counted in days now, so a day
+# cannot disappear because another day was busy.
+
+def test_a_busy_day_does_not_push_older_days_out_of_the_history(app):
+    """The regression. Three runs on day 0 - a catch-up after two restarts -
+    used to consume three of the rows the older days needed."""
+
+    with app.app_context():
+        for hour in range(3):
+            record_run("backup", target_id=f"catch-up-{hour}", minutes_ago=hour * 60)
+        for day in range(1, 10):
+            record_run("backup", target_id=f"day-{day}", days_ago=day)
+        runs = backup_schedule.recent_runs()
+
+    listed = [run["archiveId"] for run in runs]
+    # Every one of the nine older days is still accounted for.
+    assert [f"day-{day}" for day in range(1, 10)] == listed[3:]
+    assert len(listed) == 12
+
+
+def test_a_run_older_than_the_window_is_left_out(app):
+    with app.app_context():
+        record_run("backup failed", "inside", days_ago=1)
+        record_run("backup failed", "outside", days_ago=backup_schedule.DEFAULT_KEEP + 3)
+        runs = backup_schedule.recent_runs()
+
+    assert [run["message"] for run in runs] == ["inside"]
+
+
+def test_the_window_follows_the_schedules_retention(app):
+    """Raising how many archives are kept reaches further back, so the history
+    and the archives it talks about cover the same span."""
+
+    with app.app_context():
+        record_run("backup failed", "three weeks ago", days_ago=21)
+
+        narrow = backup_schedule.recent_runs({"keep": 14, "frequency": "daily"})
+        wide = backup_schedule.recent_runs({"keep": 30, "frequency": "daily"})
+
+    assert narrow == []
+    assert [run["message"] for run in wide] == ["three weeks ago"]
+
+
+def test_a_weekly_schedule_reaches_back_in_weeks(app):
+    """``keep`` counts archives, not days. Fourteen kept archives is a
+    fortnight of a daily schedule and most of a season of a weekly one, and
+    windowing the weekly one on its archive count would hide nearly all of
+    the history it is meant to show."""
+
+    with app.app_context():
+        record_run("backup failed", "ten weeks ago", days_ago=70)
+
+        daily = backup_schedule.recent_runs({"keep": 14, "frequency": "daily"})
+        weekly = backup_schedule.recent_runs({"keep": 14, "frequency": "weekly"})
+
+    assert daily == []
+    assert [run["message"] for run in weekly] == ["ten weeks ago"]
+
+
+def test_a_run_on_the_boundary_is_not_cut_off_by_the_clock(app):
+    """A day of slack, so the oldest run a fortnight's retention still holds
+    does not vanish between one panel load and the next."""
+
+    with app.app_context():
+        record_run("backup failed", "the oldest kept night",
+                   days_ago=backup_schedule.DEFAULT_KEEP, minutes_ago=30)
+        runs = backup_schedule.recent_runs({"keep": backup_schedule.DEFAULT_KEEP,
+                                            "frequency": "daily"})
+
+    assert [run["message"] for run in runs] == ["the oldest kept night"]
+
+
+@pytest.mark.parametrize("schedule", [None, {}, {"keep": None}, {"keep": "many"}, {"keep": 0}, {"keep": -3}])
+def test_an_unreadable_retention_falls_back_to_the_default_window(app, schedule):
+    """The history is the one thing still worth reading when the schedule row
+    is the part that is broken, so it is not allowed to come back empty."""
+
+    with app.app_context():
+        record_run("backup failed", "inside the default window", days_ago=backup_schedule.DEFAULT_KEEP - 1)
+        runs = backup_schedule.recent_runs(schedule)
+
+    assert [run["message"] for run in runs] == ["inside the default window"]
+
+
+def test_the_ceiling_still_applies_inside_the_window(app):
+    """Bounded by time, but not unbounded: a timer stuck in a restart loop
+    must not turn one panel load into an enormous response."""
+
+    with app.app_context():
+        for minute in range(8):
+            record_run("backup failed", f"loop {minute}", minutes_ago=minute)
+        runs = backup_schedule.recent_runs(limit=5)
+
+    assert len(runs) == 5
+    assert runs[0]["message"] == "loop 0"
 
 
 def test_a_history_that_cannot_be_read_is_not_an_empty_history(app):

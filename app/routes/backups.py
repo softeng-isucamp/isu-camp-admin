@@ -149,7 +149,10 @@ def list_backup_history():
     # deleted by retention long before anybody stops caring that it ran. Left
     # out when the audit rows cannot be read, so the panel hides the section
     # rather than showing an empty history that reads as "it has never run".
-    runs = recent_runs()
+    # Given the schedule, so the history reaches back exactly as far as the
+    # retention it is paired with: every day whose archive could still be
+    # stored is a day the panel can account for.
+    runs = recent_runs(schedule)
     if runs is not None:
         automatic = {"runs": runs}
         due = next_run(schedule)
