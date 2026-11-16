@@ -196,8 +196,15 @@ function Eyebrow({ children, tone = 'light' }: { children: ReactNode; tone?: 'li
 
 /* ---------- sections ---------- */
 
-function Nav() {
+/** Signed in, the admin entry goes straight to the dashboard; signed out, to sign-in. `/` itself never redirects. */
+function AdminLink({ className, children }: { className?: string; children?: ReactNode }) {
   const { session } = useAuth()
+  return session
+    ? <Link className={className} to="/dashboard">Go to dashboard{children}</Link>
+    : <Link className={className} to="/login">Admin sign in{children}</Link>
+}
+
+function Nav() {
   // A 1px sentinel 24px down the page: once it leaves the viewport the nav gains its backdrop.
   // No scroll listener, so nothing runs per scroll frame.
   const sentinel = useRef<HTMLDivElement>(null)
@@ -225,9 +232,7 @@ function Nav() {
           <a href="#faq">FAQ</a>
         </nav>
         <div className="lp-nav-actions">
-          {session
-            ? <Link className="lp-nav-admin" to="/dashboard">Go to dashboard</Link>
-            : <Link className="lp-nav-admin" to="/login">Admin sign in</Link>}
+          <AdminLink className="lp-nav-admin" />
           <a className="lp-btn lp-btn--sm lp-btn--light" href={WEB_APP_URL}>Open web app</a>
         </div>
       </div>
@@ -544,7 +549,7 @@ function Admins() {
             <li><span><IconList size={19} /></span><div><b>Location directory</b>Keep buildings, offices, rooms and CRs accurate, with photos and search keywords.</div></li>
             <li><span><IconShield size={19} /></span><div><b>Oversight</b>Admin permissions, system logs and backups, built in.</div></li>
           </ul>
-          <Link className="lp-btn lp-btn--dark" to="/login">Admin sign in<IconArrowRight size={18} className="lp-nudge" /></Link>
+          <AdminLink className="lp-btn lp-btn--dark"><IconArrowRight size={18} className="lp-nudge" /></AdminLink>
           <p className="lp-admin-note">The portal is for authorised campus staff only.</p>
         </div>
         <div className="lp-admins-visual" data-reveal>
@@ -639,7 +644,7 @@ function Footer({ platform }: { platform: Platform }) {
           <nav aria-label="Staff">
             <h3>Staff</h3>
             <a href="#admins">For admins</a>
-            <Link to="/login">Admin sign in</Link>
+            <AdminLink />
           </nav>
         </div>
         <div className="lp-footer-base">
