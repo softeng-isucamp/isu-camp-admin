@@ -1,0 +1,127 @@
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
+import { APK_URL, WEB_APP_URL } from "./features/landing/Landing";
+import { services } from "./services/api";
+import type { Session } from "./types";
+
+const SESSION: Session = { id: "1", username: "admin_justine", email: "admin@isu.edu.ph", role: "superadmin" } as Session;
+
+function renderApp(path: string) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}><App /></MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** jsdom has neither observers nor media queries; the landing page needs both. */
+beforeEach(() => {
+  vi.stubGlobal("IntersectionObserver", class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } });
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false, onchange: null,
+  }));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+const landingHeading = () => screen.findByRole("heading", { level: 1, name: /Stop guessing/ });
+const userAgent = (ua: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ua);
+
+describe("the public landing page at /", () => {
+  it("renders for a signed-out visitor, with Admin sign in going to /login", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    for (const link of screen.getAllByRole("link", { name: "Admin sign in" })) expect(link).toHaveAttribute("href", "/login");
+    expect(screen.queryByRole("link", { name: "Go to dashboard" })).not.toBeInTheDocument();
+  });
+
+  it("does not redirect a signed-in administrator, and offers Go to dashboard", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(SESSION);
+    renderApp("/");
+    await landingHeading();
+    for (const link of screen.getAllByRole("link", { name: "Go to dashboard" })) expect(link).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("link", { name: "Admin sign in" })).not.toBeInTheDocument();
+    expect(document.querySelector(".crumb b")).toBeNull();
+  });
+
+  it("keeps the OpenStreetMap attribution visible", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(screen.getByText("Campus map data © OpenStreetMap contributors")).toBeInTheDocument();
+  });
+
+  it("overrides the admin body min-width only while mounted", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    document.body.style.minWidth = "1080px";
+    const view = renderApp("/");
+    await landingHeading();
+    expect(document.body.style.minWidth).toBe("0");
+    view.unmount();
+    expect(document.body.style.minWidth).toBe("1080px");
+    document.body.style.minWidth = "";
+  });
+
+  it("leads with the web app and a link to the APK QR on a desktop", async () => {
+    userAgent("Mozilla/5.0 (X11; Linux x86_64) Firefox/130.0");
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", WEB_APP_URL);
+    expect(screen.getAllByRole("link", { name: /Get the Android app/ })[0]).toHaveAttribute("href", "#download");
+    expect(screen.getByRole("img", { name: /QR code that downloads the Kumpas Android APK/ })).toBeInTheDocument();
+  });
+
+  it("leads with the APK on Android", async () => {
+    userAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/126.0 Mobile");
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(screen.getAllByRole("link", { name: /Download for Android/ })[0]).toHaveAttribute("href", APK_URL);
+  });
+
+  it("offers only the web app on an iPhone", async () => {
+    userAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1");
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(document.querySelector(`a[href="${APK_URL}"]`)).toBeNull();
+    expect(screen.queryByRole("img", { name: /QR code that downloads the Kumpas Android APK/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", WEB_APP_URL);
+  });
+
+  it("marks the unconfirmed FAQ answers visibly", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(document.querySelectorAll(".lp-confirm").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the admin pages are still behind the guard", () => {
+  it("sends a signed-out visitor from /dashboard to sign-in, not to the landing page", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/dashboard");
+    expect(await screen.findByPlaceholderText("Enter your username")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: /Stop guessing/ })).not.toBeInTheDocument();
+  });
+
+  it("signing in at /login lands on /dashboard, not the landing page", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/login");
+    fireEvent.change(await screen.findByPlaceholderText("Enter your username"), { target: { value: "admin_justine" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: /login/i }));
+    await waitFor(() => expect(document.querySelector(".crumb b")).toHaveTextContent("Dashboard Overview"));
+    expect(screen.queryByRole("heading", { level: 1, name: /Stop guessing/ })).not.toBeInTheDocument();
+  });
+});
