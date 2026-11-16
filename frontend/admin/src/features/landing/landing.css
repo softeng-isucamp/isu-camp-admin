@@ -545,20 +545,60 @@
   .lp-hero-facts { margin-top: 30px; }
 }
 
-/* ---------- phones ---------- */
+/* ---------- phones ----------
+   Scoped to phone widths so desktop and tablet are unchanged. Gutters, the nav and the hero clear
+   the notch through env(safe-area-inset-*). */
 @media (max-width: 720px) {
   .lp { font-size: 16px; }
   .lp-section { padding: 88px 0; }
-  .lp-container { padding: 0 20px; }
+  .lp-container { padding: 0 max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px)); }
+
+  /* Nav: 64 px instead of 76, with a 44 px brand and button. */
+  .lp-nav { height: calc(64px + env(safe-area-inset-top, 0px)); }
   .lp-nav-admin { display: none; }
-  .lp-brand { font-size: 19px; }
-  .lp-hero-title { font-size: clamp(42px, 12.4vw, 56px); }
-  .lp-hero-lede { font-size: 17px; }
-  .lp-hero-kicker { font-size: 12.5px; }
-  .lp-hero-ctas { flex-direction: column; align-items: stretch; }
-  .lp-hero-facts { gap: 10px 18px; }
+  .lp-brand { font-size: 19px; min-height: 44px; }
+  .lp-nav .lp-btn--sm { height: 44px; }
+
+  /* Hero: copy, then the map as a framed card, then its credit and the facts. The facts move below
+     the map (they restate the lede) so the route starts on the first screen. */
+  .lp-hero { padding-top: calc(92px + env(safe-area-inset-top, 0px)); padding-bottom: 44px; }
+  .lp-hero-copy.lp-container { display: contents; }
+  .lp-hero-copy > * { order: 1; margin-left: max(20px, env(safe-area-inset-left, 0px)); margin-right: max(20px, env(safe-area-inset-right, 0px)); }
+  .lp-hero-kicker { margin-bottom: 20px; font-size: 12.5px; }
+  .lp-hero-title { font-size: clamp(40px, 12.4vw, 56px); }
+  .lp-hero-lede { margin-top: 16px; font-size: 17px; }
+  .lp-hero-ctas { flex-direction: column; align-items: stretch; gap: 12px; margin-top: 26px; }
+  .lp-hero-note { margin-top: 14px; }
+  .lp-hero-facts { order: 4; gap: 10px 18px; margin-top: 18px; padding-top: 0; border-top: 0; }
   .lp-hero-facts li { font-size: 13.5px; }
-  .lp-search { width: min(336px, calc(100vw - 32px)); }
+  .lp-hero-credit { order: 3; margin: 10px max(20px, env(safe-area-inset-right, 0px)) 0; padding: 0; }
+
+  /* The map card: the Gate sits 44 px in and 190 px down (below the search card), and the scale is the
+     largest that keeps the Admin pin and its arrival card inside the frame. Height follows the scale so
+     the CCSICT pin at map y 1116 always clears the bottom edge. */
+  .lp-map {
+    --s: 0.574;
+    --ox: calc(44px - 240.2px * var(--s));
+    --oy: calc(190px - 775.5px * var(--s));
+    height: calc(252px + 341px * var(--s));
+    margin: 26px max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
+    border-radius: 24px; overflow: hidden; background: #0c3121;
+  }
+  .lp-map::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset; pointer-events: none; }
+  .lp-map-veil { background: linear-gradient(180deg, rgba(12, 49, 33, 0.7) 0, rgba(12, 49, 33, 0) 110px); }
+  .lp-m-labels text { font-size: 19px; }
+  .lp-m-labels text[data-m="end"] { text-anchor: end; }
+  .lp-m-labels text[data-m="hide"] { display: none; }
+  .lp-gate-label { font-size: 17px; }
+  .lp-cardpin--search { left: 12px; right: 12px; top: 12px; }
+  .lp-search { width: auto; }
+  .lp-cardpin--turn { right: 12px; top: 12px; }
+  /* Arrival cards hang off their pin as on desktop, instead of docking to the bottom edge 180 px away. */
+  .lp-cardpin--arrive { left: calc(var(--ox) + var(--mx) * var(--s) * 1px); right: auto; top: calc(var(--oy) + var(--my) * var(--s) * 1px); bottom: auto; display: block; translate: -100% -100% !important; }
+  .lp-cardpin--arrive.is-below { translate: -100% 0 !important; }
+  /* At phone scale the card is large next to the map: a little more room for the CCSICT pin. */
+  .lp-cardpin--arrive.is-above { margin: -6px 0 0 -10px; }
+
   .lp-audience-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 40px; }
   .lp-aud-card { padding: 24px; }
   .lp-steps button { grid-template-columns: 34px 1fr; gap: 12px; padding: 18px 14px 20px 12px; }
@@ -593,3 +633,8 @@
   .lp-footer-grid { grid-template-columns: 1fr 1fr; padding: 40px 0; }
   .lp-footer-brand { grid-column: 1 / -1; }
 }
+
+/* Smaller and larger phones: rescale the hero map so the route fills the frame without clipping. */
+@media (max-width: 379px) { .lp-map { --s: 0.5; } }
+@media (max-width: 339px) { .lp-map { --s: 0.43; } }
+@media (min-width: 420px) and (max-width: 720px) { .lp-map { --s: 0.64; } }
