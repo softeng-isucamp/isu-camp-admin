@@ -1,3 +1,4 @@
+import { lazy, Suspense, useEffect } from 'react'
 import { Profile } from './features/profile/Profile'
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { Shell } from './components/Shell'
@@ -13,7 +14,11 @@ import { Locations } from './features/locations/Locations'
 import { MapEditor } from './features/map/MapEditor'
 import { Users } from './features/users/Users'
 import { Logs } from './features/logs/Logs'
+import { adminUrlFor, isLandingHost } from './features/landing/links'
 import { landingAfterSignIn, returnPointOf } from './features/auth/returnPath'
+
+/** The public landing page is its own chunk: admins who go straight to a page never download its map and screenshots. */
+const Landing = lazy(() => import('./features/landing/Landing').then(m => ({ default: m.Landing })))
 
 function RestoringSession() { return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}><LoadingState size={26}>Restoring your session…</LoadingState></div> }
 /** Every admin page: signed out, the visitor goes to sign-in with the page remembered, so sign-in can bring them back to it. */
@@ -38,5 +43,20 @@ export function MissingRoute() {
   if (session) return <Shell>{card}</Shell>
   return <div className="auth-page"><div className="ambient" />{card}</div>
 }
-function AppRoutes() { return <Routes><Route element={<GuestOnly />}><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /></Route><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
-export function App() { return <AuthProvider><AppRoutes /></AuthProvider> }
+function AppRoutes() { return <Routes><Route element={<GuestOnly />}><Route path="/login" element={<Login />} /><Route path="/forgot-password" element={<ForgotPassword />} /><Route path="/forgot-username" element={<ForgotUsername />} /></Route><Route path="/reset-password" element={<Navigate to="/forgot-password" replace />} /><Route path="/home" element={<Suspense fallback={null}><Landing /></Suspense>} /><Route element={<Guard />}><Route index element={<Navigate to="/dashboard" replace />} /><Route path="/dashboard" element={<Dashboard />} /><Route path="/analytics" element={<AnalyticsPage />} /><Route path="/map-editor" element={<MapEditor />} /><Route path="/locations" element={<Locations />} /><Route path="/users" element={<Users />} /><Route path="/profile" element={<Profile />} /><Route path="/system-logs" element={<Logs />} /></Route><Route path="*" element={<MissingRoute />} /></Routes> }
+/** The portal does not live on the landing host: send the visitor to the same address on the admin origin, as a full page load. */
+function RedirectToAdmin() {
+  const location = useLocation()
+  useEffect(() => { window.location.replace(adminUrlFor(location)) }, [location])
+  return null
+}
+/**
+ * On the landing host (home.kumpas.live) `/` is the landing and every other path moves to the admin origin. That
+ * branch sits outside AuthProvider, which asks the server for the session as soon as it mounts and would 401 on
+ * every visit there. Anywhere else the portal runs as usual and the landing is the public `/home` page.
+ */
+export function App() {
+  const { pathname } = useLocation()
+  if (isLandingHost()) return pathname === '/' ? <Suspense fallback={null}><Landing /></Suspense> : <RedirectToAdmin />
+  return <AuthProvider><AppRoutes /></AuthProvider>
+}
