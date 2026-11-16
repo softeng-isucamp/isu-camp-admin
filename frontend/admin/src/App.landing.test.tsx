@@ -35,18 +35,18 @@ afterEach(() => {
 const landingHeading = () => screen.findByRole("heading", { level: 1, name: /Stop guessing/ });
 const userAgent = (ua: string) => vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ua);
 
-describe("the public landing page at /", () => {
+describe("the public landing page at /home (local dev and preview)", () => {
   it("renders for a signed-out visitor, with Admin sign in going to /login", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     for (const link of screen.getAllByRole("link", { name: "Admin sign in" })) expect(link).toHaveAttribute("href", "/login");
     expect(screen.queryByRole("link", { name: "Go to dashboard" })).not.toBeInTheDocument();
   });
 
-  it("does not redirect a signed-in administrator, and offers Go to dashboard", async () => {
+  it("needs no guard, shows a signed-in administrator, and offers Go to dashboard", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(SESSION);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     for (const link of screen.getAllByRole("link", { name: "Go to dashboard" })) expect(link).toHaveAttribute("href", "/dashboard");
     expect(screen.queryByRole("link", { name: "Admin sign in" })).not.toBeInTheDocument();
@@ -55,7 +55,7 @@ describe("the public landing page at /", () => {
 
   it("keeps the OpenStreetMap attribution visible", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     expect(screen.getByText("Campus map data © OpenStreetMap contributors")).toBeInTheDocument();
   });
@@ -63,7 +63,7 @@ describe("the public landing page at /", () => {
   it("overrides the admin body min-width only while mounted", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     document.body.style.minWidth = "1080px";
-    const view = renderApp("/");
+    const view = renderApp("/home");
     await landingHeading();
     expect(document.body.style.minWidth).toBe("0");
     view.unmount();
@@ -74,7 +74,7 @@ describe("the public landing page at /", () => {
   it("leads with the web app and a link to the APK QR on a desktop", async () => {
     userAgent("Mozilla/5.0 (X11; Linux x86_64) Firefox/130.0");
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", WEB_APP_URL);
     expect(screen.getAllByRole("link", { name: /Get the Android app/ })[0]).toHaveAttribute("href", "#download");
@@ -84,7 +84,7 @@ describe("the public landing page at /", () => {
   it("leads with the APK on Android", async () => {
     userAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/126.0 Mobile");
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     expect(screen.getAllByRole("link", { name: /Download for Android/ })[0]).toHaveAttribute("href", APK_URL);
   });
@@ -92,7 +92,7 @@ describe("the public landing page at /", () => {
   it("offers only the web app on an iPhone", async () => {
     userAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/604.1");
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     expect(document.querySelector(`a[href="${APK_URL}"]`)).toBeNull();
     expect(screen.queryByRole("img", { name: /QR code that downloads the Kumpas Android APK/ })).not.toBeInTheDocument();
@@ -101,9 +101,74 @@ describe("the public landing page at /", () => {
 
   it("marks the unconfirmed FAQ answers visibly", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
-    renderApp("/");
+    renderApp("/home");
     await landingHeading();
     expect(document.querySelectorAll(".lp-confirm").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the landing host (home.kumpas.live)", () => {
+  const replace = vi.fn();
+  beforeEach(() => {
+    replace.mockClear();
+    vi.stubGlobal("location", { ...window.location, hostname: "home.kumpas.live", replace });
+  });
+
+  it("shows the landing at /, never asks for a session, and links to the admin host's sign-in", async () => {
+    const me = vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    await landingHeading();
+    expect(me).not.toHaveBeenCalled();
+    const links = screen.getAllByRole("link", { name: "Admin sign in" });
+    expect(links.length).toBeGreaterThan(1);
+    for (const link of links) expect(link).toHaveAttribute("href", "https://admin.kumpas.live/login");
+    expect(screen.queryByRole("link", { name: "Go to dashboard" })).not.toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["/login", "https://admin.kumpas.live/login"],
+    ["/dashboard", "https://admin.kumpas.live/dashboard"],
+    ["/system-logs?q=a#b", "https://admin.kumpas.live/system-logs?q=a#b"],
+  ])("sends %s to the admin origin with a full-page redirect", async (path, target) => {
+    const me = vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp(path);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(target));
+    expect(me).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { level: 1, name: /Stop guessing/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("the admin host", () => {
+  beforeEach(() => {
+    vi.stubGlobal("location", { ...window.location, hostname: "admin.kumpas.live" });
+  });
+
+  it("redirects / to the dashboard for a signed-in administrator", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(SESSION);
+    renderApp("/");
+    await waitFor(() => expect(document.querySelector(".crumb b")).toHaveTextContent("Dashboard Overview"));
+  });
+
+  it("sends / to sign-in when signed out", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/");
+    expect(await screen.findByPlaceholderText("Enter your username")).toBeInTheDocument();
+  });
+
+  it("/home checks the session: signed out gets an in-app /login link", async () => {
+    const me = vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    expect(me).toHaveBeenCalled();
+    for (const link of screen.getAllByRole("link", { name: "Admin sign in" })) expect(link).toHaveAttribute("href", "/login");
+  });
+
+  it("/home checks the session: signed in gets Go to dashboard", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(SESSION);
+    renderApp("/home");
+    await landingHeading();
+    for (const link of screen.getAllByRole("link", { name: "Go to dashboard" })) expect(link).toHaveAttribute("href", "/dashboard");
   });
 });
 

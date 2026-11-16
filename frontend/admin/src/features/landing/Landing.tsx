@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactNode, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { ADMIN_LOGIN_URL, APK_URL, WEB_APP_HOST, WEB_APP_URL, isLandingHost } from './links'
 import './landing.css'
 import { HeroMap } from './HeroMap'
 import { apkQr, webQr } from './campusMap'
@@ -19,10 +20,7 @@ import shotOffline from './assets/offline-map-ready.webp'
 import shotAdminMap from './assets/admin-map-editor.webp'
 import shotAdminLocations from './assets/admin-locations.webp'
 
-/** Not live yet; this is the one place to change when the web app is deployed. The QR in campusMap.ts encodes it too. */
-export const WEB_APP_URL = 'https://app.kumpas.live'
-export const WEB_APP_HOST = new URL(WEB_APP_URL).host
-export const APK_URL = 'https://github.com/softeng-isucamp/isu-camp-app/releases/latest/download/app-release.apk'
+export { APK_URL, WEB_APP_HOST, WEB_APP_URL }
 
 const RM_QUERY = '(prefers-reduced-motion: reduce)'
 
@@ -197,11 +195,17 @@ function Eyebrow({ children, tone = 'light' }: { children: ReactNode; tone?: 'li
 /* ---------- sections ---------- */
 
 /** Signed in, the admin entry goes straight to the dashboard; signed out, to sign-in. `/` itself never redirects. */
-function AdminLink({ className, children }: { className?: string; children?: ReactNode }) {
+function SessionAdminLink({ className, children }: { className?: string; children?: ReactNode }) {
   const { session } = useAuth()
   return session
     ? <Link className={className} to="/dashboard">Go to dashboard{children}</Link>
     : <Link className={className} to="/login">Admin sign in{children}</Link>
+}
+
+/** On the landing host there is no session to read (and no AuthProvider), so it is always an absolute link to the admin host. */
+function AdminLink(props: { className?: string; children?: ReactNode }) {
+  if (isLandingHost()) return <a className={props.className} href={ADMIN_LOGIN_URL}>Admin sign in{props.children}</a>
+  return <SessionAdminLink {...props} />
 }
 
 function Nav() {
