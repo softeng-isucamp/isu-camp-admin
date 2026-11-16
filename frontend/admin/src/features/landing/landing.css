@@ -33,6 +33,10 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow-x: clip;
+  /* Phones: no grey flash over tapped controls (each has its own :active press), no font inflation in landscape. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 .lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
 :where(.lp) a { color: inherit; text-decoration: none; }
@@ -42,9 +46,12 @@
 .lp-audience, .lp-how, .lp-features, .lp-admins, .lp-faq { --focus: var(--green); }
 .lp-tile--indoor, .lp-tile--anywhere { --focus: var(--yellow); }
 .lp-btn, .lp-link, .lp-steps button, .lp-faq-q button { -webkit-tap-highlight-color: transparent; }
+/* No double-tap-zoom wait on taps; a long press on a control does not select its label. */
+.lp a, .lp button { touch-action: manipulation; }
+.lp-btn, .lp-steps button, .lp-faq-q button { -webkit-user-select: none; user-select: none; }
 
 .lp main { max-width: none; margin: 0; }
-.lp-container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+.lp-container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 max(24px, env(safe-area-inset-right, 0px)) 0 max(24px, env(safe-area-inset-left, 0px)); }
 .lp-section { padding: 128px 0; }
 
 /* ---------- type ---------- */
@@ -81,7 +88,7 @@
 .lp-btn--dark { --btn-hover: var(--green); background: var(--forest-2); color: #fff; box-shadow: 0 14px 30px -16px rgba(10, 43, 28, 0.8); }
 
 /* ---------- nav ---------- */
-.lp-nav { position: fixed; inset: 0 0 auto; z-index: 50; height: 76px; display: flex; align-items: center; }
+.lp-nav { position: fixed; inset: 0 0 auto; z-index: 50; height: calc(76px + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); display: flex; align-items: center; }
 /* Solid translucent backdrop (no backdrop-filter: it re-blurs the page on every scroll frame). Opacity-only fade. */
 .lp-nav::before { content: ""; position: absolute; inset: 0; z-index: -1; background: rgba(7, 31, 21, 0.95); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 30px -20px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 200ms ease; }
 .lp-nav-sentinel { position: absolute; top: 24px; left: 0; width: 1px; height: 1px; pointer-events: none; }
@@ -91,10 +98,10 @@
 .lp-brand img { width: 26px; height: auto; }
 .lp-nav-links { display: flex; gap: 30px; margin-left: 28px; }
 .lp-nav-links a { color: rgba(230, 242, 235, 0.74); font-size: 15px; font-weight: 600; }
-.lp-nav-links a:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) { .lp-nav-links a:hover { color: #fff; } }
 .lp-nav-actions { margin-left: auto; display: flex; align-items: center; gap: 22px; }
 .lp-nav-admin { color: rgba(230, 242, 235, 0.7); font-size: 14px; font-weight: 600; }
-.lp-nav-admin:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) { .lp-nav-admin:hover { color: #fff; } }
 
 /* ---------- hero ---------- */
 .lp-hero { position: relative; isolation: isolate; height: clamp(720px, 100svh, 940px); background: radial-gradient(1200px 700px at 72% 45%, #0f3825 0%, rgba(15, 56, 37, 0) 70%), var(--forest); color: #fff; overflow: hidden; }
@@ -284,6 +291,7 @@
 @keyframes lp-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .lp-how-stage { position: relative; display: grid; place-items: center; padding: 24px 0; }
 .lp-how-halo { position: absolute; width: 520px; height: 520px; border-radius: 50%; background: radial-gradient(circle, #dcefe3 0%, rgba(220, 239, 227, 0.55) 45%, rgba(220, 239, 227, 0) 70%); }
+.lp-how-caption { display: none; }
 .lp-how-chip { position: absolute; left: 50%; bottom: 72px; translate: calc(-50% - 170px) 0; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 999px; background: #fff; color: var(--forest-2); font-size: 14px; font-weight: 700; box-shadow: 0 18px 40px -18px rgba(10, 43, 28, 0.45), 0 0 0 1px var(--line) inset; }
 
 /* ---------- phone ---------- */
@@ -453,7 +461,7 @@
 .lp-footer-brand p { margin: 14px 0 0; max-width: 22em; font-size: 15px; }
 .lp-footer-grid nav { display: grid; align-content: start; gap: 10px; font-size: 15px; }
 .lp-footer-grid h3 { margin: 0 0 6px; font-size: 12.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #fff; font-weight: 800; }
-.lp-footer-grid nav a:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) { .lp-footer-grid nav a:hover { color: #fff; } }
 .lp-footer-base { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding-top: 28px; border-top: 1px solid rgba(255, 255, 255, 0.1); font-size: 13.5px; color: rgba(225, 240, 231, 0.5); }
 
 /* ---------- reveal ---------- */
@@ -538,51 +546,158 @@
   .lp-hero-facts { margin-top: 30px; }
 }
 
-/* ---------- phones ---------- */
+/* ---------- phones ----------
+   Mobile-first pass, scoped to phone widths so desktop and tablet are unchanged. Every target here is
+   44 px or more; gutters, the nav and the hero clear the notch through env(safe-area-inset-*). */
 @media (max-width: 720px) {
   .lp { font-size: 16px; }
-  .lp-section { padding: 88px 0; }
-  .lp-container { padding: 0 20px; }
+  .lp-section { padding: 72px 0; }
+  .lp-container { padding: 0 max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px)); }
+  .lp-h2 { font-size: clamp(28px, 8.4vw, 34px); }
+  .lp-sub { margin-top: 14px; font-size: 16.5px; }
+  .lp-eyebrow { margin-bottom: 14px; }
+  .lp-link { min-height: 44px; }
+
+  /* Nav: 64 px instead of 76, with a 44 px brand and button. */
+  .lp-nav { height: calc(64px + env(safe-area-inset-top, 0px)); }
   .lp-nav-admin { display: none; }
-  .lp-brand { font-size: 19px; }
-  .lp-hero-title { font-size: clamp(42px, 12.4vw, 56px); }
-  .lp-hero-lede { font-size: 17px; }
-  .lp-hero-kicker { font-size: 12.5px; }
-  .lp-hero-ctas { flex-direction: column; align-items: stretch; }
-  .lp-hero-facts { gap: 10px 18px; }
+  .lp-brand { font-size: 19px; min-height: 44px; }
+  .lp-nav .lp-btn--sm { height: 44px; }
+
+  /* Hero: copy, then the map as a framed card, then its credit and the facts. The facts move below
+     the map (they restate the lede) so the route starts on the first screen. */
+  .lp-hero { padding-top: calc(92px + env(safe-area-inset-top, 0px)); padding-bottom: 44px; }
+  .lp-hero-copy.lp-container { display: contents; }
+  .lp-hero-copy > * { order: 1; margin-left: max(20px, env(safe-area-inset-left, 0px)); margin-right: max(20px, env(safe-area-inset-right, 0px)); }
+  .lp-hero-kicker { margin-bottom: 20px; font-size: 12.5px; }
+  .lp-hero-title { font-size: clamp(40px, 12.4vw, 56px); }
+  .lp-hero-lede { margin-top: 16px; font-size: 17px; }
+  .lp-hero-ctas { flex-direction: column; align-items: stretch; gap: 12px; margin-top: 26px; }
+  .lp-hero-note { margin-top: 14px; }
+  .lp-hero-facts { order: 4; gap: 10px 18px; margin-top: 18px; padding-top: 0; border-top: 0; }
   .lp-hero-facts li { font-size: 13.5px; }
-  .lp-search { width: min(336px, calc(100vw - 32px)); }
-  .lp-audience-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 40px; }
-  .lp-aud-card { padding: 24px; }
-  .lp-steps button { grid-template-columns: 34px 1fr; gap: 12px; padding: 18px 14px 20px 12px; }
-  .lp-step-bar { left: 58px; right: 14px; }
-  .lp-step-title { font-size: 18.5px; }
-  .lp-how-halo { width: 380px; height: 380px; }
-  .lp-phone--stack { width: 270px; }
+  .lp-hero-credit { order: 3; margin: 10px max(20px, env(safe-area-inset-right, 0px)) 0; padding: 0; }
+
+  /* The map card: the Gate sits 44 px in and 190 px down (below the search card), and the scale is the
+     largest that keeps the Admin pin and its arrival card inside the frame. Height follows the scale so
+     the CCSICT pin at map y 1116 always clears the bottom edge. */
+  .lp-map {
+    --s: 0.574;
+    --ox: calc(44px - 240.2px * var(--s));
+    --oy: calc(190px - 775.5px * var(--s));
+    height: calc(252px + 341px * var(--s));
+    margin: 26px max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
+    border-radius: 24px; overflow: hidden; background: #0c3121;
+  }
+  .lp-map::after { content: ""; position: absolute; inset: 0; z-index: 3; border-radius: inherit; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset; pointer-events: none; }
+  .lp-map-veil { background: linear-gradient(180deg, rgba(12, 49, 33, 0.7) 0, rgba(12, 49, 33, 0) 110px); }
+  .lp-m-labels text { font-size: 19px; }
+  .lp-m-labels text[data-m="end"] { text-anchor: end; }
+  .lp-m-labels text[data-m="hide"] { display: none; }
+  .lp-gate-label { font-size: 17px; }
+  .lp-cardpin--search { left: 12px; right: 12px; top: 12px; }
+  .lp-search { width: auto; }
+  .lp-cardpin--turn { right: 12px; top: 12px; }
+  /* Arrival cards hang off their pin as on desktop, instead of docking to the bottom edge 180 px away. */
+  .lp-cardpin--arrive { left: calc(var(--ox) + var(--mx) * var(--s) * 1px); right: auto; top: calc(var(--oy) + var(--my) * var(--s) * 1px); bottom: auto; display: block; translate: -100% -100% !important; }
+  .lp-cardpin--arrive.is-below { translate: -100% 0 !important; }
+  /* Drop the card below the Administration label (it sits level with the pin) so it stays readable. */
+  .lp-cardpin--arrive.is-below { margin-top: 12px; }
+  /* At phone scale the card is large next to the map: a little more room for the CCSICT pin. */
+  .lp-cardpin--arrive.is-above { margin: -6px 0 0 -10px; }
+
+  /* Who it's for: icon beside the text, not above it. */
+  .lp-audience-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 32px; }
+  .lp-aud-card { display: grid; grid-template-columns: 44px 1fr; column-gap: 16px; align-items: start; padding: 20px 20px 22px; border-radius: 20px; }
+  .lp-aud-icon { grid-row: span 2; width: 44px; height: 44px; border-radius: 13px; }
+  .lp-aud-card h3 { margin: 0 0 4px; font-size: 18.5px; line-height: 1.3; }
+  .lp-aud-card p { grid-column: 2; font-size: 15.5px; }
+
+  /* How it works: the four steps become tabs under a smaller phone, and the active step's text sits
+     below them, so the screen and its explanation share one screen. */
+  .lp-how-stage { margin-top: 28px; padding: 0; }
+  .lp-how-halo { width: 320px; height: 320px; }
+  .lp-phone--stack { width: clamp(204px, 58vw, 240px); padding: 7px; border-radius: 40px; }
+  .lp-phone--stack .lp-phone-screen { border-radius: 33px; }
   .lp-how-chip { display: none; }
-  .lp-showcase { padding-top: 88px; }
-  .lp-showcase-row { height: 470px; margin-top: 48px; }
-  .lp-showcase .lp-phone { width: 250px; }
-  .lp-phone--tilt-l, .lp-phone--tilt-r { display: none; }
-  .lp-bento { gap: 14px; margin-top: 40px; }
-  .lp-tile, .lp-tile--offline, .lp-tile--routes { grid-column: span 12; padding: 26px; border-radius: 24px; }
+  .lp-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 22px; }
+  .lp-steps button { grid-template-columns: 1fr; justify-items: center; gap: 1px; min-height: 58px; padding: 9px 4px 14px; border-radius: 14px; text-align: center; }
+  .lp-steps button:active { transform: scale(0.96); }
+  .lp-step-num { padding-top: 0; font-size: 11px; }
+  .lp-step-k { font-size: 14px; letter-spacing: -0.005em; text-transform: none; color: var(--muted); opacity: 1; }
+  .lp-steps li.is-active .lp-step-k { color: var(--text); }
+  .lp-step-title, .lp-step-body { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .lp-step-bar { left: 14px; right: 14px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .lp-how-caption { order: 4; display: block; min-height: 132px; margin-top: 18px; text-align: center; }
+  .lp-how-caption-in { display: grid; gap: 6px; max-width: 34em; margin: 0 auto; animation: lp-fade 240ms var(--ease-out); }
+  .lp-how-caption-title { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
+  .lp-how-caption-body { font-size: 15.5px; color: var(--muted); text-wrap: pretty; }
+
+  /* Showcase: all three screens in a snap row, centred one at a time with the next peeking in. */
+  .lp-showcase { padding-top: 72px; }
+  .lp-showcase-row {
+    justify-content: flex-start; gap: 16px; height: 452px; margin: 40px calc(-1 * max(20px, env(safe-area-inset-left, 0px))) 0;
+    padding: 8px calc(50vw - 116px) 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+  }
+  .lp-showcase-row::-webkit-scrollbar { display: none; }
+  .lp-showcase .lp-phone { width: 232px; scroll-snap-align: center; }
+  .lp-phone--tilt-l, .lp-phone--tilt-r, .lp-phone--lift { transform: none; }
+  /* A sideways scroller would reveal its phones as they slide in; they are simply there. */
+  .lp.lp-reveal-on .lp-showcase-row [data-reveal]:not(.is-in) { opacity: 1; }
+  .lp .lp-showcase-row [data-reveal].is-in { animation: none; }
+
+  /* Features */
+  .lp-bento { gap: 12px; margin-top: 32px; }
+  .lp-tile, .lp-tile--offline, .lp-tile--routes { grid-column: span 12; padding: 24px 22px; border-radius: 24px; }
   .lp-tile--indoor { padding-bottom: 0; }
-  .lp-tile h3 { font-size: 21px; }
-  .lp-indoor-visual { min-height: 340px; }
-  .lp-phone--crop { left: auto; right: -30px; margin-left: 0; width: 240px; }
-  .lp-floor-card { min-width: 250px; left: -6px; bottom: 26px; }
+  .lp-tile h3 { margin-top: 18px; font-size: 21px; }
+  .lp-tile p { font-size: 15.5px; }
+  .lp-indoor-visual { min-height: 330px; margin-top: 24px; }
+  .lp-phone--crop { left: auto; right: -30px; margin-left: 0; width: 236px; }
+  .lp-floor-card { left: -8px; right: -8px; bottom: 24px; min-width: 0; padding: 16px; }
+  .lp-floor-row { white-space: normal; font-size: 14.5px; }
+  .lp-floor-row b { white-space: nowrap; }
   .lp-places { grid-template-columns: repeat(2, 1fr); }
-  .lp-dl-grid { grid-template-columns: 1fr; gap: 16px; margin-top: 40px; }
-  .lp-dl-card { padding: 24px; border-radius: 24px; }
-  .lp-dl-qr { display: none; }
+
+  /* Download */
+  .lp-dl-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 32px; }
+  .lp-dl-card { padding: 24px 22px; border-radius: 24px; }
   .lp-dl-card h3 { font-size: 23px; }
-  .lp-admins-visual { padding-bottom: 70px; }
+  .lp-dl-steps { margin: 22px 0 24px; }
+
+  /* Admins */
+  .lp-admin-list { margin: 28px 0 30px; gap: 18px; }
+  .lp-admins-visual { padding-bottom: 64px; }
   .lp-browser--float { width: 70%; right: -10px; }
-  .lp-faq-q button { font-size: 17px; padding: 20px 2px; }
-  .lp-faq-a { padding-right: 8px; }
-  .lp-footer { padding-top: 88px; }
-  .lp-footer-cta { padding-bottom: 56px; }
-  .lp-footer-cta .lp-hero-ctas { width: 100%; }
-  .lp-footer-grid { grid-template-columns: 1fr 1fr; padding: 40px 0; }
+
+  /* FAQ: whole-row targets (64 px and up), answer runs the full width. */
+  .lp-faq-grid { gap: 36px; }
+  .lp-faq-head .lp-link { margin-top: 10px; }
+  .lp-faq-q button { min-height: 64px; padding: 18px 2px; font-size: 17px; }
+  .lp-faq-a { padding: 0 8px 22px 2px; font-size: 16px; }
+  /* Inline links in answers: a 44 px tap area. Inline padding extends the hit box without moving the text. */
+  .lp-faq-a a { padding: 12px 0; }
+
+  /* Footer: link rows are 44 px tall. */
+  .lp-footer { padding: 72px 0 calc(28px + env(safe-area-inset-bottom, 0px)); }
+  .lp-footer-cta { padding-bottom: 48px; }
+  .lp-footer-cta h2 { font-size: clamp(38px, 11.5vw, 52px); }
+  .lp-footer-cta .lp-hero-ctas { width: 100%; margin: 0; }
+  .lp-footer-grid { grid-template-columns: 1fr 1fr; gap: 24px 20px; padding: 36px 0 28px; }
   .lp-footer-brand { grid-column: 1 / -1; }
+  .lp-footer-grid nav { gap: 0; }
+  .lp-footer-grid h3 { margin-bottom: 2px; }
+  .lp-footer-grid nav a { display: flex; align-items: center; min-height: 44px; }
+  .lp-footer-brand .lp-brand { min-height: 44px; }
+}
+
+/* Smaller and larger phones: rescale the hero map so the route fills the frame without clipping. */
+@media (max-width: 379px) { .lp-map { --s: 0.5; } }
+@media (max-width: 339px) { .lp-map { --s: 0.43; } }
+@media (min-width: 420px) and (max-width: 720px) { .lp-map { --s: 0.64; } }
+
+/* You cannot scan the screen you are holding: no QR codes on phones, landscape included. */
+@media (max-width: 720px), (max-width: 900px) and (pointer: coarse) {
+  .lp-dl-qr, .lp-dl-qr-mention { display: none; }
 }

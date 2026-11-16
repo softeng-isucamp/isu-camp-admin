@@ -28,14 +28,15 @@ const TRAIL_ENDS = [
   { x: 283, y: 910.5 },
 ]
 
-type Label = { x: number; y: number; t: string; a?: 'start' | 'middle' | 'end' }
+/** `m` is for the phone frame, whose right edge cuts through the east of campus: anchor the label at its end, or hide it. */
+type Label = { x: number; y: number; t: string; a?: 'start' | 'middle' | 'end'; m?: 'end' | 'hide' }
 const LABELS: Label[] = [
-  { x: 752, y: 900, t: 'Administration' },
+  { x: 752, y: 900, t: 'Administration', m: 'end' },
   { x: 846, y: 860, t: 'Canteen' },
-  { x: 676, y: 1062, t: 'Main Library', a: 'end' },
-  { x: 785, y: 1012, t: 'Faculty' },
+  { x: 676, y: 1062, t: 'Main Library', a: 'end', m: 'hide' },
+  { x: 785, y: 1012, t: 'Faculty', m: 'hide' },
   { x: 578, y: 1112, t: 'CCSICT', a: 'end' },
-  { x: 740, y: 1180, t: 'CAS' },
+  { x: 740, y: 1180, t: 'CAS', m: 'end' },
   { x: 1128, y: 806, t: 'Engineering', a: 'middle' },
   { x: 1268, y: 1008, t: 'Sports Oval', a: 'middle' },
   { x: 1145, y: 958, t: 'CBAPA' },
@@ -121,7 +122,7 @@ export function HeroMap({ running }: { running: boolean }) {
           <path d={pathwaysPath} className="lp-m-pathways" />
           <g className="lp-m-labels">
             {LABELS.map(l => (
-              <text key={l.t} x={l.x} y={l.y} textAnchor={l.a ?? 'start'}>{l.t}</text>
+              <text key={l.t} x={l.x} y={l.y} textAnchor={l.a ?? 'start'} data-m={l.m}>{l.t}</text>
             ))}
           </g>
         </svg>

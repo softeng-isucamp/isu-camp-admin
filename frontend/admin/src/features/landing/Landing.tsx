@@ -88,11 +88,22 @@ function usePublicPageChrome() {
     if (!window.matchMedia(RM_QUERY).matches) html.style.scrollBehavior = 'smooth'
     const title = document.title
     document.title = 'Kumpas · Stop guessing. Start navigating.'
+    // Phones: paint edge to edge past the notch (the page pads itself with env(safe-area-inset-*)) and
+    // tint the browser chrome to match the nav. Scoped to this page; the portal's head is restored on leave.
+    const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
+    const prevViewport = viewport?.content
+    if (viewport && !/viewport-fit/.test(viewport.content)) viewport.content = `${viewport.content}, viewport-fit=cover`
+    const theme = document.createElement('meta')
+    theme.name = 'theme-color'
+    theme.content = '#0a2b1c'
+    document.head.appendChild(theme)
     return () => {
       body.style.minWidth = prev.minWidth
       body.style.background = prev.bg
       html.style.scrollBehavior = prev.scroll
       document.title = title
+      if (viewport && prevViewport !== undefined) viewport.content = prevViewport
+      theme.remove()
     }
   }, [])
 }
@@ -395,6 +406,14 @@ function HowItWorks() {
           </div>
           <div className="lp-how-chip" aria-hidden="true"><IconWalk size={16} />Walking directions</div>
         </div>
+        {/* Phones only: the steps collapse to a row of tabs and the active step's text sits under the phone,
+            so the screen and its explanation fit on one screen. The buttons keep the text for screen readers. */}
+        <div className="lp-how-caption" aria-hidden="true" data-reveal>
+          <div key={active} className="lp-how-caption-in">
+            <span className="lp-how-caption-title">{STEPS[active].title}</span>
+            <span className="lp-how-caption-body">{STEPS[active].body}</span>
+          </div>
+        </div>
       </div>
     </section>
   )
@@ -522,7 +541,7 @@ function Download({ platform }: { platform: Platform }) {
               </figure>
             </div>
             <ol className="lp-dl-steps">
-              <li><b>Download the APK</b> from the button below or the QR code.</li>
+              <li><b>Download the APK</b> from the button below<span className="lp-dl-qr-mention"> or the QR code</span>.</li>
               <li><b>Allow the install</b> if Android asks. Apps downloaded outside an app store need this once.</li>
               <li><b>Open Kumpas</b> and download the offline campus map.</li>
             </ol>
