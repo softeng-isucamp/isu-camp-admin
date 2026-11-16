@@ -109,6 +109,22 @@ describe("the public landing page at /home (local dev and preview)", () => {
     expect(document.body.textContent).not.toContain("app.kumpas.live");
   });
 
+  it("sets viewport-fit=cover and a theme colour only while mounted", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    const meta = document.createElement("meta");
+    meta.name = "viewport";
+    meta.content = "width=device-width, initial-scale=1.0";
+    document.head.appendChild(meta);
+    const view = renderApp("/home");
+    await landingHeading();
+    expect(meta.content).toBe("width=device-width, initial-scale=1.0, viewport-fit=cover");
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute("content", "#0a2b1c");
+    view.unmount();
+    expect(meta.content).toBe("width=device-width, initial-scale=1.0");
+    expect(document.querySelector('meta[name="theme-color"]')).toBeNull();
+    meta.remove();
+  });
+
   it("marks the unconfirmed FAQ answers visibly", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     renderApp("/home");
