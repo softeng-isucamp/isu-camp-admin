@@ -601,6 +601,8 @@
   /* Arrival cards hang off their pin as on desktop, instead of docking to the bottom edge 180 px away. */
   .lp-cardpin--arrive { left: calc(var(--ox) + var(--mx) * var(--s) * 1px); right: auto; top: calc(var(--oy) + var(--my) * var(--s) * 1px); bottom: auto; display: block; translate: -100% -100% !important; }
   .lp-cardpin--arrive.is-below { translate: -100% 0 !important; }
+  /* Drop the card below the Administration label (it sits level with the pin) so it stays readable. */
+  .lp-cardpin--arrive.is-below { margin-top: 12px; }
   /* At phone scale the card is large next to the map: a little more room for the CCSICT pin. */
   .lp-cardpin--arrive.is-above { margin: -6px 0 0 -10px; }
 
