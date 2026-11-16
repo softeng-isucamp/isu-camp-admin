@@ -33,7 +33,7 @@ type Label = { x: number; y: number; t: string; a?: 'start' | 'middle' | 'end'; 
 const LABELS: Label[] = [
   { x: 752, y: 900, t: 'Administration', m: 'end' },
   { x: 846, y: 860, t: 'Canteen' },
-  { x: 676, y: 1062, t: 'Main Library', a: 'end' },
+  { x: 676, y: 1062, t: 'Main Library', a: 'end', m: 'hide' },
   { x: 785, y: 1012, t: 'Faculty', m: 'hide' },
   { x: 578, y: 1112, t: 'CCSICT', a: 'end' },
   { x: 740, y: 1180, t: 'CAS', m: 'end' },

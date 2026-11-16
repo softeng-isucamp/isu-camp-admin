@@ -628,7 +628,7 @@
   .lp-steps li.is-active .lp-step-k { color: var(--text); }
   .lp-step-title, .lp-step-body { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .lp-step-bar { left: 14px; right: 14px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
-  .lp-how-caption { order: 4; display: block; min-height: 128px; margin-top: 18px; text-align: center; }
+  .lp-how-caption { order: 4; display: block; min-height: 132px; margin-top: 18px; text-align: center; }
   .lp-how-caption-in { display: grid; gap: 6px; max-width: 34em; margin: 0 auto; animation: lp-fade 240ms var(--ease-out); }
   .lp-how-caption-title { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
   .lp-how-caption-body { font-size: 15.5px; color: var(--muted); text-wrap: pretty; }
@@ -676,6 +676,8 @@
   .lp-faq-head .lp-link { margin-top: 10px; }
   .lp-faq-q button { min-height: 64px; padding: 18px 2px; font-size: 17px; }
   .lp-faq-a { padding: 0 8px 22px 2px; font-size: 16px; }
+  /* Inline links in answers: a 44 px tap area. Inline padding extends the hit box without moving the text. */
+  .lp-faq-a a { padding: 12px 0; }
 
   /* Footer: link rows are 44 px tall. */
   .lp-footer { padding: 72px 0 calc(28px + env(safe-area-inset-bottom, 0px)); }
