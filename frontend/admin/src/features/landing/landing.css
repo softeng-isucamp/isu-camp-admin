@@ -291,6 +291,7 @@
 @keyframes lp-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .lp-how-stage { position: relative; display: grid; place-items: center; padding: 24px 0; }
 .lp-how-halo { position: absolute; width: 520px; height: 520px; border-radius: 50%; background: radial-gradient(circle, #dcefe3 0%, rgba(220, 239, 227, 0.55) 45%, rgba(220, 239, 227, 0) 70%); }
+.lp-how-caption { display: none; }
 .lp-how-chip { position: absolute; left: 50%; bottom: 72px; translate: calc(-50% - 170px) 0; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 999px; background: #fff; color: var(--forest-2); font-size: 14px; font-weight: 700; box-shadow: 0 18px 40px -18px rgba(10, 43, 28, 0.45), 0 0 0 1px var(--line) inset; }
 
 /* ---------- phone ---------- */
@@ -546,12 +547,16 @@
 }
 
 /* ---------- phones ----------
-   Scoped to phone widths so desktop and tablet are unchanged. Gutters, the nav and the hero clear
-   the notch through env(safe-area-inset-*). */
+   Mobile-first pass, scoped to phone widths so desktop and tablet are unchanged. Every target here is
+   44 px or more; gutters, the nav and the hero clear the notch through env(safe-area-inset-*). */
 @media (max-width: 720px) {
   .lp { font-size: 16px; }
-  .lp-section { padding: 88px 0; }
+  .lp-section { padding: 72px 0; }
   .lp-container { padding: 0 max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px)); }
+  .lp-h2 { font-size: clamp(28px, 8.4vw, 34px); }
+  .lp-sub { margin-top: 14px; font-size: 16.5px; }
+  .lp-eyebrow { margin-bottom: 14px; }
+  .lp-link { min-height: 44px; }
 
   /* Nav: 64 px instead of 76, with a 44 px brand and button. */
   .lp-nav { height: calc(64px + env(safe-area-inset-top, 0px)); }
@@ -599,42 +604,96 @@
   /* At phone scale the card is large next to the map: a little more room for the CCSICT pin. */
   .lp-cardpin--arrive.is-above { margin: -6px 0 0 -10px; }
 
-  .lp-audience-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 40px; }
-  .lp-aud-card { padding: 24px; }
-  .lp-steps button { grid-template-columns: 34px 1fr; gap: 12px; padding: 18px 14px 20px 12px; }
-  .lp-step-bar { left: 58px; right: 14px; }
-  .lp-step-title { font-size: 18.5px; }
-  .lp-how-halo { width: 380px; height: 380px; }
-  .lp-phone--stack { width: 270px; }
+  /* Who it's for: icon beside the text, not above it. */
+  .lp-audience-grid { grid-template-columns: 1fr; gap: 12px; margin-top: 32px; }
+  .lp-aud-card { display: grid; grid-template-columns: 44px 1fr; column-gap: 16px; align-items: start; padding: 20px 20px 22px; border-radius: 20px; }
+  .lp-aud-icon { grid-row: span 2; width: 44px; height: 44px; border-radius: 13px; }
+  .lp-aud-card h3 { margin: 0 0 4px; font-size: 18.5px; line-height: 1.3; }
+  .lp-aud-card p { grid-column: 2; font-size: 15.5px; }
+
+  /* How it works: the four steps become tabs under a smaller phone, and the active step's text sits
+     below them, so the screen and its explanation share one screen. */
+  .lp-how-stage { margin-top: 28px; padding: 0; }
+  .lp-how-halo { width: 320px; height: 320px; }
+  .lp-phone--stack { width: clamp(204px, 58vw, 240px); padding: 7px; border-radius: 40px; }
+  .lp-phone--stack .lp-phone-screen { border-radius: 33px; }
   .lp-how-chip { display: none; }
-  .lp-showcase { padding-top: 88px; }
-  .lp-showcase-row { height: 470px; margin-top: 48px; }
-  .lp-showcase .lp-phone { width: 250px; }
-  .lp-phone--tilt-l, .lp-phone--tilt-r { display: none; }
-  .lp-bento { gap: 14px; margin-top: 40px; }
-  .lp-tile, .lp-tile--offline, .lp-tile--routes { grid-column: span 12; padding: 26px; border-radius: 24px; }
+  .lp-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 22px; }
+  .lp-steps button { grid-template-columns: 1fr; justify-items: center; gap: 1px; min-height: 58px; padding: 9px 4px 14px; border-radius: 14px; text-align: center; }
+  .lp-steps button:active { transform: scale(0.96); }
+  .lp-step-num { padding-top: 0; font-size: 11px; }
+  .lp-step-k { font-size: 14px; letter-spacing: -0.005em; text-transform: none; color: var(--muted); opacity: 1; }
+  .lp-steps li.is-active .lp-step-k { color: var(--text); }
+  .lp-step-title, .lp-step-body { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .lp-step-bar { left: 14px; right: 14px; bottom: 6px; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .lp-how-caption { order: 4; display: block; min-height: 128px; margin-top: 18px; text-align: center; }
+  .lp-how-caption-in { display: grid; gap: 6px; max-width: 34em; margin: 0 auto; animation: lp-fade 240ms var(--ease-out); }
+  .lp-how-caption-title { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.25; text-wrap: balance; }
+  .lp-how-caption-body { font-size: 15.5px; color: var(--muted); text-wrap: pretty; }
+
+  /* Showcase: all three screens in a snap row, centred one at a time with the next peeking in. */
+  .lp-showcase { padding-top: 72px; }
+  .lp-showcase-row {
+    justify-content: flex-start; gap: 16px; height: 452px; margin: 40px calc(-1 * max(20px, env(safe-area-inset-left, 0px))) 0;
+    padding: 8px calc(50vw - 116px) 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+  }
+  .lp-showcase-row::-webkit-scrollbar { display: none; }
+  .lp-showcase .lp-phone { width: 232px; scroll-snap-align: center; }
+  .lp-phone--tilt-l, .lp-phone--tilt-r, .lp-phone--lift { transform: none; }
+  /* A sideways scroller would reveal its phones as they slide in; they are simply there. */
+  .lp.lp-reveal-on .lp-showcase-row [data-reveal]:not(.is-in) { opacity: 1; }
+  .lp .lp-showcase-row [data-reveal].is-in { animation: none; }
+
+  /* Features */
+  .lp-bento { gap: 12px; margin-top: 32px; }
+  .lp-tile, .lp-tile--offline, .lp-tile--routes { grid-column: span 12; padding: 24px 22px; border-radius: 24px; }
   .lp-tile--indoor { padding-bottom: 0; }
-  .lp-tile h3 { font-size: 21px; }
-  .lp-indoor-visual { min-height: 340px; }
-  .lp-phone--crop { left: auto; right: -30px; margin-left: 0; width: 240px; }
-  .lp-floor-card { min-width: 250px; left: -6px; bottom: 26px; }
+  .lp-tile h3 { margin-top: 18px; font-size: 21px; }
+  .lp-tile p { font-size: 15.5px; }
+  .lp-indoor-visual { min-height: 330px; margin-top: 24px; }
+  .lp-phone--crop { left: auto; right: -30px; margin-left: 0; width: 236px; }
+  .lp-floor-card { left: -8px; right: -8px; bottom: 24px; min-width: 0; padding: 16px; }
+  .lp-floor-row { white-space: normal; font-size: 14.5px; }
+  .lp-floor-row b { white-space: nowrap; }
   .lp-places { grid-template-columns: repeat(2, 1fr); }
-  .lp-dl-grid { grid-template-columns: 1fr; gap: 16px; margin-top: 40px; }
-  .lp-dl-card { padding: 24px; border-radius: 24px; }
-  .lp-dl-qr { display: none; }
+
+  /* Download */
+  .lp-dl-grid { grid-template-columns: 1fr; gap: 14px; margin-top: 32px; }
+  .lp-dl-card { padding: 24px 22px; border-radius: 24px; }
   .lp-dl-card h3 { font-size: 23px; }
-  .lp-admins-visual { padding-bottom: 70px; }
+  .lp-dl-steps { margin: 22px 0 24px; }
+
+  /* Admins */
+  .lp-admin-list { margin: 28px 0 30px; gap: 18px; }
+  .lp-admins-visual { padding-bottom: 64px; }
   .lp-browser--float { width: 70%; right: -10px; }
-  .lp-faq-q button { font-size: 17px; padding: 20px 2px; }
-  .lp-faq-a { padding-right: 8px; }
-  .lp-footer { padding-top: 88px; }
-  .lp-footer-cta { padding-bottom: 56px; }
-  .lp-footer-cta .lp-hero-ctas { width: 100%; }
-  .lp-footer-grid { grid-template-columns: 1fr 1fr; padding: 40px 0; }
+
+  /* FAQ: whole-row targets (64 px and up), answer runs the full width. */
+  .lp-faq-grid { gap: 36px; }
+  .lp-faq-head .lp-link { margin-top: 10px; }
+  .lp-faq-q button { min-height: 64px; padding: 18px 2px; font-size: 17px; }
+  .lp-faq-a { padding: 0 8px 22px 2px; font-size: 16px; }
+
+  /* Footer: link rows are 44 px tall. */
+  .lp-footer { padding: 72px 0 calc(28px + env(safe-area-inset-bottom, 0px)); }
+  .lp-footer-cta { padding-bottom: 48px; }
+  .lp-footer-cta h2 { font-size: clamp(38px, 11.5vw, 52px); }
+  .lp-footer-cta .lp-hero-ctas { width: 100%; margin: 0; }
+  .lp-footer-grid { grid-template-columns: 1fr 1fr; gap: 24px 20px; padding: 36px 0 28px; }
   .lp-footer-brand { grid-column: 1 / -1; }
+  .lp-footer-grid nav { gap: 0; }
+  .lp-footer-grid h3 { margin-bottom: 2px; }
+  .lp-footer-grid nav a { display: flex; align-items: center; min-height: 44px; }
+  .lp-footer-brand .lp-brand { min-height: 44px; }
 }
 
 /* Smaller and larger phones: rescale the hero map so the route fills the frame without clipping. */
 @media (max-width: 379px) { .lp-map { --s: 0.5; } }
 @media (max-width: 339px) { .lp-map { --s: 0.43; } }
 @media (min-width: 420px) and (max-width: 720px) { .lp-map { --s: 0.64; } }
+
+/* You cannot scan the screen you are holding: no QR codes on phones, landscape included. */
+@media (max-width: 720px), (max-width: 900px) and (pointer: coarse) {
+  .lp-dl-qr, .lp-dl-qr-mention { display: none; }
+}

@@ -125,6 +125,28 @@ describe("the public landing page at /home (local dev and preview)", () => {
     meta.remove();
   });
 
+  it("shows the chosen step's text in the phone caption", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    const caption = document.querySelector(".lp-how-caption") as HTMLElement;
+    expect(caption).toHaveAttribute("aria-hidden", "true");
+    expect(caption.textContent).toContain("Ask the way you would ask a friend");
+    fireEvent.click(screen.getByRole("button", { name: /Preview/ }));
+    expect(caption.textContent).toContain("See the walk before you take it");
+    expect(caption.textContent).not.toContain("Ask the way you would ask a friend");
+  });
+
+  it("keeps the QR mention in its own span so phones, which hide the QR, can drop it", async () => {
+    userAgent("Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/126.0 Mobile");
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    const mention = document.querySelector(".lp-dl-qr-mention");
+    expect(mention?.textContent).toBe(" or the QR code");
+    expect(mention?.closest("li")?.textContent).toBe("Download the APK from the button below or the QR code.");
+  });
+
   it("marks the unconfirmed FAQ answers visibly", async () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     renderApp("/home");
