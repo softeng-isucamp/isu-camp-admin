@@ -1,7 +1,7 @@
 /** Where the landing page sends people. Kept free of React so App.tsx can use it without loading the lazy landing chunk. */
 
-/** Not live yet; this is the one place to change when the web app is deployed. The QR in campusMap.ts encodes it too. */
-export const WEB_APP_URL = 'https://app.kumpas.live'
+/** The web app. This is the one place to change it; the QR in campusMap.ts encodes it too and must be regenerated. */
+export const WEB_APP_URL = 'https://www.kumpas.live'
 export const WEB_APP_HOST = new URL(WEB_APP_URL).host
 export const APK_URL = 'https://github.com/softeng-isucamp/isu-camp-app/releases/latest/download/app-release.apk'
 
@@ -17,7 +17,8 @@ export const LANDING_HOST = 'home.kumpas.live'
  * the admin host. Everywhere else (the admin host, localhost, previews) the landing is reachable at `/home`.
  */
 export function isLandingHost(hostname: string = typeof window === 'undefined' ? '' : window.location.hostname): boolean {
-  return hostname === LANDING_HOST
+  // A fully qualified name may end in one dot; DNS names are case-insensitive.
+  return hostname.toLowerCase().replace(/\.$/, '') === LANDING_HOST
 }
 
 /** Same path, query and hash on the admin origin. */

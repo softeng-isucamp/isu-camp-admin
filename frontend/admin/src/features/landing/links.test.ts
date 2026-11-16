@@ -7,8 +7,14 @@ describe("isLandingHost", () => {
     expect(isLandingHost("home.kumpas.live")).toBe(true);
   });
 
+  it("ignores letter case and a single trailing dot, the fully qualified form of the same host", () => {
+    expect(isLandingHost("home.kumpas.live.")).toBe(true);
+    expect(isLandingHost("HOME.Kumpas.Live")).toBe(true);
+    expect(isLandingHost("home.kumpas.live..")).toBe(false);
+  });
+
   it("is false on the admin host, the apex, www, localhost and look-alikes", () => {
-    for (const host of ["admin.kumpas.live", "kumpas.live", "www.kumpas.live", "app.kumpas.live", "localhost", "127.0.0.1", "home.kumpas.live.evil.example", ""]) {
+    for (const host of ["admin.kumpas.live", "kumpas.live", "www.kumpas.live", "app.kumpas.live", "localhost", "127.0.0.1", "home.kumpas.live.evil.example", "home.kumpas.live.evil.com", "xhome.kumpas.live", "home.kumpas.live.example.", ""]) {
       expect(isLandingHost(host)).toBe(false);
     }
   });

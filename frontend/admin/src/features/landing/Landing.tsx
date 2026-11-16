@@ -113,6 +113,8 @@ function usePageVisible() {
  * (80, 60, 50, 40 ms) so a row reads as one wave, and the fifth item onward waits no longer.
  */
 const STAGGER_MS = [0, 80, 140, 190, 230]
+/** How long to wait for the observer's first batch before showing every [data-reveal] item. */
+const REVEAL_FAIL_OPEN_MS = 1500
 
 /**
  * Scroll reveal for [data-reveal], once. Items that cross into view in the same
@@ -127,7 +129,10 @@ function useReveal(root: RefObject<HTMLElement | null>) {
     if (window.matchMedia(RM_QUERY).matches || typeof IntersectionObserver === 'undefined') return
     const items = Array.from(el.querySelectorAll<HTMLElement>('[data-reveal]'))
     el.classList.add('lp-reveal-on')
+    let observed = false
+    const showAll = () => { io.disconnect(); el.classList.remove('lp-reveal-on') }
     const io = new IntersectionObserver(entries => {
+      observed = true
       const entering = entries
         .filter(e => e.isIntersecting || e.boundingClientRect.bottom < 0)
         .sort((a, b) => Math.round(a.boundingClientRect.top / 40) - Math.round(b.boundingClientRect.top / 40) || a.boundingClientRect.left - b.boundingClientRect.left)
@@ -140,13 +145,20 @@ function useReveal(root: RefObject<HTMLElement | null>) {
       })
     }, { rootMargin: '0px 0px -8% 0px' })
     items.forEach(i => io.observe(i))
+    // Fail open: an observer delivers its first batch right after observe(). If nothing arrives, show everything
+    // rather than leave the page hidden.
+    const failOpen = window.setTimeout(() => { if (!observed) showAll() }, REVEAL_FAIL_OPEN_MS)
+    // Reduced motion can switch on after mount: show everything at once.
+    const mq = window.matchMedia(RM_QUERY)
+    const onMotion = () => { if (mq.matches) showAll() }
+    mq.addEventListener('change', onMotion)
     // Once an entrance has played, drop the animation so a later display toggle (a breakpoint) cannot replay it.
     const done = (e: AnimationEvent) => {
       const t = e.target as HTMLElement
       if (e.animationName === 'lp-rise' && t.classList.contains('is-in')) t.classList.add('is-done')
     }
     el.addEventListener('animationend', done)
-    return () => { io.disconnect(); el.removeEventListener('animationend', done); el.classList.remove('lp-reveal-on') }
+    return () => { window.clearTimeout(failOpen); mq.removeEventListener('change', onMotion); io.disconnect(); el.removeEventListener('animationend', done); el.classList.remove('lp-reveal-on') }
   }, [root])
 }
 

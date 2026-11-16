@@ -1,9 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { APK_URL, WEB_APP_URL } from "./features/landing/Landing";
 import { services } from "./services/api";
 import type { Session } from "./types";
 
@@ -76,7 +75,7 @@ describe("the public landing page at /home (local dev and preview)", () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     renderApp("/home");
     await landingHeading();
-    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", WEB_APP_URL);
+    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", "https://www.kumpas.live");
     expect(screen.getAllByRole("link", { name: /Get the Android app/ })[0]).toHaveAttribute("href", "#download");
     expect(screen.getByRole("img", { name: /QR code that downloads the Kumpas Android APK/ })).toBeInTheDocument();
   });
@@ -86,7 +85,7 @@ describe("the public landing page at /home (local dev and preview)", () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     renderApp("/home");
     await landingHeading();
-    expect(screen.getAllByRole("link", { name: /Download for Android/ })[0]).toHaveAttribute("href", APK_URL);
+    expect(screen.getAllByRole("link", { name: /Download for Android/ })[0]).toHaveAttribute("href", "https://github.com/softeng-isucamp/isu-camp-app/releases/latest/download/app-release.apk");
   });
 
   it("offers only the web app on an iPhone", async () => {
@@ -94,9 +93,20 @@ describe("the public landing page at /home (local dev and preview)", () => {
     vi.spyOn(services.auth, "me").mockResolvedValue(null);
     renderApp("/home");
     await landingHeading();
-    expect(document.querySelector(`a[href="${APK_URL}"]`)).toBeNull();
+    expect(document.querySelector('a[href$="app-release.apk"]')).toBeNull();
     expect(screen.queryByRole("img", { name: /QR code that downloads the Kumpas Android APK/ })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", WEB_APP_URL);
+    expect(screen.getAllByRole("link", { name: /Open the web app/ })[0]).toHaveAttribute("href", "https://www.kumpas.live");
+  });
+
+  it("names the web app host in the QR label, its caption and the download card", async () => {
+    userAgent("Mozilla/5.0 (X11; Linux x86_64) Firefox/130.0");
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    expect(screen.getByRole("img", { name: "QR code that opens www.kumpas.live" })).toBeInTheDocument();
+    expect(screen.getByText("Scan to open www.kumpas.live")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /^Open www\.kumpas\.live/ })[0]).toHaveAttribute("href", "https://www.kumpas.live");
+    expect(document.body.textContent).not.toContain("app.kumpas.live");
   });
 
   it("marks the unconfirmed FAQ answers visibly", async () => {
@@ -104,6 +114,35 @@ describe("the public landing page at /home (local dev and preview)", () => {
     renderApp("/home");
     await landingHeading();
     expect(document.querySelectorAll(".lp-confirm").length).toBeGreaterThan(0);
+  });
+});
+
+describe("scroll reveal fails open", () => {
+  it("shows the content when the observer never reports", async () => {
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    const root = document.querySelector(".lp")!;
+    expect(root).toHaveClass("lp-reveal-on");
+    await waitFor(() => expect(root).not.toHaveClass("lp-reveal-on"), { timeout: 2500 });
+  });
+
+  it("shows the content when the preference changes to reduced motion after mount", async () => {
+    const listeners: Array<() => void> = [];
+    let reduced = false;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      get matches() { return reduced && query.includes("reduce"); }, media: query,
+      addEventListener: (_: string, fn: () => void) => { if (query.includes("reduce")) listeners.push(fn); }, removeEventListener() {},
+      addListener() {}, removeListener() {}, dispatchEvent: () => false, onchange: null,
+    }));
+    vi.spyOn(services.auth, "me").mockResolvedValue(null);
+    renderApp("/home");
+    await landingHeading();
+    const root = document.querySelector(".lp")!;
+    expect(root).toHaveClass("lp-reveal-on");
+    reduced = true;
+    act(() => listeners.forEach(fn => fn()));
+    expect(root).not.toHaveClass("lp-reveal-on");
   });
 });
 

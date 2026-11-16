@@ -471,7 +471,7 @@
    the How it works screen swap and the nav backdrop. */
 @media (prefers-reduced-motion: reduce) {
   .lp *, .lp *::before, .lp *::after { animation: none !important; }
-  .lp [data-reveal] { opacity: 1; }
+  .lp.lp-reveal-on [data-reveal]:not(.is-in), .lp [data-reveal] { opacity: 1 !important; }
   .lp .lp-btn, .lp .lp-steps button, .lp .lp-nudge, .lp .lp-faq-q i, .lp .lp-faq-q i::before, .lp .lp-faq-panel { transition: none; }
   .lp .lp-btn:active, .lp .lp-steps button:active { transform: none; }
   .lp .lp-faq-q button:active i { scale: none; }
